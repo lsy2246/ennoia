@@ -1,0 +1,13 @@
+id = "observatory"
+kind = "SystemExtension"
+version = "0.1.0"
+frontend_bundle = "frontend/index.js"
+backend_entry = "backend/index.js"
+
+[contributes]
+pages = []
+panels = []
+themes = []
+commands = []
+providers = []
+hooks = []

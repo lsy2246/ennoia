@@ -69,11 +69,29 @@ ennoia/
 
 ## 文档入口
 
-- [roadmap.md](D:/data/code/ennoia/docs/roadmap.md)
-- [architecture.md](D:/data/code/ennoia/docs/architecture.md)
-- [runtime-layout.md](D:/data/code/ennoia/docs/runtime-layout.md)
-- [data-model.md](D:/data/code/ennoia/docs/data-model.md)
-- [config-model.md](D:/data/code/ennoia/docs/config-model.md)
-- [hooks-and-events.md](D:/data/code/ennoia/docs/hooks-and-events.md)
-- [api-surface.md](D:/data/code/ennoia/docs/api-surface.md)
-- [extension-development.md](D:/data/code/ennoia/docs/extension-development.md)
+详细说明见 [docs/runtime-layout.md](docs/runtime-layout.md)。
+
+## 测试与验证
+
+当前仓库的基础验证链为：
+
+- Rust：`cargo fmt --all`、`cargo check --workspace`、`cargo test --workspace`
+- 前端：`bun --cwd web/shell i`、`bun --cwd web/shell run typecheck`、`bun --cwd web/shell run build`
+
+测试目录说明：
+
+- `tests/integration/`：后端集成测试
+- `tests/e2e/`：前端与主链路端到端测试入口
+- `tests/fixtures/`：测试夹具
+- `.tmp-tests/`：测试运行产物目录
+
+## 文档入口
+
+- [docs/roadmap.md](docs/roadmap.md)
+- [docs/architecture.md](docs/architecture.md)
+- [docs/runtime-layout.md](docs/runtime-layout.md)
+- [docs/data-model.md](docs/data-model.md)
+- [docs/config-model.md](docs/config-model.md)
+- [docs/hooks-and-events.md](docs/hooks-and-events.md)
+- [docs/api-surface.md](docs/api-surface.md)
+- [docs/extension-development.md](docs/extension-development.md)

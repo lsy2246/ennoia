@@ -13,7 +13,10 @@ ennoia-extension-host = { path = "../extension-host" }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 axum = "0.8.9"
+sqlx = { version = "0.8.6", features = ["runtime-tokio-rustls", "sqlite"] }
+tokio = { version = "1.51.1", features = ["rt-multi-thread", "net"] }
+toml = "1.1.2"
+tower-http = { version = "0.6.8", features = ["cors"] }
 
 [lib]
 path = "src/lib.rs"
-

@@ -57,6 +57,20 @@ body {
   margin-top: 28px;
 }
 
+.stats {
+  display: grid;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.stat {
+  display: flex;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
 .nav-item {
   border: 0;
   padding: 14px 16px;
@@ -114,6 +128,45 @@ body {
 
 .dock {
   margin-top: 28px;
+}
+
+.field {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.field input,
+.field select {
+  border: 1px solid rgba(30, 29, 26, 0.12);
+  border-radius: 14px;
+  padding: 12px 14px;
+  font: inherit;
+  background: #fff;
+}
+
+.primary {
+  margin-top: 16px;
+  border: 0;
+  border-radius: 14px;
+  padding: 12px 14px;
+  background: #1e1d1a;
+  color: #fff7ec;
+  font: inherit;
+  cursor: pointer;
+}
+
+.list {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.list-row {
+  display: grid;
+  gap: 4px;
+  padding: 12px 0;
+  border-top: 1px solid rgba(30, 29, 26, 0.08);
 }
 
 @media (max-width: 900px) {

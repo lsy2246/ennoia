@@ -47,9 +47,9 @@
 
 ## 6. 文档规则
 
-- 新增模块时，必须同步更新 [README.md](d:/data/code/ennoia/README.md) 或 `docs/` 下对应文档。
-- 目录结构调整时，必须同步更新 [docs/runtime-layout.md](d:/data/code/ennoia/docs/runtime-layout.md)。
-- 核心概念变化时，必须同步更新 [docs/architecture.md](d:/data/code/ennoia/docs/architecture.md)。
+- 新增模块时，必须同步更新 [README.md](README.md) 或 `docs/` 下对应文档。
+- 目录结构调整时，必须同步更新 [docs/runtime-layout.md](docs/runtime-layout.md)。
+- 核心概念变化时，必须同步更新 [docs/architecture.md](docs/architecture.md)。
 
 ## 7. 结果汇报要求
 
@@ -57,4 +57,3 @@
 - 明确列出执行过的命令和结果。
 - 若有未完成项、占位实现、未接入校验，必须显式说明。
 - 若本次未提交代码，任务结束时主动建议执行 `git commit`。
-

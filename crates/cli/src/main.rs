@@ -3,7 +3,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use ennoia_server::{build_router, default_app_state};
+use ennoia_server::{bootstrap_app_state, default_app_state, run_server};
 
 const APP_CONFIG_TEMPLATE: &str =
     include_str!("../../../packaging/home-template/config/ennoia.toml");
@@ -18,9 +18,13 @@ const OBSERVATORY_TEMPLATE: &str =
     include_str!("../../../packaging/home-template/config/extensions/observatory.toml");
 const GITHUB_TEMPLATE: &str =
     include_str!("../../../packaging/home-template/config/extensions/github.toml");
+const OBSERVATORY_MANIFEST_TEMPLATE: &str =
+    include_str!("../../../packaging/home-template/global/extensions/observatory/manifest.toml");
+const GITHUB_MANIFEST_TEMPLATE: &str =
+    include_str!("../../../packaging/home-template/global/extensions/github/manifest.toml");
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let args: Vec<String> = env::args().collect();
     match args.get(1).map(String::as_str) {
         Some("init") => {
@@ -35,8 +39,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             print_default_config()?;
         }
         Some("dev") => {
-            let _router = build_router(default_app_state());
-            println!("Ennoia dev router prepared");
+            let target = args
+                .get(2)
+                .map(PathBuf::from)
+                .unwrap_or_else(default_home_template_path);
+            init_home_template(&target)?;
+            let state = bootstrap_app_state(&target).await?;
+            println!(
+                "Ennoia dev state ready at {} with {} agents",
+                target.display(),
+                state.agents.len()
+            );
+        }
+        Some("start") | Some("serve") => {
+            let target = args
+                .get(2)
+                .map(PathBuf::from)
+                .unwrap_or_else(default_home_template_path);
+            init_home_template(&target)?;
+            run_server(&target).await?;
         }
         _ => {
             print_summary();
@@ -56,7 +77,7 @@ fn print_summary() {
     );
 }
 
-fn print_default_config() -> Result<(), Box<dyn std::error::Error>> {
+fn print_default_config() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let state = default_app_state();
     println!(
         "[config/ennoia.toml]\n{}",
@@ -81,7 +102,8 @@ fn init_home_template(target: &Path) -> io::Result<()> {
     fs::create_dir_all(target.join("state/runs"))?;
     fs::create_dir_all(target.join("state/cache"))?;
     fs::create_dir_all(target.join("state/sqlite"))?;
-    fs::create_dir_all(target.join("global/extensions"))?;
+    fs::create_dir_all(target.join("global/extensions/observatory"))?;
+    fs::create_dir_all(target.join("global/extensions/github"))?;
     fs::create_dir_all(target.join("global/skills"))?;
     fs::create_dir_all(target.join("agents"))?;
     fs::create_dir_all(target.join("spaces"))?;
@@ -97,6 +119,14 @@ fn init_home_template(target: &Path) -> io::Result<()> {
         OBSERVATORY_TEMPLATE,
     )?;
     fs::write(config_dir.join("extensions/github.toml"), GITHUB_TEMPLATE)?;
+    fs::write(
+        target.join("global/extensions/observatory/manifest.toml"),
+        OBSERVATORY_MANIFEST_TEMPLATE,
+    )?;
+    fs::write(
+        target.join("global/extensions/github/manifest.toml"),
+        GITHUB_MANIFEST_TEMPLATE,
+    )?;
 
     Ok(())
 }
