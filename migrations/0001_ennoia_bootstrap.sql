@@ -1,0 +1,3 @@
+-- Ennoia bootstrap schema placeholder
+-- This migration will later define agents, spaces, threads, messages, runs, tasks,
+-- memories, scheduled_jobs and extension_registry tables.

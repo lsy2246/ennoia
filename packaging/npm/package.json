@@ -1,0 +1,13 @@
+{
+  "name": "ennoia",
+  "version": "0.1.0",
+  "description": "Ennoia packaged runtime",
+  "type": "module",
+  "bin": {
+    "ennoia": "bin/ennoia.js"
+  },
+  "files": [
+    "bin",
+    "templates"
+  ]
+}

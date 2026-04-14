@@ -1,0 +1,18 @@
+[workspace]
+members = [
+  "crates/kernel",
+  "crates/memory",
+  "crates/orchestrator",
+  "crates/scheduler",
+  "crates/extension-host",
+  "crates/server",
+  "crates/cli",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+version = "0.1.0"
+authors = ["Ennoia"]
+

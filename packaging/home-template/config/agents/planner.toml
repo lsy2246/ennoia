@@ -1,0 +1,8 @@
+id = "planner"
+display_name = "Planner"
+kind = "agent"
+workspace_mode = "private"
+default_model = "gpt-5.4"
+skills_dir = "~/.ennoia/agents/planner/skills"
+workspace_dir = "~/.ennoia/agents/planner/workspace"
+artifacts_dir = "~/.ennoia/agents/planner/artifacts"

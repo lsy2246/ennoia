@@ -1,0 +1,60 @@
+# AGENTS.md
+
+本文件定义 `Ennoia` 仓库内 Agent 与开发者协作时的统一执行规范。
+
+## 1. 基本原则
+
+- 变更优先最小化，避免无关改动。
+- 文档与代码保持一致；架构、目录、配置协议有变化时必须同步文档。
+- 所有回答、提交说明、设计文档默认使用中文。
+- 不再使用 `pmem`、`runtime` 作为新系统核心命名，统一使用 `memory`、`orchestrator` 等新命名。
+
+## 2. 仓库定位
+
+- 本仓库是 `Ennoia` 的源码仓库。
+- 发布形态目标是：`一个 npm 包 + ~/.ennoia 配置目录`。
+- 源码允许按模块拆分目录，但运行时对用户暴露为一个系统。
+
+## 3. 目录约定
+
+- `crates/`：Rust 核心模块。
+- `web/`：前端主壳与前端扩展接入层。
+- `sdk/`：扩展与技能开发 SDK。
+- `packaging/`：打包、发布、运行目录模板。
+- `docs/`：架构和执行文档。
+
+## 4. 完成后必须执行
+
+当前初始化阶段，默认执行以下检查：
+
+1. `cargo fmt --all`
+2. `cargo check --workspace`
+3. `cargo test --workspace`
+
+前端脚手架接入后，补充：
+
+1. `web shell` 的 lint
+2. `web shell` 的 typecheck
+3. `web shell` 的 build
+
+若某项尚未接入，必须在结果汇报中显式说明。
+
+## 5. 前后端验证规则
+
+- 后端改动：优先使用集成测试、接口请求或最小可复现实验验证行为。
+- 前端改动：至少验证主壳加载、子页挂载、面板注册、无控制台报错。
+- 扩展改动：必须验证启动扫描与重启后生效链路。
+
+## 6. 文档规则
+
+- 新增模块时，必须同步更新 [README.md](d:/data/code/ennoia/README.md) 或 `docs/` 下对应文档。
+- 目录结构调整时，必须同步更新 [docs/runtime-layout.md](d:/data/code/ennoia/docs/runtime-layout.md)。
+- 核心概念变化时，必须同步更新 [docs/architecture.md](d:/data/code/ennoia/docs/architecture.md)。
+
+## 7. 结果汇报要求
+
+- 明确列出改动文件。
+- 明确列出执行过的命令和结果。
+- 若有未完成项、占位实现、未接入校验，必须显式说明。
+- 若本次未提交代码，任务结束时主动建议执行 `git commit`。
+

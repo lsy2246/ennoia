@@ -1,0 +1,8 @@
+app_name = "ennoia"
+mode = "development"
+database_mode = "sqlite"
+database_url = "sqlite://~/.ennoia/state/sqlite/ennoia.db"
+extensions_scan_dir = "~/.ennoia/config/extensions"
+agents_scan_dir = "~/.ennoia/config/agents"
+scheduler_tick_ms = 1000
+default_mention_mode = "configured"

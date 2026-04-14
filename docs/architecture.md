@@ -1,0 +1,139 @@
+# Ennoia 架构总览
+
+## 1. 顶层目标
+
+`Ennoia` 是一个 `Space-first` 的 AI 工作台平台。
+
+- `Space`：私聊、群聊、线程和多人协作的统一上下文容器
+- `Agent`：能参与对话、执行任务、拥有私有技能和私有工作区的参与者
+- `Run`：一次完整的编排执行实例
+- `Task`：Run 内的可追踪工作单元
+- `Extension`：系统扩展总称
+- `Skill`：面向 Agent 与 Task 的能力包
+
+## 2. 系统分层
+
+```text
+Web Shell
+  -> Server
+    -> Kernel
+    -> Memory
+    -> Orchestrator
+    -> Scheduler
+    -> Extension Host
+```
+
+### kernel
+
+负责定义系统是什么：
+
+- 核心对象模型
+- 配置协议
+- 扩展 manifest 契约
+- 公共枚举、标识、运行时上下文
+
+### memory
+
+负责定义系统如何记住：
+
+- truth memory
+- working memory
+- context artifact
+- active view
+- projection
+- review workbench
+- graph sidecar
+
+### orchestrator
+
+负责定义系统如何工作：
+
+- 消息转 run
+- run 转 task
+- 计划与门禁
+- 多 Agent 编排
+- owner 归属和产物定位
+
+### scheduler
+
+负责定义系统如何后台推进：
+
+- cron
+- delay
+- retry
+- maintenance
+- wake
+
+### extension-host
+
+负责定义系统如何扩展：
+
+- 扫描扩展目录
+- 校验 manifest
+- 注册后端 Hook
+- 注册前端贡献
+- 管理 theme、provider、page、panel 和 command
+
+### server
+
+负责定义系统如何对外提供服务：
+
+- HTTP API
+- WebSocket
+- 鉴权和会话订阅
+- 静态资源
+- 主壳注入和扩展注册表输出
+
+### shell
+
+负责定义系统如何呈现：
+
+- 顶部栏
+- 侧栏
+- 子页面
+- 面板
+- 命令系统
+- 拖拽工作台
+
+## 3. 主链路
+
+### 私聊链路
+
+1. 用户向某个 Agent 发消息
+2. Server 写入 thread/message
+3. Orchestrator 创建私聊 run
+4. Memory 组装上下文视图
+5. Agent 执行 skill / extension / provider
+6. 输出写回消息、日志、任务状态和 artifacts
+
+### 群聊链路
+
+1. 用户在某个 Space 发消息
+2. Server 判断提及策略和参与者
+3. Orchestrator 生成群聊 run 与 task 集
+4. 各 Agent 在共享 Space 上下文中协作
+5. 结果写回 Space 消息流、workspace 和 artifacts
+
+### 后台链路
+
+1. 用户或系统注册定时任务
+2. Scheduler 到点触发 job
+3. Orchestrator 创建后台 run
+4. 执行结果按 owner 归档
+5. Shell 的日志页、任务页、通知中心实时可见
+
+## 4. 前端形态
+
+前端不是多个独立站点拼起来，而是一个 `Shell`：
+
+- `Shell` 是唯一主壳
+- 扩展注册的是 `Shell` 下的子页面和面板
+- 子页面挂载在内容区
+- 面板挂载在 Dock 区域，支持拖拽、停靠、分栏和恢复
+
+## 5. 运行时事实源
+
+- 数据库：系统真相源
+- 文件系统：工作区、扩展安装位、产物、缓存
+
+系统核心命名始终使用新体系，不再沿用 `pmem` 或 `runtime` 作为核心模块名。

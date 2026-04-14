@@ -1,0 +1,4 @@
+id = "github"
+kind = "system"
+enabled = false
+install_dir = "~/.ennoia/global/extensions/github"

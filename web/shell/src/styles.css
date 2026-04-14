@@ -1,0 +1,134 @@
+:root {
+  color-scheme: light;
+  font-family: "Segoe UI", sans-serif;
+  background:
+    radial-gradient(circle at top left, rgba(255, 196, 112, 0.55), transparent 28%),
+    radial-gradient(circle at right, rgba(89, 168, 255, 0.22), transparent 30%),
+    #f5f1e8;
+  color: #1e1d1a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+}
+
+.shell {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  min-height: 100vh;
+}
+
+.sidebar {
+  padding: 24px;
+  background: rgba(255, 248, 236, 0.88);
+  border-right: 1px solid rgba(30, 29, 26, 0.08);
+  backdrop-filter: blur(12px);
+}
+
+.brand h1,
+.header h2,
+.dock-header h3,
+.page-card h3,
+.panel-card h4 {
+  margin: 0;
+}
+
+.eyebrow {
+  margin: 0 0 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  font-size: 12px;
+  color: #8c6132;
+}
+
+.muted {
+  color: #6d675f;
+}
+
+.nav {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 28px;
+}
+
+.nav-item {
+  border: 0;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: #fff6ea;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  box-shadow: 0 8px 30px rgba(84, 60, 28, 0.08);
+}
+
+.content {
+  padding: 28px;
+}
+
+.header,
+.dock-header {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.status-pill {
+  border-radius: 999px;
+  padding: 10px 14px;
+  background: #1e1d1a;
+  color: #f9f2e5;
+  font-size: 14px;
+}
+
+.page-grid,
+.panel-grid {
+  display: grid;
+  gap: 16px;
+  margin-top: 20px;
+}
+
+.page-grid {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.panel-grid {
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.page-card,
+.panel-card,
+.dock {
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.86);
+  padding: 22px;
+  box-shadow: 0 18px 48px rgba(84, 60, 28, 0.08);
+}
+
+.dock {
+  margin-top: 28px;
+}
+
+@media (max-width: 900px) {
+  .shell {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    border-right: 0;
+    border-bottom: 1px solid rgba(30, 29, 26, 0.08);
+  }
+
+  .header,
+  .dock-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

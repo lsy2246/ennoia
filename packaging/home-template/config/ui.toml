@@ -1,0 +1,5 @@
+shell_title = "Ennoia"
+default_theme = "system"
+dock_persistence = true
+default_page = "inbox"
+show_command_palette = true

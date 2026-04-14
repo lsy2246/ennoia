@@ -1,0 +1,28 @@
+{
+  "name": "ennoia-shell",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit",
+    "test:smoke": "vite build"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.99.0",
+    "@tanstack/react-router": "^1.168.21",
+    "dockview": "^5.2.0",
+    "monaco-editor": "^0.55.1",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "zustand": "^5.0.8"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.2",
+    "@vitejs/plugin-react": "^5.1.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.2.0"
+  }
+}

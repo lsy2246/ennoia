@@ -1,0 +1,4 @@
+id = "observatory"
+kind = "system"
+enabled = true
+install_dir = "~/.ennoia/global/extensions/observatory"

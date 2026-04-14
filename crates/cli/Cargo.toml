@@ -1,0 +1,15 @@
+[package]
+name = "ennoia-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ennoia-server = { path = "../server" }
+tokio = { version = "1.51.1", features = ["macros", "rt-multi-thread"] }
+toml = "1.1.2"
+
+[[bin]]
+name = "ennoia"
+path = "src/main.rs"
+

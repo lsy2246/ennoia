@@ -1,0 +1,12 @@
+{
+  "name": "ennoia",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Ennoia source workspace",
+  "type": "module",
+  "scripts": {
+    "build": "bun --cwd web/shell run build",
+    "typecheck": "bun --cwd web/shell run typecheck",
+    "test:web": "bun --cwd web/shell run test:smoke"
+  }
+}

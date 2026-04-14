@@ -1,0 +1,13 @@
+[package]
+name = "ennoia-memory"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ennoia-kernel = { path = "../kernel" }
+serde = { version = "1.0.228", features = ["derive"] }
+
+[lib]
+path = "src/lib.rs"
+
