@@ -1,15 +1,18 @@
 import { spawnSync } from "node:child_process";
 
 import { existsSync, rmSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { tmpdir } from "node:os";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const homeDir = homedir();
+const cargoBinDir = join(homeDir, ".cargo", "bin");
 const localCargoPath =
   process.platform === "win32"
-    ? resolve(process.env.USERPROFILE ?? "C:/Users/Administrator", ".cargo/bin/cargo.exe")
-    : resolve(process.env.HOME ?? "~", ".cargo/bin/cargo");
+    ? join(cargoBinDir, "cargo.exe")
+    : join(cargoBinDir, "cargo");
 
 function commandExists(command) {
   if (command === "cargo" && existsSync(localCargoPath)) {
@@ -33,22 +36,79 @@ function runStep(label, command, args) {
   }
 }
 
-function runWindowsCargoCheck() {
-  const vsDevCmd = "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\Common7\\Tools\\VsDevCmd.bat";
+function detectVsDevCmd() {
+  if (process.platform !== "win32") {
+    return null;
+  }
 
-  if (!existsSync(vsDevCmd)) {
+  const programFilesX86 = process.env["ProgramFiles(x86)"] ?? process.env.ProgramFiles;
+  const vswherePath = programFilesX86
+    ? join(programFilesX86, "Microsoft Visual Studio", "Installer", "vswhere.exe")
+    : null;
+
+  if (vswherePath && existsSync(vswherePath)) {
+    const result = spawnSync(
+      vswherePath,
+      [
+        "-latest",
+        "-products",
+        "*",
+        "-requires",
+        "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+        "-find",
+        "Common7\\Tools\\VsDevCmd.bat",
+      ],
+      { cwd: rootDir, encoding: "utf8" },
+    );
+
+    const detected = result.stdout?.trim();
+    if (result.status === 0 && detected) {
+      return detected;
+    }
+  }
+
+  const programRoots = [process.env["ProgramFiles(x86)"], process.env.ProgramFiles].filter(Boolean);
+  const versions = ["2022", "2019"];
+  const editions = ["BuildTools", "Community", "Professional", "Enterprise"];
+
+  for (const programRoot of programRoots) {
+    for (const version of versions) {
+      for (const edition of editions) {
+        const candidate = join(
+          programRoot,
+          "Microsoft Visual Studio",
+          version,
+          edition,
+          "Common7",
+          "Tools",
+          "VsDevCmd.bat",
+        );
+
+        if (existsSync(candidate)) {
+          return candidate;
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+function runWindowsCargoCheck() {
+  const vsDevCmd = detectVsDevCmd();
+
+  if (!vsDevCmd) {
     console.warn(
       "[bootstrap] 未检测到 Visual Studio Build Tools，已跳过 Rust 校验。安装 C++ Build Tools 后可重新执行 `cargo check --workspace`。",
     );
     return;
   }
 
-  const cargoBin = `${process.env.USERPROFILE ?? "C:\\Users\\Administrator"}\\.cargo\\bin`;
   const scriptPath = resolve(tmpdir(), "ennoia-bootstrap-rust-check.cmd");
   const script = [
     "@echo off",
     `call "${vsDevCmd}" -arch=x64 -host_arch=x64`,
-    `set PATH=${cargoBin};%PATH%`,
+    `set PATH=${cargoBinDir};%PATH%`,
     "cargo check --workspace",
     "",
   ].join("\r\n");
