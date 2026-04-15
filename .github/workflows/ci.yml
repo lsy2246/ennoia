@@ -22,10 +22,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
       - uses: oven-sh/setup-bun@v2
       - name: bun install
-        working-directory: web/shell
-        run: bun i
-      - name: bun build
-        working-directory: web/shell
+        run: bun install
+      - name: bootstrap
+        run: bun run bootstrap
+      - name: web build
         run: bun run build
+      - name: integration smoke
+        run: bun run test:integration
+      - name: e2e smoke
+        run: bun run test:e2e

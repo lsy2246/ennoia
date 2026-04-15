@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 
 use ennoia_server::{bootstrap_app_state, default_app_state, run_server};
 
+const ENNOIA_HOME_ENV: &str = "ENNOIA_HOME";
+
 const APP_CONFIG_TEMPLATE: &str =
     include_str!("../../../packaging/home-template/config/ennoia.toml");
 const SERVER_CONFIG_TEMPLATE: &str =
@@ -28,10 +30,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let args: Vec<String> = env::args().collect();
     match args.get(1).map(String::as_str) {
         Some("init") => {
-            let target = args
-                .get(2)
-                .map(PathBuf::from)
-                .unwrap_or_else(default_home_template_path);
+            let target = resolve_runtime_path(args.get(2));
             init_home_template(&target)?;
             println!("initialized Ennoia home at {}", target.display());
         }
@@ -39,23 +38,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             print_default_config()?;
         }
         Some("dev") => {
-            let target = args
-                .get(2)
-                .map(PathBuf::from)
-                .unwrap_or_else(default_home_template_path);
+            let target = resolve_runtime_path(args.get(2));
             init_home_template(&target)?;
             let state = bootstrap_app_state(&target).await?;
             println!(
-                "Ennoia dev state ready at {} with {} agents",
+                "Ennoia dev runtime ready at {} with {} agents",
                 target.display(),
                 state.agents.len()
             );
+            run_server(&target).await?;
         }
         Some("start") | Some("serve") => {
-            let target = args
-                .get(2)
-                .map(PathBuf::from)
-                .unwrap_or_else(default_home_template_path);
+            let target = resolve_runtime_path(args.get(2));
             init_home_template(&target)?;
             run_server(&target).await?;
         }
@@ -109,22 +103,22 @@ fn init_home_template(target: &Path) -> io::Result<()> {
     fs::create_dir_all(target.join("spaces"))?;
     fs::create_dir_all(target.join("logs"))?;
 
-    fs::write(config_dir.join("ennoia.toml"), APP_CONFIG_TEMPLATE)?;
-    fs::write(config_dir.join("server.toml"), SERVER_CONFIG_TEMPLATE)?;
-    fs::write(config_dir.join("ui.toml"), UI_CONFIG_TEMPLATE)?;
-    fs::write(config_dir.join("agents/coder.toml"), CODER_TEMPLATE)?;
-    fs::write(config_dir.join("agents/planner.toml"), PLANNER_TEMPLATE)?;
-    fs::write(
-        config_dir.join("extensions/observatory.toml"),
+    write_if_missing(&config_dir.join("ennoia.toml"), APP_CONFIG_TEMPLATE)?;
+    write_if_missing(&config_dir.join("server.toml"), SERVER_CONFIG_TEMPLATE)?;
+    write_if_missing(&config_dir.join("ui.toml"), UI_CONFIG_TEMPLATE)?;
+    write_if_missing(&config_dir.join("agents/coder.toml"), CODER_TEMPLATE)?;
+    write_if_missing(&config_dir.join("agents/planner.toml"), PLANNER_TEMPLATE)?;
+    write_if_missing(
+        &config_dir.join("extensions/observatory.toml"),
         OBSERVATORY_TEMPLATE,
     )?;
-    fs::write(config_dir.join("extensions/github.toml"), GITHUB_TEMPLATE)?;
-    fs::write(
-        target.join("global/extensions/observatory/manifest.toml"),
+    write_if_missing(&config_dir.join("extensions/github.toml"), GITHUB_TEMPLATE)?;
+    write_if_missing(
+        &target.join("global/extensions/observatory/manifest.toml"),
         OBSERVATORY_MANIFEST_TEMPLATE,
     )?;
-    fs::write(
-        target.join("global/extensions/github/manifest.toml"),
+    write_if_missing(
+        &target.join("global/extensions/github/manifest.toml"),
         GITHUB_MANIFEST_TEMPLATE,
     )?;
 
@@ -136,4 +130,19 @@ fn default_home_template_path() -> PathBuf {
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".ennoia")
+}
+
+fn resolve_runtime_path(argument: Option<&String>) -> PathBuf {
+    argument
+        .map(PathBuf::from)
+        .or_else(|| env::var_os(ENNOIA_HOME_ENV).map(PathBuf::from))
+        .unwrap_or_else(default_home_template_path)
+}
+
+fn write_if_missing(path: &Path, contents: &str) -> io::Result<()> {
+    if !path.exists() {
+        fs::write(path, contents)?;
+    }
+
+    Ok(())
 }

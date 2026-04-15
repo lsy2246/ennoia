@@ -3,11 +3,20 @@
   "version": "0.1.0",
   "description": "Ennoia packaged runtime",
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "bin": {
     "ennoia": "bin/ennoia.js"
   },
   "files": [
     "bin",
-    "templates"
+    "README.md"
+  ],
+  "keywords": [
+    "ennoia",
+    "agent",
+    "workspace",
+    "runtime"
   ]
 }

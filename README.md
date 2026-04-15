@@ -15,7 +15,7 @@
 - 核心命名和目录已经确定
 - Rust workspace 已经拆分出核心模块
 - 文档体系覆盖架构、路线图、运行目录、数据模型、配置模型和扩展模型
-- 前端主壳、扩展 SDK、打包目录和配置模板已经落下基础骨架
+- 前端主壳、扩展 SDK、打包目录和配置模板已经进入可启动、可验证的 Phase 1 基础设施阶段
 
 ## 技术栈
 
@@ -56,6 +56,12 @@ ennoia/
 ~/.ennoia/
 ```
 
+运行时路径解析顺序：
+
+- 命令行参数显式传入的目录
+- 环境变量 `ENNOIA_HOME`
+- 默认目录 `~/.ennoia`
+
 详细说明见 [docs/runtime-layout.md](docs/runtime-layout.md)。
 
 ## 设计决议
@@ -67,17 +73,15 @@ ennoia/
 - 扩展采用编译安装、重启生效
 - 私聊产物归属 Agent，群聊产物归属 Space
 
-## 文档入口
-
-详细说明见 [docs/runtime-layout.md](docs/runtime-layout.md)。
-
 ## 测试与验证
 
 当前仓库的基础验证链为：
 
-- 初始化：`bun run bootstrap`（会安装前端依赖，并在本机已安装 Rust toolchain 时执行 `cargo check --workspace`）
+- 环境初始化：`bun run setup` 或 `bun run bootstrap`
 - Rust：`cargo fmt --all`、`cargo check --workspace`、`cargo test --workspace`
-- 前端：`bun install --cwd web/shell`、`bun run --cwd web/shell typecheck`、`bun run --cwd web/shell build`
+- 前端：`bun run typecheck`、`bun run build`
+- 集成验证：`bun run test:integration`
+- 主链路验证：`bun run test:e2e`
 
 测试目录说明：
 

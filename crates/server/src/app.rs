@@ -3,12 +3,13 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use ennoia_extension_host::ExtensionRegistry;
+use ennoia_extension_host::{ExtensionRegistry, RegisteredExtension};
 use ennoia_kernel::{
-    AgentConfig, AppConfig, ContributionSet, ExtensionKind, ExtensionManifest, PageContribution,
-    PlatformOverview, ServerConfig, SpaceSpec, UiConfig,
+    AgentConfig, AppConfig, CommandContribution, ContributionSet, ExtensionKind, ExtensionManifest,
+    HookContribution, PageContribution, PanelContribution, PlatformOverview, ProviderContribution,
+    ServerConfig, SpaceSpec, ThemeContribution, UiConfig,
 };
-use sqlx::sqlite::SqlitePoolOptions;
+use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::SqlitePool;
 use tokio::net::TcpListener;
 
@@ -43,7 +44,7 @@ pub fn default_app_state() -> AppState {
         overview: PlatformOverview::default(),
         home_dir: Arc::new(default_home_dir()),
         pool,
-        extensions: ExtensionRegistry::new(vec![sample_observatory_manifest()]),
+        extensions: fallback_extension_registry(),
         agents: vec![
             AgentConfig {
                 id: "coder".to_string(),
@@ -82,10 +83,12 @@ pub async fn bootstrap_app_state(home_dir: impl AsRef<Path>) -> Result<AppState,
     let extensions = load_enabled_extensions(home_dir.join("config/extensions"))?;
 
     let database_path = home_dir.join("state/sqlite/ennoia.db");
-    let database_url = format!("sqlite://{}", database_path.display());
+    let connect_options = SqliteConnectOptions::new()
+        .filename(&database_path)
+        .create_if_missing(true);
     let pool = SqlitePoolOptions::new()
         .max_connections(5)
-        .connect(&database_url)
+        .connect_with(connect_options)
         .await?;
 
     db::initialize_schema(&pool).await?;
@@ -159,7 +162,7 @@ fn load_enabled_extensions(path: PathBuf) -> Result<ExtensionRegistry, AppError>
         return Ok(ExtensionRegistry::new(vec![sample_observatory_manifest()]));
     }
 
-    let mut manifests = Vec::new();
+    let mut items = Vec::new();
     for entry in fs::read_dir(path)? {
         let entry = entry?;
         if !entry.file_type()?.is_file() {
@@ -171,19 +174,23 @@ fn load_enabled_extensions(path: PathBuf) -> Result<ExtensionRegistry, AppError>
             continue;
         }
 
-        let manifest_path = expand_home_dir(&config.install_dir).join("manifest.toml");
+        let install_dir = expand_home_dir(&config.install_dir);
+        let manifest_path = install_dir.join("manifest.toml");
         if manifest_path.exists() {
             let manifest_contents = fs::read_to_string(manifest_path)?;
             let manifest: ExtensionManifest = toml::from_str(&manifest_contents)?;
-            manifests.push(manifest);
+            items.push(RegisteredExtension {
+                manifest,
+                install_dir: install_dir.display().to_string(),
+            });
         }
     }
 
-    if manifests.is_empty() {
-        manifests.push(sample_observatory_manifest());
+    if items.is_empty() {
+        return Ok(fallback_extension_registry());
     }
 
-    Ok(ExtensionRegistry::new(manifests))
+    Ok(ExtensionRegistry::from_registered(items))
 }
 
 fn ensure_runtime_layout(home_dir: &Path) -> Result<(), AppError> {
@@ -222,10 +229,46 @@ fn sample_observatory_manifest() -> ExtensionManifest {
                 id: "observatory.events".to_string(),
                 title: "Observatory".to_string(),
                 route: "/observatory".to_string(),
+                mount: "observatory.events.page".to_string(),
+                icon: Some("activity".to_string()),
+            }],
+            panels: vec![PanelContribution {
+                id: "observatory.timeline".to_string(),
+                title: "Event Timeline".to_string(),
+                mount: "observatory.timeline.panel".to_string(),
+                slot: "right".to_string(),
+                icon: Some("panel-right".to_string()),
+            }],
+            themes: vec![ThemeContribution {
+                id: "observatory.daybreak".to_string(),
+                label: "Daybreak".to_string(),
+                entry: Some("frontend/themes/daybreak.css".to_string()),
+            }],
+            commands: vec![CommandContribution {
+                id: "observatory.open".to_string(),
+                title: "Open Observatory".to_string(),
+                action: "open-page".to_string(),
+                shortcut: Some("Ctrl+Shift+O".to_string()),
+            }],
+            providers: vec![ProviderContribution {
+                id: "observatory.feed".to_string(),
+                kind: "activity-feed".to_string(),
+                entry: Some("backend/providers/activity-feed.js".to_string()),
+            }],
+            hooks: vec![HookContribution {
+                event: "run.completed".to_string(),
+                handler: Some("backend/hooks/run-completed.js".to_string()),
             }],
             ..ContributionSet::default()
         },
     }
+}
+
+fn fallback_extension_registry() -> ExtensionRegistry {
+    ExtensionRegistry::from_registered(vec![RegisteredExtension {
+        install_dir: "~/.ennoia/global/extensions/observatory".to_string(),
+        manifest: sample_observatory_manifest(),
+    }])
 }
 
 fn default_home_dir() -> PathBuf {

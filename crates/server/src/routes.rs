@@ -5,6 +5,10 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
+use ennoia_extension_host::{
+    ExtensionRegistrySnapshot, RegisteredExtensionSnapshot, RegisteredPageContribution,
+    RegisteredPanelContribution,
+};
 use ennoia_kernel::{OwnerKind, OwnerRef};
 use ennoia_memory::{MemoryKind, MemoryRecord, MemoryService};
 use ennoia_orchestrator::OrchestratorService;
@@ -19,6 +23,9 @@ pub fn build_router(state: AppState) -> Router {
         .route("/health", get(health))
         .route("/api/v1/overview", get(overview))
         .route("/api/v1/extensions", get(extensions))
+        .route("/api/v1/extensions/registry", get(extension_registry))
+        .route("/api/v1/extensions/pages", get(extension_pages))
+        .route("/api/v1/extensions/panels", get(extension_panels))
         .route("/api/v1/agents", get(agents))
         .route("/api/v1/spaces", get(spaces))
         .route("/api/v1/runs", get(runs))
@@ -100,24 +107,20 @@ async fn overview(State(state): State<AppState>) -> Json<OverviewResponse> {
     })
 }
 
-async fn extensions(State(state): State<AppState>) -> Json<Vec<serde_json::Value>> {
-    Json(
-        state
-            .extensions
-            .items()
-            .iter()
-            .map(|item| {
-                serde_json::json!({
-                    "id": item.manifest.id,
-                    "version": item.manifest.version,
-                    "install_dir": item.install_dir,
-                    "pages": item.manifest.contributes.pages,
-                    "panels": item.manifest.contributes.panels,
-                    "commands": item.manifest.contributes.commands
-                })
-            })
-            .collect(),
-    )
+async fn extensions(State(state): State<AppState>) -> Json<Vec<RegisteredExtensionSnapshot>> {
+    Json(state.extensions.snapshot().extensions)
+}
+
+async fn extension_registry(State(state): State<AppState>) -> Json<ExtensionRegistrySnapshot> {
+    Json(state.extensions.snapshot())
+}
+
+async fn extension_pages(State(state): State<AppState>) -> Json<Vec<RegisteredPageContribution>> {
+    Json(state.extensions.pages())
+}
+
+async fn extension_panels(State(state): State<AppState>) -> Json<Vec<RegisteredPanelContribution>> {
+    Json(state.extensions.panels())
 }
 
 async fn agents(State(state): State<AppState>) -> Json<Vec<ennoia_kernel::AgentConfig>> {

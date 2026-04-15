@@ -16,6 +16,15 @@ Ennoia 对外统一使用 `Extension` 作为扩展总称，内部区分：
 - Theme
 - Provider
 
+当前 manifest 协议字段：
+
+- `pages[]`：`id`、`title`、`route`、`mount`、`icon`
+- `panels[]`：`id`、`title`、`mount`、`slot`、`icon`
+- `themes[]`：`id`、`label`、`entry`
+- `commands[]`：`id`、`title`、`action`、`shortcut`
+- `providers[]`：`id`、`kind`、`entry`
+- `hooks[]`：`event`、`handler`
+
 ## 3. skill 可以贡献
 
 - Agent 或 Task 可调用的能力
@@ -48,7 +57,8 @@ Ennoia 对外统一使用 `Extension` 作为扩展总称，内部区分：
 1. 安装到 `~/.ennoia/global/extensions/` 或技能目录
 2. 在 `config/extensions/*.toml` 中启用
 3. Server 启动时扫描并注册
-4. Shell 读取注册表后挂载页面、面板和命令
+4. Server 通过 `/api/v1/extensions/registry`、`/api/v1/extensions/pages`、`/api/v1/extensions/panels` 暴露挂载协议
+5. Shell 读取注册表后挂载页面、面板和命令
 
 ## 6. 开发原则
 
@@ -56,3 +66,4 @@ Ennoia 对外统一使用 `Extension` 作为扩展总称，内部区分：
 - skill 负责能力调用
 - Theme 作为 UI contribution 提供
 - 扩展采用编译安装、重启生效
+- 页面、面板、命令和 Provider 优先通过稳定的 `mount` / `entry` 协议接入

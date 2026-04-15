@@ -6,6 +6,12 @@
 ~/.ennoia/
 ```
 
+CLI 路径解析顺序：
+
+1. 命令行参数传入的目录
+2. 环境变量 `ENNOIA_HOME`
+3. 默认目录 `~/.ennoia`
+
 ## 1. 目录树
 
 ```text
@@ -55,6 +61,12 @@
 
 加载方式采用目录扫描，参考 Nginx 风格。
 
+`extensions/*.toml` 当前包含：
+
+- `enabled`：是否启用扩展
+- `install_dir`：扩展安装目录
+- `id`、`kind`：扩展标识信息
+
 ## 3. 状态层
 
 ### `state/`
@@ -73,6 +85,22 @@
 ### `global/extensions/`
 
 安装后的 system extension 目录。
+
+每个扩展目录至少包含：
+
+```text
+global/extensions/<ext_id>/
+└─ manifest.toml
+```
+
+`manifest.toml` 中的 `contributes` 当前支持：
+
+- `pages[]`：`id`、`title`、`route`、`mount`、`icon`
+- `panels[]`：`id`、`title`、`mount`、`slot`、`icon`
+- `themes[]`：`id`、`label`、`entry`
+- `commands[]`：`id`、`title`、`action`、`shortcut`
+- `providers[]`：`id`、`kind`、`entry`
+- `hooks[]`：`event`、`handler`
 
 ### `global/skills/`
 

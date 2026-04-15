@@ -14,6 +14,9 @@ Server 首版提供一组稳定、可扩展的系统接口。
 ### Extensions
 
 - `GET /api/v1/extensions`
+- `GET /api/v1/extensions/registry`
+- `GET /api/v1/extensions/pages`
+- `GET /api/v1/extensions/panels`
 
 ### Agents
 
@@ -48,3 +51,6 @@ Server 首版提供一组稳定、可扩展的系统接口。
 - 首版接口围绕系统概览和主链路表达
 - 资源命名与领域对象一致
 - 前端主壳从概览、注册表和实时流组合界面状态
+- `/api/v1/extensions` 维持扁平扩展列表
+- `/api/v1/extensions/registry` 提供完整 registry 快照
+- `/api/v1/extensions/pages` 与 `/api/v1/extensions/panels` 提供细粒度挂载入口

@@ -5,9 +5,9 @@ frontend_bundle = "frontend/index.js"
 backend_entry = "backend/index.js"
 
 [contributes]
-pages = []
-panels = []
-themes = []
-commands = []
-providers = []
-hooks = []
+pages = [{ id = "observatory.events", title = "Observatory", route = "/observatory", mount = "observatory.events.page", icon = "activity" }]
+panels = [{ id = "observatory.timeline", title = "Event Timeline", mount = "observatory.timeline.panel", slot = "right", icon = "panel-right" }]
+themes = [{ id = "observatory.daybreak", label = "Daybreak", entry = "frontend/themes/daybreak.css" }]
+commands = [{ id = "observatory.open", title = "Open Observatory", action = "open-page", shortcut = "Ctrl+Shift+O" }]
+providers = [{ id = "observatory.feed", kind = "activity-feed", entry = "backend/providers/activity-feed.js" }]
+hooks = [{ event = "run.completed", handler = "backend/hooks/run-completed.js" }]

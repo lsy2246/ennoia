@@ -5,9 +5,9 @@ frontend_bundle = "frontend/index.js"
 backend_entry = "backend/index.js"
 
 [contributes]
-pages = []
-panels = []
+pages = [{ id = "github.repositories", title = "GitHub", route = "/github", mount = "github.repositories.page", icon = "mark-github" }]
+panels = [{ id = "github.activity", title = "GitHub Activity", mount = "github.activity.panel", slot = "left", icon = "pulse" }]
 themes = []
-commands = []
-providers = []
-hooks = []
+commands = [{ id = "github.open", title = "Open GitHub", action = "open-page", shortcut = "Ctrl+Shift+G" }]
+providers = [{ id = "github.repositories", kind = "repository-feed", entry = "backend/providers/repositories.js" }]
+hooks = [{ event = "run.created", handler = "backend/hooks/run-created.js" }]

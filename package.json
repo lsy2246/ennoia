@@ -6,8 +6,11 @@
   "type": "module",
   "scripts": {
     "bootstrap": "node ./scripts/bootstrap.mjs",
+    "setup": "bun run bootstrap",
     "build": "bun run --cwd web/shell build",
     "typecheck": "bun run --cwd web/shell typecheck",
-    "test:web": "bun run --cwd web/shell test:smoke"
+    "test:web": "bun run --cwd web/shell test:smoke",
+    "test:integration": "bun ./tests/integration/runtime-smoke.mjs",
+    "test:e2e": "bun ./tests/e2e/platform-smoke.mjs"
   }
 }
