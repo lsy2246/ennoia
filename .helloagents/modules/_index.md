@@ -1,0 +1,6 @@
+# 模块索引
+
+| 模块 | 说明 |
+|------|------|
+| `web-shell` | 前端主壳、Panda CSS 样式系统与运行时面板 |
+| `workspace-docs` | README 与架构文档约定、仓库级 bootstrap 入口 |

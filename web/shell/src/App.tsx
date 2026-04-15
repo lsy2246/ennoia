@@ -1,5 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 
+import { styles } from "./app.styles";
+
 type Overview = {
   app_name: string;
   shell_title: string;
@@ -144,58 +146,62 @@ export function App() {
   }
 
   return (
-    <div className="shell">
-      <aside className="sidebar">
-        <div className="brand">
-          <p className="eyebrow">AI Workbench</p>
-          <h1>{overview?.shell_title ?? "Ennoia"}</h1>
-          <p className="muted">{status}</p>
+    <div className={styles.shell}>
+      <aside className={styles.sidebar}>
+        <div className={styles.brand}>
+          <p className={styles.eyebrow}>AI Workbench</p>
+          <h1 className={styles.brandTitle}>{overview?.shell_title ?? "Ennoia"}</h1>
+          <p className={styles.muted}>{status}</p>
         </div>
 
-        <div className="stats">
+        <div className={styles.stats}>
           <Stat label="Agents" value={overview?.counts.agents ?? 0} />
           <Stat label="Spaces" value={overview?.counts.spaces ?? 0} />
           <Stat label="Runs" value={overview?.counts.runs ?? 0} />
           <Stat label="Extensions" value={overview?.counts.extensions ?? 0} />
         </div>
 
-        <nav className="nav">
-          <button className="nav-item" type="button">
+        <nav className={styles.nav}>
+          <button className={styles.navItem} type="button">
             私聊
           </button>
-          <button className="nav-item" type="button">
+          <button className={styles.navItem} type="button">
             群聊
           </button>
-          <button className="nav-item" type="button">
+          <button className={styles.navItem} type="button">
             Runs
           </button>
-          <button className="nav-item" type="button">
+          <button className={styles.navItem} type="button">
             Memory
           </button>
         </nav>
       </aside>
 
-      <main className="content">
-        <header className="header">
-          <div>
-            <p className="eyebrow">Workspace</p>
-            <h2>{overview?.app_name ?? "Ennoia"} Runtime</h2>
-            <p className="muted">
+      <main className={styles.content}>
+        <header className={styles.header}>
+          <div className={styles.headerBlock}>
+            <p className={styles.eyebrow}>Workspace</p>
+            <h2 className={styles.runtimeTitle}>{overview?.app_name ?? "Ennoia"} Runtime</h2>
+            <p className={styles.muted}>
               模块：{overview?.modules.join(", ") ?? "loading"}
             </p>
           </div>
-          <button className="status-pill" type="button" onClick={() => void loadAll()}>
+          <button className={styles.statusPill} type="button" onClick={() => void loadAll()}>
             刷新数据
           </button>
         </header>
 
-        <section className="page-grid">
-          <form className="page-card" onSubmit={submitPrivateRun}>
-            <p className="eyebrow">Private Chat</p>
-            <h3>发起私聊 Run</h3>
-            <label className="field">
-              <span>Agent</span>
-              <select value={privateAgent} onChange={(event) => setPrivateAgent(event.target.value)}>
+        <section className={styles.pageGrid}>
+          <form className={styles.pageCard} onSubmit={submitPrivateRun}>
+            <p className={styles.eyebrow}>Private Chat</p>
+            <h3 className={styles.sectionTitle}>发起私聊 Run</h3>
+            <label className={styles.field}>
+              <span className={styles.fieldLabel}>Agent</span>
+              <select
+                className={styles.fieldControl}
+                value={privateAgent}
+                onChange={(event) => setPrivateAgent(event.target.value)}
+              >
                 {agents.map((agent) => (
                   <option key={agent.id} value={agent.id}>
                     {agent.display_name}
@@ -203,21 +209,25 @@ export function App() {
                 ))}
               </select>
             </label>
-            <label className="field">
-              <span>Goal</span>
-              <input value={privateGoal} onChange={(event) => setPrivateGoal(event.target.value)} />
+            <label className={styles.field}>
+              <span className={styles.fieldLabel}>Goal</span>
+              <input
+                className={styles.fieldControl}
+                value={privateGoal}
+                onChange={(event) => setPrivateGoal(event.target.value)}
+              />
             </label>
-            <button className="primary" type="submit">
+            <button className={styles.primaryButton} type="submit">
               创建私聊 Run
             </button>
           </form>
 
-          <form className="page-card" onSubmit={submitSpaceRun}>
-            <p className="eyebrow">Group Chat</p>
-            <h3>发起群聊 Run</h3>
-            <label className="field">
-              <span>Space</span>
-              <select defaultValue="studio">
+          <form className={styles.pageCard} onSubmit={submitSpaceRun}>
+            <p className={styles.eyebrow}>Group Chat</p>
+            <h3 className={styles.sectionTitle}>发起群聊 Run</h3>
+            <label className={styles.field}>
+              <span className={styles.fieldLabel}>Space</span>
+              <select className={styles.fieldControl} defaultValue="studio">
                 {spaces.map((space) => (
                   <option key={space.id} value={space.id}>
                     {space.display_name}
@@ -225,41 +235,46 @@ export function App() {
                 ))}
               </select>
             </label>
-            <label className="field">
-              <span>Goal</span>
-              <input value={spaceGoal} onChange={(event) => setSpaceGoal(event.target.value)} />
+            <label className={styles.field}>
+              <span className={styles.fieldLabel}>Goal</span>
+              <input
+                className={styles.fieldControl}
+                value={spaceGoal}
+                onChange={(event) => setSpaceGoal(event.target.value)}
+              />
             </label>
-            <button className="primary" type="submit">
+            <button className={styles.primaryButton} type="submit">
               创建群聊 Run
             </button>
           </form>
 
-          <form className="page-card" onSubmit={submitJob}>
-            <p className="eyebrow">Scheduler</p>
-            <h3>注册后台任务</h3>
-            <label className="field">
-              <span>Description</span>
+          <form className={styles.pageCard} onSubmit={submitJob}>
+            <p className={styles.eyebrow}>Scheduler</p>
+            <h3 className={styles.sectionTitle}>注册后台任务</h3>
+            <label className={styles.field}>
+              <span className={styles.fieldLabel}>Description</span>
               <input
+                className={styles.fieldControl}
                 value={jobDescription}
                 onChange={(event) => setJobDescription(event.target.value)}
               />
             </label>
-            <button className="primary" type="submit">
+            <button className={styles.primaryButton} type="submit">
               创建 Job
             </button>
           </form>
         </section>
 
-        <section className="dock">
-          <div className="dock-header">
-            <div>
-              <p className="eyebrow">Panels</p>
-              <h3>运行数据面板</h3>
+        <section className={styles.dock}>
+          <div className={styles.dockHeader}>
+            <div className={styles.headerBlock}>
+              <p className={styles.eyebrow}>Panels</p>
+              <h3 className={styles.sectionTitle}>运行数据面板</h3>
             </div>
-            <p className="muted">当前面板已经接上真实 API 数据。</p>
+            <p className={styles.muted}>当前面板已经接上真实 API 数据。</p>
           </div>
 
-          <div className="panel-grid">
+          <div className={styles.panelGrid}>
             <PanelCard title="Extensions">
               {extensions.map((extension) => (
                 <ListRow key={extension.id} title={extension.id} detail={extension.version} />
@@ -304,7 +319,7 @@ export function App() {
 
 function Stat({ label, value }: { label: string; value: number }) {
   return (
-    <div className="stat">
+    <div className={styles.stat}>
       <span>{label}</span>
       <strong>{value}</strong>
     </div>
@@ -313,18 +328,18 @@ function Stat({ label, value }: { label: string; value: number }) {
 
 function PanelCard(props: { title: string; children: React.ReactNode }) {
   return (
-    <article className="panel-card">
-      <h4>{props.title}</h4>
-      <div className="list">{props.children}</div>
+    <article className={styles.panelCard}>
+      <h4 className={styles.panelTitle}>{props.title}</h4>
+      <div className={styles.list}>{props.children}</div>
     </article>
   );
 }
 
 function ListRow({ title, detail }: { title: string; detail: string }) {
   return (
-    <div className="list-row">
-      <strong>{title}</strong>
-      <span>{detail}</span>
+    <div className={styles.listRow}>
+      <strong className={styles.listTitle}>{title}</strong>
+      <span className={styles.listDetail}>{detail}</span>
     </div>
   );
 }

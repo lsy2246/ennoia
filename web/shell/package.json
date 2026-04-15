@@ -5,9 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
-    "typecheck": "tsc --noEmit",
-    "test:smoke": "vite build"
+    "panda:codegen": "panda codegen --clean",
+    "build": "bun run panda:codegen && vite build",
+    "typecheck": "bun run panda:codegen && tsc --noEmit",
+    "test:smoke": "bun run build",
+    "prepare": "bun run panda:codegen"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.99.0",
@@ -19,9 +21,11 @@
     "zustand": "^5.0.8"
   },
   "devDependencies": {
+    "@pandacss/dev": "^1.9.1",
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.2",
     "@vitejs/plugin-react": "^5.1.0",
+    "postcss": "^8.5.9",
     "typescript": "^5.9.3",
     "vite": "^7.2.0"
   }

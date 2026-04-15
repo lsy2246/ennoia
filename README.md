@@ -20,8 +20,8 @@
 ## 技术栈
 
 - 后端：Rust、Tokio、Axum、SQLx、Serde、TOML
-- 数据库：PostgreSQL 为主，SQLite 用于单机模式
-- 前端：React、Vite、TanStack Router、TanStack Query、Zustand、Dockview、Monaco
+- 数据库：SQLite 优先，围绕本地运行目录落地首版数据存储
+- 前端：React、Vite、TanStack Router、TanStack Query、Zustand、Dockview、Monaco、Panda CSS
 - 前端包管理：`bun`
 - 发布形态：单个 `npm` 包 `ennoia`
 
@@ -56,7 +56,7 @@ ennoia/
 ~/.ennoia/
 ```
 
-详细说明见 [runtime-layout.md](D:/data/code/ennoia/docs/runtime-layout.md)。
+详细说明见 [docs/runtime-layout.md](docs/runtime-layout.md)。
 
 ## 设计决议
 
@@ -75,8 +75,9 @@ ennoia/
 
 当前仓库的基础验证链为：
 
+- 初始化：`bun run bootstrap`（会安装前端依赖，并在本机已安装 Rust toolchain 时执行 `cargo check --workspace`）
 - Rust：`cargo fmt --all`、`cargo check --workspace`、`cargo test --workspace`
-- 前端：`bun --cwd web/shell i`、`bun --cwd web/shell run typecheck`、`bun --cwd web/shell run build`
+- 前端：`bun install --cwd web/shell`、`bun run --cwd web/shell typecheck`、`bun run --cwd web/shell build`
 
 测试目录说明：
 

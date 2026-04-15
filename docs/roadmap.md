@@ -84,7 +84,7 @@ Ennoia 的首版目标是形成一个长期可演进的 AI Agent 平台基础盘
 
 ### Phase 3：前端主壳骨架
 
-- Vite + React + Bun
+- Vite + React + Bun + Panda CSS
 - 主壳布局
 - 子页面容器
 - 面板区域占位
@@ -93,7 +93,7 @@ Ennoia 的首版目标是形成一个长期可演进的 AI Agent 平台基础盘
 
 验收：
 
-- `bun run build --filter ennoia-shell`
+- `bun run --cwd web/shell build`
 
 ### Phase 4：配置、打包与模板
 

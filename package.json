@@ -5,8 +5,9 @@
   "description": "Ennoia source workspace",
   "type": "module",
   "scripts": {
-    "build": "bun --cwd web/shell run build",
-    "typecheck": "bun --cwd web/shell run typecheck",
-    "test:web": "bun --cwd web/shell run test:smoke"
+    "bootstrap": "node ./scripts/bootstrap.mjs",
+    "build": "bun run --cwd web/shell build",
+    "typecheck": "bun run --cwd web/shell typecheck",
+    "test:web": "bun run --cwd web/shell test:smoke"
   }
 }

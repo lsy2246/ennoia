@@ -8,8 +8,8 @@
 
 - `app_name`
 - `mode`
-- `database_mode`
-- `database_url`
+- `database_mode`：首版默认值为 `sqlite`
+- `database_url`：默认指向 `sqlite://~/.ennoia/state/sqlite/ennoia.db`
 - `extensions_scan_dir`
 - `agents_scan_dir`
 - `scheduler_tick_ms`
