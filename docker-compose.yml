@@ -1,0 +1,27 @@
+services:
+  ennoia:
+    build: .
+    image: ennoia:local
+    container_name: ennoia
+    restart: unless-stopped
+    ports:
+      - "3710:3710"
+    volumes:
+      - ennoia-data:/data/ennoia
+    environment:
+      # Override the default bind if you need it reachable from the host network.
+      ENNOIA_HOME: /data/ennoia
+
+  # Optional: static file server for the built web shell (bun run --cwd web/shell build)
+  # Uncomment when you want a one-shot UI container instead of using `bun run dev`.
+  # web:
+  #   image: nginx:alpine
+  #   ports:
+  #     - "5173:80"
+  #   volumes:
+  #     - ./web/shell/dist:/usr/share/nginx/html:ro
+  #   depends_on:
+  #     - ennoia
+
+volumes:
+  ennoia-data:

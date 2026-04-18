@@ -4,6 +4,8 @@ use ennoia_kernel::{
     OwnerKind, OwnerRef, RunSpec, RunStage, SpaceSpec, TaskKind, TaskSpec, TaskStatus, ThreadKind,
     ThreadSpec,
 };
+use sea_query::{Expr, Iden, OnConflict, Query, SqliteQueryBuilder};
+use sea_query_binder::SqlxBinder;
 use serde::Serialize;
 use sqlx::{Row, SqlitePool};
 
@@ -11,6 +13,132 @@ pub const SCHEMA_SQL: &str = include_str!("../../../migrations/0001_ennoia_core.
 pub const SYSTEM_CONFIG_SQL: &str =
     include_str!("../../../migrations/0002_system_config.sql");
 pub const AUTH_SQL: &str = include_str!("../../../migrations/0003_auth.sql");
+
+// ========== Iden enums ==========
+
+#[derive(Iden)]
+enum Agents {
+    Table,
+    Id,
+    DisplayName,
+    Kind,
+    WorkspaceMode,
+    DefaultModel,
+    SkillsDir,
+    WorkspaceDir,
+    ArtifactsDir,
+    CreatedAt,
+    UpdatedAt,
+}
+
+#[derive(Iden)]
+enum Spaces {
+    Table,
+    Id,
+    DisplayName,
+    MentionPolicy,
+    DefaultAgentsJson,
+    CreatedAt,
+    UpdatedAt,
+}
+
+#[derive(Iden)]
+enum Threads {
+    Table,
+    Id,
+    ThreadKind,
+    OwnerKind,
+    OwnerId,
+    SpaceId,
+    Title,
+    ParticipantsJson,
+    CreatedAt,
+    UpdatedAt,
+}
+
+#[derive(Iden)]
+enum Messages {
+    Table,
+    Id,
+    ThreadId,
+    Sender,
+    Role,
+    Body,
+    MentionsJson,
+    CreatedAt,
+}
+
+#[derive(Iden)]
+enum Runs {
+    Table,
+    Id,
+    ThreadId,
+    OwnerKind,
+    OwnerId,
+    Trigger,
+    Goal,
+    Stage,
+    CreatedAt,
+    UpdatedAt,
+}
+
+#[derive(Iden)]
+enum Tasks {
+    Table,
+    Id,
+    RunId,
+    TaskKind,
+    Title,
+    AssignedAgentId,
+    Status,
+    CreatedAt,
+    UpdatedAt,
+}
+
+#[derive(Iden)]
+enum Artifacts {
+    Table,
+    Id,
+    OwnerKind,
+    OwnerId,
+    RunId,
+    ArtifactKind,
+    RelativePath,
+    CreatedAt,
+}
+
+#[derive(Iden)]
+enum Extensions {
+    Table,
+    Id,
+    Kind,
+    Version,
+    InstallDir,
+    FrontendBundle,
+    BackendEntry,
+    PagesJson,
+    PanelsJson,
+    CommandsJson,
+    ThemesJson,
+    HooksJson,
+    ProvidersJson,
+}
+
+#[derive(Iden)]
+enum Jobs {
+    Table,
+    Id,
+    OwnerKind,
+    OwnerId,
+    JobKind,
+    ScheduleKind,
+    ScheduleValue,
+    Status,
+    NextRunAt,
+    CreatedAt,
+}
+
+// ========== Public types ==========
 
 #[derive(Debug, Clone, Serialize)]
 pub struct JobRow {
@@ -25,6 +153,8 @@ pub struct JobRow {
     pub created_at: String,
 }
 
+// ========== Schema migration ==========
+
 pub async fn initialize_schema(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     for migration in [SCHEMA_SQL, SYSTEM_CONFIG_SQL, AUTH_SQL] {
         for statement in migration
@@ -38,35 +168,53 @@ pub async fn initialize_schema(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     Ok(())
 }
 
+// ========== Upserts ==========
+
 pub async fn upsert_agents(pool: &SqlitePool, agents: &[AgentConfig]) -> Result<(), sqlx::Error> {
     let now = now_iso();
     for agent in agents {
-        sqlx::query(
-            "INSERT INTO agents \
-             (id, display_name, kind, workspace_mode, default_model, skills_dir, workspace_dir, artifacts_dir, created_at, updated_at) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
-             ON CONFLICT(id) DO UPDATE SET \
-               display_name = excluded.display_name, \
-               kind = excluded.kind, \
-               workspace_mode = excluded.workspace_mode, \
-               default_model = excluded.default_model, \
-               skills_dir = excluded.skills_dir, \
-               workspace_dir = excluded.workspace_dir, \
-               artifacts_dir = excluded.artifacts_dir, \
-               updated_at = excluded.updated_at",
-        )
-        .bind(&agent.id)
-        .bind(&agent.display_name)
-        .bind(&agent.kind)
-        .bind(&agent.workspace_mode)
-        .bind(&agent.default_model)
-        .bind(&agent.skills_dir)
-        .bind(&agent.workspace_dir)
-        .bind(&agent.artifacts_dir)
-        .bind(&now)
-        .bind(&now)
-        .execute(pool)
-        .await?;
+        let (sql, values) = Query::insert()
+            .into_table(Agents::Table)
+            .columns([
+                Agents::Id,
+                Agents::DisplayName,
+                Agents::Kind,
+                Agents::WorkspaceMode,
+                Agents::DefaultModel,
+                Agents::SkillsDir,
+                Agents::WorkspaceDir,
+                Agents::ArtifactsDir,
+                Agents::CreatedAt,
+                Agents::UpdatedAt,
+            ])
+            .values_panic([
+                agent.id.clone().into(),
+                agent.display_name.clone().into(),
+                agent.kind.clone().into(),
+                agent.workspace_mode.clone().into(),
+                agent.default_model.clone().into(),
+                agent.skills_dir.clone().into(),
+                agent.workspace_dir.clone().into(),
+                agent.artifacts_dir.clone().into(),
+                now.clone().into(),
+                now.clone().into(),
+            ])
+            .on_conflict(
+                OnConflict::column(Agents::Id)
+                    .update_columns([
+                        Agents::DisplayName,
+                        Agents::Kind,
+                        Agents::WorkspaceMode,
+                        Agents::DefaultModel,
+                        Agents::SkillsDir,
+                        Agents::WorkspaceDir,
+                        Agents::ArtifactsDir,
+                        Agents::UpdatedAt,
+                    ])
+                    .to_owned(),
+            )
+            .build_sqlx(SqliteQueryBuilder);
+        sqlx::query_with(&sql, values).execute(pool).await?;
     }
     Ok(())
 }
@@ -74,23 +222,37 @@ pub async fn upsert_agents(pool: &SqlitePool, agents: &[AgentConfig]) -> Result<
 pub async fn upsert_spaces(pool: &SqlitePool, spaces: &[SpaceSpec]) -> Result<(), sqlx::Error> {
     let now = now_iso();
     for space in spaces {
-        sqlx::query(
-            "INSERT INTO spaces (id, display_name, mention_policy, default_agents_json, created_at, updated_at) \
-             VALUES (?, ?, ?, ?, ?, ?) \
-             ON CONFLICT(id) DO UPDATE SET \
-               display_name = excluded.display_name, \
-               mention_policy = excluded.mention_policy, \
-               default_agents_json = excluded.default_agents_json, \
-               updated_at = excluded.updated_at",
-        )
-        .bind(&space.id)
-        .bind(&space.display_name)
-        .bind(&space.mention_policy)
-        .bind(serde_json::to_string(&space.default_agents).unwrap_or_else(|_| "[]".to_string()))
-        .bind(&now)
-        .bind(&now)
-        .execute(pool)
-        .await?;
+        let default_agents = serde_json::to_string(&space.default_agents).unwrap_or_else(|_| "[]".into());
+        let (sql, values) = Query::insert()
+            .into_table(Spaces::Table)
+            .columns([
+                Spaces::Id,
+                Spaces::DisplayName,
+                Spaces::MentionPolicy,
+                Spaces::DefaultAgentsJson,
+                Spaces::CreatedAt,
+                Spaces::UpdatedAt,
+            ])
+            .values_panic([
+                space.id.clone().into(),
+                space.display_name.clone().into(),
+                space.mention_policy.clone().into(),
+                default_agents.into(),
+                now.clone().into(),
+                now.clone().into(),
+            ])
+            .on_conflict(
+                OnConflict::column(Spaces::Id)
+                    .update_columns([
+                        Spaces::DisplayName,
+                        Spaces::MentionPolicy,
+                        Spaces::DefaultAgentsJson,
+                        Spaces::UpdatedAt,
+                    ])
+                    .to_owned(),
+            )
+            .build_sqlx(SqliteQueryBuilder);
+        sqlx::query_with(&sql, values).execute(pool).await?;
     }
     Ok(())
 }
@@ -106,96 +268,149 @@ pub async fn upsert_extensions(
 }
 
 pub async fn upsert_thread(pool: &SqlitePool, thread: &ThreadSpec) -> Result<(), sqlx::Error> {
-    sqlx::query(
-        "INSERT INTO threads \
-         (id, owner_kind, owner_id, space_id, thread_kind, title, participants_json, created_at, updated_at) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) \
-         ON CONFLICT(id) DO UPDATE SET \
-           owner_kind = excluded.owner_kind, \
-           owner_id = excluded.owner_id, \
-           space_id = excluded.space_id, \
-           thread_kind = excluded.thread_kind, \
-           title = excluded.title, \
-           participants_json = excluded.participants_json, \
-           updated_at = excluded.updated_at",
-    )
-    .bind(&thread.id)
-    .bind(owner_kind_str(&thread.owner.kind))
-    .bind(&thread.owner.id)
-    .bind(&thread.space_id)
-    .bind(thread_kind_str(&thread.kind))
-    .bind(&thread.title)
-    .bind(serde_json::to_string(&thread.participants).unwrap_or_else(|_| "[]".to_string()))
-    .bind(&thread.created_at)
-    .bind(&thread.updated_at)
-    .execute(pool)
-    .await?;
+    let participants =
+        serde_json::to_string(&thread.participants).unwrap_or_else(|_| "[]".to_string());
+    let (sql, values) = Query::insert()
+        .into_table(Threads::Table)
+        .columns([
+            Threads::Id,
+            Threads::OwnerKind,
+            Threads::OwnerId,
+            Threads::SpaceId,
+            Threads::ThreadKind,
+            Threads::Title,
+            Threads::ParticipantsJson,
+            Threads::CreatedAt,
+            Threads::UpdatedAt,
+        ])
+        .values_panic([
+            thread.id.clone().into(),
+            owner_kind_str(&thread.owner.kind).to_string().into(),
+            thread.owner.id.clone().into(),
+            thread.space_id.clone().into(),
+            thread_kind_str(&thread.kind).to_string().into(),
+            thread.title.clone().into(),
+            participants.into(),
+            thread.created_at.clone().into(),
+            thread.updated_at.clone().into(),
+        ])
+        .on_conflict(
+            OnConflict::column(Threads::Id)
+                .update_columns([
+                    Threads::OwnerKind,
+                    Threads::OwnerId,
+                    Threads::SpaceId,
+                    Threads::ThreadKind,
+                    Threads::Title,
+                    Threads::ParticipantsJson,
+                    Threads::UpdatedAt,
+                ])
+                .to_owned(),
+        )
+        .build_sqlx(SqliteQueryBuilder);
+    sqlx::query_with(&sql, values).execute(pool).await?;
     Ok(())
 }
 
 pub async fn insert_message(pool: &SqlitePool, message: &MessageSpec) -> Result<(), sqlx::Error> {
-    sqlx::query(
-        "INSERT OR REPLACE INTO messages \
-         (id, thread_id, sender, role, body, mentions_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-    )
-    .bind(&message.id)
-    .bind(&message.thread_id)
-    .bind(&message.sender)
-    .bind(message_role_str(&message.role))
-    .bind(&message.body)
-    .bind(serde_json::to_string(&message.mentions).unwrap_or_else(|_| "[]".to_string()))
-    .bind(&message.created_at)
-    .execute(pool)
-    .await?;
+    let mentions = serde_json::to_string(&message.mentions).unwrap_or_else(|_| "[]".to_string());
+    let (sql, values) = Query::insert()
+        .into_table(Messages::Table)
+        .columns([
+            Messages::Id,
+            Messages::ThreadId,
+            Messages::Sender,
+            Messages::Role,
+            Messages::Body,
+            Messages::MentionsJson,
+            Messages::CreatedAt,
+        ])
+        .values_panic([
+            message.id.clone().into(),
+            message.thread_id.clone().into(),
+            message.sender.clone().into(),
+            message_role_str(&message.role).to_string().into(),
+            message.body.clone().into(),
+            mentions.into(),
+            message.created_at.clone().into(),
+        ])
+        .on_conflict(OnConflict::column(Messages::Id).do_nothing().to_owned())
+        .build_sqlx(SqliteQueryBuilder);
+    sqlx::query_with(&sql, values).execute(pool).await?;
     Ok(())
 }
 
 pub async fn upsert_run(pool: &SqlitePool, run: &RunSpec) -> Result<(), sqlx::Error> {
-    sqlx::query(
-        "INSERT INTO runs \
-         (id, thread_id, owner_kind, owner_id, trigger, goal, stage, created_at, updated_at) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) \
-         ON CONFLICT(id) DO UPDATE SET \
-           stage = excluded.stage, \
-           goal = excluded.goal, \
-           updated_at = excluded.updated_at",
-    )
-    .bind(&run.id)
-    .bind(&run.thread_id)
-    .bind(owner_kind_str(&run.owner.kind))
-    .bind(&run.owner.id)
-    .bind(&run.trigger)
-    .bind(&run.goal)
-    .bind(run.stage.as_str())
-    .bind(&run.created_at)
-    .bind(&run.updated_at)
-    .execute(pool)
-    .await?;
+    let (sql, values) = Query::insert()
+        .into_table(Runs::Table)
+        .columns([
+            Runs::Id,
+            Runs::ThreadId,
+            Runs::OwnerKind,
+            Runs::OwnerId,
+            Runs::Trigger,
+            Runs::Goal,
+            Runs::Stage,
+            Runs::CreatedAt,
+            Runs::UpdatedAt,
+        ])
+        .values_panic([
+            run.id.clone().into(),
+            run.thread_id.clone().into(),
+            owner_kind_str(&run.owner.kind).to_string().into(),
+            run.owner.id.clone().into(),
+            run.trigger.clone().into(),
+            run.goal.clone().into(),
+            run.stage.as_str().to_string().into(),
+            run.created_at.clone().into(),
+            run.updated_at.clone().into(),
+        ])
+        .on_conflict(
+            OnConflict::column(Runs::Id)
+                .update_columns([Runs::Stage, Runs::Goal, Runs::UpdatedAt])
+                .to_owned(),
+        )
+        .build_sqlx(SqliteQueryBuilder);
+    sqlx::query_with(&sql, values).execute(pool).await?;
     Ok(())
 }
 
 pub async fn upsert_task(pool: &SqlitePool, task: &TaskSpec) -> Result<(), sqlx::Error> {
-    sqlx::query(
-        "INSERT INTO tasks \
-         (id, run_id, task_kind, title, assigned_agent_id, status, created_at, updated_at) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?) \
-         ON CONFLICT(id) DO UPDATE SET \
-           task_kind = excluded.task_kind, \
-           title = excluded.title, \
-           assigned_agent_id = excluded.assigned_agent_id, \
-           status = excluded.status, \
-           updated_at = excluded.updated_at",
-    )
-    .bind(&task.id)
-    .bind(&task.run_id)
-    .bind(task_kind_str(&task.task_kind))
-    .bind(&task.title)
-    .bind(&task.assigned_agent_id)
-    .bind(task_status_str(&task.status))
-    .bind(&task.created_at)
-    .bind(&task.updated_at)
-    .execute(pool)
-    .await?;
+    let (sql, values) = Query::insert()
+        .into_table(Tasks::Table)
+        .columns([
+            Tasks::Id,
+            Tasks::RunId,
+            Tasks::TaskKind,
+            Tasks::Title,
+            Tasks::AssignedAgentId,
+            Tasks::Status,
+            Tasks::CreatedAt,
+            Tasks::UpdatedAt,
+        ])
+        .values_panic([
+            task.id.clone().into(),
+            task.run_id.clone().into(),
+            task_kind_str(&task.task_kind).to_string().into(),
+            task.title.clone().into(),
+            task.assigned_agent_id.clone().into(),
+            task_status_str(&task.status).to_string().into(),
+            task.created_at.clone().into(),
+            task.updated_at.clone().into(),
+        ])
+        .on_conflict(
+            OnConflict::column(Tasks::Id)
+                .update_columns([
+                    Tasks::TaskKind,
+                    Tasks::Title,
+                    Tasks::AssignedAgentId,
+                    Tasks::Status,
+                    Tasks::UpdatedAt,
+                ])
+                .to_owned(),
+        )
+        .build_sqlx(SqliteQueryBuilder);
+    sqlx::query_with(&sql, values).execute(pool).await?;
     Ok(())
 }
 
@@ -203,31 +418,120 @@ pub async fn insert_artifact(
     pool: &SqlitePool,
     artifact: &ArtifactSpec,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query(
-        "INSERT OR REPLACE INTO artifacts \
-         (id, owner_kind, owner_id, run_id, artifact_kind, relative_path, created_at) \
-         VALUES (?, ?, ?, ?, ?, ?, ?)",
-    )
-    .bind(&artifact.id)
-    .bind(owner_kind_str(&artifact.owner.kind))
-    .bind(&artifact.owner.id)
-    .bind(&artifact.run_id)
-    .bind(artifact_kind_str(&artifact.kind))
-    .bind(&artifact.relative_path)
-    .bind(&artifact.created_at)
-    .execute(pool)
-    .await?;
+    let (sql, values) = Query::insert()
+        .into_table(Artifacts::Table)
+        .columns([
+            Artifacts::Id,
+            Artifacts::OwnerKind,
+            Artifacts::OwnerId,
+            Artifacts::RunId,
+            Artifacts::ArtifactKind,
+            Artifacts::RelativePath,
+            Artifacts::CreatedAt,
+        ])
+        .values_panic([
+            artifact.id.clone().into(),
+            owner_kind_str(&artifact.owner.kind).to_string().into(),
+            artifact.owner.id.clone().into(),
+            artifact.run_id.clone().into(),
+            artifact_kind_str(&artifact.kind).to_string().into(),
+            artifact.relative_path.clone().into(),
+            artifact.created_at.clone().into(),
+        ])
+        .on_conflict(OnConflict::column(Artifacts::Id).do_nothing().to_owned())
+        .build_sqlx(SqliteQueryBuilder);
+    sqlx::query_with(&sql, values).execute(pool).await?;
     Ok(())
 }
 
-pub async fn list_threads(pool: &SqlitePool) -> Result<Vec<ThreadSpec>, sqlx::Error> {
-    let rows = sqlx::query(
-        "SELECT id, owner_kind, owner_id, space_id, thread_kind, title, participants_json, created_at, updated_at \
-         FROM threads ORDER BY updated_at DESC",
-    )
-    .fetch_all(pool)
-    .await?;
+async fn persist_extension(
+    pool: &SqlitePool,
+    manifest: &ExtensionManifest,
+    install_dir: &str,
+) -> Result<(), sqlx::Error> {
+    let (sql, values) = Query::insert()
+        .into_table(Extensions::Table)
+        .columns([
+            Extensions::Id,
+            Extensions::Kind,
+            Extensions::Version,
+            Extensions::InstallDir,
+            Extensions::FrontendBundle,
+            Extensions::BackendEntry,
+            Extensions::PagesJson,
+            Extensions::PanelsJson,
+            Extensions::CommandsJson,
+            Extensions::ThemesJson,
+            Extensions::HooksJson,
+            Extensions::ProvidersJson,
+        ])
+        .values_panic([
+            manifest.id.clone().into(),
+            format!("{:?}", manifest.kind).into(),
+            manifest.version.clone().into(),
+            install_dir.to_string().into(),
+            manifest.frontend_bundle.clone().into(),
+            manifest.backend_entry.clone().into(),
+            serde_json::to_string(&manifest.contributes.pages)
+                .unwrap_or_else(|_| "[]".into())
+                .into(),
+            serde_json::to_string(&manifest.contributes.panels)
+                .unwrap_or_else(|_| "[]".into())
+                .into(),
+            serde_json::to_string(&manifest.contributes.commands)
+                .unwrap_or_else(|_| "[]".into())
+                .into(),
+            serde_json::to_string(&manifest.contributes.themes)
+                .unwrap_or_else(|_| "[]".into())
+                .into(),
+            serde_json::to_string(&manifest.contributes.hooks)
+                .unwrap_or_else(|_| "[]".into())
+                .into(),
+            serde_json::to_string(&manifest.contributes.providers)
+                .unwrap_or_else(|_| "[]".into())
+                .into(),
+        ])
+        .on_conflict(
+            OnConflict::column(Extensions::Id)
+                .update_columns([
+                    Extensions::Kind,
+                    Extensions::Version,
+                    Extensions::InstallDir,
+                    Extensions::FrontendBundle,
+                    Extensions::BackendEntry,
+                    Extensions::PagesJson,
+                    Extensions::PanelsJson,
+                    Extensions::CommandsJson,
+                    Extensions::ThemesJson,
+                    Extensions::HooksJson,
+                    Extensions::ProvidersJson,
+                ])
+                .to_owned(),
+        )
+        .build_sqlx(SqliteQueryBuilder);
+    sqlx::query_with(&sql, values).execute(pool).await?;
+    Ok(())
+}
 
+// ========== Lists ==========
+
+pub async fn list_threads(pool: &SqlitePool) -> Result<Vec<ThreadSpec>, sqlx::Error> {
+    let (sql, values) = Query::select()
+        .columns([
+            Threads::Id,
+            Threads::OwnerKind,
+            Threads::OwnerId,
+            Threads::SpaceId,
+            Threads::ThreadKind,
+            Threads::Title,
+            Threads::ParticipantsJson,
+            Threads::CreatedAt,
+            Threads::UpdatedAt,
+        ])
+        .from(Threads::Table)
+        .order_by(Threads::UpdatedAt, sea_query::Order::Desc)
+        .build_sqlx(SqliteQueryBuilder);
+    let rows = sqlx::query_with(&sql, values).fetch_all(pool).await?;
     Ok(rows.into_iter().map(map_thread).collect())
 }
 
@@ -235,25 +539,41 @@ pub async fn list_messages_for_thread(
     pool: &SqlitePool,
     thread_id: &str,
 ) -> Result<Vec<MessageSpec>, sqlx::Error> {
-    let rows = sqlx::query(
-        "SELECT id, thread_id, sender, role, body, mentions_json, created_at \
-         FROM messages WHERE thread_id = ? ORDER BY created_at ASC",
-    )
-    .bind(thread_id)
-    .fetch_all(pool)
-    .await?;
-
+    let (sql, values) = Query::select()
+        .columns([
+            Messages::Id,
+            Messages::ThreadId,
+            Messages::Sender,
+            Messages::Role,
+            Messages::Body,
+            Messages::MentionsJson,
+            Messages::CreatedAt,
+        ])
+        .from(Messages::Table)
+        .and_where(Expr::col(Messages::ThreadId).eq(thread_id))
+        .order_by(Messages::CreatedAt, sea_query::Order::Asc)
+        .build_sqlx(SqliteQueryBuilder);
+    let rows = sqlx::query_with(&sql, values).fetch_all(pool).await?;
     Ok(rows.into_iter().map(map_message).collect())
 }
 
 pub async fn list_runs(pool: &SqlitePool) -> Result<Vec<RunSpec>, sqlx::Error> {
-    let rows = sqlx::query(
-        "SELECT id, thread_id, owner_kind, owner_id, trigger, goal, stage, created_at, updated_at \
-         FROM runs ORDER BY created_at DESC",
-    )
-    .fetch_all(pool)
-    .await?;
-
+    let (sql, values) = Query::select()
+        .columns([
+            Runs::Id,
+            Runs::ThreadId,
+            Runs::OwnerKind,
+            Runs::OwnerId,
+            Runs::Trigger,
+            Runs::Goal,
+            Runs::Stage,
+            Runs::CreatedAt,
+            Runs::UpdatedAt,
+        ])
+        .from(Runs::Table)
+        .order_by(Runs::CreatedAt, sea_query::Order::Desc)
+        .build_sqlx(SqliteQueryBuilder);
+    let rows = sqlx::query_with(&sql, values).fetch_all(pool).await?;
     Ok(rows.into_iter().map(map_run).collect())
 }
 
@@ -261,25 +581,42 @@ pub async fn list_runs_for_thread(
     pool: &SqlitePool,
     thread_id: &str,
 ) -> Result<Vec<RunSpec>, sqlx::Error> {
-    let rows = sqlx::query(
-        "SELECT id, thread_id, owner_kind, owner_id, trigger, goal, stage, created_at, updated_at \
-         FROM runs WHERE thread_id = ? ORDER BY created_at DESC",
-    )
-    .bind(thread_id)
-    .fetch_all(pool)
-    .await?;
-
+    let (sql, values) = Query::select()
+        .columns([
+            Runs::Id,
+            Runs::ThreadId,
+            Runs::OwnerKind,
+            Runs::OwnerId,
+            Runs::Trigger,
+            Runs::Goal,
+            Runs::Stage,
+            Runs::CreatedAt,
+            Runs::UpdatedAt,
+        ])
+        .from(Runs::Table)
+        .and_where(Expr::col(Runs::ThreadId).eq(thread_id))
+        .order_by(Runs::CreatedAt, sea_query::Order::Desc)
+        .build_sqlx(SqliteQueryBuilder);
+    let rows = sqlx::query_with(&sql, values).fetch_all(pool).await?;
     Ok(rows.into_iter().map(map_run).collect())
 }
 
 pub async fn list_tasks(pool: &SqlitePool) -> Result<Vec<TaskSpec>, sqlx::Error> {
-    let rows = sqlx::query(
-        "SELECT id, run_id, task_kind, title, assigned_agent_id, status, created_at, updated_at \
-         FROM tasks ORDER BY created_at DESC",
-    )
-    .fetch_all(pool)
-    .await?;
-
+    let (sql, values) = Query::select()
+        .columns([
+            Tasks::Id,
+            Tasks::RunId,
+            Tasks::TaskKind,
+            Tasks::Title,
+            Tasks::AssignedAgentId,
+            Tasks::Status,
+            Tasks::CreatedAt,
+            Tasks::UpdatedAt,
+        ])
+        .from(Tasks::Table)
+        .order_by(Tasks::CreatedAt, sea_query::Order::Desc)
+        .build_sqlx(SqliteQueryBuilder);
+    let rows = sqlx::query_with(&sql, values).fetch_all(pool).await?;
     Ok(rows.into_iter().map(map_task).collect())
 }
 
@@ -287,14 +624,22 @@ pub async fn list_tasks_for_run(
     pool: &SqlitePool,
     run_id: &str,
 ) -> Result<Vec<TaskSpec>, sqlx::Error> {
-    let rows = sqlx::query(
-        "SELECT id, run_id, task_kind, title, assigned_agent_id, status, created_at, updated_at \
-         FROM tasks WHERE run_id = ? ORDER BY created_at ASC",
-    )
-    .bind(run_id)
-    .fetch_all(pool)
-    .await?;
-
+    let (sql, values) = Query::select()
+        .columns([
+            Tasks::Id,
+            Tasks::RunId,
+            Tasks::TaskKind,
+            Tasks::Title,
+            Tasks::AssignedAgentId,
+            Tasks::Status,
+            Tasks::CreatedAt,
+            Tasks::UpdatedAt,
+        ])
+        .from(Tasks::Table)
+        .and_where(Expr::col(Tasks::RunId).eq(run_id))
+        .order_by(Tasks::CreatedAt, sea_query::Order::Asc)
+        .build_sqlx(SqliteQueryBuilder);
+    let rows = sqlx::query_with(&sql, values).fetch_all(pool).await?;
     Ok(rows.into_iter().map(map_task).collect())
 }
 
@@ -303,6 +648,7 @@ pub async fn list_active_tasks_for_owner(
     owner: &OwnerRef,
     limit: usize,
 ) -> Result<Vec<TaskSpec>, sqlx::Error> {
+    // JOIN across tables — use raw SQL for simplicity.
     let rows = sqlx::query(
         "SELECT tasks.id, tasks.run_id, tasks.task_kind, tasks.title, tasks.assigned_agent_id, tasks.status, tasks.created_at, tasks.updated_at \
          FROM tasks INNER JOIN runs ON runs.id = tasks.run_id \
@@ -313,18 +659,24 @@ pub async fn list_active_tasks_for_owner(
     .bind(limit as i64)
     .fetch_all(pool)
     .await?;
-
     Ok(rows.into_iter().map(map_task).collect())
 }
 
 pub async fn list_artifacts(pool: &SqlitePool) -> Result<Vec<ArtifactSpec>, sqlx::Error> {
-    let rows = sqlx::query(
-        "SELECT id, owner_kind, owner_id, run_id, artifact_kind, relative_path, created_at \
-         FROM artifacts ORDER BY created_at DESC",
-    )
-    .fetch_all(pool)
-    .await?;
-
+    let (sql, values) = Query::select()
+        .columns([
+            Artifacts::Id,
+            Artifacts::OwnerKind,
+            Artifacts::OwnerId,
+            Artifacts::RunId,
+            Artifacts::ArtifactKind,
+            Artifacts::RelativePath,
+            Artifacts::CreatedAt,
+        ])
+        .from(Artifacts::Table)
+        .order_by(Artifacts::CreatedAt, sea_query::Order::Desc)
+        .build_sqlx(SqliteQueryBuilder);
+    let rows = sqlx::query_with(&sql, values).fetch_all(pool).await?;
     Ok(rows.into_iter().map(map_artifact).collect())
 }
 
@@ -332,14 +684,21 @@ pub async fn list_artifacts_for_run(
     pool: &SqlitePool,
     run_id: &str,
 ) -> Result<Vec<ArtifactSpec>, sqlx::Error> {
-    let rows = sqlx::query(
-        "SELECT id, owner_kind, owner_id, run_id, artifact_kind, relative_path, created_at \
-         FROM artifacts WHERE run_id = ? ORDER BY created_at ASC",
-    )
-    .bind(run_id)
-    .fetch_all(pool)
-    .await?;
-
+    let (sql, values) = Query::select()
+        .columns([
+            Artifacts::Id,
+            Artifacts::OwnerKind,
+            Artifacts::OwnerId,
+            Artifacts::RunId,
+            Artifacts::ArtifactKind,
+            Artifacts::RelativePath,
+            Artifacts::CreatedAt,
+        ])
+        .from(Artifacts::Table)
+        .and_where(Expr::col(Artifacts::RunId).eq(run_id))
+        .order_by(Artifacts::CreatedAt, sea_query::Order::Asc)
+        .build_sqlx(SqliteQueryBuilder);
+    let rows = sqlx::query_with(&sql, values).fetch_all(pool).await?;
     Ok(rows.into_iter().map(map_artifact).collect())
 }
 
@@ -350,13 +709,22 @@ pub async fn count_rows(pool: &SqlitePool, table: &str) -> Result<i64, sqlx::Err
 }
 
 pub async fn list_jobs(pool: &SqlitePool) -> Result<Vec<JobRow>, sqlx::Error> {
-    let rows = sqlx::query(
-        "SELECT id, owner_kind, owner_id, job_kind, schedule_kind, schedule_value, status, next_run_at, created_at \
-         FROM jobs ORDER BY created_at DESC",
-    )
-    .fetch_all(pool)
-    .await?;
-
+    let (sql, values) = Query::select()
+        .columns([
+            Jobs::Id,
+            Jobs::OwnerKind,
+            Jobs::OwnerId,
+            Jobs::JobKind,
+            Jobs::ScheduleKind,
+            Jobs::ScheduleValue,
+            Jobs::Status,
+            Jobs::NextRunAt,
+            Jobs::CreatedAt,
+        ])
+        .from(Jobs::Table)
+        .order_by(Jobs::CreatedAt, sea_query::Order::Desc)
+        .build_sqlx(SqliteQueryBuilder);
+    let rows = sqlx::query_with(&sql, values).fetch_all(pool).await?;
     Ok(rows
         .into_iter()
         .map(|row| JobRow {
@@ -373,35 +741,7 @@ pub async fn list_jobs(pool: &SqlitePool) -> Result<Vec<JobRow>, sqlx::Error> {
         .collect())
 }
 
-async fn persist_extension(
-    pool: &SqlitePool,
-    manifest: &ExtensionManifest,
-    install_dir: &str,
-) -> Result<(), sqlx::Error> {
-    sqlx::query(
-        "INSERT OR REPLACE INTO extensions \
-         (id, kind, version, install_dir, frontend_bundle, backend_entry, pages_json, panels_json, commands_json, themes_json, hooks_json, providers_json) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-    )
-    .bind(&manifest.id)
-    .bind(format!("{:?}", manifest.kind))
-    .bind(&manifest.version)
-    .bind(install_dir)
-    .bind(&manifest.frontend_bundle)
-    .bind(&manifest.backend_entry)
-    .bind(serde_json::to_string(&manifest.contributes.pages).unwrap_or_else(|_| "[]".to_string()))
-    .bind(serde_json::to_string(&manifest.contributes.panels).unwrap_or_else(|_| "[]".to_string()))
-    .bind(serde_json::to_string(&manifest.contributes.commands).unwrap_or_else(|_| "[]".to_string()))
-    .bind(serde_json::to_string(&manifest.contributes.themes).unwrap_or_else(|_| "[]".to_string()))
-    .bind(serde_json::to_string(&manifest.contributes.hooks).unwrap_or_else(|_| "[]".to_string()))
-    .bind(
-        serde_json::to_string(&manifest.contributes.providers)
-            .unwrap_or_else(|_| "[]".to_string()),
-    )
-    .execute(pool)
-    .await?;
-    Ok(())
-}
+// ========== Row mappers ==========
 
 fn map_thread(row: sqlx::sqlite::SqliteRow) -> ThreadSpec {
     ThreadSpec {

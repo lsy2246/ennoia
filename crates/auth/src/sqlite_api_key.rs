@@ -1,8 +1,24 @@
 use async_trait::async_trait;
 use chrono::Utc;
 use ennoia_kernel::{ApiKey, ApiKeyStore, AuthError, CreateApiKeyRequest};
+use sea_query::{Expr, Iden, Query, SqliteQueryBuilder};
+use sea_query_binder::SqlxBinder;
 use sqlx::{Row, SqlitePool};
 use uuid::Uuid;
+
+#[derive(Iden)]
+enum ApiKeys {
+    #[iden = "api_keys"]
+    Table,
+    Id,
+    UserId,
+    KeyHash,
+    Label,
+    ScopesJson,
+    CreatedAt,
+    ExpiresAt,
+    LastUsedAt,
+}
 
 #[derive(Debug, Clone)]
 pub struct SqliteApiKeyStore {
@@ -25,6 +41,19 @@ impl<T> IntoAuthError<T> for Result<T, sqlx::Error> {
     }
 }
 
+fn api_key_columns() -> Vec<ApiKeys> {
+    vec![
+        ApiKeys::Id,
+        ApiKeys::UserId,
+        ApiKeys::KeyHash,
+        ApiKeys::Label,
+        ApiKeys::ScopesJson,
+        ApiKeys::CreatedAt,
+        ApiKeys::ExpiresAt,
+        ApiKeys::LastUsedAt,
+    ]
+}
+
 #[async_trait]
 impl ApiKeyStore for SqliteApiKeyStore {
     async fn create(&self, req: CreateApiKeyRequest) -> Result<ApiKey, AuthError> {
@@ -33,20 +62,25 @@ impl ApiKeyStore for SqliteApiKeyStore {
         let scopes_json =
             serde_json::to_string(&req.scopes).map_err(|e| AuthError::Serde(e.to_string()))?;
 
-        sqlx::query(
-            "INSERT INTO api_keys (id, user_id, key_hash, label, scopes_json, created_at, expires_at, last_used_at) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, NULL)",
-        )
-        .bind(&id)
-        .bind(&req.user_id)
-        .bind(&req.key_hash)
-        .bind(&req.label)
-        .bind(&scopes_json)
-        .bind(&now)
-        .bind(&req.expires_at)
-        .execute(&self.pool)
-        .await
-        .auth_err()?;
+        let (sql, values) = Query::insert()
+            .into_table(ApiKeys::Table)
+            .columns(api_key_columns())
+            .values_panic([
+                id.clone().into(),
+                req.user_id.clone().into(),
+                req.key_hash.clone().into(),
+                req.label.clone().into(),
+                scopes_json.clone().into(),
+                now.clone().into(),
+                req.expires_at.clone().into(),
+                Option::<String>::None.into(),
+            ])
+            .build_sqlx(SqliteQueryBuilder);
+
+        sqlx::query_with(&sql, values)
+            .execute(&self.pool)
+            .await
+            .auth_err()?;
 
         Ok(ApiKey {
             id,
@@ -61,44 +95,55 @@ impl ApiKeyStore for SqliteApiKeyStore {
     }
 
     async fn find_by_key_hash(&self, key_hash: &str) -> Result<Option<ApiKey>, AuthError> {
-        let row = sqlx::query(
-            "SELECT id, user_id, key_hash, label, scopes_json, created_at, expires_at, last_used_at \
-             FROM api_keys WHERE key_hash = ?",
-        )
-        .bind(key_hash)
-        .fetch_optional(&self.pool)
-        .await
-        .auth_err()?;
+        let (sql, values) = Query::select()
+            .columns(api_key_columns())
+            .from(ApiKeys::Table)
+            .and_where(Expr::col(ApiKeys::KeyHash).eq(key_hash))
+            .build_sqlx(SqliteQueryBuilder);
+
+        let row = sqlx::query_with(&sql, values)
+            .fetch_optional(&self.pool)
+            .await
+            .auth_err()?;
         Ok(row.map(row_to_api_key))
     }
 
     async fn list(&self) -> Result<Vec<ApiKey>, AuthError> {
-        let rows = sqlx::query(
-            "SELECT id, user_id, key_hash, label, scopes_json, created_at, expires_at, last_used_at \
-             FROM api_keys ORDER BY created_at DESC",
-        )
-        .fetch_all(&self.pool)
-        .await
-        .auth_err()?;
+        let (sql, values) = Query::select()
+            .columns(api_key_columns())
+            .from(ApiKeys::Table)
+            .order_by(ApiKeys::CreatedAt, sea_query::Order::Desc)
+            .build_sqlx(SqliteQueryBuilder);
+
+        let rows = sqlx::query_with(&sql, values)
+            .fetch_all(&self.pool)
+            .await
+            .auth_err()?;
         Ok(rows.into_iter().map(row_to_api_key).collect())
     }
 
     async fn list_for_user(&self, user_id: &str) -> Result<Vec<ApiKey>, AuthError> {
-        let rows = sqlx::query(
-            "SELECT id, user_id, key_hash, label, scopes_json, created_at, expires_at, last_used_at \
-             FROM api_keys WHERE user_id = ? ORDER BY created_at DESC",
-        )
-        .bind(user_id)
-        .fetch_all(&self.pool)
-        .await
-        .auth_err()?;
+        let (sql, values) = Query::select()
+            .columns(api_key_columns())
+            .from(ApiKeys::Table)
+            .and_where(Expr::col(ApiKeys::UserId).eq(user_id))
+            .order_by(ApiKeys::CreatedAt, sea_query::Order::Desc)
+            .build_sqlx(SqliteQueryBuilder);
+
+        let rows = sqlx::query_with(&sql, values)
+            .fetch_all(&self.pool)
+            .await
+            .auth_err()?;
         Ok(rows.into_iter().map(row_to_api_key).collect())
     }
 
     async fn touch_used(&self, id: &str, now_iso: &str) -> Result<(), AuthError> {
-        sqlx::query("UPDATE api_keys SET last_used_at = ? WHERE id = ?")
-            .bind(now_iso)
-            .bind(id)
+        let (sql, values) = Query::update()
+            .table(ApiKeys::Table)
+            .values([(ApiKeys::LastUsedAt, now_iso.to_string().into())])
+            .and_where(Expr::col(ApiKeys::Id).eq(id))
+            .build_sqlx(SqliteQueryBuilder);
+        sqlx::query_with(&sql, values)
             .execute(&self.pool)
             .await
             .auth_err()?;
@@ -106,8 +151,11 @@ impl ApiKeyStore for SqliteApiKeyStore {
     }
 
     async fn delete(&self, id: &str) -> Result<(), AuthError> {
-        sqlx::query("DELETE FROM api_keys WHERE id = ?")
-            .bind(id)
+        let (sql, values) = Query::delete()
+            .from_table(ApiKeys::Table)
+            .and_where(Expr::col(ApiKeys::Id).eq(id))
+            .build_sqlx(SqliteQueryBuilder);
+        sqlx::query_with(&sql, values)
             .execute(&self.pool)
             .await
             .auth_err()?;

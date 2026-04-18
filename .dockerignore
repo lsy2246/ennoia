@@ -1,0 +1,36 @@
+# Version control
+.git
+.gitignore
+.github
+.claude
+
+# Rust build output
+target/
+**/target/
+
+# Node / web
+node_modules/
+**/node_modules/
+web/shell/dist/
+web/shell/styled-system/
+**/*.tsbuildinfo
+
+# IDE / editor
+.vscode
+.idea
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local state / runtime data
+.ennoia/
+state/
+logs/
+
+# Large files not needed for build
+docs/
+tests/
+*.log

@@ -3,8 +3,26 @@ use chrono::Utc;
 use ennoia_kernel::{
     AuthError, CreateUserRequest, UpdateUserRequest, User, UserRole, UserStore,
 };
+use sea_query::{Expr, Func, Iden, Query, SqliteQueryBuilder};
+use sea_query_binder::SqlxBinder;
 use sqlx::{Row, SqlitePool};
 use uuid::Uuid;
+
+#[derive(Iden)]
+enum Users {
+    Table,
+    Id,
+    Username,
+    DisplayName,
+    PasswordHash,
+    Email,
+    Role,
+    OwnerKind,
+    OwnerId,
+    CreatedAt,
+    UpdatedAt,
+    LastLoginAt,
+}
 
 #[derive(Debug, Clone)]
 pub struct SqliteUserStore {
@@ -31,14 +49,33 @@ impl<T> IntoAuthError<T> for Result<T, sqlx::Error> {
     }
 }
 
+fn user_columns_readonly() -> Vec<Users> {
+    vec![
+        Users::Id,
+        Users::Username,
+        Users::DisplayName,
+        Users::Email,
+        Users::Role,
+        Users::OwnerKind,
+        Users::OwnerId,
+        Users::CreatedAt,
+        Users::UpdatedAt,
+        Users::LastLoginAt,
+    ]
+}
+
 #[async_trait]
 impl UserStore for SqliteUserStore {
     async fn create(&self, req: CreateUserRequest) -> Result<User, AuthError> {
         let now = Utc::now().to_rfc3339();
         let id = format!("user-{}", Uuid::new_v4());
 
-        let existing = sqlx::query("SELECT id FROM users WHERE username = ?")
-            .bind(&req.username)
+        let (sql, values) = Query::select()
+            .column(Users::Id)
+            .from(Users::Table)
+            .and_where(Expr::col(Users::Username).eq(req.username.clone()))
+            .build_sqlx(SqliteQueryBuilder);
+        let existing = sqlx::query_with(&sql, values)
             .fetch_optional(&self.pool)
             .await
             .auth_err()?;
@@ -46,24 +83,38 @@ impl UserStore for SqliteUserStore {
             return Err(AuthError::Duplicate(format!("username {}", req.username)));
         }
 
-        sqlx::query(
-            "INSERT INTO users \
-             (id, username, display_name, password_hash, email, role, owner_kind, owner_id, created_at, updated_at) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(&id)
-        .bind(&req.username)
-        .bind(&req.display_name)
-        .bind(&req.password_hash)
-        .bind(&req.email)
-        .bind(req.role.as_str())
-        .bind(&req.owner_kind)
-        .bind(&req.owner_id)
-        .bind(&now)
-        .bind(&now)
-        .execute(&self.pool)
-        .await
-        .auth_err()?;
+        let (sql, values) = Query::insert()
+            .into_table(Users::Table)
+            .columns([
+                Users::Id,
+                Users::Username,
+                Users::DisplayName,
+                Users::PasswordHash,
+                Users::Email,
+                Users::Role,
+                Users::OwnerKind,
+                Users::OwnerId,
+                Users::CreatedAt,
+                Users::UpdatedAt,
+            ])
+            .values_panic([
+                id.clone().into(),
+                req.username.clone().into(),
+                req.display_name.clone().into(),
+                req.password_hash.clone().into(),
+                req.email.clone().into(),
+                req.role.as_str().to_string().into(),
+                req.owner_kind.clone().into(),
+                req.owner_id.clone().into(),
+                now.clone().into(),
+                now.clone().into(),
+            ])
+            .build_sqlx(SqliteQueryBuilder);
+
+        sqlx::query_with(&sql, values)
+            .execute(&self.pool)
+            .await
+            .auth_err()?;
 
         Ok(User {
             id,
@@ -80,14 +131,16 @@ impl UserStore for SqliteUserStore {
     }
 
     async fn get(&self, id: &str) -> Result<Option<User>, AuthError> {
-        let row = sqlx::query(
-            "SELECT id, username, display_name, email, role, owner_kind, owner_id, created_at, updated_at, last_login_at \
-             FROM users WHERE id = ?",
-        )
-        .bind(id)
-        .fetch_optional(&self.pool)
-        .await
-        .auth_err()?;
+        let (sql, values) = Query::select()
+            .columns(user_columns_readonly())
+            .from(Users::Table)
+            .and_where(Expr::col(Users::Id).eq(id))
+            .build_sqlx(SqliteQueryBuilder);
+
+        let row = sqlx::query_with(&sql, values)
+            .fetch_optional(&self.pool)
+            .await
+            .auth_err()?;
         Ok(row.map(row_to_user))
     }
 
@@ -95,14 +148,18 @@ impl UserStore for SqliteUserStore {
         &self,
         username: &str,
     ) -> Result<Option<(User, String)>, AuthError> {
-        let row = sqlx::query(
-            "SELECT id, username, display_name, email, role, owner_kind, owner_id, created_at, updated_at, last_login_at, password_hash \
-             FROM users WHERE username = ?",
-        )
-        .bind(username)
-        .fetch_optional(&self.pool)
-        .await
-        .auth_err()?;
+        let mut cols = user_columns_readonly();
+        cols.push(Users::PasswordHash);
+        let (sql, values) = Query::select()
+            .columns(cols)
+            .from(Users::Table)
+            .and_where(Expr::col(Users::Username).eq(username))
+            .build_sqlx(SqliteQueryBuilder);
+
+        let row = sqlx::query_with(&sql, values)
+            .fetch_optional(&self.pool)
+            .await
+            .auth_err()?;
         Ok(row.map(|r| {
             let password_hash: String = r.get("password_hash");
             (row_to_user(r), password_hash)
@@ -110,13 +167,16 @@ impl UserStore for SqliteUserStore {
     }
 
     async fn list(&self) -> Result<Vec<User>, AuthError> {
-        let rows = sqlx::query(
-            "SELECT id, username, display_name, email, role, owner_kind, owner_id, created_at, updated_at, last_login_at \
-             FROM users ORDER BY created_at ASC",
-        )
-        .fetch_all(&self.pool)
-        .await
-        .auth_err()?;
+        let (sql, values) = Query::select()
+            .columns(user_columns_readonly())
+            .from(Users::Table)
+            .order_by(Users::CreatedAt, sea_query::Order::Asc)
+            .build_sqlx(SqliteQueryBuilder);
+
+        let rows = sqlx::query_with(&sql, values)
+            .fetch_all(&self.pool)
+            .await
+            .auth_err()?;
         Ok(rows.into_iter().map(row_to_user).collect())
     }
 
@@ -130,17 +190,21 @@ impl UserStore for SqliteUserStore {
         let email = update.email.or(existing.email);
         let role = update.role.unwrap_or(existing.role);
 
-        sqlx::query(
-            "UPDATE users SET display_name = ?, email = ?, role = ?, updated_at = ? WHERE id = ?",
-        )
-        .bind(&display_name)
-        .bind(&email)
-        .bind(role.as_str())
-        .bind(&now)
-        .bind(id)
-        .execute(&self.pool)
-        .await
-        .auth_err()?;
+        let (sql, values) = Query::update()
+            .table(Users::Table)
+            .values([
+                (Users::DisplayName, display_name.clone().into()),
+                (Users::Email, email.clone().into()),
+                (Users::Role, role.as_str().to_string().into()),
+                (Users::UpdatedAt, now.clone().into()),
+            ])
+            .and_where(Expr::col(Users::Id).eq(id))
+            .build_sqlx(SqliteQueryBuilder);
+
+        sqlx::query_with(&sql, values)
+            .execute(&self.pool)
+            .await
+            .auth_err()?;
 
         Ok(User {
             id: existing.id,
@@ -158,16 +222,20 @@ impl UserStore for SqliteUserStore {
 
     async fn set_password(&self, id: &str, password_hash: &str) -> Result<(), AuthError> {
         let now = Utc::now().to_rfc3339();
-        let affected = sqlx::query(
-            "UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?",
-        )
-        .bind(password_hash)
-        .bind(&now)
-        .bind(id)
-        .execute(&self.pool)
-        .await
-        .auth_err()?
-        .rows_affected();
+        let (sql, values) = Query::update()
+            .table(Users::Table)
+            .values([
+                (Users::PasswordHash, password_hash.to_string().into()),
+                (Users::UpdatedAt, now.into()),
+            ])
+            .and_where(Expr::col(Users::Id).eq(id))
+            .build_sqlx(SqliteQueryBuilder);
+
+        let affected = sqlx::query_with(&sql, values)
+            .execute(&self.pool)
+            .await
+            .auth_err()?
+            .rows_affected();
         if affected == 0 {
             return Err(AuthError::NotFound(format!("user {id}")));
         }
@@ -175,8 +243,12 @@ impl UserStore for SqliteUserStore {
     }
 
     async fn delete(&self, id: &str) -> Result<(), AuthError> {
-        sqlx::query("DELETE FROM users WHERE id = ?")
-            .bind(id)
+        let (sql, values) = Query::delete()
+            .from_table(Users::Table)
+            .and_where(Expr::col(Users::Id).eq(id))
+            .build_sqlx(SqliteQueryBuilder);
+
+        sqlx::query_with(&sql, values)
             .execute(&self.pool)
             .await
             .auth_err()?;
@@ -184,9 +256,13 @@ impl UserStore for SqliteUserStore {
     }
 
     async fn touch_login(&self, id: &str, now_iso: &str) -> Result<(), AuthError> {
-        sqlx::query("UPDATE users SET last_login_at = ? WHERE id = ?")
-            .bind(now_iso)
-            .bind(id)
+        let (sql, values) = Query::update()
+            .table(Users::Table)
+            .values([(Users::LastLoginAt, now_iso.to_string().into())])
+            .and_where(Expr::col(Users::Id).eq(id))
+            .build_sqlx(SqliteQueryBuilder);
+
+        sqlx::query_with(&sql, values)
             .execute(&self.pool)
             .await
             .auth_err()?;
@@ -194,7 +270,12 @@ impl UserStore for SqliteUserStore {
     }
 
     async fn count(&self) -> Result<u32, AuthError> {
-        let row = sqlx::query("SELECT COUNT(*) AS n FROM users")
+        let (sql, values) = Query::select()
+            .expr_as(Func::count(Expr::col(Users::Id)), sea_query::Alias::new("n"))
+            .from(Users::Table)
+            .build_sqlx(SqliteQueryBuilder);
+
+        let row = sqlx::query_with(&sql, values)
             .fetch_one(&self.pool)
             .await
             .auth_err()?;

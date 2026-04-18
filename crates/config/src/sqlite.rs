@@ -1,8 +1,34 @@
 use async_trait::async_trait;
 use chrono::Utc;
 use ennoia_kernel::{ConfigChangeRecord, ConfigEntry, ConfigError, ConfigStore};
+use sea_query::{Expr, Iden, OnConflict, Query, SqliteQueryBuilder};
+use sea_query_binder::SqlxBinder;
 use sqlx::{Row, SqlitePool};
 use uuid::Uuid;
+
+#[derive(Iden)]
+enum SystemConfigTbl {
+    #[iden = "system_config"]
+    Table,
+    Key,
+    PayloadJson,
+    Enabled,
+    Version,
+    UpdatedBy,
+    UpdatedAt,
+}
+
+#[derive(Iden)]
+enum SystemConfigHistory {
+    #[iden = "system_config_history"]
+    Table,
+    Id,
+    ConfigKey,
+    OldPayloadJson,
+    NewPayloadJson,
+    ChangedBy,
+    ChangedAt,
+}
 
 #[derive(Debug, Clone)]
 pub struct SqliteConfigStore {
@@ -45,27 +71,44 @@ impl<T> IntoConfigError<T> for Result<T, serde_json::Error> {
 #[async_trait]
 impl ConfigStore for SqliteConfigStore {
     async fn list(&self) -> Result<Vec<ConfigEntry>, ConfigError> {
-        let rows = sqlx::query(
-            "SELECT key, payload_json, enabled, version, updated_by, updated_at \
-             FROM system_config ORDER BY key",
-        )
-        .fetch_all(&self.pool)
-        .await
-        .cfg_backend()?;
+        let (sql, values) = Query::select()
+            .columns([
+                SystemConfigTbl::Key,
+                SystemConfigTbl::PayloadJson,
+                SystemConfigTbl::Enabled,
+                SystemConfigTbl::Version,
+                SystemConfigTbl::UpdatedBy,
+                SystemConfigTbl::UpdatedAt,
+            ])
+            .from(SystemConfigTbl::Table)
+            .order_by(SystemConfigTbl::Key, sea_query::Order::Asc)
+            .build_sqlx(SqliteQueryBuilder);
 
+        let rows = sqlx::query_with(&sql, values)
+            .fetch_all(&self.pool)
+            .await
+            .cfg_backend()?;
         Ok(rows.into_iter().map(row_to_entry).collect())
     }
 
     async fn get(&self, key: &str) -> Result<Option<ConfigEntry>, ConfigError> {
-        let row = sqlx::query(
-            "SELECT key, payload_json, enabled, version, updated_by, updated_at \
-             FROM system_config WHERE key = ?",
-        )
-        .bind(key)
-        .fetch_optional(&self.pool)
-        .await
-        .cfg_backend()?;
+        let (sql, values) = Query::select()
+            .columns([
+                SystemConfigTbl::Key,
+                SystemConfigTbl::PayloadJson,
+                SystemConfigTbl::Enabled,
+                SystemConfigTbl::Version,
+                SystemConfigTbl::UpdatedBy,
+                SystemConfigTbl::UpdatedAt,
+            ])
+            .from(SystemConfigTbl::Table)
+            .and_where(Expr::col(SystemConfigTbl::Key).eq(key))
+            .build_sqlx(SqliteQueryBuilder);
 
+        let row = sqlx::query_with(&sql, values)
+            .fetch_optional(&self.pool)
+            .await
+            .cfg_backend()?;
         Ok(row.map(row_to_entry))
     }
 
@@ -82,39 +125,64 @@ impl ConfigStore for SqliteConfigStore {
         let old_payload_json = existing.as_ref().map(|e| e.payload_json.clone());
         let new_version = existing.as_ref().map(|e| e.version + 1).unwrap_or(1);
 
-        sqlx::query(
-            "INSERT INTO system_config (key, payload_json, enabled, version, updated_by, updated_at) \
-             VALUES (?, ?, 1, ?, ?, ?) \
-             ON CONFLICT(key) DO UPDATE SET \
-               payload_json = excluded.payload_json, \
-               version = excluded.version, \
-               updated_by = excluded.updated_by, \
-               updated_at = excluded.updated_at",
-        )
-        .bind(key)
-        .bind(&payload_json)
-        .bind(new_version as i64)
-        .bind(updated_by)
-        .bind(&now)
-        .execute(&self.pool)
-        .await
-        .cfg_backend()?;
+        let (sql, values) = Query::insert()
+            .into_table(SystemConfigTbl::Table)
+            .columns([
+                SystemConfigTbl::Key,
+                SystemConfigTbl::PayloadJson,
+                SystemConfigTbl::Enabled,
+                SystemConfigTbl::Version,
+                SystemConfigTbl::UpdatedBy,
+                SystemConfigTbl::UpdatedAt,
+            ])
+            .values_panic([
+                key.to_string().into(),
+                payload_json.clone().into(),
+                1i64.into(),
+                (new_version as i64).into(),
+                updated_by.map(String::from).into(),
+                now.clone().into(),
+            ])
+            .on_conflict(
+                OnConflict::column(SystemConfigTbl::Key)
+                    .update_columns([
+                        SystemConfigTbl::PayloadJson,
+                        SystemConfigTbl::Version,
+                        SystemConfigTbl::UpdatedBy,
+                        SystemConfigTbl::UpdatedAt,
+                    ])
+                    .to_owned(),
+            )
+            .build_sqlx(SqliteQueryBuilder);
+        sqlx::query_with(&sql, values)
+            .execute(&self.pool)
+            .await
+            .cfg_backend()?;
 
         let history_id = format!("cfgh-{}", Uuid::new_v4());
-        sqlx::query(
-            "INSERT INTO system_config_history \
-             (id, config_key, old_payload_json, new_payload_json, changed_by, changed_at) \
-             VALUES (?, ?, ?, ?, ?, ?)",
-        )
-        .bind(&history_id)
-        .bind(key)
-        .bind(&old_payload_json)
-        .bind(&payload_json)
-        .bind(updated_by)
-        .bind(&now)
-        .execute(&self.pool)
-        .await
-        .cfg_backend()?;
+        let (sql, values) = Query::insert()
+            .into_table(SystemConfigHistory::Table)
+            .columns([
+                SystemConfigHistory::Id,
+                SystemConfigHistory::ConfigKey,
+                SystemConfigHistory::OldPayloadJson,
+                SystemConfigHistory::NewPayloadJson,
+                SystemConfigHistory::ChangedBy,
+                SystemConfigHistory::ChangedAt,
+            ])
+            .values_panic([
+                history_id.into(),
+                key.to_string().into(),
+                old_payload_json.into(),
+                payload_json.clone().into(),
+                updated_by.map(String::from).into(),
+                now.clone().into(),
+            ])
+            .build_sqlx(SqliteQueryBuilder);
+        sqlx::query_with(&sql, values)
+            .execute(&self.pool)
+            .await
+            .cfg_backend()?;
 
         Ok(ConfigEntry {
             key: key.to_string(),
@@ -131,17 +199,25 @@ impl ConfigStore for SqliteConfigStore {
         key: &str,
         limit: u32,
     ) -> Result<Vec<ConfigChangeRecord>, ConfigError> {
-        let rows = sqlx::query(
-            "SELECT id, config_key, old_payload_json, new_payload_json, changed_by, changed_at \
-             FROM system_config_history WHERE config_key = ? \
-             ORDER BY changed_at DESC LIMIT ?",
-        )
-        .bind(key)
-        .bind(limit as i64)
-        .fetch_all(&self.pool)
-        .await
-        .cfg_backend()?;
+        let (sql, values) = Query::select()
+            .columns([
+                SystemConfigHistory::Id,
+                SystemConfigHistory::ConfigKey,
+                SystemConfigHistory::OldPayloadJson,
+                SystemConfigHistory::NewPayloadJson,
+                SystemConfigHistory::ChangedBy,
+                SystemConfigHistory::ChangedAt,
+            ])
+            .from(SystemConfigHistory::Table)
+            .and_where(Expr::col(SystemConfigHistory::ConfigKey).eq(key))
+            .order_by(SystemConfigHistory::ChangedAt, sea_query::Order::Desc)
+            .limit(limit as u64)
+            .build_sqlx(SqliteQueryBuilder);
 
+        let rows = sqlx::query_with(&sql, values)
+            .fetch_all(&self.pool)
+            .await
+            .cfg_backend()?;
         Ok(rows
             .into_iter()
             .map(|row| ConfigChangeRecord {

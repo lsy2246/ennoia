@@ -4,10 +4,31 @@ use ennoia_kernel::{
     EnqueueRequest, JobKind, JobRecord, JobStatus, OwnerKind, OwnerRef, ScheduleKind,
     SchedulerError, SchedulerStore,
 };
+use sea_query::{Expr, Iden, Query, SqliteQueryBuilder};
+use sea_query_binder::SqlxBinder;
 use sqlx::{Row, SqlitePool};
 use uuid::Uuid;
 
-/// SqliteSchedulerStore persists jobs into the shared sqlite pool.
+#[derive(Iden)]
+enum Jobs {
+    Table,
+    Id,
+    OwnerKind,
+    OwnerId,
+    JobKind,
+    ScheduleKind,
+    ScheduleValue,
+    PayloadJson,
+    Status,
+    RetryCount,
+    MaxRetries,
+    LastRunAt,
+    NextRunAt,
+    Error,
+    CreatedAt,
+    UpdatedAt,
+}
+
 #[derive(Debug, Clone)]
 pub struct SqliteSchedulerStore {
     pool: SqlitePool,
@@ -42,6 +63,26 @@ impl<T> IntoSchedulerError<T> for Result<T, serde_json::Error> {
     }
 }
 
+fn job_columns() -> Vec<Jobs> {
+    vec![
+        Jobs::Id,
+        Jobs::OwnerKind,
+        Jobs::OwnerId,
+        Jobs::JobKind,
+        Jobs::ScheduleKind,
+        Jobs::ScheduleValue,
+        Jobs::PayloadJson,
+        Jobs::Status,
+        Jobs::RetryCount,
+        Jobs::MaxRetries,
+        Jobs::LastRunAt,
+        Jobs::NextRunAt,
+        Jobs::Error,
+        Jobs::CreatedAt,
+        Jobs::UpdatedAt,
+    ]
+}
+
 #[async_trait]
 impl SchedulerStore for SqliteSchedulerStore {
     async fn enqueue(&self, req: EnqueueRequest) -> Result<JobRecord, SchedulerError> {
@@ -64,69 +105,81 @@ impl SchedulerStore for SqliteSchedulerStore {
             updated_at: now,
         };
 
-        sqlx::query(
-            "INSERT INTO jobs \
-             (id, owner_kind, owner_id, job_kind, schedule_kind, schedule_value, payload_json, status, \
-              retry_count, max_retries, last_run_at, next_run_at, error, created_at, updated_at) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(&record.id)
-        .bind(owner_kind_str(&record.owner.kind))
-        .bind(&record.owner.id)
-        .bind(record.job_kind.as_str())
-        .bind(record.schedule_kind.as_str())
-        .bind(&record.schedule_value)
-        .bind(&record.payload_json)
-        .bind(record.status.as_str())
-        .bind(record.retry_count as i64)
-        .bind(record.max_retries as i64)
-        .bind(&record.last_run_at)
-        .bind(&record.next_run_at)
-        .bind(&record.error)
-        .bind(&record.created_at)
-        .bind(&record.updated_at)
-        .execute(&self.pool)
-        .await
-        .sch_backend()?;
+        let (sql, values) = Query::insert()
+            .into_table(Jobs::Table)
+            .columns(job_columns())
+            .values_panic([
+                record.id.clone().into(),
+                owner_kind_str(&record.owner.kind).into(),
+                record.owner.id.clone().into(),
+                record.job_kind.as_str().to_string().into(),
+                record.schedule_kind.as_str().to_string().into(),
+                record.schedule_value.clone().into(),
+                record.payload_json.clone().into(),
+                record.status.as_str().to_string().into(),
+                (record.retry_count as i64).into(),
+                (record.max_retries as i64).into(),
+                record.last_run_at.clone().into(),
+                record.next_run_at.clone().into(),
+                record.error.clone().into(),
+                record.created_at.clone().into(),
+                record.updated_at.clone().into(),
+            ])
+            .build_sqlx(SqliteQueryBuilder);
+        sqlx::query_with(&sql, values)
+            .execute(&self.pool)
+            .await
+            .sch_backend()?;
 
         Ok(record)
     }
 
     async fn list(&self, limit: u32) -> Result<Vec<JobRecord>, SchedulerError> {
-        let rows = sqlx::query(
-            "SELECT id, owner_kind, owner_id, job_kind, schedule_kind, schedule_value, payload_json, status, \
-             retry_count, max_retries, last_run_at, next_run_at, error, created_at, updated_at \
-             FROM jobs ORDER BY created_at DESC LIMIT ?",
-        )
-        .bind(limit as i64)
-        .fetch_all(&self.pool)
-        .await
-        .sch_backend()?;
+        let (sql, values) = Query::select()
+            .columns(job_columns())
+            .from(Jobs::Table)
+            .order_by(Jobs::CreatedAt, sea_query::Order::Desc)
+            .limit(limit as u64)
+            .build_sqlx(SqliteQueryBuilder);
 
+        let rows = sqlx::query_with(&sql, values)
+            .fetch_all(&self.pool)
+            .await
+            .sch_backend()?;
         Ok(rows.into_iter().map(row_to_job).collect())
     }
 
     async fn fetch_due(&self, now_iso: &str, limit: u32) -> Result<Vec<JobRecord>, SchedulerError> {
-        let rows = sqlx::query(
-            "SELECT id, owner_kind, owner_id, job_kind, schedule_kind, schedule_value, payload_json, status, \
-             retry_count, max_retries, last_run_at, next_run_at, error, created_at, updated_at \
-             FROM jobs \
-             WHERE status = 'pending' AND (next_run_at IS NULL OR next_run_at <= ?) \
-             ORDER BY next_run_at ASC LIMIT ?",
-        )
-        .bind(now_iso)
-        .bind(limit as i64)
-        .fetch_all(&self.pool)
-        .await
-        .sch_backend()?;
+        let (sql, values) = Query::select()
+            .columns(job_columns())
+            .from(Jobs::Table)
+            .and_where(Expr::col(Jobs::Status).eq("pending"))
+            .and_where(
+                Expr::col(Jobs::NextRunAt)
+                    .is_null()
+                    .or(Expr::col(Jobs::NextRunAt).lte(now_iso.to_string())),
+            )
+            .order_by(Jobs::NextRunAt, sea_query::Order::Asc)
+            .limit(limit as u64)
+            .build_sqlx(SqliteQueryBuilder);
 
+        let rows = sqlx::query_with(&sql, values)
+            .fetch_all(&self.pool)
+            .await
+            .sch_backend()?;
         Ok(rows.into_iter().map(row_to_job).collect())
     }
 
     async fn mark_running(&self, id: &str, now_iso: &str) -> Result<(), SchedulerError> {
-        sqlx::query("UPDATE jobs SET status = 'running', updated_at = ? WHERE id = ?")
-            .bind(now_iso)
-            .bind(id)
+        let (sql, values) = Query::update()
+            .table(Jobs::Table)
+            .values([
+                (Jobs::Status, "running".into()),
+                (Jobs::UpdatedAt, now_iso.to_string().into()),
+            ])
+            .and_where(Expr::col(Jobs::Id).eq(id))
+            .build_sqlx(SqliteQueryBuilder);
+        sqlx::query_with(&sql, values)
             .execute(&self.pool)
             .await
             .sch_backend()?;
@@ -134,15 +187,20 @@ impl SchedulerStore for SqliteSchedulerStore {
     }
 
     async fn mark_done(&self, id: &str, now_iso: &str) -> Result<(), SchedulerError> {
-        sqlx::query(
-            "UPDATE jobs SET status = 'done', last_run_at = ?, updated_at = ?, error = NULL WHERE id = ?",
-        )
-        .bind(now_iso)
-        .bind(now_iso)
-        .bind(id)
-        .execute(&self.pool)
-        .await
-        .sch_backend()?;
+        let (sql, values) = Query::update()
+            .table(Jobs::Table)
+            .values([
+                (Jobs::Status, "done".into()),
+                (Jobs::LastRunAt, now_iso.to_string().into()),
+                (Jobs::UpdatedAt, now_iso.to_string().into()),
+                (Jobs::Error, sea_query::Value::String(None).into()),
+            ])
+            .and_where(Expr::col(Jobs::Id).eq(id))
+            .build_sqlx(SqliteQueryBuilder);
+        sqlx::query_with(&sql, values)
+            .execute(&self.pool)
+            .await
+            .sch_backend()?;
         Ok(())
     }
 
@@ -152,16 +210,21 @@ impl SchedulerStore for SqliteSchedulerStore {
         now_iso: &str,
         error: &str,
     ) -> Result<(), SchedulerError> {
-        sqlx::query(
-            "UPDATE jobs SET status = 'failed', last_run_at = ?, updated_at = ?, error = ?, retry_count = retry_count + 1 WHERE id = ?",
-        )
-        .bind(now_iso)
-        .bind(now_iso)
-        .bind(error)
-        .bind(id)
-        .execute(&self.pool)
-        .await
-        .sch_backend()?;
+        let (sql, values) = Query::update()
+            .table(Jobs::Table)
+            .values([
+                (Jobs::Status, "failed".into()),
+                (Jobs::LastRunAt, now_iso.to_string().into()),
+                (Jobs::UpdatedAt, now_iso.to_string().into()),
+                (Jobs::Error, error.to_string().into()),
+            ])
+            .value(Jobs::RetryCount, Expr::col(Jobs::RetryCount).add(1))
+            .and_where(Expr::col(Jobs::Id).eq(id))
+            .build_sqlx(SqliteQueryBuilder);
+        sqlx::query_with(&sql, values)
+            .execute(&self.pool)
+            .await
+            .sch_backend()?;
         Ok(())
     }
 }

@@ -8,8 +8,121 @@ use ennoia_kernel::{
     MemoryStatus, MemoryStore, OwnerKind, OwnerRef, RecallMode, RecallQuery, RecallResult,
     RememberReceipt, RememberRequest, ReviewAction, ReviewActionKind, ReviewReceipt, Stability,
 };
+use sea_query::{Expr, Iden, OnConflict, Query, SqliteQueryBuilder};
+use sea_query_binder::SqlxBinder;
 use sqlx::{Row, SqlitePool};
 use uuid::Uuid;
+
+#[derive(Iden)]
+enum Episodes {
+    Table,
+    Id,
+    OwnerKind,
+    OwnerId,
+    Namespace,
+    ThreadId,
+    RunId,
+    EpisodeKind,
+    Role,
+    Content,
+    ContentType,
+    SourceUri,
+    EntitiesJson,
+    TagsJson,
+    Importance,
+    OccurredAt,
+    IngestedAt,
+}
+
+#[derive(Iden)]
+enum Memories {
+    Table,
+    Id,
+    OwnerKind,
+    OwnerId,
+    Namespace,
+    MemoryKind,
+    Stability,
+    Status,
+    SupersededBy,
+    Title,
+    Content,
+    Summary,
+    Confidence,
+    Importance,
+    ValidFrom,
+    ValidTo,
+    SourcesJson,
+    TagsJson,
+    EntitiesJson,
+    CreatedAt,
+    UpdatedAt,
+}
+
+#[derive(Iden)]
+enum ContextFrames {
+    #[iden = "context_frames"]
+    Table,
+    Id,
+    OwnerKind,
+    OwnerId,
+    Namespace,
+    Layer,
+    FrameKind,
+    Content,
+    SourceMemoryIdsJson,
+    BudgetChars,
+    TtlSeconds,
+    CreatedAt,
+    UpdatedAt,
+}
+
+#[derive(Iden)]
+enum RememberReceipts {
+    #[iden = "remember_receipts"]
+    Table,
+    Id,
+    OwnerKind,
+    OwnerId,
+    TargetMemoryId,
+    Action,
+    PolicyRuleId,
+    DetailsJson,
+    CreatedAt,
+}
+
+#[derive(Iden)]
+enum RecallReceipts {
+    #[iden = "recall_receipts"]
+    Table,
+    Id,
+    OwnerKind,
+    OwnerId,
+    ThreadId,
+    RunId,
+    QueryText,
+    Mode,
+    MemoryIdsJson,
+    Chars,
+    DetailsJson,
+    CreatedAt,
+}
+
+#[derive(Iden)]
+enum ReviewReceipts {
+    #[iden = "review_receipts"]
+    Table,
+    Id,
+    OwnerKind,
+    OwnerId,
+    TargetMemoryId,
+    Action,
+    OldStatus,
+    NewStatus,
+    Reviewer,
+    DetailsJson,
+    CreatedAt,
+}
 
 /// SqliteMemoryStore is the canonical MemoryStore backed by sqlx + sqlite.
 #[derive(Debug, Clone)]
@@ -61,8 +174,6 @@ impl SqliteMemoryStore {
     }
 }
 
-// ========== Error helpers (sqlx/serde → MemoryError) ==========
-
 trait IntoMemoryError<T> {
     fn mem_backend(self) -> Result<T, MemoryError>;
     fn mem_serde(self) -> Result<T, MemoryError>;
@@ -84,6 +195,52 @@ impl<T> IntoMemoryError<T> for Result<T, serde_json::Error> {
     fn mem_serde(self) -> Result<T, MemoryError> {
         self.map_err(|e| MemoryError::Serde(e.to_string()))
     }
+}
+
+fn memory_columns_all() -> Vec<Memories> {
+    vec![
+        Memories::Id,
+        Memories::OwnerKind,
+        Memories::OwnerId,
+        Memories::Namespace,
+        Memories::MemoryKind,
+        Memories::Stability,
+        Memories::Status,
+        Memories::SupersededBy,
+        Memories::Title,
+        Memories::Content,
+        Memories::Summary,
+        Memories::Confidence,
+        Memories::Importance,
+        Memories::ValidFrom,
+        Memories::ValidTo,
+        Memories::SourcesJson,
+        Memories::TagsJson,
+        Memories::EntitiesJson,
+        Memories::CreatedAt,
+        Memories::UpdatedAt,
+    ]
+}
+
+fn episode_columns_all() -> Vec<Episodes> {
+    vec![
+        Episodes::Id,
+        Episodes::OwnerKind,
+        Episodes::OwnerId,
+        Episodes::Namespace,
+        Episodes::ThreadId,
+        Episodes::RunId,
+        Episodes::EpisodeKind,
+        Episodes::Role,
+        Episodes::Content,
+        Episodes::ContentType,
+        Episodes::SourceUri,
+        Episodes::EntitiesJson,
+        Episodes::TagsJson,
+        Episodes::Importance,
+        Episodes::OccurredAt,
+        Episodes::IngestedAt,
+    ]
 }
 
 #[async_trait]
@@ -115,32 +272,33 @@ impl MemoryStore for SqliteMemoryStore {
         let entities_json = serde_json::to_string(&record.entities).mem_serde()?;
         let tags_json = serde_json::to_string(&record.tags).mem_serde()?;
 
-        sqlx::query(
-            "INSERT INTO episodes \
-             (id, owner_kind, owner_id, namespace, thread_id, run_id, episode_kind, role, \
-              content, content_type, source_uri, entities_json, tags_json, importance, \
-              occurred_at, ingested_at) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(&record.id)
-        .bind(owner_kind_str(&record.owner.kind))
-        .bind(&record.owner.id)
-        .bind(&record.namespace)
-        .bind(&record.thread_id)
-        .bind(&record.run_id)
-        .bind(record.episode_kind.as_str())
-        .bind(&record.role)
-        .bind(&record.content)
-        .bind(&record.content_type)
-        .bind(&record.source_uri)
-        .bind(entities_json)
-        .bind(tags_json)
-        .bind(record.importance as f64)
-        .bind(&record.occurred_at)
-        .bind(&record.ingested_at)
-        .execute(&self.pool)
-        .await
-        .mem_backend()?;
+        let (sql, values) = Query::insert()
+            .into_table(Episodes::Table)
+            .columns(episode_columns_all())
+            .values_panic([
+                record.id.clone().into(),
+                owner_kind_str(&record.owner.kind).to_string().into(),
+                record.owner.id.clone().into(),
+                record.namespace.clone().into(),
+                record.thread_id.clone().into(),
+                record.run_id.clone().into(),
+                record.episode_kind.as_str().to_string().into(),
+                record.role.clone().into(),
+                record.content.clone().into(),
+                record.content_type.clone().into(),
+                record.source_uri.clone().into(),
+                entities_json.into(),
+                tags_json.into(),
+                (record.importance as f64).into(),
+                record.occurred_at.clone().into(),
+                record.ingested_at.clone().into(),
+            ])
+            .build_sqlx(SqliteQueryBuilder);
+
+        sqlx::query_with(&sql, values)
+            .execute(&self.pool)
+            .await
+            .mem_backend()?;
 
         Ok(record)
     }
@@ -159,53 +317,67 @@ impl MemoryStore for SqliteMemoryStore {
         let tags_json = serde_json::to_string(&req.tags).mem_serde()?;
         let entities_json = serde_json::to_string(&req.entities).mem_serde()?;
 
-        sqlx::query(
-            "INSERT INTO memories \
-             (id, owner_kind, owner_id, namespace, memory_kind, stability, status, superseded_by, \
-              title, content, summary, confidence, importance, valid_from, valid_to, \
-              sources_json, tags_json, entities_json, created_at, updated_at) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(&memory_id)
-        .bind(owner_kind_str(&req.owner.kind))
-        .bind(&req.owner.id)
-        .bind(&req.namespace)
-        .bind(req.memory_kind.as_str())
-        .bind(req.stability.as_str())
-        .bind(status.as_str())
-        .bind(&req.title)
-        .bind(&req.content)
-        .bind(&req.summary)
-        .bind(req.confidence.unwrap_or(0.6) as f64)
-        .bind(req.importance.unwrap_or(0.5) as f64)
-        .bind(&req.valid_from)
-        .bind(&req.valid_to)
-        .bind(sources_json)
-        .bind(tags_json)
-        .bind(entities_json)
-        .bind(&now)
-        .bind(&now)
-        .execute(&self.pool)
-        .await
-        .mem_backend()?;
+        let (sql, values) = Query::insert()
+            .into_table(Memories::Table)
+            .columns(memory_columns_all())
+            .values_panic([
+                memory_id.clone().into(),
+                owner_kind_str(&req.owner.kind).to_string().into(),
+                req.owner.id.clone().into(),
+                req.namespace.clone().into(),
+                req.memory_kind.as_str().to_string().into(),
+                req.stability.as_str().to_string().into(),
+                status.as_str().to_string().into(),
+                Option::<String>::None.into(),
+                req.title.clone().into(),
+                req.content.clone().into(),
+                req.summary.clone().into(),
+                (req.confidence.unwrap_or(0.6) as f64).into(),
+                (req.importance.unwrap_or(0.5) as f64).into(),
+                req.valid_from.clone().into(),
+                req.valid_to.clone().into(),
+                sources_json.into(),
+                tags_json.into(),
+                entities_json.into(),
+                now.clone().into(),
+                now.clone().into(),
+            ])
+            .build_sqlx(SqliteQueryBuilder);
+
+        sqlx::query_with(&sql, values)
+            .execute(&self.pool)
+            .await
+            .mem_backend()?;
 
         let receipt_id = format!("rec-rem-{}", Uuid::new_v4());
-        sqlx::query(
-            "INSERT INTO remember_receipts \
-             (id, owner_kind, owner_id, target_memory_id, action, policy_rule_id, details_json, created_at) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(&receipt_id)
-        .bind(owner_kind_str(&req.owner.kind))
-        .bind(&req.owner.id)
-        .bind(&memory_id)
-        .bind("create")
-        .bind::<Option<&str>>(None)
-        .bind("{}")
-        .bind(&now)
-        .execute(&self.pool)
-        .await
-        .mem_backend()?;
+        let (sql, values) = Query::insert()
+            .into_table(RememberReceipts::Table)
+            .columns([
+                RememberReceipts::Id,
+                RememberReceipts::OwnerKind,
+                RememberReceipts::OwnerId,
+                RememberReceipts::TargetMemoryId,
+                RememberReceipts::Action,
+                RememberReceipts::PolicyRuleId,
+                RememberReceipts::DetailsJson,
+                RememberReceipts::CreatedAt,
+            ])
+            .values_panic([
+                receipt_id.clone().into(),
+                owner_kind_str(&req.owner.kind).to_string().into(),
+                req.owner.id.clone().into(),
+                memory_id.clone().into(),
+                "create".to_string().into(),
+                Option::<String>::None.into(),
+                "{}".to_string().into(),
+                now.clone().into(),
+            ])
+            .build_sqlx(SqliteQueryBuilder);
+
+        sqlx::query_with(&sql, values)
+            .execute(&self.pool)
+            .await
+            .mem_backend()?;
 
         Ok(RememberReceipt {
             receipt_id,
@@ -234,25 +406,40 @@ impl MemoryStore for SqliteMemoryStore {
         let now = now_iso();
         let memory_ids_json = serde_json::to_string(&memory_ids).mem_serde()?;
 
-        sqlx::query(
-            "INSERT INTO recall_receipts \
-             (id, owner_kind, owner_id, thread_id, run_id, query_text, mode, memory_ids_json, chars, details_json, created_at) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(&receipt_id)
-        .bind(owner_kind_str(&query.owner.kind))
-        .bind(&query.owner.id)
-        .bind(&query.thread_id)
-        .bind(&query.run_id)
-        .bind(&query.query_text)
-        .bind(query.mode.as_str())
-        .bind(memory_ids_json)
-        .bind(chars as i64)
-        .bind("{}")
-        .bind(&now)
-        .execute(&self.pool)
-        .await
-        .mem_backend()?;
+        let (sql, values) = Query::insert()
+            .into_table(RecallReceipts::Table)
+            .columns([
+                RecallReceipts::Id,
+                RecallReceipts::OwnerKind,
+                RecallReceipts::OwnerId,
+                RecallReceipts::ThreadId,
+                RecallReceipts::RunId,
+                RecallReceipts::QueryText,
+                RecallReceipts::Mode,
+                RecallReceipts::MemoryIdsJson,
+                RecallReceipts::Chars,
+                RecallReceipts::DetailsJson,
+                RecallReceipts::CreatedAt,
+            ])
+            .values_panic([
+                receipt_id.clone().into(),
+                owner_kind_str(&query.owner.kind).to_string().into(),
+                query.owner.id.clone().into(),
+                query.thread_id.clone().into(),
+                query.run_id.clone().into(),
+                query.query_text.clone().into(),
+                query.mode.as_str().to_string().into(),
+                memory_ids_json.into(),
+                (chars as i64).into(),
+                "{}".to_string().into(),
+                now.clone().into(),
+            ])
+            .build_sqlx(SqliteQueryBuilder);
+
+        sqlx::query_with(&sql, values)
+            .execute(&self.pool)
+            .await
+            .mem_backend()?;
 
         Ok(RecallResult {
             memories,
@@ -263,13 +450,16 @@ impl MemoryStore for SqliteMemoryStore {
     }
 
     async fn review(&self, action: ReviewAction) -> Result<ReviewReceipt, MemoryError> {
-        let existing = sqlx::query(
-            "SELECT owner_kind, owner_id, status FROM memories WHERE id = ?",
-        )
-        .bind(&action.target_memory_id)
-        .fetch_optional(&self.pool)
-        .await
-        .mem_backend()?;
+        let (sql, values) = Query::select()
+            .columns([Memories::OwnerKind, Memories::OwnerId, Memories::Status])
+            .from(Memories::Table)
+            .and_where(Expr::col(Memories::Id).eq(action.target_memory_id.clone()))
+            .build_sqlx(SqliteQueryBuilder);
+
+        let existing = sqlx::query_with(&sql, values)
+            .fetch_optional(&self.pool)
+            .await
+            .mem_backend()?;
 
         let row = existing.ok_or_else(|| MemoryError::NotFound(action.target_memory_id.clone()))?;
         let owner_kind: String = row.get("owner_kind");
@@ -284,34 +474,54 @@ impl MemoryStore for SqliteMemoryStore {
         };
 
         let now = now_iso();
-        sqlx::query("UPDATE memories SET status = ?, updated_at = ? WHERE id = ?")
-            .bind(new_status.as_str())
-            .bind(&now)
-            .bind(&action.target_memory_id)
+        let (sql, values) = Query::update()
+            .table(Memories::Table)
+            .values([
+                (Memories::Status, new_status.as_str().to_string().into()),
+                (Memories::UpdatedAt, now.clone().into()),
+            ])
+            .and_where(Expr::col(Memories::Id).eq(action.target_memory_id.clone()))
+            .build_sqlx(SqliteQueryBuilder);
+
+        sqlx::query_with(&sql, values)
             .execute(&self.pool)
             .await
             .mem_backend()?;
 
         let receipt_id = format!("rec-rev-{}", Uuid::new_v4());
         let notes_json = serde_json::to_string(&action.notes).mem_serde()?;
-        sqlx::query(
-            "INSERT INTO review_receipts \
-             (id, owner_kind, owner_id, target_memory_id, action, old_status, new_status, reviewer, details_json, created_at) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(&receipt_id)
-        .bind(&owner_kind)
-        .bind(&owner_id)
-        .bind(&action.target_memory_id)
-        .bind(action.action.as_str())
-        .bind(&old_status)
-        .bind(new_status.as_str())
-        .bind(&action.reviewer)
-        .bind(notes_json)
-        .bind(&now)
-        .execute(&self.pool)
-        .await
-        .mem_backend()?;
+        let (sql, values) = Query::insert()
+            .into_table(ReviewReceipts::Table)
+            .columns([
+                ReviewReceipts::Id,
+                ReviewReceipts::OwnerKind,
+                ReviewReceipts::OwnerId,
+                ReviewReceipts::TargetMemoryId,
+                ReviewReceipts::Action,
+                ReviewReceipts::OldStatus,
+                ReviewReceipts::NewStatus,
+                ReviewReceipts::Reviewer,
+                ReviewReceipts::DetailsJson,
+                ReviewReceipts::CreatedAt,
+            ])
+            .values_panic([
+                receipt_id.clone().into(),
+                owner_kind.clone().into(),
+                owner_id.clone().into(),
+                action.target_memory_id.clone().into(),
+                action.action.as_str().to_string().into(),
+                old_status.clone().into(),
+                new_status.as_str().to_string().into(),
+                action.reviewer.clone().into(),
+                notes_json.into(),
+                now.clone().into(),
+            ])
+            .build_sqlx(SqliteQueryBuilder);
+
+        sqlx::query_with(&sql, values)
+            .execute(&self.pool)
+            .await
+            .mem_backend()?;
 
         Ok(ReviewReceipt {
             receipt_id,
@@ -332,16 +542,20 @@ impl MemoryStore for SqliteMemoryStore {
         view.recent_messages = req.recent_messages;
         view.active_tasks = req.active_tasks;
 
-        let frames = sqlx::query(
-            "SELECT layer, content FROM context_frames \
-             WHERE owner_kind = ? AND owner_id = ? \
-             ORDER BY updated_at DESC",
-        )
-        .bind(owner_kind_str(&req.owner.kind))
-        .bind(&req.owner.id)
-        .fetch_all(&self.pool)
-        .await
-        .mem_backend()?;
+        let (sql, values) = Query::select()
+            .columns([ContextFrames::Layer, ContextFrames::Content])
+            .from(ContextFrames::Table)
+            .and_where(
+                Expr::col(ContextFrames::OwnerKind).eq(owner_kind_str(&req.owner.kind).to_string()),
+            )
+            .and_where(Expr::col(ContextFrames::OwnerId).eq(req.owner.id.clone()))
+            .order_by(ContextFrames::UpdatedAt, sea_query::Order::Desc)
+            .build_sqlx(SqliteQueryBuilder);
+
+        let frames = sqlx::query_with(&sql, values)
+            .fetch_all(&self.pool)
+            .await
+            .mem_backend()?;
 
         for row in frames {
             if view.total_chars >= budget {
@@ -352,17 +566,31 @@ impl MemoryStore for SqliteMemoryStore {
             view.push(layer, content);
         }
 
-        let memories = sqlx::query(
-            "SELECT id, namespace, memory_kind, stability, status, content, summary, title \
-             FROM memories \
-             WHERE owner_kind = ? AND owner_id = ? AND status = 'active' \
-             ORDER BY updated_at DESC LIMIT 20",
-        )
-        .bind(owner_kind_str(&req.owner.kind))
-        .bind(&req.owner.id)
-        .fetch_all(&self.pool)
-        .await
-        .mem_backend()?;
+        let (sql, values) = Query::select()
+            .columns([
+                Memories::Id,
+                Memories::Namespace,
+                Memories::MemoryKind,
+                Memories::Stability,
+                Memories::Status,
+                Memories::Content,
+                Memories::Summary,
+                Memories::Title,
+            ])
+            .from(Memories::Table)
+            .and_where(
+                Expr::col(Memories::OwnerKind).eq(owner_kind_str(&req.owner.kind).to_string()),
+            )
+            .and_where(Expr::col(Memories::OwnerId).eq(req.owner.id.clone()))
+            .and_where(Expr::col(Memories::Status).eq("active"))
+            .order_by(Memories::UpdatedAt, sea_query::Order::Desc)
+            .limit(20)
+            .build_sqlx(SqliteQueryBuilder);
+
+        let memories = sqlx::query_with(&sql, values)
+            .fetch_all(&self.pool)
+            .await
+            .mem_backend()?;
 
         for row in memories {
             if view.total_chars >= budget {
@@ -393,50 +621,73 @@ impl MemoryStore for SqliteMemoryStore {
             frame.created_at.clone()
         };
         let source_ids_json = serde_json::to_string(&frame.source_memory_ids).mem_serde()?;
-        sqlx::query(
-            "INSERT INTO context_frames \
-             (id, owner_kind, owner_id, namespace, layer, frame_kind, content, source_memory_ids_json, budget_chars, ttl_seconds, created_at, updated_at) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
-             ON CONFLICT(id) DO UPDATE SET \
-               namespace = excluded.namespace, \
-               layer = excluded.layer, \
-               frame_kind = excluded.frame_kind, \
-               content = excluded.content, \
-               source_memory_ids_json = excluded.source_memory_ids_json, \
-               budget_chars = excluded.budget_chars, \
-               ttl_seconds = excluded.ttl_seconds, \
-               updated_at = excluded.updated_at",
-        )
-        .bind(&frame.id)
-        .bind(owner_kind_str(&frame.owner.kind))
-        .bind(&frame.owner.id)
-        .bind(&frame.namespace)
-        .bind(frame.layer.as_str())
-        .bind(&frame.frame_kind)
-        .bind(&frame.content)
-        .bind(source_ids_json)
-        .bind(frame.budget_chars.map(|v| v as i64))
-        .bind(frame.ttl_seconds.map(|v| v as i64))
-        .bind(&created_at)
-        .bind(&now)
-        .execute(&self.pool)
-        .await
-        .mem_backend()?;
+
+        let (sql, values) = Query::insert()
+            .into_table(ContextFrames::Table)
+            .columns([
+                ContextFrames::Id,
+                ContextFrames::OwnerKind,
+                ContextFrames::OwnerId,
+                ContextFrames::Namespace,
+                ContextFrames::Layer,
+                ContextFrames::FrameKind,
+                ContextFrames::Content,
+                ContextFrames::SourceMemoryIdsJson,
+                ContextFrames::BudgetChars,
+                ContextFrames::TtlSeconds,
+                ContextFrames::CreatedAt,
+                ContextFrames::UpdatedAt,
+            ])
+            .values_panic([
+                frame.id.clone().into(),
+                owner_kind_str(&frame.owner.kind).to_string().into(),
+                frame.owner.id.clone().into(),
+                frame.namespace.clone().into(),
+                frame.layer.as_str().to_string().into(),
+                frame.frame_kind.clone().into(),
+                frame.content.clone().into(),
+                source_ids_json.into(),
+                frame.budget_chars.map(|v| v as i64).into(),
+                frame.ttl_seconds.map(|v| v as i64).into(),
+                created_at.into(),
+                now.clone().into(),
+            ])
+            .on_conflict(
+                OnConflict::column(ContextFrames::Id)
+                    .update_columns([
+                        ContextFrames::Namespace,
+                        ContextFrames::Layer,
+                        ContextFrames::FrameKind,
+                        ContextFrames::Content,
+                        ContextFrames::SourceMemoryIdsJson,
+                        ContextFrames::BudgetChars,
+                        ContextFrames::TtlSeconds,
+                        ContextFrames::UpdatedAt,
+                    ])
+                    .to_owned(),
+            )
+            .build_sqlx(SqliteQueryBuilder);
+
+        sqlx::query_with(&sql, values)
+            .execute(&self.pool)
+            .await
+            .mem_backend()?;
 
         Ok(())
     }
 
     async fn list_memories(&self, limit: u32) -> Result<Vec<MemoryRecord>, MemoryError> {
-        let rows = sqlx::query(
-            "SELECT id, owner_kind, owner_id, namespace, memory_kind, stability, status, superseded_by, \
-             title, content, summary, confidence, importance, valid_from, valid_to, \
-             sources_json, tags_json, entities_json, created_at, updated_at \
-             FROM memories ORDER BY updated_at DESC LIMIT ?",
-        )
-        .bind(limit as i64)
-        .fetch_all(&self.pool)
-        .await
-        .mem_backend()?;
+        let (sql, values) = Query::select()
+            .columns(memory_columns_all())
+            .from(Memories::Table)
+            .order_by(Memories::UpdatedAt, sea_query::Order::Desc)
+            .limit(limit as u64)
+            .build_sqlx(SqliteQueryBuilder);
+
+        let rows = sqlx::query_with(&sql, values)
+            .fetch_all(&self.pool)
+            .await
+            .mem_backend()?;
 
         rows.into_iter().map(row_to_memory).collect()
     }
@@ -446,17 +697,19 @@ impl MemoryStore for SqliteMemoryStore {
         owner: &OwnerRef,
         limit: u32,
     ) -> Result<Vec<EpisodeRecord>, MemoryError> {
-        let rows = sqlx::query(
-            "SELECT id, owner_kind, owner_id, namespace, thread_id, run_id, episode_kind, role, \
-             content, content_type, source_uri, entities_json, tags_json, importance, occurred_at, ingested_at \
-             FROM episodes WHERE owner_kind = ? AND owner_id = ? ORDER BY ingested_at DESC LIMIT ?",
-        )
-        .bind(owner_kind_str(&owner.kind))
-        .bind(&owner.id)
-        .bind(limit as i64)
-        .fetch_all(&self.pool)
-        .await
-        .mem_backend()?;
+        let (sql, values) = Query::select()
+            .columns(episode_columns_all())
+            .from(Episodes::Table)
+            .and_where(Expr::col(Episodes::OwnerKind).eq(owner_kind_str(&owner.kind).to_string()))
+            .and_where(Expr::col(Episodes::OwnerId).eq(owner.id.clone()))
+            .order_by(Episodes::IngestedAt, sea_query::Order::Desc)
+            .limit(limit as u64)
+            .build_sqlx(SqliteQueryBuilder);
+
+        let rows = sqlx::query_with(&sql, values)
+            .fetch_all(&self.pool)
+            .await
+            .mem_backend()?;
 
         rows.into_iter().map(row_to_episode).collect()
     }
@@ -471,31 +724,34 @@ async fn recall_by_namespace(
         .clone()
         .map(|p| format!("{p}%"))
         .unwrap_or_else(|| "%".to_string());
-    let memory_kind = query.memory_kind.map(|k| k.as_str().to_string());
 
-    let rows = sqlx::query(
-        "SELECT id, owner_kind, owner_id, namespace, memory_kind, stability, status, superseded_by, \
-         title, content, summary, confidence, importance, valid_from, valid_to, \
-         sources_json, tags_json, entities_json, created_at, updated_at \
-         FROM memories \
-         WHERE owner_kind = ? AND owner_id = ? AND status = 'active' \
-         AND namespace LIKE ? \
-         AND (? IS NULL OR memory_kind = ?) \
-         ORDER BY updated_at DESC LIMIT ?",
-    )
-    .bind(owner_kind_str(&query.owner.kind))
-    .bind(&query.owner.id)
-    .bind(namespace_pattern)
-    .bind(&memory_kind)
-    .bind(&memory_kind)
-    .bind(query.limit as i64)
-    .fetch_all(pool)
-    .await
-    .mem_backend()?;
+    let mut builder = Query::select();
+    builder
+        .columns(memory_columns_all())
+        .from(Memories::Table)
+        .and_where(
+            Expr::col(Memories::OwnerKind).eq(owner_kind_str(&query.owner.kind).to_string()),
+        )
+        .and_where(Expr::col(Memories::OwnerId).eq(query.owner.id.clone()))
+        .and_where(Expr::col(Memories::Status).eq("active"))
+        .and_where(Expr::col(Memories::Namespace).like(namespace_pattern))
+        .order_by(Memories::UpdatedAt, sea_query::Order::Desc)
+        .limit(query.limit as u64);
+
+    if let Some(kind) = query.memory_kind {
+        builder.and_where(Expr::col(Memories::MemoryKind).eq(kind.as_str().to_string()));
+    }
+
+    let (sql, values) = builder.build_sqlx(SqliteQueryBuilder);
+    let rows = sqlx::query_with(&sql, values)
+        .fetch_all(pool)
+        .await
+        .mem_backend()?;
 
     rows.into_iter().map(row_to_memory).collect()
 }
 
+/// FTS5 MATCH is not supported by sea-query's builder; keep this query raw.
 async fn recall_by_fts(
     pool: &SqlitePool,
     query: &RecallQuery,
