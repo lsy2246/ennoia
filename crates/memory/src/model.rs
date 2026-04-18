@@ -15,10 +15,13 @@ pub enum MemoryKind {
 pub struct MemoryRecord {
     pub id: String,
     pub owner: OwnerRef,
+    pub thread_id: Option<String>,
+    pub run_id: Option<String>,
     pub kind: MemoryKind,
     pub source: String,
     pub content: String,
     pub summary: String,
+    pub created_at: String,
 }
 
 /// ContextView is the assembled context emitted to the orchestrator.

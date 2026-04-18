@@ -7,8 +7,8 @@ pub mod runtime;
 
 pub use config::{AgentConfig, AppConfig, ServerConfig, UiConfig};
 pub use domain::{
-    AgentSpec, ArtifactKind, ArtifactSpec, MessageSpec, OwnerKind, OwnerRef, RunSpec, RunStatus,
-    SpaceSpec, TaskSpec, TaskStatus, ThreadKind, ThreadSpec,
+    AgentSpec, ArtifactKind, ArtifactSpec, MessageRole, MessageSpec, OwnerKind, OwnerRef, RunSpec,
+    RunStatus, SpaceSpec, TaskKind, TaskSpec, TaskStatus, ThreadKind, ThreadSpec,
 };
 pub use extension::{
     CommandContribution, ContributionSet, ExtensionKind, ExtensionManifest, HookContribution,

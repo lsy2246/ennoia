@@ -22,6 +22,14 @@ pub enum ThreadKind {
     Space,
 }
 
+/// MessageRole describes who produced one message.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum MessageRole {
+    User,
+    Agent,
+    System,
+}
+
 /// RunStatus tracks high-level run execution state.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum RunStatus {
@@ -38,6 +46,14 @@ pub enum TaskStatus {
     Running,
     Failed,
     Completed,
+}
+
+/// TaskKind tracks the purpose of one task unit.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum TaskKind {
+    Response,
+    Collaboration,
+    Maintenance,
 }
 
 /// ArtifactKind distinguishes stored output types.
@@ -73,7 +89,11 @@ pub struct ThreadSpec {
     pub id: String,
     pub kind: ThreadKind,
     pub owner: OwnerRef,
+    pub space_id: Option<String>,
+    pub title: String,
     pub participants: Vec<String>,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 /// MessageSpec is the normalized message input shape for orchestrator flows.
@@ -82,8 +102,10 @@ pub struct MessageSpec {
     pub id: String,
     pub thread_id: String,
     pub sender: String,
+    pub role: MessageRole,
     pub body: String,
     pub mentions: Vec<String>,
+    pub created_at: String,
 }
 
 /// RunSpec captures the base run metadata.
@@ -94,6 +116,9 @@ pub struct RunSpec {
     pub thread_id: String,
     pub trigger: String,
     pub status: RunStatus,
+    pub goal: String,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 /// TaskSpec captures one execution unit inside a run.
@@ -101,9 +126,12 @@ pub struct RunSpec {
 pub struct TaskSpec {
     pub id: String,
     pub run_id: String,
+    pub task_kind: TaskKind,
     pub title: String,
     pub assigned_agent_id: String,
     pub status: TaskStatus,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 /// ArtifactSpec stores the minimum metadata needed to locate a produced artifact.
@@ -114,4 +142,5 @@ pub struct ArtifactSpec {
     pub run_id: String,
     pub kind: ArtifactKind,
     pub relative_path: String,
+    pub created_at: String,
 }

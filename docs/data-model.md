@@ -22,15 +22,21 @@
 ### Thread
 
 - `id`
+- `owner_kind`
+- `owner_id`
 - `space_id`
 - `thread_kind`
+- `title`
 - `participants`
+- `created_at`
+- `updated_at`
 
 ### Message
 
 - `id`
 - `thread_id`
 - `sender`
+- `role`
 - `body`
 - `mentions`
 - `created_at`
@@ -43,6 +49,9 @@
 - `thread_id`
 - `trigger`
 - `status`
+- `goal`
+- `created_at`
+- `updated_at`
 
 ### Task
 
@@ -52,6 +61,8 @@
 - `title`
 - `status`
 - `assigned_agent_id`
+- `created_at`
+- `updated_at`
 
 ### Artifact
 
@@ -61,6 +72,7 @@
 - `run_id`
 - `artifact_kind`
 - `relative_path`
+- `created_at`
 
 ## 2. 记忆实体
 
@@ -73,6 +85,8 @@
 - `source`
 - `content`
 - `summary`
+- `thread_id`
+- `run_id`
 - `created_at`
 
 ### ContextView
@@ -93,6 +107,12 @@
 - `frontend_bundle`
 - `backend_entry`
 - `contributes`
+
+### ExtensionRegistryView
+
+- `extensions`
+- `pages`
+- `panels`
 
 ### SkillSpec
 
@@ -127,3 +147,25 @@
 - artifact 归属
 - memory 归属
 - scheduler job 归属
+
+## 6. 当前持久化事实源
+
+当前 SQLite schema 已经落地以下正式表：
+
+- `agents`
+- `spaces`
+- `threads`
+- `messages`
+- `runs`
+- `tasks`
+- `artifacts`
+- `memories`
+- `jobs`
+- `extensions`
+
+前端主壳直接消费以下正式派生视图：
+
+- `overview`
+- `registry.pages`
+- `registry.panels`
+- `threads -> messages -> runs -> tasks -> artifacts -> memories`

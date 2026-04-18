@@ -21,6 +21,27 @@ impl MemoryService {
         self.records
             .iter()
             .filter(|record| &record.owner == owner)
+            .rev()
+            .take(limit)
+            .cloned()
+            .collect()
+    }
+
+    pub fn recall_for_thread(&self, thread_id: &str, limit: usize) -> Vec<MemoryRecord> {
+        self.records
+            .iter()
+            .filter(|record| record.thread_id.as_deref() == Some(thread_id))
+            .rev()
+            .take(limit)
+            .cloned()
+            .collect()
+    }
+
+    pub fn recall_for_run(&self, run_id: &str, limit: usize) -> Vec<MemoryRecord> {
+        self.records
+            .iter()
+            .filter(|record| record.run_id.as_deref() == Some(run_id))
+            .rev()
             .take(limit)
             .cloned()
             .collect()
@@ -29,14 +50,27 @@ impl MemoryService {
     pub fn build_context(
         &self,
         owner: &OwnerRef,
+        thread_id: Option<&str>,
         recent_messages: Vec<String>,
         active_tasks: Vec<String>,
     ) -> ContextView {
-        let recalled_memories = self
+        let mut recalled_memories: Vec<String> = self
             .recall_for_owner(owner, 5)
             .into_iter()
             .map(|record| record.summary)
             .collect();
+
+        if let Some(thread_id) = thread_id {
+            for summary in self
+                .recall_for_thread(thread_id, 5)
+                .into_iter()
+                .map(|record| record.summary)
+            {
+                if !recalled_memories.contains(&summary) {
+                    recalled_memories.push(summary);
+                }
+            }
+        }
 
         ContextView {
             thread_facts: vec![format!("owner:{}:{}", owner_kind_label(owner), owner.id)],

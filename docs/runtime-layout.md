@@ -133,7 +133,7 @@ agents/<agent_id>/artifacts/runs/<run_id>/
 - `artifacts/`：该 Space 的产物
 - `cache/`：该 Space 的缓存
 
-这里不单独再建 `shared/`，因为 `workspace/` 本身就表示该空间的共享工作区。
+`workspace/` 目录直接表达该 Space 的共享工作区语义。
 
 Run 级产物建议归档到：
 

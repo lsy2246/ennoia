@@ -1,4 +1,4 @@
-use ennoia_kernel::{OwnerRef, RunSpec, TaskSpec, ThreadSpec};
+use ennoia_kernel::{MessageSpec, OwnerRef, RunSpec, TaskSpec, ThreadSpec};
 use ennoia_memory::ContextView;
 use serde::{Deserialize, Serialize};
 
@@ -15,6 +15,7 @@ pub enum RunTrigger {
 pub struct RunRequest {
     pub owner: OwnerRef,
     pub thread: ThreadSpec,
+    pub message: MessageSpec,
     pub trigger: RunTrigger,
     pub goal: String,
     pub addressed_agents: Vec<String>,
@@ -23,6 +24,8 @@ pub struct RunRequest {
 /// PlannedRun is the normalized result emitted by the orchestrator.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PlannedRun {
+    pub thread: ThreadSpec,
+    pub message: MessageSpec,
     pub run: RunSpec,
     pub tasks: Vec<TaskSpec>,
     pub context: ContextView,

@@ -15,7 +15,9 @@
 - 核心命名和目录已经确定
 - Rust workspace 已经拆分出核心模块
 - 文档体系覆盖架构、路线图、运行目录、数据模型、配置模型和扩展模型
-- 前端主壳、扩展 SDK、打包目录和配置模板已经进入可启动、可验证的 Phase 1 基础设施阶段
+- 前端主壳已经形成正式 workspace，可统一查看私聊、群聊、run、task、memory 与 extension surface
+- `web/ui-sdk` 与 `web/builtins` 已提供最小正式挂载描述，支持 page / panel 按 registry 协议接入主壳
+- 打包目录和配置模板已经与 SQLite 默认运行时布局保持一致
 
 ## 技术栈
 
@@ -35,6 +37,8 @@
 - `server`：HTTP API、WebSocket、扩展注册表、前端主壳注入
 - `cli`：初始化、开发、启动、本地输出和运行目录生成
 - `web/shell`：主壳、子页面、面板和扩展 UI 容器
+- `web/ui-sdk`：前端 extension page / panel 的共享类型与挂载助手
+- `web/builtins`：主壳内建 extension 描述与默认 surface 元数据
 
 ## 目录概览
 
