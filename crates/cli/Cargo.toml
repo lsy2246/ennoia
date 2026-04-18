@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 ennoia-kernel = { path = "../kernel" }
+ennoia-auth = { path = "../auth" }
 ennoia-server = { path = "../server" }
 serde_json = "1.0.149"
 tokio = { version = "1.51.1", features = ["macros", "rt-multi-thread"] }

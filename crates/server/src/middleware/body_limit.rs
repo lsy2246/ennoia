@@ -1,7 +1,7 @@
 use axum::{
     body::{to_bytes, Body},
-    extract::State,
-    http::{Request, StatusCode},
+    extract::{Request, State},
+    http::StatusCode,
     middleware::Next,
     response::{IntoResponse, Response},
 };
@@ -12,7 +12,7 @@ use crate::app::AppState;
 /// Per-path overrides win over the global default.
 pub async fn body_limit_middleware(
     State(state): State<AppState>,
-    req: Request<Body>,
+    req: Request,
     next: Next,
 ) -> Response {
     let cfg = state.system_config.body_limit.load();

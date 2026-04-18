@@ -3,9 +3,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use axum::{
-    body::Body,
-    extract::State,
-    http::{header, Request, StatusCode},
+    extract::{Request, State},
+    http::{header, StatusCode},
     middleware::Next,
     response::{IntoResponse, Response},
 };
@@ -52,7 +51,7 @@ impl RateLimitState {
 /// rate_limit_middleware enforces the RateLimitConfig against the caller's IP.
 pub async fn rate_limit_middleware(
     State(state): State<AppState>,
-    req: Request<Body>,
+    req: Request,
     next: Next,
 ) -> Response {
     let cfg = state.system_config.rate_limit.load();
@@ -80,7 +79,7 @@ pub async fn rate_limit_middleware(
     next.run(req).await
 }
 
-fn extract_client_ip(req: &Request<Body>) -> Option<String> {
+fn extract_client_ip(req: &Request) -> Option<String> {
     if let Some(value) = req.headers().get("x-forwarded-for") {
         if let Ok(s) = value.to_str() {
             return s.split(',').next().map(|s| s.trim().to_string());

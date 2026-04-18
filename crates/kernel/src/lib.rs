@@ -3,6 +3,7 @@
 //! All cross-crate contracts live here. Implementation crates (memory / runtime /
 //! scheduler / auth / policy-loader) depend only on `ennoia-kernel`.
 
+pub mod auth;
 pub mod config;
 pub mod decision;
 pub mod domain;
@@ -19,6 +20,10 @@ pub mod system_config;
 
 // ========== Re-exports ==========
 
+pub use auth::{
+    ApiKey, ApiKeyStore, AuthError, CreateApiKeyRequest, CreateSessionRequest, CreateUserRequest,
+    Session, SessionStore, UpdateUserRequest, User, UserRole, UserStore,
+};
 pub use config::{AgentConfig, AppConfig, ServerConfig, UiConfig};
 pub use decision::{Decision, DecisionSnapshot, NextAction};
 pub use domain::{

@@ -1,7 +1,7 @@
 use axum::{
     body::Body,
-    extract::State,
-    http::{header, HeaderValue, Method, Request, StatusCode},
+    extract::{Request, State},
+    http::{header, HeaderValue, Method, StatusCode},
     middleware::Next,
     response::Response,
 };
@@ -12,7 +12,7 @@ use crate::app::AppState;
 /// OPTIONS preflight requests.
 pub async fn cors_middleware(
     State(state): State<AppState>,
-    req: Request<Body>,
+    req: Request,
     next: Next,
 ) -> Response {
     let cfg = state.system_config.cors.load();

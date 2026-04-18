@@ -3,13 +3,14 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use ennoia_auth::{AuthService, SqliteApiKeyStore, SqliteSessionStore, SqliteUserStore};
 use ennoia_config::SqliteConfigStore;
 use ennoia_extension_host::{ExtensionRegistry, RegisteredExtension};
 use ennoia_kernel::{
-    AgentConfig, AppConfig, CommandContribution, ContributionSet, ExtensionKind, ExtensionManifest,
-    GatePipeline, HookContribution, MemoryStore, PageContribution, PanelContribution,
-    PlatformOverview, ProviderContribution, RuntimeStore, SchedulerStore, ServerConfig, SpaceSpec,
-    StageMachine, ThemeContribution, UiConfig,
+    AgentConfig, ApiKeyStore, AppConfig, CommandContribution, ContributionSet, ExtensionKind,
+    ExtensionManifest, GatePipeline, HookContribution, MemoryStore, PageContribution,
+    PanelContribution, PlatformOverview, ProviderContribution, RuntimeStore, SchedulerStore,
+    ServerConfig, SessionStore, SpaceSpec, StageMachine, ThemeContribution, UiConfig, UserStore,
 };
 use ennoia_memory::SqliteMemoryStore;
 use ennoia_policy::PolicySet;
@@ -45,6 +46,10 @@ pub struct AppState {
     pub gate_pipeline: GatePipeline,
     pub orchestrator: OrchestratorService,
     pub system_config: SystemConfigRuntime,
+    pub user_store: Arc<dyn UserStore>,
+    pub session_store: Arc<dyn SessionStore>,
+    pub api_key_store: Arc<dyn ApiKeyStore>,
+    pub auth_service: AuthService,
 }
 
 pub fn default_app_state() -> AppState {
@@ -68,6 +73,14 @@ pub fn default_app_state() -> AppState {
     let orchestrator = OrchestratorService::new(stage_machine.clone(), gate_pipeline.clone());
     let config_store = Arc::new(SqliteConfigStore::new(pool.clone()));
     let system_config = SystemConfigRuntime::defaulted(config_store);
+    let user_store: Arc<dyn UserStore> = Arc::new(SqliteUserStore::new(pool.clone()));
+    let session_store: Arc<dyn SessionStore> = Arc::new(SqliteSessionStore::new(pool.clone()));
+    let api_key_store: Arc<dyn ApiKeyStore> = Arc::new(SqliteApiKeyStore::new(pool.clone()));
+    let auth_service = AuthService::new(
+        user_store.clone(),
+        session_store.clone(),
+        api_key_store.clone(),
+    );
 
     AppState {
         app_config: AppConfig::default(),
@@ -87,6 +100,10 @@ pub fn default_app_state() -> AppState {
         gate_pipeline,
         orchestrator,
         system_config,
+        user_store,
+        session_store,
+        api_key_store,
+        auth_service,
     }
 }
 
@@ -131,6 +148,14 @@ pub async fn bootstrap_app_state(home_dir: impl AsRef<Path>) -> Result<AppState,
     let config_store = Arc::new(SqliteConfigStore::new(pool.clone()));
     let system_config = SystemConfigRuntime::defaulted(config_store);
     system_config.load_from_store().await?;
+    let user_store: Arc<dyn UserStore> = Arc::new(SqliteUserStore::new(pool.clone()));
+    let session_store: Arc<dyn SessionStore> = Arc::new(SqliteSessionStore::new(pool.clone()));
+    let api_key_store: Arc<dyn ApiKeyStore> = Arc::new(SqliteApiKeyStore::new(pool.clone()));
+    let auth_service = AuthService::new(
+        user_store.clone(),
+        session_store.clone(),
+        api_key_store.clone(),
+    );
 
     Ok(AppState {
         app_config,
@@ -150,6 +175,10 @@ pub async fn bootstrap_app_state(home_dir: impl AsRef<Path>) -> Result<AppState,
         gate_pipeline,
         orchestrator,
         system_config,
+        user_store,
+        session_store,
+        api_key_store,
+        auth_service,
     })
 }
 

@@ -8,6 +8,7 @@ license.workspace = true
 ennoia-kernel = { path = "../kernel" }
 ennoia-policy = { path = "../policy" }
 ennoia-config = { path = "../config" }
+ennoia-auth = { path = "../auth" }
 ennoia-memory = { path = "../memory" }
 ennoia-runtime = { path = "../runtime" }
 ennoia-orchestrator = { path = "../orchestrator" }

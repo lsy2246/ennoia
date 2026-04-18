@@ -3,6 +3,7 @@ members = [
   "crates/kernel",
   "crates/policy",
   "crates/config",
+  "crates/auth",
   "crates/memory",
   "crates/runtime",
   "crates/orchestrator",

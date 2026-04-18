@@ -7,7 +7,7 @@ pub mod logging;
 pub mod rate_limit;
 pub mod timeout;
 
-pub use auth::{auth_middleware, AuthedUser};
+pub use auth::{auth_middleware, require_admin, AuthedUser};
 pub use body_limit::body_limit_middleware;
 pub use cors::cors_middleware;
 pub use logging::logging_middleware;

@@ -49,6 +49,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         Some("memory") => {
             memory_command(&args[2..]).await?;
         }
+        Some("admin") => {
+            admin_command(&args[2..]).await?;
+        }
         _ => {
             print_summary();
         }
@@ -73,6 +76,8 @@ fn print_summary() {
     println!("  ennoia memory list");
     println!("  ennoia memory remember <owner_kind> <owner_id> <namespace> <content>");
     println!("  ennoia memory recall <owner_kind> <owner_id> [query]");
+    println!("  ennoia admin create-admin <username> <password> [display_name]");
+    println!("  ennoia admin list-users");
 }
 
 fn print_default_config() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -265,5 +270,74 @@ fn write_if_missing(path: &Path, contents: &str) -> io::Result<()> {
         fs::write(path, contents)?;
     }
 
+    Ok(())
+}
+
+async fn admin_command(args: &[String]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let target = resolve_runtime_path(None);
+    init_home_template(&target)?;
+    let state = ennoia_server::bootstrap_app_state(&target).await?;
+
+    let sub = args.first().map(String::as_str).unwrap_or("help");
+    match sub {
+        "create-admin" => admin_create_admin(&state, &args[1..]).await,
+        "list-users" => admin_list_users(&state).await,
+        other => {
+            eprintln!("unknown admin subcommand: {other}");
+            eprintln!("available: create-admin, list-users");
+            std::process::exit(2);
+        }
+    }
+}
+
+async fn admin_create_admin(
+    state: &ennoia_server::AppState,
+    args: &[String],
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    if args.len() < 2 {
+        eprintln!("usage: ennoia admin create-admin <username> <password> [display_name]");
+        std::process::exit(2);
+    }
+    let username = &args[0];
+    let password = &args[1];
+    let display_name = args.get(2).cloned();
+
+    let existing = state.user_store.count().await?;
+    if existing > 0 {
+        eprintln!("note: {existing} user(s) already exist; still creating admin");
+    }
+
+    let user = state
+        .auth_service
+        .register(
+            username,
+            password,
+            display_name,
+            None,
+            ennoia_kernel::UserRole::Admin,
+        )
+        .await?;
+    println!("created admin user: {}", user.id);
+    println!("username: {}", user.username);
+    Ok(())
+}
+
+async fn admin_list_users(
+    state: &ennoia_server::AppState,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let users = state.user_store.list().await?;
+    if users.is_empty() {
+        println!("(no users)");
+        return Ok(());
+    }
+    for user in users {
+        println!(
+            "{}  {}  [{}]  created={}",
+            user.id,
+            user.username,
+            user.role.as_str(),
+            user.created_at
+        );
+    }
     Ok(())
 }

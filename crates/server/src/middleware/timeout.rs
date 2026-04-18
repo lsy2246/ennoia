@@ -1,9 +1,8 @@
 use std::time::Duration;
 
 use axum::{
-    body::Body,
-    extract::State,
-    http::{Request, StatusCode},
+    extract::{Request, State},
+    http::StatusCode,
     middleware::Next,
     response::{IntoResponse, Response},
 };
@@ -13,7 +12,7 @@ use crate::app::AppState;
 /// timeout_middleware enforces a per-path or default-ms timeout from the live TimeoutConfig.
 pub async fn timeout_middleware(
     State(state): State<AppState>,
-    req: Request<Body>,
+    req: Request,
     next: Next,
 ) -> Response {
     let cfg = state.system_config.timeout.load();

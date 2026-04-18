@@ -1,24 +1,26 @@
 use std::fs;
 
 use axum::{
-    extract::{Path, State},
-    http::StatusCode,
+    extract::{Extension, Path, State},
+    http::{HeaderMap, StatusCode},
     middleware as axum_middleware,
     routing::{get, post},
     Json, Router,
 };
 use chrono::Utc;
+use ennoia_auth::tokens;
 use ennoia_extension_host::{
     ExtensionRegistrySnapshot, RegisteredExtensionSnapshot, RegisteredPageContribution,
     RegisteredPanelContribution,
 };
 use ennoia_kernel::{
-    ArtifactKind, ArtifactSpec, AssembleRequest, ConfigChangeRecord, ConfigEntry, ConfigStore,
-    ContextView, EnqueueRequest, EpisodeKind, EpisodeRequest, JobKind, JobRecord, MemoryKind,
-    MemoryRecord, MemorySource, MessageRole, MessageSpec, OwnerKind, OwnerRef, RecallMode,
-    RecallQuery, RecallResult, RememberReceipt, RememberRequest, ReviewAction, ReviewActionKind,
-    ReviewReceipt, ScheduleKind, Stability, SystemConfig, ThreadKind, ThreadSpec,
-    ALL_CONFIG_KEYS,
+    ApiKey, ArtifactKind, ArtifactSpec, AssembleRequest, AuthMode, BootstrapState,
+    ConfigChangeRecord, ConfigEntry, ConfigStore, ContextView, EnqueueRequest, EpisodeKind,
+    EpisodeRequest, JobKind, JobRecord, MemoryKind, MemoryRecord, MemorySource, MessageRole,
+    MessageSpec, OwnerKind, OwnerRef, RecallMode, RecallQuery, RecallResult, RememberReceipt,
+    RememberRequest, ReviewAction, ReviewActionKind, ReviewReceipt, ScheduleKind, Session,
+    Stability, SystemConfig, ThreadKind, ThreadSpec, UpdateUserRequest, User, UserRole,
+    ALL_CONFIG_KEYS, CONFIG_KEY_AUTH, CONFIG_KEY_BOOTSTRAP,
 };
 use ennoia_orchestrator::{RunRequest, RunTrigger};
 use serde::{Deserialize, Serialize};
@@ -29,7 +31,7 @@ use crate::app::AppState;
 use crate::db::{self, JobRow};
 use crate::middleware::{
     auth_middleware, body_limit_middleware, cors_middleware, logging_middleware,
-    rate_limit_middleware, timeout_middleware,
+    rate_limit_middleware, require_admin, timeout_middleware, AuthedUser,
 };
 
 pub fn build_router(state: AppState) -> Router {
@@ -40,7 +42,43 @@ pub fn build_router(state: AppState) -> Router {
             get(config_get).put(config_put),
         )
         .route("/api/v1/admin/config/{key}/history", get(config_history))
-        .route("/api/v1/admin/config/snapshot", get(config_snapshot));
+        .route("/api/v1/admin/config/snapshot", get(config_snapshot))
+        .route(
+            "/api/v1/admin/users",
+            get(users_list).post(users_create),
+        )
+        .route(
+            "/api/v1/admin/users/{user_id}",
+            get(users_get).put(users_update).delete(users_delete),
+        )
+        .route(
+            "/api/v1/admin/users/{user_id}/reset-password",
+            post(users_reset_password),
+        )
+        .route("/api/v1/admin/sessions", get(sessions_list))
+        .route(
+            "/api/v1/admin/sessions/{session_id}",
+            axum::routing::delete(sessions_delete),
+        )
+        .route(
+            "/api/v1/admin/api-keys",
+            get(api_keys_list).post(api_keys_create),
+        )
+        .route(
+            "/api/v1/admin/api-keys/{key_id}",
+            axum::routing::delete(api_keys_delete),
+        );
+
+    let auth_public = Router::new()
+        .route("/api/v1/auth/register", post(auth_register))
+        .route("/api/v1/auth/login", post(auth_login))
+        .route("/api/v1/auth/logout", post(auth_logout))
+        .route("/api/v1/auth/me", get(auth_me))
+        .route("/api/v1/auth/refresh", post(auth_refresh));
+
+    let bootstrap = Router::new()
+        .route("/api/v1/bootstrap/state", get(bootstrap_state_handler))
+        .route("/api/v1/bootstrap", post(bootstrap_complete));
 
     Router::new()
         .route("/health", get(health))
@@ -75,6 +113,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/memories/review", post(memories_review))
         .route("/api/v1/jobs", get(jobs_list).post(jobs_create))
         .merge(admin)
+        .merge(auth_public)
+        .merge(bootstrap)
         .layer(axum_middleware::from_fn_with_state(
             state.clone(),
             auth_middleware,
@@ -884,4 +924,508 @@ fn ensure_full_config_set(mut rows: Vec<ConfigEntry>) -> Vec<ConfigEntry> {
     }
     rows.sort_by(|a, b| a.key.cmp(&b.key));
     rows
+}
+
+// ========== Auth public API ==========
+
+#[derive(Debug, Deserialize)]
+struct RegisterPayload {
+    username: String,
+    password: String,
+    #[serde(default)]
+    display_name: Option<String>,
+    #[serde(default)]
+    email: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct LoginPayload {
+    username: String,
+    password: String,
+}
+
+#[derive(Debug, Serialize)]
+struct LoginResponse {
+    user: User,
+    token: String,
+    token_kind: &'static str,
+    expires_at: String,
+}
+
+#[derive(Debug, Serialize)]
+struct RegisterResponse {
+    user: User,
+}
+
+async fn auth_register(
+    State(state): State<AppState>,
+    Json(payload): Json<RegisterPayload>,
+) -> Result<Json<RegisterResponse>, (StatusCode, String)> {
+    let cfg = state.system_config.auth.load();
+    if !cfg.allow_registration {
+        return Err((StatusCode::FORBIDDEN, "registration is disabled".to_string()));
+    }
+    let user = state
+        .auth_service
+        .register(
+            &payload.username,
+            &payload.password,
+            payload.display_name,
+            payload.email,
+            UserRole::User,
+        )
+        .await
+        .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+    Ok(Json(RegisterResponse { user }))
+}
+
+async fn auth_login(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(payload): Json<LoginPayload>,
+) -> Result<Json<LoginResponse>, (StatusCode, String)> {
+    let cfg = state.system_config.auth.load();
+    let ttl = cfg.session_ttl_seconds;
+    let user_agent = headers
+        .get("user-agent")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string());
+    let ip = headers
+        .get("x-forwarded-for")
+        .or_else(|| headers.get("x-real-ip"))
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.split(',').next().unwrap_or("").trim().to_string());
+
+    match cfg.mode {
+        AuthMode::Jwt => {
+            // JWT still requires username+password to authenticate against the user store.
+            let (user, password_hash) = state
+                .user_store
+                .get_by_username(&payload.username)
+                .await
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+                .ok_or((StatusCode::UNAUTHORIZED, "invalid credentials".to_string()))?;
+            let ok = ennoia_auth::verify_password(&payload.password, &password_hash)
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+            if !ok {
+                return Err((StatusCode::UNAUTHORIZED, "invalid credentials".to_string()));
+            }
+            let secret = cfg
+                .jwt_secret
+                .as_deref()
+                .ok_or((StatusCode::INTERNAL_SERVER_ERROR, "jwt secret not configured".to_string()))?;
+            let token = state
+                .auth_service
+                .mint_jwt(&user, secret, ttl)
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+            let expires_at = (Utc::now() + chrono::Duration::seconds(ttl as i64)).to_rfc3339();
+            let _ = state.user_store.touch_login(&user.id, &now_iso()).await;
+            Ok(Json(LoginResponse {
+                user,
+                token,
+                token_kind: "jwt",
+                expires_at,
+            }))
+        }
+        _ => {
+            let outcome = state
+                .auth_service
+                .login(&payload.username, &payload.password, ttl, user_agent, ip)
+                .await
+                .map_err(|e| (StatusCode::UNAUTHORIZED, e.to_string()))?;
+            Ok(Json(LoginResponse {
+                user: outcome.user,
+                token: outcome.raw_token,
+                token_kind: "session",
+                expires_at: outcome.session.expires_at,
+            }))
+        }
+    }
+}
+
+async fn auth_logout(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let token = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .map(|s| s.trim().to_string());
+    if let Some(t) = token {
+        let _ = state.auth_service.logout(&t).await;
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn auth_me(Extension(user): Extension<AuthedUser>) -> Json<AuthedUser> {
+    Json(user)
+}
+
+#[derive(Debug, Deserialize)]
+struct RefreshPayload {
+    token: String,
+}
+
+async fn auth_refresh(
+    State(state): State<AppState>,
+    Json(payload): Json<RefreshPayload>,
+) -> Result<Json<LoginResponse>, (StatusCode, String)> {
+    let cfg = state.system_config.auth.load();
+    let secret = cfg
+        .jwt_secret
+        .as_deref()
+        .ok_or((StatusCode::BAD_REQUEST, "jwt secret not configured".to_string()))?;
+    let (user, _claims) = state
+        .auth_service
+        .authenticate_jwt(&payload.token, secret)
+        .await
+        .map_err(|e| (StatusCode::UNAUTHORIZED, e.to_string()))?;
+    let ttl = cfg.session_ttl_seconds;
+    let token = state
+        .auth_service
+        .mint_jwt(&user, secret, ttl)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let expires_at = (Utc::now() + chrono::Duration::seconds(ttl as i64)).to_rfc3339();
+    Ok(Json(LoginResponse {
+        user,
+        token,
+        token_kind: "jwt",
+        expires_at,
+    }))
+}
+
+// ========== Admin users API ==========
+
+#[derive(Debug, Deserialize)]
+struct AdminCreateUserPayload {
+    username: String,
+    password: String,
+    #[serde(default)]
+    display_name: Option<String>,
+    #[serde(default)]
+    email: Option<String>,
+    #[serde(default)]
+    role: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AdminUpdateUserPayload {
+    #[serde(default)]
+    display_name: Option<String>,
+    #[serde(default)]
+    email: Option<String>,
+    #[serde(default)]
+    role: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AdminResetPasswordPayload {
+    new_password: String,
+}
+
+async fn users_list(
+    State(state): State<AppState>,
+    Extension(user): Extension<AuthedUser>,
+) -> Result<Json<Vec<User>>, (StatusCode, String)> {
+    require_admin(&user, &state)?;
+    state
+        .user_store
+        .list()
+        .await
+        .map(Json)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
+}
+
+async fn users_create(
+    State(state): State<AppState>,
+    Extension(user): Extension<AuthedUser>,
+    Json(payload): Json<AdminCreateUserPayload>,
+) -> Result<Json<User>, (StatusCode, String)> {
+    require_admin(&user, &state)?;
+    let role = payload
+        .role
+        .as_deref()
+        .map(UserRole::from_str)
+        .unwrap_or(UserRole::User);
+    state
+        .auth_service
+        .register(
+            &payload.username,
+            &payload.password,
+            payload.display_name,
+            payload.email,
+            role,
+        )
+        .await
+        .map(Json)
+        .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))
+}
+
+async fn users_get(
+    State(state): State<AppState>,
+    Extension(caller): Extension<AuthedUser>,
+    Path(user_id): Path<String>,
+) -> Result<Json<User>, (StatusCode, String)> {
+    require_admin(&caller, &state)?;
+    state
+        .user_store
+        .get(&user_id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .map(Json)
+        .ok_or((StatusCode::NOT_FOUND, format!("user {user_id}")))
+}
+
+async fn users_update(
+    State(state): State<AppState>,
+    Extension(caller): Extension<AuthedUser>,
+    Path(user_id): Path<String>,
+    Json(payload): Json<AdminUpdateUserPayload>,
+) -> Result<Json<User>, (StatusCode, String)> {
+    require_admin(&caller, &state)?;
+    let update = UpdateUserRequest {
+        display_name: payload.display_name,
+        email: payload.email,
+        role: payload.role.as_deref().map(UserRole::from_str),
+    };
+    state
+        .user_store
+        .update(&user_id, update)
+        .await
+        .map(Json)
+        .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))
+}
+
+async fn users_delete(
+    State(state): State<AppState>,
+    Extension(caller): Extension<AuthedUser>,
+    Path(user_id): Path<String>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    require_admin(&caller, &state)?;
+    state
+        .user_store
+        .delete(&user_id)
+        .await
+        .map(|_| StatusCode::NO_CONTENT)
+        .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))
+}
+
+async fn users_reset_password(
+    State(state): State<AppState>,
+    Extension(caller): Extension<AuthedUser>,
+    Path(user_id): Path<String>,
+    Json(payload): Json<AdminResetPasswordPayload>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    require_admin(&caller, &state)?;
+    let hash = ennoia_auth::hash_password(&payload.new_password)
+        .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+    state
+        .user_store
+        .set_password(&user_id, &hash)
+        .await
+        .map(|_| StatusCode::NO_CONTENT)
+        .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))
+}
+
+// ========== Admin sessions API ==========
+
+async fn sessions_list(
+    State(state): State<AppState>,
+    Extension(caller): Extension<AuthedUser>,
+) -> Result<Json<Vec<Session>>, (StatusCode, String)> {
+    require_admin(&caller, &state)?;
+    state
+        .session_store
+        .list_all()
+        .await
+        .map(Json)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
+}
+
+async fn sessions_delete(
+    State(state): State<AppState>,
+    Extension(caller): Extension<AuthedUser>,
+    Path(session_id): Path<String>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    require_admin(&caller, &state)?;
+    state
+        .session_store
+        .delete(&session_id)
+        .await
+        .map(|_| StatusCode::NO_CONTENT)
+        .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))
+}
+
+// ========== Admin API keys API ==========
+
+#[derive(Debug, Deserialize)]
+struct AdminCreateApiKeyPayload {
+    user_id: String,
+    #[serde(default)]
+    label: Option<String>,
+    #[serde(default)]
+    scopes: Vec<String>,
+    #[serde(default)]
+    expires_at: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct AdminCreateApiKeyResponse {
+    key: ApiKey,
+    raw_key: String,
+}
+
+async fn api_keys_list(
+    State(state): State<AppState>,
+    Extension(caller): Extension<AuthedUser>,
+) -> Result<Json<Vec<ApiKey>>, (StatusCode, String)> {
+    require_admin(&caller, &state)?;
+    state
+        .api_key_store
+        .list()
+        .await
+        .map(Json)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
+}
+
+async fn api_keys_create(
+    State(state): State<AppState>,
+    Extension(caller): Extension<AuthedUser>,
+    Json(payload): Json<AdminCreateApiKeyPayload>,
+) -> Result<Json<AdminCreateApiKeyResponse>, (StatusCode, String)> {
+    require_admin(&caller, &state)?;
+    let (key, raw) = state
+        .auth_service
+        .create_api_key(&payload.user_id, payload.label, payload.scopes, payload.expires_at)
+        .await
+        .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+    Ok(Json(AdminCreateApiKeyResponse { key, raw_key: raw }))
+}
+
+async fn api_keys_delete(
+    State(state): State<AppState>,
+    Extension(caller): Extension<AuthedUser>,
+    Path(key_id): Path<String>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    require_admin(&caller, &state)?;
+    state
+        .api_key_store
+        .delete(&key_id)
+        .await
+        .map(|_| StatusCode::NO_CONTENT)
+        .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))
+}
+
+// ========== Bootstrap API ==========
+
+#[derive(Debug, Deserialize)]
+struct BootstrapPayload {
+    admin_username: String,
+    admin_password: String,
+    #[serde(default)]
+    admin_display_name: Option<String>,
+    #[serde(default)]
+    auth_mode: Option<String>,
+    #[serde(default)]
+    allow_registration: Option<bool>,
+}
+
+#[derive(Debug, Serialize)]
+struct BootstrapResponse {
+    user: User,
+    bootstrap: BootstrapState,
+    jwt_secret_generated: bool,
+}
+
+async fn bootstrap_state_handler(State(state): State<AppState>) -> Json<BootstrapState> {
+    Json((**state.system_config.bootstrap.load()).clone())
+}
+
+async fn bootstrap_complete(
+    State(state): State<AppState>,
+    Json(payload): Json<BootstrapPayload>,
+) -> Result<Json<BootstrapResponse>, (StatusCode, String)> {
+    let current = (**state.system_config.bootstrap.load()).clone();
+    if current.completed {
+        return Err((StatusCode::CONFLICT, "bootstrap already completed".to_string()));
+    }
+
+    let count = state
+        .user_store
+        .count()
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    if count > 0 {
+        return Err((
+            StatusCode::CONFLICT,
+            "users already exist; bootstrap disabled".to_string(),
+        ));
+    }
+
+    let admin = state
+        .auth_service
+        .register(
+            &payload.admin_username,
+            &payload.admin_password,
+            payload.admin_display_name,
+            None,
+            UserRole::Admin,
+        )
+        .await
+        .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+
+    let mut auth_cfg = (**state.system_config.auth.load()).clone();
+    auth_cfg.enabled = true;
+    auth_cfg.mode = payload
+        .auth_mode
+        .as_deref()
+        .map(|m| match m {
+            "api_key" => AuthMode::ApiKey,
+            "jwt" => AuthMode::Jwt,
+            "none" => AuthMode::None,
+            _ => AuthMode::Session,
+        })
+        .unwrap_or(AuthMode::Session);
+    if let Some(allow) = payload.allow_registration {
+        auth_cfg.allow_registration = allow;
+    }
+
+    let mut generated_secret = false;
+    if auth_cfg.jwt_secret.is_none() {
+        let secret = tokens::generate_jwt_secret()
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        auth_cfg.jwt_secret = Some(secret);
+        generated_secret = true;
+    }
+
+    let auth_value =
+        serde_json::to_value(&auth_cfg).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    state
+        .system_config
+        .store
+        .put(CONFIG_KEY_AUTH, &auth_value, Some("bootstrap"))
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let _ = state.system_config.apply(CONFIG_KEY_AUTH, &auth_value);
+
+    let bootstrap = BootstrapState {
+        completed: true,
+        admin_created_at: Some(now_iso()),
+    };
+    let boot_value = serde_json::to_value(&bootstrap)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    state
+        .system_config
+        .store
+        .put(CONFIG_KEY_BOOTSTRAP, &boot_value, Some("bootstrap"))
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let _ = state.system_config.apply(CONFIG_KEY_BOOTSTRAP, &boot_value);
+
+    Ok(Json(BootstrapResponse {
+        user: admin,
+        bootstrap,
+        jwt_secret_generated: generated_secret,
+    }))
 }

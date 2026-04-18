@@ -10,6 +10,7 @@ use sqlx::{Row, SqlitePool};
 pub const SCHEMA_SQL: &str = include_str!("../../../migrations/0001_ennoia_core.sql");
 pub const SYSTEM_CONFIG_SQL: &str =
     include_str!("../../../migrations/0002_system_config.sql");
+pub const AUTH_SQL: &str = include_str!("../../../migrations/0003_auth.sql");
 
 #[derive(Debug, Clone, Serialize)]
 pub struct JobRow {
@@ -25,7 +26,7 @@ pub struct JobRow {
 }
 
 pub async fn initialize_schema(pool: &SqlitePool) -> Result<(), sqlx::Error> {
-    for migration in [SCHEMA_SQL, SYSTEM_CONFIG_SQL] {
+    for migration in [SCHEMA_SQL, SYSTEM_CONFIG_SQL, AUTH_SQL] {
         for statement in migration
             .split(';')
             .map(str::trim)

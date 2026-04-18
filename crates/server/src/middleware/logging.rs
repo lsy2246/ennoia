@@ -1,7 +1,5 @@
 use axum::{
-    body::Body,
-    extract::State,
-    http::Request,
+    extract::{Request, State},
     middleware::Next,
     response::Response,
 };
@@ -13,7 +11,7 @@ use crate::app::AppState;
 /// Sampling and redaction are honored from the live LoggingConfig.
 pub async fn logging_middleware(
     State(state): State<AppState>,
-    req: Request<Body>,
+    req: Request,
     next: Next,
 ) -> Response {
     let cfg = state.system_config.logging.load();
