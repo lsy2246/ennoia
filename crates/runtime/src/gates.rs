@@ -1,9 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use ennoia_kernel::GateVerdict;
-
-use crate::gate::{Gate, GateContext, GatePipeline};
+use ennoia_kernel::{Gate, GateContext, GatePipeline, GateVerdict};
 
 /// ContextReadyGate fails when the assembled context view is empty.
 #[derive(Debug, Default, Clone, Copy)]

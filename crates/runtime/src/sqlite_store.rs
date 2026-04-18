@@ -1,9 +1,6 @@
 use async_trait::async_trait;
-use ennoia_kernel::{DecisionSnapshot, GateRecord, RunStage, RunStageEvent};
+use ennoia_kernel::{DecisionSnapshot, GateRecord, RunStage, RunStageEvent, RuntimeError, RuntimeStore};
 use sqlx::{Row, SqlitePool};
-
-use crate::error::RuntimeError;
-use crate::store::RuntimeStore;
 
 /// SqliteRuntimeStore persists runtime audit rows into the shared sqlite pool.
 #[derive(Debug, Clone)]
@@ -18,6 +15,16 @@ impl SqliteRuntimeStore {
 
     pub fn pool(&self) -> &SqlitePool {
         &self.pool
+    }
+}
+
+trait IntoRuntimeError<T> {
+    fn rt_err(self) -> Result<T, RuntimeError>;
+}
+
+impl<T> IntoRuntimeError<T> for Result<T, sqlx::Error> {
+    fn rt_err(self) -> Result<T, RuntimeError> {
+        self.map_err(|e| RuntimeError::Backend(e.to_string()))
     }
 }
 
@@ -37,7 +44,8 @@ impl RuntimeStore for SqliteRuntimeStore {
         .bind(&event.reason)
         .bind(&event.at)
         .execute(&self.pool)
-        .await?;
+        .await
+        .rt_err()?;
         Ok(())
     }
 
@@ -56,7 +64,8 @@ impl RuntimeStore for SqliteRuntimeStore {
         .bind(&snapshot.policy_rule_id)
         .bind(&snapshot.at)
         .execute(&self.pool)
-        .await?;
+        .await
+        .rt_err()?;
         Ok(())
     }
 
@@ -75,7 +84,8 @@ impl RuntimeStore for SqliteRuntimeStore {
         .bind(&record.details_json)
         .bind(&record.at)
         .execute(&self.pool)
-        .await?;
+        .await
+        .rt_err()?;
         Ok(())
     }
 
@@ -89,7 +99,8 @@ impl RuntimeStore for SqliteRuntimeStore {
         )
         .bind(run_id)
         .fetch_all(&self.pool)
-        .await?;
+        .await
+        .rt_err()?;
 
         Ok(rows
             .into_iter()
@@ -117,7 +128,8 @@ impl RuntimeStore for SqliteRuntimeStore {
         )
         .bind(run_id)
         .fetch_all(&self.pool)
-        .await?;
+        .await
+        .rt_err()?;
 
         Ok(rows
             .into_iter()
@@ -144,7 +156,8 @@ impl RuntimeStore for SqliteRuntimeStore {
         )
         .bind(run_id)
         .fetch_all(&self.pool)
-        .await?;
+        .await
+        .rt_err()?;
 
         Ok(rows
             .into_iter()

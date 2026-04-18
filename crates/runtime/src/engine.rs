@@ -1,14 +1,8 @@
 use std::sync::Arc;
 
-use ennoia_kernel::{Decision, RunStage, Signals};
-use ennoia_policy::StagePolicy;
+use ennoia_kernel::{Decision, DecisionEngine, RunStage, Signals, StagePolicy, StageMachine};
 
-use crate::stage::{PolicyStageMachine, StageMachine};
-
-/// DecisionEngine produces a Decision for a given stage + signals.
-pub trait DecisionEngine: Send + Sync {
-    fn decide(&self, stage: RunStage, signals: &Signals) -> Decision;
-}
+use crate::stage::PolicyStageMachine;
 
 /// DefaultDecisionEngine delegates to a PolicyStageMachine and emits its Decision part.
 #[derive(Debug, Clone)]

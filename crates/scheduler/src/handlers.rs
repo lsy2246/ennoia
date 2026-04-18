@@ -1,13 +1,5 @@
 use async_trait::async_trait;
-
-use crate::model::JobRecord;
-
-/// JobHandler is the contract a runtime must implement for each job kind.
-#[async_trait]
-pub trait JobHandler: Send + Sync {
-    fn kind(&self) -> &'static str;
-    async fn handle(&self, job: &JobRecord) -> Result<(), String>;
-}
+use ennoia_kernel::{JobHandler, JobRecord};
 
 /// RetireExpiredHandler is a placeholder no-op that succeeds.
 ///

@@ -1,5 +1,14 @@
-use ennoia_kernel::OwnerRef;
+//! Scheduler domain: job types, traits, error.
+//!
+//! Kernel owns the contracts and job record shapes. The `ennoia-scheduler` crate
+//! provides the SqliteSchedulerStore + Worker.
+
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+
+use crate::OwnerRef;
+
+// ========== Job kinds ==========
 
 /// JobKind lists the canonical built-in job categories.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -60,7 +69,6 @@ impl ScheduleKind {
     }
 }
 
-/// JobStatus tracks one scheduled job lifecycle.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum JobStatus {
@@ -120,3 +128,51 @@ pub struct JobRecord {
     pub created_at: String,
     pub updated_at: String,
 }
+
+// ========== SchedulerStore ==========
+
+#[async_trait]
+pub trait SchedulerStore: Send + Sync {
+    async fn enqueue(&self, req: EnqueueRequest) -> Result<JobRecord, SchedulerError>;
+    async fn list(&self, limit: u32) -> Result<Vec<JobRecord>, SchedulerError>;
+    async fn fetch_due(&self, now_iso: &str, limit: u32) -> Result<Vec<JobRecord>, SchedulerError>;
+    async fn mark_running(&self, id: &str, now_iso: &str) -> Result<(), SchedulerError>;
+    async fn mark_done(&self, id: &str, now_iso: &str) -> Result<(), SchedulerError>;
+    async fn mark_failed(
+        &self,
+        id: &str,
+        now_iso: &str,
+        error: &str,
+    ) -> Result<(), SchedulerError>;
+}
+
+// ========== JobHandler ==========
+
+#[async_trait]
+pub trait JobHandler: Send + Sync {
+    fn kind(&self) -> &'static str;
+    async fn handle(&self, job: &JobRecord) -> Result<(), String>;
+}
+
+// ========== Error ==========
+
+#[derive(Debug)]
+pub enum SchedulerError {
+    Backend(String),
+    Serde(String),
+    NotFound(String),
+    Invalid(String),
+}
+
+impl std::fmt::Display for SchedulerError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SchedulerError::Backend(reason) => write!(f, "scheduler backend error: {reason}"),
+            SchedulerError::Serde(reason) => write!(f, "scheduler serde error: {reason}"),
+            SchedulerError::NotFound(key) => write!(f, "scheduler job not found: {key}"),
+            SchedulerError::Invalid(reason) => write!(f, "scheduler invalid input: {reason}"),
+        }
+    }
+}
+
+impl std::error::Error for SchedulerError {}

@@ -6,16 +6,14 @@ use std::sync::Arc;
 use ennoia_extension_host::{ExtensionRegistry, RegisteredExtension};
 use ennoia_kernel::{
     AgentConfig, AppConfig, CommandContribution, ContributionSet, ExtensionKind, ExtensionManifest,
-    HookContribution, PageContribution, PanelContribution, PlatformOverview, ProviderContribution,
-    ServerConfig, SpaceSpec, ThemeContribution, UiConfig,
+    GatePipeline, HookContribution, MemoryStore, PageContribution, PanelContribution,
+    PlatformOverview, ProviderContribution, RuntimeStore, SchedulerStore, ServerConfig, SpaceSpec,
+    StageMachine, ThemeContribution, UiConfig,
 };
-use ennoia_memory::{MemoryStore, SqliteMemoryStore};
+use ennoia_memory::SqliteMemoryStore;
 use ennoia_policy::PolicySet;
-use ennoia_runtime::{
-    builtin_pipeline, GatePipeline, PolicyStageMachine, RuntimeStore, SqliteRuntimeStore,
-    StageMachine,
-};
-use ennoia_scheduler::{SchedulerStore, SqliteSchedulerStore, Worker};
+use ennoia_runtime::{builtin_pipeline, PolicyStageMachine, SqliteRuntimeStore};
+use ennoia_scheduler::{SqliteSchedulerStore, Worker};
 use ennoia_orchestrator::OrchestratorService;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::SqlitePool;

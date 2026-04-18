@@ -1,15 +1,12 @@
-//! Policy crate owns configuration for memory and runtime behavior.
-
-pub mod glob;
-pub mod memory;
-pub mod runtime;
+//! policy-loader: thin toml → kernel policy loader.
+//!
+//! All policy types live in `ennoia_kernel::policy`. This crate only knows how
+//! to read toml files from disk and produce the canonical kernel types.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub use glob::GlobPattern;
-pub use memory::MemoryPolicy;
-pub use runtime::{RuntimeRule, RuntimeRuleCondition, RuntimeRuleTarget, StagePolicy};
+use ennoia_kernel::{MemoryPolicy, StagePolicy};
 
 /// PolicySet is the bundle loaded from `<home>/policies/`.
 #[derive(Debug, Clone, Default)]

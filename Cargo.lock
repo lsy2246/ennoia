@@ -309,7 +309,6 @@ name = "ennoia-cli"
 version = "0.1.0"
 dependencies = [
  "ennoia-kernel",
- "ennoia-memory",
  "ennoia-server",
  "serde_json",
  "tokio",
@@ -329,7 +328,9 @@ dependencies = [
 name = "ennoia-kernel"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -339,7 +340,6 @@ dependencies = [
  "async-trait",
  "chrono",
  "ennoia-kernel",
- "ennoia-policy",
  "serde",
  "serde_json",
  "sqlx",
@@ -352,9 +352,6 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "ennoia-kernel",
- "ennoia-memory",
- "ennoia-policy",
- "ennoia-runtime",
  "serde",
  "serde_json",
  "uuid",
@@ -376,8 +373,6 @@ dependencies = [
  "async-trait",
  "chrono",
  "ennoia-kernel",
- "ennoia-memory",
- "ennoia-policy",
  "serde",
  "serde_json",
  "sqlx",
@@ -391,7 +386,6 @@ dependencies = [
  "async-trait",
  "chrono",
  "ennoia-kernel",
- "ennoia-memory",
  "serde",
  "serde_json",
  "sqlx",

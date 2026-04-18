@@ -3,10 +3,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::Utc;
+use ennoia_kernel::{JobHandler, SchedulerStore};
 use tokio::sync::watch;
-
-use crate::handlers::JobHandler;
-use crate::store::SchedulerStore;
 
 /// Worker polls the scheduler store and runs due jobs through registered handlers.
 #[derive(Clone)]

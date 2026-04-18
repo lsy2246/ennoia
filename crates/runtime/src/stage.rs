@@ -1,12 +1,8 @@
 use std::sync::Arc;
 
-use ennoia_kernel::{Decision, NextAction, RunStage, Signals, StageTransition};
-use ennoia_policy::StagePolicy;
-
-/// StageMachine owns the rule that decides "given current stage and signals, what's next".
-pub trait StageMachine: Send + Sync {
-    fn decide(&self, stage: RunStage, signals: &Signals) -> (Decision, StageTransition);
-}
+use ennoia_kernel::{
+    Decision, NextAction, RunStage, Signals, StageMachine, StagePolicy, StageTransition,
+};
 
 /// PolicyStageMachine drives transitions from the declarative StagePolicy.
 #[derive(Debug, Clone)]
@@ -75,7 +71,6 @@ pub fn apply_next_action(_from: RunStage, action: NextAction) -> RunStage {
 mod tests {
     use super::*;
     use ennoia_kernel::{ExecutionSignals, Signals};
-    use std::sync::Arc;
 
     #[test]
     fn policy_machine_enters_planning() {

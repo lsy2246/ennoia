@@ -7,27 +7,16 @@ use ennoia_server::{bootstrap_app_state, default_app_state, run_server, AppState
 
 const ENNOIA_HOME_ENV: &str = "ENNOIA_HOME";
 
-const APP_CONFIG_TEMPLATE: &str =
-    include_str!("../../../packaging/home-template/config/ennoia.toml");
-const SERVER_CONFIG_TEMPLATE: &str =
-    include_str!("../../../packaging/home-template/config/server.toml");
-const UI_CONFIG_TEMPLATE: &str = include_str!("../../../packaging/home-template/config/ui.toml");
-const CODER_TEMPLATE: &str =
-    include_str!("../../../packaging/home-template/config/agents/coder.toml");
-const PLANNER_TEMPLATE: &str =
-    include_str!("../../../packaging/home-template/config/agents/planner.toml");
-const OBSERVATORY_TEMPLATE: &str =
-    include_str!("../../../packaging/home-template/config/extensions/observatory.toml");
-const GITHUB_TEMPLATE: &str =
-    include_str!("../../../packaging/home-template/config/extensions/github.toml");
+const APP_CONFIG_TEMPLATE: &str = include_str!("../templates/config/ennoia.toml");
+const SERVER_CONFIG_TEMPLATE: &str = include_str!("../templates/config/server.toml");
+const UI_CONFIG_TEMPLATE: &str = include_str!("../templates/config/ui.toml");
+const CODER_TEMPLATE: &str = include_str!("../templates/config/agents/coder.toml");
+const PLANNER_TEMPLATE: &str = include_str!("../templates/config/agents/planner.toml");
+const OBSERVATORY_TEMPLATE: &str = include_str!("../templates/config/extensions/observatory.toml");
 const OBSERVATORY_MANIFEST_TEMPLATE: &str =
-    include_str!("../../../packaging/home-template/global/extensions/observatory/manifest.toml");
-const GITHUB_MANIFEST_TEMPLATE: &str =
-    include_str!("../../../packaging/home-template/global/extensions/github/manifest.toml");
-const MEMORY_POLICY_TEMPLATE: &str =
-    include_str!("../../../packaging/home-template/policies/memory.toml");
-const STAGE_POLICY_TEMPLATE: &str =
-    include_str!("../../../packaging/home-template/policies/stage.toml");
+    include_str!("../templates/global/extensions/observatory/manifest.toml");
+const MEMORY_POLICY_TEMPLATE: &str = include_str!("../templates/policies/memory.toml");
+const STAGE_POLICY_TEMPLATE: &str = include_str!("../templates/policies/stage.toml");
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -151,7 +140,7 @@ async fn memory_remember(
         },
         id: args[1].clone(),
     };
-    let request = ennoia_memory::RememberRequest {
+    let request = ennoia_kernel::RememberRequest {
         owner,
         namespace: args[2].clone(),
         memory_kind: ennoia_kernel::MemoryKind::Fact,
@@ -194,11 +183,11 @@ async fn memory_recall(
         None
     };
     let mode = if query_text.is_some() {
-        ennoia_memory::RecallMode::Fts
+        ennoia_kernel::RecallMode::Fts
     } else {
-        ennoia_memory::RecallMode::Namespace
+        ennoia_kernel::RecallMode::Namespace
     };
-    let query = ennoia_memory::RecallQuery {
+    let query = ennoia_kernel::RecallQuery {
         owner,
         thread_id: None,
         run_id: None,
@@ -233,7 +222,6 @@ fn init_home_template(target: &Path) -> io::Result<()> {
     fs::create_dir_all(target.join("state/cache"))?;
     fs::create_dir_all(target.join("state/sqlite"))?;
     fs::create_dir_all(target.join("global/extensions/observatory"))?;
-    fs::create_dir_all(target.join("global/extensions/github"))?;
     fs::create_dir_all(target.join("global/skills"))?;
     fs::create_dir_all(target.join("agents"))?;
     fs::create_dir_all(target.join("spaces"))?;
@@ -248,14 +236,9 @@ fn init_home_template(target: &Path) -> io::Result<()> {
         &config_dir.join("extensions/observatory.toml"),
         OBSERVATORY_TEMPLATE,
     )?;
-    write_if_missing(&config_dir.join("extensions/github.toml"), GITHUB_TEMPLATE)?;
     write_if_missing(
         &target.join("global/extensions/observatory/manifest.toml"),
         OBSERVATORY_MANIFEST_TEMPLATE,
-    )?;
-    write_if_missing(
-        &target.join("global/extensions/github/manifest.toml"),
-        GITHUB_MANIFEST_TEMPLATE,
     )?;
     write_if_missing(&policies_dir.join("memory.toml"), MEMORY_POLICY_TEMPLATE)?;
     write_if_missing(&policies_dir.join("stage.toml"), STAGE_POLICY_TEMPLATE)?;

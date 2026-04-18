@@ -1,4 +1,7 @@
-//! Kernel defines Ennoia's shared domain model and contracts.
+//! Kernel defines Ennoia's shared domain model, traits and policy contracts.
+//!
+//! All cross-crate contracts live here. Implementation crates (memory / runtime /
+//! scheduler / auth / policy-loader) depend only on `ennoia-kernel`.
 
 pub mod config;
 pub mod decision;
@@ -7,8 +10,13 @@ pub mod extension;
 pub mod gate;
 pub mod memory;
 pub mod overview;
+pub mod policy;
+pub mod runtime;
+pub mod scheduler;
 pub mod signals;
 pub mod stage;
+
+// ========== Re-exports ==========
 
 pub use config::{AgentConfig, AppConfig, ServerConfig, UiConfig};
 pub use decision::{Decision, DecisionSnapshot, NextAction};
@@ -22,10 +30,22 @@ pub use extension::{
 };
 pub use gate::{GateRecord, GateSeverity, GateVerdict};
 pub use memory::{
-    ContextFrame, ContextLayer, ContextView, EpisodeKind, EpisodeRecord, MemoryKind, MemoryRecord,
-    MemorySource, MemoryStatus, ReviewAction, ReviewActionKind, Stability,
+    AssembleRequest, ContextFrame, ContextLayer, ContextView, EpisodeKind, EpisodeRecord,
+    EpisodeRequest, MemoryError, MemoryKind, MemoryRecord, MemorySource, MemoryStatus,
+    MemoryStore, RecallMode, RecallQuery, RecallReceipt, RecallResult, RememberReceipt,
+    RememberRequest, ReviewAction, ReviewActionKind, ReviewReceipt, Stability,
 };
 pub use overview::{core_modules, PlatformOverview};
+pub use policy::{
+    GlobPattern, MemoryPolicy, RuntimeRule, RuntimeRuleCondition, RuntimeRuleTarget, StagePolicy,
+};
+pub use runtime::{
+    DecisionEngine, Gate, GateContext, GatePipeline, RuntimeError, RuntimeStore, StageMachine,
+};
+pub use scheduler::{
+    EnqueueRequest, JobHandler, JobKind, JobRecord, JobStatus, ScheduleKind, SchedulerError,
+    SchedulerStore,
+};
 pub use signals::{EvidenceSignals, ExecutionSignals, IntentSignals, Signals};
 pub use stage::{RunStage, RunStageEvent, StageTransition};
 

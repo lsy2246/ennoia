@@ -1,12 +1,11 @@
 use async_trait::async_trait;
 use chrono::Utc;
-use ennoia_kernel::{OwnerKind, OwnerRef};
+use ennoia_kernel::{
+    EnqueueRequest, JobKind, JobRecord, JobStatus, OwnerKind, OwnerRef, ScheduleKind,
+    SchedulerError, SchedulerStore,
+};
 use sqlx::{Row, SqlitePool};
 use uuid::Uuid;
-
-use crate::error::SchedulerError;
-use crate::model::{EnqueueRequest, JobKind, JobRecord, JobStatus, ScheduleKind};
-use crate::store::SchedulerStore;
 
 /// SqliteSchedulerStore persists jobs into the shared sqlite pool.
 #[derive(Debug, Clone)]
@@ -20,17 +19,41 @@ impl SqliteSchedulerStore {
     }
 }
 
+trait IntoSchedulerError<T> {
+    fn sch_backend(self) -> Result<T, SchedulerError>;
+    fn sch_serde(self) -> Result<T, SchedulerError>;
+}
+
+impl<T> IntoSchedulerError<T> for Result<T, sqlx::Error> {
+    fn sch_backend(self) -> Result<T, SchedulerError> {
+        self.map_err(|e| SchedulerError::Backend(e.to_string()))
+    }
+    fn sch_serde(self) -> Result<T, SchedulerError> {
+        self.map_err(|e| SchedulerError::Backend(e.to_string()))
+    }
+}
+
+impl<T> IntoSchedulerError<T> for Result<T, serde_json::Error> {
+    fn sch_backend(self) -> Result<T, SchedulerError> {
+        self.map_err(|e| SchedulerError::Serde(e.to_string()))
+    }
+    fn sch_serde(self) -> Result<T, SchedulerError> {
+        self.map_err(|e| SchedulerError::Serde(e.to_string()))
+    }
+}
+
 #[async_trait]
 impl SchedulerStore for SqliteSchedulerStore {
     async fn enqueue(&self, req: EnqueueRequest) -> Result<JobRecord, SchedulerError> {
         let now = Utc::now().to_rfc3339();
+        let payload_json = serde_json::to_string(&req.payload).sch_serde()?;
         let record = JobRecord {
             id: format!("job-{}", Uuid::new_v4()),
             owner: req.owner.clone(),
             job_kind: req.job_kind.clone(),
             schedule_kind: req.schedule_kind.clone(),
             schedule_value: req.schedule_value.clone(),
-            payload_json: serde_json::to_string(&req.payload)?,
+            payload_json,
             status: JobStatus::Pending,
             retry_count: 0,
             max_retries: req.max_retries.unwrap_or(3),
@@ -63,7 +86,8 @@ impl SchedulerStore for SqliteSchedulerStore {
         .bind(&record.created_at)
         .bind(&record.updated_at)
         .execute(&self.pool)
-        .await?;
+        .await
+        .sch_backend()?;
 
         Ok(record)
     }
@@ -76,7 +100,8 @@ impl SchedulerStore for SqliteSchedulerStore {
         )
         .bind(limit as i64)
         .fetch_all(&self.pool)
-        .await?;
+        .await
+        .sch_backend()?;
 
         Ok(rows.into_iter().map(row_to_job).collect())
     }
@@ -92,7 +117,8 @@ impl SchedulerStore for SqliteSchedulerStore {
         .bind(now_iso)
         .bind(limit as i64)
         .fetch_all(&self.pool)
-        .await?;
+        .await
+        .sch_backend()?;
 
         Ok(rows.into_iter().map(row_to_job).collect())
     }
@@ -102,7 +128,8 @@ impl SchedulerStore for SqliteSchedulerStore {
             .bind(now_iso)
             .bind(id)
             .execute(&self.pool)
-            .await?;
+            .await
+            .sch_backend()?;
         Ok(())
     }
 
@@ -114,7 +141,8 @@ impl SchedulerStore for SqliteSchedulerStore {
         .bind(now_iso)
         .bind(id)
         .execute(&self.pool)
-        .await?;
+        .await
+        .sch_backend()?;
         Ok(())
     }
 
@@ -132,7 +160,8 @@ impl SchedulerStore for SqliteSchedulerStore {
         .bind(error)
         .bind(id)
         .execute(&self.pool)
-        .await?;
+        .await
+        .sch_backend()?;
         Ok(())
     }
 }

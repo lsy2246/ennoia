@@ -3,19 +3,13 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use chrono::Utc;
 use ennoia_kernel::{
-    ContextFrame, ContextLayer, ContextView, EpisodeKind, EpisodeRecord, MemoryKind, MemoryRecord,
-    MemorySource, MemoryStatus, OwnerKind, OwnerRef, ReviewAction, ReviewActionKind, Stability,
+    AssembleRequest, ContextFrame, ContextLayer, ContextView, EpisodeKind, EpisodeRecord,
+    EpisodeRequest, MemoryError, MemoryKind, MemoryPolicy, MemoryRecord, MemorySource,
+    MemoryStatus, MemoryStore, OwnerKind, OwnerRef, RecallMode, RecallQuery, RecallResult,
+    RememberReceipt, RememberRequest, ReviewAction, ReviewActionKind, ReviewReceipt, Stability,
 };
-use ennoia_policy::MemoryPolicy;
 use sqlx::{Row, SqlitePool};
 use uuid::Uuid;
-
-use crate::error::MemoryError;
-use crate::model::{RememberReceipt, ReviewReceipt};
-use crate::requests::{
-    AssembleRequest, EpisodeRequest, RecallMode, RecallQuery, RecallResult, RememberRequest,
-};
-use crate::store::MemoryStore;
 
 /// SqliteMemoryStore is the canonical MemoryStore backed by sqlx + sqlite.
 #[derive(Debug, Clone)]
@@ -67,6 +61,31 @@ impl SqliteMemoryStore {
     }
 }
 
+// ========== Error helpers (sqlx/serde → MemoryError) ==========
+
+trait IntoMemoryError<T> {
+    fn mem_backend(self) -> Result<T, MemoryError>;
+    fn mem_serde(self) -> Result<T, MemoryError>;
+}
+
+impl<T> IntoMemoryError<T> for Result<T, sqlx::Error> {
+    fn mem_backend(self) -> Result<T, MemoryError> {
+        self.map_err(|e| MemoryError::Backend(e.to_string()))
+    }
+    fn mem_serde(self) -> Result<T, MemoryError> {
+        self.map_err(|e| MemoryError::Backend(e.to_string()))
+    }
+}
+
+impl<T> IntoMemoryError<T> for Result<T, serde_json::Error> {
+    fn mem_backend(self) -> Result<T, MemoryError> {
+        self.map_err(|e| MemoryError::Serde(e.to_string()))
+    }
+    fn mem_serde(self) -> Result<T, MemoryError> {
+        self.map_err(|e| MemoryError::Serde(e.to_string()))
+    }
+}
+
 #[async_trait]
 impl MemoryStore for SqliteMemoryStore {
     async fn record_episode(&self, req: EpisodeRequest) -> Result<EpisodeRecord, MemoryError> {
@@ -93,6 +112,9 @@ impl MemoryStore for SqliteMemoryStore {
             ingested_at: now,
         };
 
+        let entities_json = serde_json::to_string(&record.entities).mem_serde()?;
+        let tags_json = serde_json::to_string(&record.tags).mem_serde()?;
+
         sqlx::query(
             "INSERT INTO episodes \
              (id, owner_kind, owner_id, namespace, thread_id, run_id, episode_kind, role, \
@@ -111,13 +133,14 @@ impl MemoryStore for SqliteMemoryStore {
         .bind(&record.content)
         .bind(&record.content_type)
         .bind(&record.source_uri)
-        .bind(serde_json::to_string(&record.entities)?)
-        .bind(serde_json::to_string(&record.tags)?)
+        .bind(entities_json)
+        .bind(tags_json)
         .bind(record.importance as f64)
         .bind(&record.occurred_at)
         .bind(&record.ingested_at)
         .execute(&self.pool)
-        .await?;
+        .await
+        .mem_backend()?;
 
         Ok(record)
     }
@@ -131,6 +154,10 @@ impl MemoryStore for SqliteMemoryStore {
             Stability::LongTerm => MemoryStatus::Active,
             Stability::Working => MemoryStatus::Active,
         };
+
+        let sources_json = serde_json::to_string(&req.sources).mem_serde()?;
+        let tags_json = serde_json::to_string(&req.tags).mem_serde()?;
+        let entities_json = serde_json::to_string(&req.entities).mem_serde()?;
 
         sqlx::query(
             "INSERT INTO memories \
@@ -153,13 +180,14 @@ impl MemoryStore for SqliteMemoryStore {
         .bind(req.importance.unwrap_or(0.5) as f64)
         .bind(&req.valid_from)
         .bind(&req.valid_to)
-        .bind(serde_json::to_string(&req.sources)?)
-        .bind(serde_json::to_string(&req.tags)?)
-        .bind(serde_json::to_string(&req.entities)?)
+        .bind(sources_json)
+        .bind(tags_json)
+        .bind(entities_json)
         .bind(&now)
         .bind(&now)
         .execute(&self.pool)
-        .await?;
+        .await
+        .mem_backend()?;
 
         let receipt_id = format!("rec-rem-{}", Uuid::new_v4());
         sqlx::query(
@@ -176,7 +204,8 @@ impl MemoryStore for SqliteMemoryStore {
         .bind("{}")
         .bind(&now)
         .execute(&self.pool)
-        .await?;
+        .await
+        .mem_backend()?;
 
         Ok(RememberReceipt {
             receipt_id,
@@ -189,7 +218,9 @@ impl MemoryStore for SqliteMemoryStore {
 
     async fn recall(&self, query: RecallQuery) -> Result<RecallResult, MemoryError> {
         let memories = match query.mode {
-            RecallMode::Namespace | RecallMode::Hybrid => recall_by_namespace(&self.pool, &query).await?,
+            RecallMode::Namespace | RecallMode::Hybrid => {
+                recall_by_namespace(&self.pool, &query).await?
+            }
             RecallMode::Fts => recall_by_fts(&self.pool, &query).await?,
         };
 
@@ -201,6 +232,7 @@ impl MemoryStore for SqliteMemoryStore {
 
         let receipt_id = format!("rec-rcl-{}", Uuid::new_v4());
         let now = now_iso();
+        let memory_ids_json = serde_json::to_string(&memory_ids).mem_serde()?;
 
         sqlx::query(
             "INSERT INTO recall_receipts \
@@ -214,12 +246,13 @@ impl MemoryStore for SqliteMemoryStore {
         .bind(&query.run_id)
         .bind(&query.query_text)
         .bind(query.mode.as_str())
-        .bind(serde_json::to_string(&memory_ids)?)
+        .bind(memory_ids_json)
         .bind(chars as i64)
         .bind("{}")
         .bind(&now)
         .execute(&self.pool)
-        .await?;
+        .await
+        .mem_backend()?;
 
         Ok(RecallResult {
             memories,
@@ -235,7 +268,8 @@ impl MemoryStore for SqliteMemoryStore {
         )
         .bind(&action.target_memory_id)
         .fetch_optional(&self.pool)
-        .await?;
+        .await
+        .mem_backend()?;
 
         let row = existing.ok_or_else(|| MemoryError::NotFound(action.target_memory_id.clone()))?;
         let owner_kind: String = row.get("owner_kind");
@@ -255,9 +289,11 @@ impl MemoryStore for SqliteMemoryStore {
             .bind(&now)
             .bind(&action.target_memory_id)
             .execute(&self.pool)
-            .await?;
+            .await
+            .mem_backend()?;
 
         let receipt_id = format!("rec-rev-{}", Uuid::new_v4());
+        let notes_json = serde_json::to_string(&action.notes).mem_serde()?;
         sqlx::query(
             "INSERT INTO review_receipts \
              (id, owner_kind, owner_id, target_memory_id, action, old_status, new_status, reviewer, details_json, created_at) \
@@ -271,10 +307,11 @@ impl MemoryStore for SqliteMemoryStore {
         .bind(&old_status)
         .bind(new_status.as_str())
         .bind(&action.reviewer)
-        .bind(serde_json::to_string(&action.notes)?)
+        .bind(notes_json)
         .bind(&now)
         .execute(&self.pool)
-        .await?;
+        .await
+        .mem_backend()?;
 
         Ok(ReviewReceipt {
             receipt_id,
@@ -303,7 +340,8 @@ impl MemoryStore for SqliteMemoryStore {
         .bind(owner_kind_str(&req.owner.kind))
         .bind(&req.owner.id)
         .fetch_all(&self.pool)
-        .await?;
+        .await
+        .mem_backend()?;
 
         for row in frames {
             if view.total_chars >= budget {
@@ -323,7 +361,8 @@ impl MemoryStore for SqliteMemoryStore {
         .bind(owner_kind_str(&req.owner.kind))
         .bind(&req.owner.id)
         .fetch_all(&self.pool)
-        .await?;
+        .await
+        .mem_backend()?;
 
         for row in memories {
             if view.total_chars >= budget {
@@ -353,6 +392,7 @@ impl MemoryStore for SqliteMemoryStore {
         } else {
             frame.created_at.clone()
         };
+        let source_ids_json = serde_json::to_string(&frame.source_memory_ids).mem_serde()?;
         sqlx::query(
             "INSERT INTO context_frames \
              (id, owner_kind, owner_id, namespace, layer, frame_kind, content, source_memory_ids_json, budget_chars, ttl_seconds, created_at, updated_at) \
@@ -374,13 +414,14 @@ impl MemoryStore for SqliteMemoryStore {
         .bind(frame.layer.as_str())
         .bind(&frame.frame_kind)
         .bind(&frame.content)
-        .bind(serde_json::to_string(&frame.source_memory_ids)?)
+        .bind(source_ids_json)
         .bind(frame.budget_chars.map(|v| v as i64))
         .bind(frame.ttl_seconds.map(|v| v as i64))
         .bind(&created_at)
         .bind(&now)
         .execute(&self.pool)
-        .await?;
+        .await
+        .mem_backend()?;
 
         Ok(())
     }
@@ -394,7 +435,8 @@ impl MemoryStore for SqliteMemoryStore {
         )
         .bind(limit as i64)
         .fetch_all(&self.pool)
-        .await?;
+        .await
+        .mem_backend()?;
 
         rows.into_iter().map(row_to_memory).collect()
     }
@@ -413,7 +455,8 @@ impl MemoryStore for SqliteMemoryStore {
         .bind(&owner.id)
         .bind(limit as i64)
         .fetch_all(&self.pool)
-        .await?;
+        .await
+        .mem_backend()?;
 
         rows.into_iter().map(row_to_episode).collect()
     }
@@ -447,7 +490,8 @@ async fn recall_by_namespace(
     .bind(&memory_kind)
     .bind(query.limit as i64)
     .fetch_all(pool)
-    .await?;
+    .await
+    .mem_backend()?;
 
     rows.into_iter().map(row_to_memory).collect()
 }
@@ -475,7 +519,8 @@ async fn recall_by_fts(
     .bind(&query.owner.id)
     .bind(query.limit as i64)
     .fetch_all(pool)
-    .await?;
+    .await
+    .mem_backend()?;
 
     rows.into_iter().map(row_to_memory).collect()
 }
@@ -541,7 +586,7 @@ fn parse_sources(raw: &str) -> Result<Vec<MemorySource>, MemoryError> {
     if raw.trim().is_empty() {
         return Ok(Vec::new());
     }
-    serde_json::from_str(raw).map_err(MemoryError::from)
+    serde_json::from_str(raw).map_err(|e| MemoryError::Serde(e.to_string()))
 }
 
 fn owner_kind_str(kind: &OwnerKind) -> &'static str {

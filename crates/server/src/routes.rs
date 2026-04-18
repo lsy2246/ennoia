@@ -12,16 +12,13 @@ use ennoia_extension_host::{
     RegisteredPanelContribution,
 };
 use ennoia_kernel::{
-    ArtifactKind, ArtifactSpec, ContextView, EpisodeKind, MemoryKind, MemoryRecord, MemorySource,
-    MessageRole, MessageSpec, OwnerKind, OwnerRef, ReviewAction, ReviewActionKind, Stability,
+    ArtifactKind, ArtifactSpec, AssembleRequest, ContextView, EnqueueRequest, EpisodeKind,
+    EpisodeRequest, JobKind, JobRecord, MemoryKind, MemoryRecord, MemorySource, MessageRole,
+    MessageSpec, OwnerKind, OwnerRef, RecallMode, RecallQuery, RecallResult, RememberReceipt,
+    RememberRequest, ReviewAction, ReviewActionKind, ReviewReceipt, ScheduleKind, Stability,
     ThreadKind, ThreadSpec,
 };
-use ennoia_memory::{
-    EpisodeRequest, RecallMode, RecallQuery, RecallResult, RememberReceipt, RememberRequest,
-    ReviewReceipt,
-};
 use ennoia_orchestrator::{RunRequest, RunTrigger};
-use ennoia_scheduler::{EnqueueRequest, JobKind, JobRecord, ScheduleKind};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use tower_http::cors::CorsLayer;
@@ -591,7 +588,7 @@ async fn drive_run(
         .await
         .map_err(|e| e.to_string())?;
 
-    let assemble = ennoia_memory::AssembleRequest {
+    let assemble = AssembleRequest {
         owner: owner.clone(),
         thread_id: Some(thread.id.clone()),
         run_id: None,
