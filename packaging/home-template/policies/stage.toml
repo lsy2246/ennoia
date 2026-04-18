@@ -1,0 +1,29 @@
+[[rules]]
+id = "R_BLOCKED"
+when = { execution_blocked = true }
+then = { next_action = "enter_blocked", reason = "execution-blocked" }
+
+[[rules]]
+id = "R_PENDING_TO_PLANNING"
+when = { stage = "pending", execution_blocked = false }
+then = { next_action = "enter_planning", reason = "trigger-received" }
+
+[[rules]]
+id = "R_PLANNING_TO_DISPATCH"
+when = { stage = "planning", execution_plan_ready = true, execution_agent_available = true }
+then = { next_action = "dispatch", reason = "plan-ready-agent-available" }
+
+[[rules]]
+id = "R_DISPATCHED_TO_RUNNING"
+when = { stage = "dispatched" }
+then = { next_action = "stay_running", reason = "dispatch-acknowledged" }
+
+[[rules]]
+id = "R_RUNNING_TO_REVIEW"
+when = { stage = "running" }
+then = { next_action = "enter_reviewing", reason = "work-handed-off" }
+
+[[rules]]
+id = "R_REVIEW_TO_COMPLETE"
+when = { stage = "reviewing" }
+then = { next_action = "complete", reason = "review-passed" }

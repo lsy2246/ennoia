@@ -1,35 +1,20 @@
 //! Scheduler runs delayed, cron and maintenance jobs.
 
+pub mod error;
+pub mod handlers;
 pub mod model;
-pub mod service;
+pub mod sqlite_store;
+pub mod store;
+pub mod worker;
 
-pub use model::{JobStatus, ScheduleKind, ScheduledJob};
-pub use service::SchedulerService;
+pub use error::SchedulerError;
+pub use handlers::{JobHandler, RetireExpiredHandler};
+pub use model::{EnqueueRequest, JobKind, JobRecord, JobStatus, ScheduleKind};
+pub use sqlite_store::SqliteSchedulerStore;
+pub use store::SchedulerStore;
+pub use worker::Worker;
 
 /// Returns the current scheduler module name.
 pub fn module_name() -> &'static str {
     "scheduler"
-}
-
-#[cfg(test)]
-mod tests {
-    use ennoia_kernel::{OwnerKind, OwnerRef};
-
-    use crate::{ScheduleKind, SchedulerService};
-
-    #[test]
-    fn scheduler_registers_job() {
-        let mut scheduler = SchedulerService::new();
-        let job = scheduler.register(
-            OwnerRef {
-                kind: OwnerKind::Space,
-                id: "studio".to_string(),
-            },
-            ScheduleKind::DelaySeconds(30),
-            "nightly review".to_string(),
-        );
-
-        assert_eq!(job.id, "job-1");
-        assert_eq!(scheduler.jobs().len(), 1);
-    }
 }

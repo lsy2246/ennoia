@@ -1,26 +1,34 @@
 use std::fs;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::{
     extract::{Path, State},
+    http::StatusCode,
     routing::{get, post},
     Json, Router,
 };
+use chrono::Utc;
 use ennoia_extension_host::{
     ExtensionRegistrySnapshot, RegisteredExtensionSnapshot, RegisteredPageContribution,
     RegisteredPanelContribution,
 };
 use ennoia_kernel::{
-    ArtifactKind, ArtifactSpec, MessageRole, MessageSpec, OwnerKind, OwnerRef, ThreadKind,
-    ThreadSpec,
+    ArtifactKind, ArtifactSpec, ContextView, EpisodeKind, MemoryKind, MemoryRecord, MemorySource,
+    MessageRole, MessageSpec, OwnerKind, OwnerRef, ReviewAction, ReviewActionKind, Stability,
+    ThreadKind, ThreadSpec,
 };
-use ennoia_memory::{MemoryKind, MemoryRecord, MemoryService};
-use ennoia_orchestrator::{OrchestratorService, RunRequest, RunTrigger};
+use ennoia_memory::{
+    EpisodeRequest, RecallMode, RecallQuery, RecallResult, RememberReceipt, RememberRequest,
+    ReviewReceipt,
+};
+use ennoia_orchestrator::{RunRequest, RunTrigger};
+use ennoia_scheduler::{EnqueueRequest, JobKind, JobRecord, ScheduleKind};
 use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
 use tower_http::cors::CorsLayer;
+use uuid::Uuid;
 
 use crate::app::AppState;
-use crate::db::{self, JobRecord};
+use crate::db::{self, JobRow};
 
 pub fn build_router(state: AppState) -> Router {
     Router::new()
@@ -43,12 +51,18 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/runs", get(runs))
         .route("/api/v1/runs/{run_id}/tasks", get(run_tasks))
         .route("/api/v1/runs/{run_id}/artifacts", get(run_artifacts))
+        .route("/api/v1/runs/{run_id}/stages", get(run_stages))
+        .route("/api/v1/runs/{run_id}/decisions", get(run_decisions))
+        .route("/api/v1/runs/{run_id}/gates", get(run_gates))
         .route("/api/v1/tasks", get(tasks))
         .route("/api/v1/artifacts", get(artifacts))
-        .route("/api/v1/memories", get(memories))
-        .route("/api/v1/jobs", get(jobs).post(create_job))
-        .route("/api/v1/runs/private", post(create_private_run))
-        .route("/api/v1/runs/space", post(create_space_run))
+        .route(
+            "/api/v1/memories",
+            get(memories_list).post(memories_create),
+        )
+        .route("/api/v1/memories/recall", post(memories_recall))
+        .route("/api/v1/memories/review", post(memories_review))
+        .route("/api/v1/jobs", get(jobs_list).post(jobs_create))
         .layer(CorsLayer::very_permissive())
         .with_state(state)
 }
@@ -65,22 +79,7 @@ struct OverviewResponse {
     shell_title: String,
     default_theme: String,
     modules: Vec<String>,
-    counts: serde_json::Value,
-}
-
-#[derive(Debug, Deserialize)]
-struct PrivateRunRequest {
-    agent_id: String,
-    goal: String,
-    message: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct SpaceRunRequest {
-    space_id: String,
-    addressed_agents: Vec<String>,
-    goal: String,
-    message: String,
+    counts: JsonValue,
 }
 
 #[derive(Debug, Deserialize)]
@@ -102,9 +101,65 @@ struct SpaceMessageRequest {
 struct CreateJobRequest {
     owner_kind: String,
     owner_id: String,
+    job_kind: String,
     schedule_kind: String,
     schedule_value: String,
-    description: String,
+    payload: Option<JsonValue>,
+    max_retries: Option<u32>,
+    run_at: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RememberPayload {
+    owner_kind: String,
+    owner_id: String,
+    namespace: String,
+    memory_kind: String,
+    stability: String,
+    #[serde(default)]
+    title: Option<String>,
+    content: String,
+    #[serde(default)]
+    summary: Option<String>,
+    #[serde(default)]
+    confidence: Option<f32>,
+    #[serde(default)]
+    importance: Option<f32>,
+    #[serde(default)]
+    sources: Vec<MemorySource>,
+    #[serde(default)]
+    tags: Vec<String>,
+    #[serde(default)]
+    entities: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RecallPayload {
+    owner_kind: String,
+    owner_id: String,
+    #[serde(default)]
+    query_text: Option<String>,
+    #[serde(default)]
+    namespace_prefix: Option<String>,
+    #[serde(default)]
+    memory_kind: Option<String>,
+    #[serde(default)]
+    mode: Option<String>,
+    #[serde(default)]
+    limit: Option<u32>,
+    #[serde(default)]
+    thread_id: Option<String>,
+    #[serde(default)]
+    run_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ReviewPayload {
+    target_memory_id: String,
+    reviewer: String,
+    action: String,
+    #[serde(default)]
+    notes: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -114,7 +169,10 @@ struct ConversationEnvelope {
     run: ennoia_kernel::RunSpec,
     tasks: Vec<ennoia_kernel::TaskSpec>,
     artifacts: Vec<ArtifactSpec>,
-    context: ennoia_memory::ContextView,
+    context: ContextView,
+    gate_verdicts: Vec<ennoia_kernel::GateVerdict>,
+    stage_event: ennoia_kernel::RunStageEvent,
+    decision: ennoia_kernel::Decision,
 }
 
 async fn health() -> Json<HealthResponse> {
@@ -132,6 +190,7 @@ async fn overview(State(state): State<AppState>) -> Json<OverviewResponse> {
     let artifact_count = db::count_rows(&state.pool, "artifacts").await.unwrap_or(0);
     let memory_count = db::count_rows(&state.pool, "memories").await.unwrap_or(0);
     let job_count = db::count_rows(&state.pool, "jobs").await.unwrap_or(0);
+    let decision_count = db::count_rows(&state.pool, "decisions").await.unwrap_or(0);
 
     Json(OverviewResponse {
         app_name: state.overview.app_name,
@@ -148,7 +207,8 @@ async fn overview(State(state): State<AppState>) -> Json<OverviewResponse> {
             "tasks": task_count,
             "artifacts": artifact_count,
             "memories": memory_count,
-            "jobs": job_count
+            "jobs": job_count,
+            "decisions": decision_count
         }),
     })
 }
@@ -229,6 +289,45 @@ async fn run_artifacts(
     )
 }
 
+async fn run_stages(
+    State(state): State<AppState>,
+    Path(run_id): Path<String>,
+) -> Json<Vec<ennoia_kernel::RunStageEvent>> {
+    Json(
+        state
+            .runtime_store
+            .list_stage_events_for_run(&run_id)
+            .await
+            .unwrap_or_default(),
+    )
+}
+
+async fn run_decisions(
+    State(state): State<AppState>,
+    Path(run_id): Path<String>,
+) -> Json<Vec<ennoia_kernel::DecisionSnapshot>> {
+    Json(
+        state
+            .runtime_store
+            .list_decisions_for_run(&run_id)
+            .await
+            .unwrap_or_default(),
+    )
+}
+
+async fn run_gates(
+    State(state): State<AppState>,
+    Path(run_id): Path<String>,
+) -> Json<Vec<ennoia_kernel::GateRecord>> {
+    Json(
+        state
+            .runtime_store
+            .list_gate_verdicts_for_run(&run_id)
+            .await
+            .unwrap_or_default(),
+    )
+}
+
 async fn tasks(State(state): State<AppState>) -> Json<Vec<ennoia_kernel::TaskSpec>> {
     Json(db::list_tasks(&state.pool).await.unwrap_or_default())
 }
@@ -237,87 +336,153 @@ async fn artifacts(State(state): State<AppState>) -> Json<Vec<ArtifactSpec>> {
     Json(db::list_artifacts(&state.pool).await.unwrap_or_default())
 }
 
-async fn memories(State(state): State<AppState>) -> Json<Vec<MemoryRecord>> {
-    Json(db::list_memories(&state.pool).await.unwrap_or_default())
+async fn memories_list(State(state): State<AppState>) -> Json<Vec<MemoryRecord>> {
+    Json(state.memory_store.list_memories(100).await.unwrap_or_default())
 }
 
-async fn jobs(State(state): State<AppState>) -> Json<Vec<JobRecord>> {
+async fn memories_create(
+    State(state): State<AppState>,
+    Json(payload): Json<RememberPayload>,
+) -> Result<Json<RememberReceipt>, (StatusCode, String)> {
+    let owner = OwnerRef {
+        kind: owner_kind_from(&payload.owner_kind),
+        id: payload.owner_id,
+    };
+    let request = RememberRequest {
+        owner,
+        namespace: payload.namespace,
+        memory_kind: MemoryKind::from_str(&payload.memory_kind),
+        stability: Stability::from_str(&payload.stability),
+        title: payload.title,
+        content: payload.content,
+        summary: payload.summary,
+        confidence: payload.confidence,
+        importance: payload.importance,
+        valid_from: None,
+        valid_to: None,
+        sources: payload.sources,
+        tags: payload.tags,
+        entities: payload.entities,
+    };
+    state
+        .memory_store
+        .remember(request)
+        .await
+        .map(Json)
+        .map_err(|error| (StatusCode::BAD_REQUEST, error.to_string()))
+}
+
+async fn memories_recall(
+    State(state): State<AppState>,
+    Json(payload): Json<RecallPayload>,
+) -> Result<Json<RecallResult>, (StatusCode, String)> {
+    let mode = payload.mode.as_deref().unwrap_or("namespace");
+    let mode = match mode {
+        "fts" => RecallMode::Fts,
+        "hybrid" => RecallMode::Hybrid,
+        _ => RecallMode::Namespace,
+    };
+    let query = RecallQuery {
+        owner: OwnerRef {
+            kind: owner_kind_from(&payload.owner_kind),
+            id: payload.owner_id,
+        },
+        thread_id: payload.thread_id,
+        run_id: payload.run_id,
+        query_text: payload.query_text,
+        namespace_prefix: payload.namespace_prefix,
+        memory_kind: payload.memory_kind.as_deref().map(MemoryKind::from_str),
+        mode,
+        limit: payload.limit.unwrap_or(20),
+    };
+    state
+        .memory_store
+        .recall(query)
+        .await
+        .map(Json)
+        .map_err(|error| (StatusCode::BAD_REQUEST, error.to_string()))
+}
+
+async fn memories_review(
+    State(state): State<AppState>,
+    Json(payload): Json<ReviewPayload>,
+) -> Result<Json<ReviewReceipt>, (StatusCode, String)> {
+    let action_kind = match payload.action.as_str() {
+        "approve" => ReviewActionKind::Approve,
+        "reject" => ReviewActionKind::Reject,
+        "supersede" => ReviewActionKind::Supersede,
+        "retire" => ReviewActionKind::Retire,
+        _ => return Err((StatusCode::BAD_REQUEST, "unknown action".to_string())),
+    };
+    let action = ReviewAction {
+        target_memory_id: payload.target_memory_id,
+        reviewer: payload.reviewer,
+        action: action_kind,
+        notes: payload.notes,
+    };
+    state
+        .memory_store
+        .review(action)
+        .await
+        .map(Json)
+        .map_err(|error| (StatusCode::BAD_REQUEST, error.to_string()))
+}
+
+async fn jobs_list(State(state): State<AppState>) -> Json<Vec<JobRow>> {
     Json(db::list_jobs(&state.pool).await.unwrap_or_default())
+}
+
+async fn jobs_create(
+    State(state): State<AppState>,
+    Json(payload): Json<CreateJobRequest>,
+) -> Result<Json<JobRecord>, (StatusCode, String)> {
+    let owner = OwnerRef {
+        kind: owner_kind_from(&payload.owner_kind),
+        id: payload.owner_id,
+    };
+    let request = EnqueueRequest {
+        owner,
+        job_kind: JobKind::from_str(&payload.job_kind),
+        schedule_kind: ScheduleKind::from_str(&payload.schedule_kind),
+        schedule_value: payload.schedule_value,
+        payload: payload.payload.unwrap_or(JsonValue::Null),
+        max_retries: payload.max_retries,
+        run_at: payload.run_at,
+    };
+    state
+        .scheduler_store
+        .enqueue(request)
+        .await
+        .map(Json)
+        .map_err(|error| (StatusCode::BAD_REQUEST, error.to_string()))
 }
 
 async fn create_private_message(
     State(state): State<AppState>,
     Json(payload): Json<PrivateMessageRequest>,
-) -> Json<ConversationEnvelope> {
+) -> Result<Json<ConversationEnvelope>, (StatusCode, String)> {
     let goal = payload.goal.unwrap_or_else(|| payload.body.clone());
-    Json(
-        process_private_message(&state, &payload.agent_id, &payload.body, &goal)
-            .await
-            .unwrap_or_else(error_envelope),
-    )
+    process_private_message(&state, &payload.agent_id, &payload.body, &goal)
+        .await
+        .map(Json)
+        .map_err(|error| (StatusCode::BAD_REQUEST, error))
 }
 
 async fn create_space_message(
     State(state): State<AppState>,
     Json(payload): Json<SpaceMessageRequest>,
-) -> Json<ConversationEnvelope> {
+) -> Result<Json<ConversationEnvelope>, (StatusCode, String)> {
     let goal = payload.goal.unwrap_or_else(|| payload.body.clone());
-    Json(
-        process_space_message(
-            &state,
-            &payload.space_id,
-            &payload.addressed_agents,
-            &payload.body,
-            &goal,
-        )
-        .await
-        .unwrap_or_else(error_envelope),
+    process_space_message(
+        &state,
+        &payload.space_id,
+        &payload.addressed_agents,
+        &payload.body,
+        &goal,
     )
-}
-
-async fn create_private_run(
-    State(state): State<AppState>,
-    Json(payload): Json<PrivateRunRequest>,
-) -> Json<ConversationEnvelope> {
-    Json(
-        process_private_message(&state, &payload.agent_id, &payload.message, &payload.goal)
-            .await
-            .unwrap_or_else(error_envelope),
-    )
-}
-
-async fn create_space_run(
-    State(state): State<AppState>,
-    Json(payload): Json<SpaceRunRequest>,
-) -> Json<ConversationEnvelope> {
-    Json(
-        process_space_message(
-            &state,
-            &payload.space_id,
-            &payload.addressed_agents,
-            &payload.message,
-            &payload.goal,
-        )
-        .await
-        .unwrap_or_else(error_envelope),
-    )
-}
-
-async fn create_job(
-    State(state): State<AppState>,
-    Json(payload): Json<CreateJobRequest>,
-) -> Json<JobRecord> {
-    let normalized = JobRecord {
-        id: new_id("job"),
-        owner_kind: payload.owner_kind,
-        owner_id: payload.owner_id,
-        schedule_kind: normalize_schedule_kind(&payload.schedule_kind),
-        schedule_value: payload.schedule_value,
-        description: payload.description,
-        status: "pending".to_string(),
-    };
-    let _ = db::insert_job(&state.pool, &normalized).await;
-    Json(normalized)
+    .await
+    .map(Json)
+    .map_err(|error| (StatusCode::BAD_REQUEST, error))
 }
 
 async fn process_private_message(
@@ -326,7 +491,7 @@ async fn process_private_message(
     body: &str,
     goal: &str,
 ) -> Result<ConversationEnvelope, String> {
-    let timestamp = current_timestamp();
+    let now = now_iso();
     let owner = OwnerRef {
         kind: OwnerKind::Agent,
         id: agent_id.to_string(),
@@ -338,63 +503,29 @@ async fn process_private_message(
         space_id: None,
         title: format!("与 {agent_id} 的私聊"),
         participants: vec!["user".to_string(), agent_id.to_string()],
-        created_at: timestamp.clone(),
-        updated_at: timestamp.clone(),
+        created_at: now.clone(),
+        updated_at: now.clone(),
     };
     let message = MessageSpec {
-        id: new_id("message"),
+        id: format!("msg-{}", Uuid::new_v4()),
         thread_id: thread.id.clone(),
         sender: "user".to_string(),
         role: MessageRole::User,
         body: body.to_string(),
         mentions: vec![agent_id.to_string()],
-        created_at: timestamp.clone(),
+        created_at: now.clone(),
     };
-    let context = build_context(state, &owner, &thread.id).await;
-    let plan = OrchestratorService::new().plan_run(
-        RunRequest {
-            owner: owner.clone(),
-            thread: thread.clone(),
-            message: message.clone(),
-            trigger: RunTrigger::DirectMessage,
-            goal: goal.to_string(),
-            addressed_agents: vec![agent_id.to_string()],
-        },
-        context,
-    );
 
-    db::insert_planned_run(&state.pool, &plan)
-        .await
-        .map_err(|error| error.to_string())?;
-
-    let memory = MemoryRecord {
-        id: new_id("memory"),
-        owner: owner.clone(),
-        thread_id: Some(thread.id.clone()),
-        run_id: Some(plan.run.id.clone()),
-        kind: MemoryKind::Working,
-        source: "private_message".to_string(),
-        content: body.to_string(),
-        summary: format!("Private request for {}: {}", owner.id, goal),
-        created_at: timestamp,
-    };
-    db::insert_memory(&state.pool, &memory)
-        .await
-        .map_err(|error| error.to_string())?;
-
-    let artifact = persist_run_artifact(state, &owner, &plan.run.id, goal);
-    db::insert_artifact(&state.pool, &artifact)
-        .await
-        .map_err(|error| error.to_string())?;
-
-    Ok(ConversationEnvelope {
-        thread: plan.thread,
-        message: plan.message,
-        run: plan.run,
-        tasks: plan.tasks,
-        artifacts: vec![artifact],
-        context: plan.context,
-    })
+    drive_run(
+        state,
+        thread,
+        message,
+        owner,
+        RunTrigger::DirectMessage,
+        goal,
+        vec![agent_id.to_string()],
+    )
+    .await
 }
 
 async fn process_space_message(
@@ -404,7 +535,7 @@ async fn process_space_message(
     body: &str,
     goal: &str,
 ) -> Result<ConversationEnvelope, String> {
-    let timestamp = current_timestamp();
+    let now = now_iso();
     let owner = OwnerRef {
         kind: OwnerKind::Space,
         id: space_id.to_string(),
@@ -419,54 +550,127 @@ async fn process_space_message(
         space_id: Some(space_id.to_string()),
         title: format!("{space_id} 协作线程"),
         participants,
-        created_at: timestamp.clone(),
-        updated_at: timestamp.clone(),
+        created_at: now.clone(),
+        updated_at: now.clone(),
     };
     let message = MessageSpec {
-        id: new_id("message"),
+        id: format!("msg-{}", Uuid::new_v4()),
         thread_id: thread.id.clone(),
         sender: "user".to_string(),
         role: MessageRole::User,
         body: body.to_string(),
         mentions: resolved_agents.clone(),
-        created_at: timestamp.clone(),
+        created_at: now.clone(),
     };
-    let context = build_context(state, &owner, &thread.id).await;
-    let plan = OrchestratorService::new().plan_run(
-        RunRequest {
-            owner: owner.clone(),
-            thread: thread.clone(),
-            message: message.clone(),
-            trigger: RunTrigger::SpaceMessage,
-            goal: goal.to_string(),
-            addressed_agents: resolved_agents,
-        },
-        context,
-    );
 
-    db::insert_planned_run(&state.pool, &plan)
+    drive_run(
+        state,
+        thread,
+        message,
+        owner,
+        RunTrigger::SpaceMessage,
+        goal,
+        resolved_agents,
+    )
+    .await
+}
+
+async fn drive_run(
+    state: &AppState,
+    thread: ThreadSpec,
+    message: MessageSpec,
+    owner: OwnerRef,
+    trigger: RunTrigger,
+    goal: &str,
+    addressed_agents: Vec<String>,
+) -> Result<ConversationEnvelope, String> {
+    db::upsert_thread(&state.pool, &thread)
         .await
-        .map_err(|error| error.to_string())?;
+        .map_err(|e| e.to_string())?;
+    db::insert_message(&state.pool, &message)
+        .await
+        .map_err(|e| e.to_string())?;
 
-    let memory = MemoryRecord {
-        id: new_id("memory"),
+    let assemble = ennoia_memory::AssembleRequest {
         owner: owner.clone(),
         thread_id: Some(thread.id.clone()),
-        run_id: Some(plan.run.id.clone()),
-        kind: MemoryKind::Working,
-        source: "space_message".to_string(),
-        content: body.to_string(),
-        summary: format!("Space request for {}: {}", owner.id, goal),
-        created_at: timestamp,
+        run_id: None,
+        recent_messages: vec![format!("{}: {}", message.sender, message.body)],
+        active_tasks: Vec::new(),
+        budget_chars: None,
     };
-    db::insert_memory(&state.pool, &memory)
+    let context = state
+        .memory_store
+        .assemble_context(assemble)
         .await
-        .map_err(|error| error.to_string())?;
+        .map_err(|e| e.to_string())?;
+
+    let available_agents: Vec<String> = state.agents.iter().map(|a| a.id.clone()).collect();
+
+    let request = RunRequest {
+        owner: owner.clone(),
+        thread: thread.clone(),
+        message: message.clone(),
+        trigger,
+        goal: goal.to_string(),
+        addressed_agents,
+    };
+
+    let plan = state
+        .orchestrator
+        .plan_run(request, context.clone(), available_agents)
+        .await;
+
+    db::upsert_run(&state.pool, &plan.run)
+        .await
+        .map_err(|e| e.to_string())?;
+    for task in &plan.tasks {
+        db::upsert_task(&state.pool, task)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+
+    state
+        .runtime_store
+        .log_stage_event(&plan.stage_event)
+        .await
+        .map_err(|e| e.to_string())?;
+    state
+        .runtime_store
+        .log_decision(&plan.decision_snapshot)
+        .await
+        .map_err(|e| e.to_string())?;
+    for record in &plan.gate_records {
+        state
+            .runtime_store
+            .log_gate_verdict(record)
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+
+    let _ = state
+        .memory_store
+        .record_episode(EpisodeRequest {
+            owner: owner.clone(),
+            namespace: format!("threads/{}", thread.id),
+            thread_id: Some(thread.id.clone()),
+            run_id: Some(plan.run.id.clone()),
+            episode_kind: EpisodeKind::Message,
+            role: Some("user".to_string()),
+            content: message.body.clone(),
+            content_type: None,
+            source_uri: None,
+            entities: Vec::new(),
+            tags: Vec::new(),
+            importance: None,
+            occurred_at: Some(message.created_at.clone()),
+        })
+        .await;
 
     let artifact = persist_run_artifact(state, &owner, &plan.run.id, goal);
     db::insert_artifact(&state.pool, &artifact)
         .await
-        .map_err(|error| error.to_string())?;
+        .map_err(|e| e.to_string())?;
 
     Ok(ConversationEnvelope {
         thread: plan.thread,
@@ -475,45 +679,10 @@ async fn process_space_message(
         tasks: plan.tasks,
         artifacts: vec![artifact],
         context: plan.context,
+        gate_verdicts: plan.gate_verdicts,
+        stage_event: plan.stage_event,
+        decision: plan.decision,
     })
-}
-
-async fn build_context(
-    state: &AppState,
-    owner: &OwnerRef,
-    thread_id: &str,
-) -> ennoia_memory::ContextView {
-    let mut memory_service = MemoryService::new();
-    for record in db::load_memories_for_owner(&state.pool, owner)
-        .await
-        .unwrap_or_default()
-    {
-        memory_service.remember(record);
-    }
-    for record in db::load_memories_for_thread(&state.pool, thread_id)
-        .await
-        .unwrap_or_default()
-    {
-        memory_service.remember(record);
-    }
-
-    let recent_messages = db::list_messages_for_thread(&state.pool, thread_id)
-        .await
-        .unwrap_or_default()
-        .into_iter()
-        .rev()
-        .take(5)
-        .map(|message| format!("{}: {}", message.sender, message.body))
-        .collect();
-
-    let active_tasks = db::list_active_tasks_for_owner(&state.pool, owner, 5)
-        .await
-        .unwrap_or_default()
-        .into_iter()
-        .map(|task| task.title)
-        .collect();
-
-    memory_service.build_context(owner, Some(thread_id), recent_messages, active_tasks)
 }
 
 fn persist_run_artifact(
@@ -550,12 +719,12 @@ fn persist_run_artifact(
     );
 
     ArtifactSpec {
-        id: new_id("artifact"),
+        id: format!("art-{}", Uuid::new_v4()),
         owner: owner.clone(),
         run_id: run_id.to_string(),
         kind: ArtifactKind::Report,
         relative_path,
-        created_at: current_timestamp(),
+        created_at: now_iso(),
     }
 }
 
@@ -577,66 +746,14 @@ fn resolve_space_agents(
         .unwrap_or_else(|| vec!["coder".to_string(), "planner".to_string()])
 }
 
-fn error_envelope(message: String) -> ConversationEnvelope {
-    let timestamp = current_timestamp();
-    ConversationEnvelope {
-        thread: ThreadSpec {
-            id: "thread-error".to_string(),
-            kind: ThreadKind::Private,
-            owner: OwnerRef {
-                kind: OwnerKind::Global,
-                id: "system".to_string(),
-            },
-            space_id: None,
-            title: "error".to_string(),
-            participants: vec!["system".to_string()],
-            created_at: timestamp.clone(),
-            updated_at: timestamp.clone(),
-        },
-        message: MessageSpec {
-            id: "message-error".to_string(),
-            thread_id: "thread-error".to_string(),
-            sender: "system".to_string(),
-            role: MessageRole::System,
-            body: message.clone(),
-            mentions: Vec::new(),
-            created_at: timestamp.clone(),
-        },
-        run: ennoia_kernel::RunSpec {
-            id: "run-error".to_string(),
-            owner: OwnerRef {
-                kind: OwnerKind::Global,
-                id: "system".to_string(),
-            },
-            thread_id: "thread-error".to_string(),
-            trigger: "system".to_string(),
-            status: ennoia_kernel::RunStatus::Blocked,
-            goal: message,
-            created_at: timestamp.clone(),
-            updated_at: timestamp,
-        },
-        tasks: Vec::new(),
-        artifacts: Vec::new(),
-        context: ennoia_memory::ContextView::default(),
-    }
-}
-
-fn normalize_schedule_kind(value: &str) -> String {
+fn owner_kind_from(value: &str) -> OwnerKind {
     match value {
-        "maintenance" => "maintenance".to_string(),
-        "cron" => "cron".to_string(),
-        _ => "delay".to_string(),
+        "agent" => OwnerKind::Agent,
+        "space" => OwnerKind::Space,
+        _ => OwnerKind::Global,
     }
 }
 
-fn new_id(prefix: &str) -> String {
-    format!("{prefix}-{}", current_timestamp())
-}
-
-fn current_timestamp() -> String {
-    let millis = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system time")
-        .as_millis();
-    format!("{millis}")
+fn now_iso() -> String {
+    Utc::now().to_rfc3339()
 }

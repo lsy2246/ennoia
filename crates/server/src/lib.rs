@@ -1,4 +1,4 @@
-//! Server exposes Ennoia over HTTP, WebSocket and static asset hosting.
+//! Server exposes Ennoia over HTTP and hosts the persistence pool.
 
 pub mod app;
 pub mod db;

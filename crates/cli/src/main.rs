@@ -3,7 +3,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use ennoia_server::{bootstrap_app_state, default_app_state, run_server};
+use ennoia_server::{bootstrap_app_state, default_app_state, run_server, AppState};
 
 const ENNOIA_HOME_ENV: &str = "ENNOIA_HOME";
 
@@ -24,6 +24,10 @@ const OBSERVATORY_MANIFEST_TEMPLATE: &str =
     include_str!("../../../packaging/home-template/global/extensions/observatory/manifest.toml");
 const GITHUB_MANIFEST_TEMPLATE: &str =
     include_str!("../../../packaging/home-template/global/extensions/github/manifest.toml");
+const MEMORY_POLICY_TEMPLATE: &str =
+    include_str!("../../../packaging/home-template/policies/memory.toml");
+const STAGE_POLICY_TEMPLATE: &str =
+    include_str!("../../../packaging/home-template/policies/stage.toml");
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -53,6 +57,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             init_home_template(&target)?;
             run_server(&target).await?;
         }
+        Some("memory") => {
+            memory_command(&args[2..]).await?;
+        }
         _ => {
             print_summary();
         }
@@ -69,6 +76,14 @@ fn print_summary() {
         "server: {}:{}",
         state.server_config.host, state.server_config.port
     );
+    println!();
+    println!("commands:");
+    println!("  ennoia init [home]");
+    println!("  ennoia dev [home]");
+    println!("  ennoia start [home]");
+    println!("  ennoia memory list");
+    println!("  ennoia memory remember <owner_kind> <owner_id> <namespace> <content>");
+    println!("  ennoia memory recall <owner_kind> <owner_id> [query]");
 }
 
 fn print_default_config() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -88,10 +103,131 @@ fn print_default_config() -> Result<(), Box<dyn std::error::Error + Send + Sync>
     Ok(())
 }
 
+async fn memory_command(args: &[String]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let target = resolve_runtime_path(None);
+    init_home_template(&target)?;
+    let state = bootstrap_app_state(&target).await?;
+
+    let sub = args.first().map(String::as_str).unwrap_or("list");
+    match sub {
+        "list" => memory_list(&state).await,
+        "remember" => memory_remember(&state, &args[1..]).await,
+        "recall" => memory_recall(&state, &args[1..]).await,
+        other => {
+            eprintln!("unknown memory subcommand: {other}");
+            std::process::exit(2);
+        }
+    }
+}
+
+async fn memory_list(state: &AppState) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let memories = state.memory_store.list_memories(50).await?;
+    for memory in memories {
+        println!(
+            "{}  {:?}/{}  {}  {}",
+            memory.id,
+            memory.owner.kind,
+            memory.owner.id,
+            memory.namespace,
+            memory.title.as_deref().unwrap_or(&memory.content)
+        );
+    }
+    Ok(())
+}
+
+async fn memory_remember(
+    state: &AppState,
+    args: &[String],
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    if args.len() < 4 {
+        eprintln!("usage: ennoia memory remember <owner_kind> <owner_id> <namespace> <content>");
+        std::process::exit(2);
+    }
+    let owner = ennoia_kernel::OwnerRef {
+        kind: match args[0].as_str() {
+            "agent" => ennoia_kernel::OwnerKind::Agent,
+            "space" => ennoia_kernel::OwnerKind::Space,
+            _ => ennoia_kernel::OwnerKind::Global,
+        },
+        id: args[1].clone(),
+    };
+    let request = ennoia_memory::RememberRequest {
+        owner,
+        namespace: args[2].clone(),
+        memory_kind: ennoia_kernel::MemoryKind::Fact,
+        stability: ennoia_kernel::Stability::Working,
+        title: None,
+        content: args[3..].join(" "),
+        summary: None,
+        confidence: None,
+        importance: None,
+        valid_from: None,
+        valid_to: None,
+        sources: Vec::new(),
+        tags: Vec::new(),
+        entities: Vec::new(),
+    };
+    let receipt = state.memory_store.remember(request).await?;
+    println!("{}", serde_json::to_string_pretty(&receipt)?);
+    Ok(())
+}
+
+async fn memory_recall(
+    state: &AppState,
+    args: &[String],
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    if args.len() < 2 {
+        eprintln!("usage: ennoia memory recall <owner_kind> <owner_id> [query]");
+        std::process::exit(2);
+    }
+    let owner = ennoia_kernel::OwnerRef {
+        kind: match args[0].as_str() {
+            "agent" => ennoia_kernel::OwnerKind::Agent,
+            "space" => ennoia_kernel::OwnerKind::Space,
+            _ => ennoia_kernel::OwnerKind::Global,
+        },
+        id: args[1].clone(),
+    };
+    let query_text = if args.len() > 2 {
+        Some(args[2..].join(" "))
+    } else {
+        None
+    };
+    let mode = if query_text.is_some() {
+        ennoia_memory::RecallMode::Fts
+    } else {
+        ennoia_memory::RecallMode::Namespace
+    };
+    let query = ennoia_memory::RecallQuery {
+        owner,
+        thread_id: None,
+        run_id: None,
+        query_text,
+        namespace_prefix: None,
+        memory_kind: None,
+        mode,
+        limit: 20,
+    };
+    let result = state.memory_store.recall(query).await?;
+    println!("receipt: {}", result.receipt_id);
+    println!("mode: {}", result.mode);
+    for memory in result.memories {
+        println!(
+            "- [{}] {}: {}",
+            memory.namespace,
+            memory.title.as_deref().unwrap_or("(no title)"),
+            memory.content
+        );
+    }
+    Ok(())
+}
+
 fn init_home_template(target: &Path) -> io::Result<()> {
     let config_dir = target.join("config");
+    let policies_dir = target.join("policies");
     fs::create_dir_all(config_dir.join("agents"))?;
     fs::create_dir_all(config_dir.join("extensions"))?;
+    fs::create_dir_all(&policies_dir)?;
     fs::create_dir_all(target.join("state/queue"))?;
     fs::create_dir_all(target.join("state/runs"))?;
     fs::create_dir_all(target.join("state/cache"))?;
@@ -121,6 +257,8 @@ fn init_home_template(target: &Path) -> io::Result<()> {
         &target.join("global/extensions/github/manifest.toml"),
         GITHUB_MANIFEST_TEMPLATE,
     )?;
+    write_if_missing(&policies_dir.join("memory.toml"), MEMORY_POLICY_TEMPLATE)?;
+    write_if_missing(&policies_dir.join("stage.toml"), STAGE_POLICY_TEMPLATE)?;
 
     Ok(())
 }

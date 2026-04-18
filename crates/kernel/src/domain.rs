@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
 
 /// OwnerKind distinguishes whether a resource belongs globally, to an agent, or to a space.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
 pub enum OwnerKind {
     Global,
     Agent,
@@ -9,47 +10,64 @@ pub enum OwnerKind {
 }
 
 /// OwnerRef is the shared owner envelope used across runs, artifacts, jobs and memory.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct OwnerRef {
     pub kind: OwnerKind,
     pub id: String,
 }
 
+impl OwnerRef {
+    pub fn new(kind: OwnerKind, id: impl Into<String>) -> Self {
+        Self {
+            kind,
+            id: id.into(),
+        }
+    }
+
+    pub fn global(id: impl Into<String>) -> Self {
+        Self::new(OwnerKind::Global, id)
+    }
+
+    pub fn agent(id: impl Into<String>) -> Self {
+        Self::new(OwnerKind::Agent, id)
+    }
+
+    pub fn space(id: impl Into<String>) -> Self {
+        Self::new(OwnerKind::Space, id)
+    }
+}
+
 /// ThreadKind describes the conversation topology.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
 pub enum ThreadKind {
     Private,
     Space,
 }
 
 /// MessageRole describes who produced one message.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
 pub enum MessageRole {
     User,
     Agent,
     System,
-}
-
-/// RunStatus tracks high-level run execution state.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum RunStatus {
-    Pending,
-    Running,
-    Blocked,
-    Completed,
+    Tool,
 }
 
 /// TaskStatus tracks each planned task state.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
 pub enum TaskStatus {
     Pending,
     Running,
-    Failed,
     Completed,
+    Failed,
 }
 
 /// TaskKind tracks the purpose of one task unit.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
 pub enum TaskKind {
     Response,
     Collaboration,
@@ -57,7 +75,8 @@ pub enum TaskKind {
 }
 
 /// ArtifactKind distinguishes stored output types.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
 pub enum ArtifactKind {
     Screenshot,
     Har,
@@ -115,7 +134,7 @@ pub struct RunSpec {
     pub owner: OwnerRef,
     pub thread_id: String,
     pub trigger: String,
-    pub status: RunStatus,
+    pub stage: crate::stage::RunStage,
     pub goal: String,
     pub created_at: String,
     pub updated_at: String,

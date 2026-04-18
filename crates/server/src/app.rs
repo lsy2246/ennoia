@@ -9,6 +9,14 @@ use ennoia_kernel::{
     HookContribution, PageContribution, PanelContribution, PlatformOverview, ProviderContribution,
     ServerConfig, SpaceSpec, ThemeContribution, UiConfig,
 };
+use ennoia_memory::{MemoryStore, SqliteMemoryStore};
+use ennoia_policy::PolicySet;
+use ennoia_runtime::{
+    builtin_pipeline, GatePipeline, PolicyStageMachine, RuntimeStore, SqliteRuntimeStore,
+    StageMachine,
+};
+use ennoia_scheduler::{SchedulerStore, SqliteSchedulerStore, Worker};
+use ennoia_orchestrator::OrchestratorService;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::SqlitePool;
 use tokio::net::TcpListener;
@@ -18,7 +26,7 @@ use crate::routes::build_router;
 
 type AppError = Box<dyn std::error::Error + Send + Sync>;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct AppState {
     pub app_config: AppConfig,
     pub server_config: ServerConfig,
@@ -29,6 +37,13 @@ pub struct AppState {
     pub extensions: ExtensionRegistry,
     pub agents: Vec<AgentConfig>,
     pub spaces: Vec<SpaceSpec>,
+    pub policies: Arc<PolicySet>,
+    pub memory_store: Arc<dyn MemoryStore>,
+    pub runtime_store: Arc<dyn RuntimeStore>,
+    pub scheduler_store: Arc<dyn SchedulerStore>,
+    pub stage_machine: Arc<dyn StageMachine>,
+    pub gate_pipeline: GatePipeline,
+    pub orchestrator: OrchestratorService,
 }
 
 pub fn default_app_state() -> AppState {
@@ -36,6 +51,20 @@ pub fn default_app_state() -> AppState {
         .max_connections(1)
         .connect_lazy("sqlite::memory:")
         .expect("memory pool");
+
+    let policies = Arc::new(PolicySet::builtin());
+    let memory_store: Arc<dyn MemoryStore> = Arc::new(SqliteMemoryStore::new(
+        pool.clone(),
+        Arc::new(policies.memory.clone()),
+    ));
+    let runtime_store: Arc<dyn RuntimeStore> = Arc::new(SqliteRuntimeStore::new(pool.clone()));
+    let scheduler_store: Arc<dyn SchedulerStore> =
+        Arc::new(SqliteSchedulerStore::new(pool.clone()));
+    let stage_machine: Arc<dyn StageMachine> = Arc::new(PolicyStageMachine::new(Arc::new(
+        policies.stage.clone(),
+    )));
+    let gate_pipeline = builtin_pipeline();
+    let orchestrator = OrchestratorService::new(stage_machine.clone(), gate_pipeline.clone());
 
     AppState {
         app_config: AppConfig::default(),
@@ -45,29 +74,15 @@ pub fn default_app_state() -> AppState {
         home_dir: Arc::new(default_home_dir()),
         pool,
         extensions: fallback_extension_registry(),
-        agents: vec![
-            AgentConfig {
-                id: "coder".to_string(),
-                display_name: "Coder".to_string(),
-                kind: "agent".to_string(),
-                workspace_mode: "private".to_string(),
-                default_model: "gpt-5.4".to_string(),
-                skills_dir: "~/.ennoia/agents/coder/skills".to_string(),
-                workspace_dir: "~/.ennoia/agents/coder/workspace".to_string(),
-                artifacts_dir: "~/.ennoia/agents/coder/artifacts".to_string(),
-            },
-            AgentConfig {
-                id: "planner".to_string(),
-                display_name: "Planner".to_string(),
-                kind: "agent".to_string(),
-                workspace_mode: "private".to_string(),
-                default_model: "gpt-5.4".to_string(),
-                skills_dir: "~/.ennoia/agents/planner/skills".to_string(),
-                workspace_dir: "~/.ennoia/agents/planner/workspace".to_string(),
-                artifacts_dir: "~/.ennoia/agents/planner/artifacts".to_string(),
-            },
-        ],
+        agents: default_agents(),
         spaces: default_spaces(),
+        policies,
+        memory_store,
+        runtime_store,
+        scheduler_store,
+        stage_machine,
+        gate_pipeline,
+        orchestrator,
     }
 }
 
@@ -81,6 +96,7 @@ pub async fn bootstrap_app_state(home_dir: impl AsRef<Path>) -> Result<AppState,
     let agents = load_agent_configs(home_dir.join("config/agents"))?;
     let spaces = default_spaces();
     let extensions = load_enabled_extensions(home_dir.join("config/extensions"))?;
+    let policies = Arc::new(PolicySet::load(home_dir.join("policies"))?);
 
     let database_path = home_dir.join("state/sqlite/ennoia.db");
     let connect_options = SqliteConnectOptions::new()
@@ -96,6 +112,19 @@ pub async fn bootstrap_app_state(home_dir: impl AsRef<Path>) -> Result<AppState,
     db::upsert_spaces(&pool, &spaces).await?;
     db::upsert_extensions(&pool, &extensions).await?;
 
+    let memory_store: Arc<dyn MemoryStore> = Arc::new(SqliteMemoryStore::new(
+        pool.clone(),
+        Arc::new(policies.memory.clone()),
+    ));
+    let runtime_store: Arc<dyn RuntimeStore> = Arc::new(SqliteRuntimeStore::new(pool.clone()));
+    let scheduler_store: Arc<dyn SchedulerStore> =
+        Arc::new(SqliteSchedulerStore::new(pool.clone()));
+    let stage_machine: Arc<dyn StageMachine> = Arc::new(PolicyStageMachine::new(Arc::new(
+        policies.stage.clone(),
+    )));
+    let gate_pipeline = builtin_pipeline();
+    let orchestrator = OrchestratorService::new(stage_machine.clone(), gate_pipeline.clone());
+
     Ok(AppState {
         app_config,
         server_config,
@@ -106,14 +135,32 @@ pub async fn bootstrap_app_state(home_dir: impl AsRef<Path>) -> Result<AppState,
         extensions,
         agents,
         spaces,
+        policies,
+        memory_store,
+        runtime_store,
+        scheduler_store,
+        stage_machine,
+        gate_pipeline,
+        orchestrator,
     })
 }
 
 pub async fn run_server(home_dir: impl AsRef<Path>) -> Result<(), AppError> {
     let state = bootstrap_app_state(home_dir).await?;
+
+    let scheduler_store = state.scheduler_store.clone();
+    let tick_ms = state.app_config.scheduler_tick_ms;
+    let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
+    let worker = Worker::new(scheduler_store, tick_ms);
+    tokio::spawn(async move {
+        worker.run_forever(cancel_rx).await;
+    });
+
     let address = format!("{}:{}", state.server_config.host, state.server_config.port);
     let listener = TcpListener::bind(&address).await?;
-    axum::serve(listener, build_router(state)).await?;
+    let serve_result = axum::serve(listener, build_router(state)).await;
+    let _ = cancel_tx.send(true);
+    serve_result?;
     Ok(())
 }
 
@@ -130,7 +177,7 @@ where
 
 fn load_agent_configs(path: PathBuf) -> Result<Vec<AgentConfig>, AppError> {
     if !path.exists() {
-        return Ok(default_app_state().agents);
+        return Ok(default_agents());
     }
 
     let mut agents = Vec::new();
@@ -145,7 +192,7 @@ fn load_agent_configs(path: PathBuf) -> Result<Vec<AgentConfig>, AppError> {
     }
 
     if agents.is_empty() {
-        Ok(default_app_state().agents)
+        Ok(default_agents())
     } else {
         Ok(agents)
     }
@@ -196,6 +243,7 @@ fn load_enabled_extensions(path: PathBuf) -> Result<ExtensionRegistry, AppError>
 fn ensure_runtime_layout(home_dir: &Path) -> Result<(), AppError> {
     fs::create_dir_all(home_dir.join("config/agents"))?;
     fs::create_dir_all(home_dir.join("config/extensions"))?;
+    fs::create_dir_all(home_dir.join("policies"))?;
     fs::create_dir_all(home_dir.join("state/queue"))?;
     fs::create_dir_all(home_dir.join("state/runs"))?;
     fs::create_dir_all(home_dir.join("state/cache"))?;
@@ -215,6 +263,31 @@ fn default_spaces() -> Vec<SpaceSpec> {
         mention_policy: "configured".to_string(),
         default_agents: vec!["coder".to_string(), "planner".to_string()],
     }]
+}
+
+fn default_agents() -> Vec<AgentConfig> {
+    vec![
+        AgentConfig {
+            id: "coder".to_string(),
+            display_name: "Coder".to_string(),
+            kind: "agent".to_string(),
+            workspace_mode: "private".to_string(),
+            default_model: "gpt-5.4".to_string(),
+            skills_dir: "~/.ennoia/agents/coder/skills".to_string(),
+            workspace_dir: "~/.ennoia/agents/coder/workspace".to_string(),
+            artifacts_dir: "~/.ennoia/agents/coder/artifacts".to_string(),
+        },
+        AgentConfig {
+            id: "planner".to_string(),
+            display_name: "Planner".to_string(),
+            kind: "agent".to_string(),
+            workspace_mode: "private".to_string(),
+            default_model: "gpt-5.4".to_string(),
+            skills_dir: "~/.ennoia/agents/planner/skills".to_string(),
+            workspace_dir: "~/.ennoia/agents/planner/workspace".to_string(),
+            artifacts_dir: "~/.ennoia/agents/planner/artifacts".to_string(),
+        },
+    ]
 }
 
 fn sample_observatory_manifest() -> ExtensionManifest {

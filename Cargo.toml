@@ -1,7 +1,9 @@
 [workspace]
 members = [
   "crates/kernel",
+  "crates/policy",
   "crates/memory",
+  "crates/runtime",
   "crates/orchestrator",
   "crates/scheduler",
   "crates/extension-host",
