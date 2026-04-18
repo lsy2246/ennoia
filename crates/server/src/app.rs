@@ -3,6 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use ennoia_config::SqliteConfigStore;
 use ennoia_extension_host::{ExtensionRegistry, RegisteredExtension};
 use ennoia_kernel::{
     AgentConfig, AppConfig, CommandContribution, ContributionSet, ExtensionKind, ExtensionManifest,
@@ -21,6 +22,7 @@ use tokio::net::TcpListener;
 
 use crate::db;
 use crate::routes::build_router;
+use crate::system_config::SystemConfigRuntime;
 
 type AppError = Box<dyn std::error::Error + Send + Sync>;
 
@@ -42,6 +44,7 @@ pub struct AppState {
     pub stage_machine: Arc<dyn StageMachine>,
     pub gate_pipeline: GatePipeline,
     pub orchestrator: OrchestratorService,
+    pub system_config: SystemConfigRuntime,
 }
 
 pub fn default_app_state() -> AppState {
@@ -63,6 +66,8 @@ pub fn default_app_state() -> AppState {
     )));
     let gate_pipeline = builtin_pipeline();
     let orchestrator = OrchestratorService::new(stage_machine.clone(), gate_pipeline.clone());
+    let config_store = Arc::new(SqliteConfigStore::new(pool.clone()));
+    let system_config = SystemConfigRuntime::defaulted(config_store);
 
     AppState {
         app_config: AppConfig::default(),
@@ -81,6 +86,7 @@ pub fn default_app_state() -> AppState {
         stage_machine,
         gate_pipeline,
         orchestrator,
+        system_config,
     }
 }
 
@@ -122,6 +128,9 @@ pub async fn bootstrap_app_state(home_dir: impl AsRef<Path>) -> Result<AppState,
     )));
     let gate_pipeline = builtin_pipeline();
     let orchestrator = OrchestratorService::new(stage_machine.clone(), gate_pipeline.clone());
+    let config_store = Arc::new(SqliteConfigStore::new(pool.clone()));
+    let system_config = SystemConfigRuntime::defaulted(config_store);
+    system_config.load_from_store().await?;
 
     Ok(AppState {
         app_config,
@@ -140,6 +149,7 @@ pub async fn bootstrap_app_state(home_dir: impl AsRef<Path>) -> Result<AppState,
         stage_machine,
         gate_pipeline,
         orchestrator,
+        system_config,
     })
 }
 

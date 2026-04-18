@@ -8,6 +8,8 @@ use serde::Serialize;
 use sqlx::{Row, SqlitePool};
 
 pub const SCHEMA_SQL: &str = include_str!("../../../migrations/0001_ennoia_core.sql");
+pub const SYSTEM_CONFIG_SQL: &str =
+    include_str!("../../../migrations/0002_system_config.sql");
 
 #[derive(Debug, Clone, Serialize)]
 pub struct JobRow {
@@ -23,12 +25,14 @@ pub struct JobRow {
 }
 
 pub async fn initialize_schema(pool: &SqlitePool) -> Result<(), sqlx::Error> {
-    for statement in SCHEMA_SQL
-        .split(';')
-        .map(str::trim)
-        .filter(|statement| !statement.is_empty())
-    {
-        sqlx::query(statement).execute(pool).await?;
+    for migration in [SCHEMA_SQL, SYSTEM_CONFIG_SQL] {
+        for statement in migration
+            .split(';')
+            .map(str::trim)
+            .filter(|statement| !statement.is_empty())
+        {
+            sqlx::query(statement).execute(pool).await?;
+        }
     }
     Ok(())
 }

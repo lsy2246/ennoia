@@ -15,6 +15,7 @@ pub mod runtime;
 pub mod scheduler;
 pub mod signals;
 pub mod stage;
+pub mod system_config;
 
 // ========== Re-exports ==========
 
@@ -48,6 +49,12 @@ pub use scheduler::{
 };
 pub use signals::{EvidenceSignals, ExecutionSignals, IntentSignals, Signals};
 pub use stage::{RunStage, RunStageEvent, StageTransition};
+pub use system_config::{
+    AuthConfig, AuthMode, BodyLimitConfig, BootstrapState, ConfigChangeRecord, ConfigEntry,
+    ConfigError, ConfigStore, CorsConfig, LoggingConfig, RateLimitConfig, SystemConfig,
+    TimeoutConfig, ALL_CONFIG_KEYS, CONFIG_KEY_AUTH, CONFIG_KEY_BODY_LIMIT, CONFIG_KEY_BOOTSTRAP,
+    CONFIG_KEY_CORS, CONFIG_KEY_LOGGING, CONFIG_KEY_RATE_LIMIT, CONFIG_KEY_TIMEOUT,
+};
 
 /// Returns the current kernel module name.
 pub fn module_name() -> &'static str {

@@ -3,6 +3,7 @@ use std::fs;
 use axum::{
     extract::{Path, State},
     http::StatusCode,
+    middleware as axum_middleware,
     routing::{get, post},
     Json, Router,
 };
@@ -12,22 +13,35 @@ use ennoia_extension_host::{
     RegisteredPanelContribution,
 };
 use ennoia_kernel::{
-    ArtifactKind, ArtifactSpec, AssembleRequest, ContextView, EnqueueRequest, EpisodeKind,
-    EpisodeRequest, JobKind, JobRecord, MemoryKind, MemoryRecord, MemorySource, MessageRole,
-    MessageSpec, OwnerKind, OwnerRef, RecallMode, RecallQuery, RecallResult, RememberReceipt,
-    RememberRequest, ReviewAction, ReviewActionKind, ReviewReceipt, ScheduleKind, Stability,
-    ThreadKind, ThreadSpec,
+    ArtifactKind, ArtifactSpec, AssembleRequest, ConfigChangeRecord, ConfigEntry, ConfigStore,
+    ContextView, EnqueueRequest, EpisodeKind, EpisodeRequest, JobKind, JobRecord, MemoryKind,
+    MemoryRecord, MemorySource, MessageRole, MessageSpec, OwnerKind, OwnerRef, RecallMode,
+    RecallQuery, RecallResult, RememberReceipt, RememberRequest, ReviewAction, ReviewActionKind,
+    ReviewReceipt, ScheduleKind, Stability, SystemConfig, ThreadKind, ThreadSpec,
+    ALL_CONFIG_KEYS,
 };
 use ennoia_orchestrator::{RunRequest, RunTrigger};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
-use tower_http::cors::CorsLayer;
 use uuid::Uuid;
 
 use crate::app::AppState;
 use crate::db::{self, JobRow};
+use crate::middleware::{
+    auth_middleware, body_limit_middleware, cors_middleware, logging_middleware,
+    rate_limit_middleware, timeout_middleware,
+};
 
 pub fn build_router(state: AppState) -> Router {
+    let admin = Router::new()
+        .route("/api/v1/admin/config", get(config_list))
+        .route(
+            "/api/v1/admin/config/{key}",
+            get(config_get).put(config_put),
+        )
+        .route("/api/v1/admin/config/{key}/history", get(config_history))
+        .route("/api/v1/admin/config/snapshot", get(config_snapshot));
+
     Router::new()
         .route("/health", get(health))
         .route("/api/v1/overview", get(overview))
@@ -60,7 +74,31 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/memories/recall", post(memories_recall))
         .route("/api/v1/memories/review", post(memories_review))
         .route("/api/v1/jobs", get(jobs_list).post(jobs_create))
-        .layer(CorsLayer::very_permissive())
+        .merge(admin)
+        .layer(axum_middleware::from_fn_with_state(
+            state.clone(),
+            auth_middleware,
+        ))
+        .layer(axum_middleware::from_fn_with_state(
+            state.clone(),
+            rate_limit_middleware,
+        ))
+        .layer(axum_middleware::from_fn_with_state(
+            state.clone(),
+            body_limit_middleware,
+        ))
+        .layer(axum_middleware::from_fn_with_state(
+            state.clone(),
+            timeout_middleware,
+        ))
+        .layer(axum_middleware::from_fn_with_state(
+            state.clone(),
+            cors_middleware,
+        ))
+        .layer(axum_middleware::from_fn_with_state(
+            state.clone(),
+            logging_middleware,
+        ))
         .with_state(state)
 }
 
@@ -753,4 +791,97 @@ fn owner_kind_from(value: &str) -> OwnerKind {
 
 fn now_iso() -> String {
     Utc::now().to_rfc3339()
+}
+
+// ========== Admin config API ==========
+
+#[derive(Debug, Deserialize)]
+struct ConfigPutPayload {
+    payload: JsonValue,
+    updated_by: Option<String>,
+}
+
+async fn config_list(State(state): State<AppState>) -> Json<Vec<ConfigEntry>> {
+    let raw = state.system_config.store.list().await.unwrap_or_default();
+    Json(ensure_full_config_set(raw))
+}
+
+async fn config_get(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+) -> Result<Json<ConfigEntry>, (StatusCode, String)> {
+    if !ALL_CONFIG_KEYS.contains(&key.as_str()) {
+        return Err((StatusCode::NOT_FOUND, format!("unknown config key '{key}'")));
+    }
+    state
+        .system_config
+        .store
+        .get(&key)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .map(Json)
+        .ok_or_else(|| (StatusCode::NOT_FOUND, format!("config '{key}' not initialized")))
+}
+
+async fn config_put(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(payload): Json<ConfigPutPayload>,
+) -> Result<Json<ConfigEntry>, (StatusCode, String)> {
+    if !ALL_CONFIG_KEYS.contains(&key.as_str()) {
+        return Err((StatusCode::NOT_FOUND, format!("unknown config key '{key}'")));
+    }
+    let entry = state
+        .system_config
+        .store
+        .put(&key, &payload.payload, payload.updated_by.as_deref())
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let applied = state
+        .system_config
+        .apply(&key, &payload.payload)
+        .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+    if !applied {
+        return Err((StatusCode::BAD_REQUEST, format!("unsupported key '{key}'")));
+    }
+
+    Ok(Json(entry))
+}
+
+async fn config_history(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+) -> Json<Vec<ConfigChangeRecord>> {
+    Json(
+        state
+            .system_config
+            .store
+            .history(&key, 50)
+            .await
+            .unwrap_or_default(),
+    )
+}
+
+async fn config_snapshot(State(state): State<AppState>) -> Json<SystemConfig> {
+    Json(state.system_config.snapshot())
+}
+
+fn ensure_full_config_set(mut rows: Vec<ConfigEntry>) -> Vec<ConfigEntry> {
+    let have: std::collections::HashSet<String> =
+        rows.iter().map(|r| r.key.clone()).collect();
+    for key in ALL_CONFIG_KEYS {
+        if !have.contains(*key) {
+            rows.push(ConfigEntry {
+                key: key.to_string(),
+                payload_json: "{}".to_string(),
+                enabled: true,
+                version: 0,
+                updated_by: None,
+                updated_at: String::new(),
+            });
+        }
+    }
+    rows.sort_by(|a, b| a.key.cmp(&b.key));
+    rows
 }
