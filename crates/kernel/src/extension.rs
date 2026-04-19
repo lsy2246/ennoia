@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::ui::{LocalizedText, ThemeAppearance};
+
 /// ExtensionKind represents the top-level extension classification.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ExtensionKind {
@@ -11,7 +13,7 @@ pub enum ExtensionKind {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PageContribution {
     pub id: String,
-    pub title: String,
+    pub title: LocalizedText,
     pub route: String,
     pub mount: String,
     pub icon: Option<String>,
@@ -21,7 +23,7 @@ pub struct PageContribution {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PanelContribution {
     pub id: String,
-    pub title: String,
+    pub title: LocalizedText,
     pub mount: String,
     pub slot: String,
     pub icon: Option<String>,
@@ -31,15 +33,28 @@ pub struct PanelContribution {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ThemeContribution {
     pub id: String,
-    pub label: String,
-    pub entry: Option<String>,
+    pub label: LocalizedText,
+    pub appearance: ThemeAppearance,
+    pub tokens_entry: String,
+    pub preview_color: Option<String>,
+    pub extends: Option<String>,
+    pub category: Option<String>,
+}
+
+/// LocaleContribution describes one locale bundle provided by an extension.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LocaleContribution {
+    pub locale: String,
+    pub namespace: String,
+    pub entry: String,
+    pub version: String,
 }
 
 /// CommandContribution describes a shell command palette action.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CommandContribution {
     pub id: String,
-    pub title: String,
+    pub title: LocalizedText,
     pub action: String,
     pub shortcut: Option<String>,
 }
@@ -65,6 +80,7 @@ pub struct ContributionSet {
     pub pages: Vec<PageContribution>,
     pub panels: Vec<PanelContribution>,
     pub themes: Vec<ThemeContribution>,
+    pub locales: Vec<LocaleContribution>,
     pub commands: Vec<CommandContribution>,
     pub providers: Vec<ProviderContribution>,
     pub hooks: Vec<HookContribution>,

@@ -5,10 +5,12 @@ import {
   loadWorkspaceSnapshot,
   type WorkspaceSnapshot,
 } from "@ennoia/api-client";
+import { useUiHelpers } from "@/stores/ui";
 
 export function DashboardPage() {
   const [snapshot, setSnapshot] = useState<WorkspaceSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const { t, formatDateTime } = useUiHelpers();
 
   useEffect(() => {
     let cancelled = false;
@@ -28,12 +30,12 @@ export function DashboardPage() {
     return <div className="page"><p className="error">Failed to load: {error}</p></div>;
   }
   if (!snapshot) {
-    return <div className="page"><p>Loading…</p></div>;
+    return <div className="page"><p>{t("dashboard.loading", "Loading…")}</p></div>;
   }
 
   return (
     <div className="page">
-      <h1>Dashboard</h1>
+      <h1>{t("dashboard.title", "Dashboard")}</h1>
       <section className="dashboard-grid">
         {Object.entries(snapshot.overview.counts).map(([key, value]) => (
           <div key={key} className="dashboard-card">
@@ -44,7 +46,7 @@ export function DashboardPage() {
       </section>
 
       <section>
-        <h2>Recent runs</h2>
+        <h2>{t("dashboard.recent_runs", "Recent runs")}</h2>
         <table className="table">
           <thead>
             <tr>
@@ -63,10 +65,10 @@ export function DashboardPage() {
                 <td>{run.thread_id}</td>
                 <td><span className={`stage stage--${run.stage}`}>{run.stage}</span></td>
                 <td>{run.goal}</td>
-                <td>{new Date(run.created_at).toLocaleString()}</td>
+                <td>{formatDateTime(run.created_at)}</td>
                 <td>
                   <Link to="/runs/$runId" params={{ runId: run.id }}>
-                    Details
+                    {t("dashboard.details", "Details")}
                   </Link>
                 </td>
               </tr>
@@ -76,7 +78,7 @@ export function DashboardPage() {
       </section>
 
       <section>
-        <h2>Agents</h2>
+        <h2>{t("dashboard.agents", "Agents")}</h2>
         <ul className="simple-list">
           {snapshot.agents.map((a) => (
             <li key={a.id}>

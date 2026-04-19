@@ -17,6 +17,7 @@ pub mod scheduler;
 pub mod signals;
 pub mod stage;
 pub mod system_config;
+pub mod ui;
 
 // ========== Re-exports ==========
 
@@ -32,7 +33,8 @@ pub use domain::{
 };
 pub use extension::{
     CommandContribution, ContributionSet, ExtensionKind, ExtensionManifest, HookContribution,
-    PageContribution, PanelContribution, ProviderContribution, ThemeContribution,
+    LocaleContribution, PageContribution, PanelContribution, ProviderContribution,
+    ThemeContribution,
 };
 pub use gate::{GateRecord, GateSeverity, GateVerdict};
 pub use memory::{
@@ -60,6 +62,7 @@ pub use system_config::{
     TimeoutConfig, ALL_CONFIG_KEYS, CONFIG_KEY_AUTH, CONFIG_KEY_BODY_LIMIT, CONFIG_KEY_BOOTSTRAP,
     CONFIG_KEY_CORS, CONFIG_KEY_LOGGING, CONFIG_KEY_RATE_LIMIT, CONFIG_KEY_TIMEOUT,
 };
+pub use ui::{LocalizedText, ThemeAppearance, UiPreference, UiPreferenceRecord};
 
 /// Returns the current kernel module name.
 pub fn module_name() -> &'static str {

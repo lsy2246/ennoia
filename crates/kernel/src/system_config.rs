@@ -67,6 +67,7 @@ impl Default for AuthConfig {
                 "/health".to_string(),
                 "/api/v1/auth/**".to_string(),
                 "/api/v1/bootstrap/**".to_string(),
+                "/api/v1/ui/runtime".to_string(),
             ],
             allow_registration: false,
         }

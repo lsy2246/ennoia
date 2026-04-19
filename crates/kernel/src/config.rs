@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+use crate::ui::LocalizedText;
+
 /// AppConfig stores startup-wide settings loaded from `config/ennoia.toml`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AppConfig {
@@ -53,8 +55,11 @@ impl Default for ServerConfig {
 /// UiConfig stores shell-specific settings loaded from `config/ui.toml`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct UiConfig {
-    pub shell_title: String,
+    pub shell_title: LocalizedText,
     pub default_theme: String,
+    pub default_locale: String,
+    pub fallback_locale: String,
+    pub available_locales: Vec<String>,
     pub dock_persistence: bool,
     pub default_page: String,
     pub show_command_palette: bool,
@@ -63,8 +68,11 @@ pub struct UiConfig {
 impl Default for UiConfig {
     fn default() -> Self {
         Self {
-            shell_title: "Ennoia".to_string(),
+            shell_title: LocalizedText::new("shell.title", "Ennoia"),
             default_theme: "system".to_string(),
+            default_locale: "zh-CN".to_string(),
+            fallback_locale: "en-US".to_string(),
+            available_locales: vec!["zh-CN".to_string(), "en-US".to_string()],
             dock_persistence: true,
             default_page: "inbox".to_string(),
             show_command_palette: true,

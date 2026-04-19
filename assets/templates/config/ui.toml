@@ -1,5 +1,8 @@
-shell_title = "Ennoia"
+shell_title = { key = "shell.title", fallback = "Ennoia" }
 default_theme = "system"
+default_locale = "zh-CN"
+fallback_locale = "en-US"
+available_locales = ["zh-CN", "en-US"]
 dock_persistence = true
 default_page = "inbox"
 show_command_palette = true

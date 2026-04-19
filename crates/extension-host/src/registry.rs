@@ -3,8 +3,8 @@ use std::io;
 use std::path::Path;
 
 use ennoia_kernel::{
-    CommandContribution, ExtensionKind, ExtensionManifest, HookContribution, PageContribution,
-    PanelContribution, ProviderContribution, ThemeContribution,
+    CommandContribution, ExtensionKind, ExtensionManifest, HookContribution, LocaleContribution,
+    PageContribution, PanelContribution, ProviderContribution, ThemeContribution,
 };
 use serde::Serialize;
 
@@ -27,6 +27,7 @@ pub struct RegisteredExtensionSnapshot {
     pub pages: Vec<PageContribution>,
     pub panels: Vec<PanelContribution>,
     pub themes: Vec<ThemeContribution>,
+    pub locales: Vec<LocaleContribution>,
     pub commands: Vec<CommandContribution>,
     pub providers: Vec<ProviderContribution>,
     pub hooks: Vec<HookContribution>,
@@ -60,6 +61,16 @@ pub struct RegisteredThemeContribution {
     pub extension_version: String,
     pub install_dir: String,
     pub theme: ThemeContribution,
+}
+
+/// RegisteredLocaleContribution describes one locale bundle contribution with extension metadata.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RegisteredLocaleContribution {
+    pub extension_id: String,
+    pub extension_kind: ExtensionKind,
+    pub extension_version: String,
+    pub install_dir: String,
+    pub locale: LocaleContribution,
 }
 
 /// RegisteredCommandContribution describes one command contribution with its extension metadata.
@@ -99,6 +110,7 @@ pub struct ExtensionRegistrySnapshot {
     pub pages: Vec<RegisteredPageContribution>,
     pub panels: Vec<RegisteredPanelContribution>,
     pub themes: Vec<RegisteredThemeContribution>,
+    pub locales: Vec<RegisteredLocaleContribution>,
     pub commands: Vec<RegisteredCommandContribution>,
     pub providers: Vec<RegisteredProviderContribution>,
     pub hooks: Vec<RegisteredHookContribution>,
@@ -169,6 +181,7 @@ impl ExtensionRegistry {
             pages: self.pages(),
             panels: self.panels(),
             themes: self.themes(),
+            locales: self.locales(),
             commands: self.commands(),
             providers: self.providers(),
             hooks: self.hooks(),
@@ -213,6 +226,20 @@ impl ExtensionRegistry {
                     .iter()
                     .cloned()
                     .map(|theme| RegisteredThemeContribution::from_extension(item, theme))
+            })
+            .collect()
+    }
+
+    pub fn locales(&self) -> Vec<RegisteredLocaleContribution> {
+        self.items
+            .iter()
+            .flat_map(|item| {
+                item.manifest
+                    .contributes
+                    .locales
+                    .iter()
+                    .cloned()
+                    .map(|locale| RegisteredLocaleContribution::from_extension(item, locale))
             })
             .collect()
     }
@@ -288,6 +315,7 @@ impl RegisteredExtensionSnapshot {
             pages: item.manifest.contributes.pages.clone(),
             panels: item.manifest.contributes.panels.clone(),
             themes: item.manifest.contributes.themes.clone(),
+            locales: item.manifest.contributes.locales.clone(),
             commands: item.manifest.contributes.commands.clone(),
             providers: item.manifest.contributes.providers.clone(),
             hooks: item.manifest.contributes.hooks.clone(),
@@ -331,6 +359,18 @@ impl RegisteredCommandContribution {
     }
 }
 
+impl RegisteredLocaleContribution {
+    fn from_extension(item: &RegisteredExtension, locale: LocaleContribution) -> Self {
+        Self {
+            extension_id: item.manifest.id.clone(),
+            extension_kind: item.manifest.kind.clone(),
+            extension_version: item.manifest.version.clone(),
+            install_dir: item.install_dir.clone(),
+            locale,
+        }
+    }
+}
+
 impl RegisteredProviderContribution {
     fn from_extension(item: &RegisteredExtension, provider: ProviderContribution) -> Self {
         Self {
@@ -369,6 +409,7 @@ mod tests {
         assert_eq!(snapshot.extensions.len(), 1);
         assert_eq!(snapshot.pages.len(), 1);
         assert_eq!(snapshot.panels.len(), 1);
+        assert_eq!(snapshot.locales.len(), 2);
         assert_eq!(snapshot.commands.len(), 1);
         assert_eq!(snapshot.providers.len(), 1);
         assert_eq!(snapshot.hooks.len(), 1);
@@ -395,6 +436,10 @@ mod tests {
         fs::remove_dir_all(&root).expect("cleanup test dir");
     }
 
+    fn text(key: &str, fallback: &str) -> ennoia_kernel::LocalizedText {
+        ennoia_kernel::LocalizedText::new(key, fallback)
+    }
+
     fn sample_manifest() -> ExtensionManifest {
         ExtensionManifest {
             id: "observatory".to_string(),
@@ -405,26 +450,44 @@ mod tests {
             contributes: ContributionSet {
                 pages: vec![PageContribution {
                     id: "observatory.events".to_string(),
-                    title: "Observatory".to_string(),
+                    title: text("ext.observatory.page.events", "Observatory"),
                     route: "/observatory".to_string(),
                     mount: "observatory.events.page".to_string(),
                     icon: Some("activity".to_string()),
                 }],
                 panels: vec![PanelContribution {
                     id: "observatory.timeline".to_string(),
-                    title: "Event Timeline".to_string(),
+                    title: text("ext.observatory.panel.timeline", "Event Timeline"),
                     mount: "observatory.timeline.panel".to_string(),
                     slot: "right".to_string(),
                     icon: Some("panel-right".to_string()),
                 }],
                 themes: vec![ThemeContribution {
                     id: "observatory.daybreak".to_string(),
-                    label: "Daybreak".to_string(),
-                    entry: Some("frontend/themes/daybreak.css".to_string()),
+                    label: text("ext.observatory.theme.daybreak", "Daybreak"),
+                    appearance: ennoia_kernel::ThemeAppearance::Light,
+                    tokens_entry: "frontend/themes/daybreak.css".to_string(),
+                    preview_color: Some("#F4A261".to_string()),
+                    extends: Some("system".to_string()),
+                    category: Some("extension".to_string()),
                 }],
+                locales: vec![
+                    LocaleContribution {
+                        locale: "zh-CN".to_string(),
+                        namespace: "ext.observatory".to_string(),
+                        entry: "frontend/locales/zh-CN.json".to_string(),
+                        version: "1".to_string(),
+                    },
+                    LocaleContribution {
+                        locale: "en-US".to_string(),
+                        namespace: "ext.observatory".to_string(),
+                        entry: "frontend/locales/en-US.json".to_string(),
+                        version: "1".to_string(),
+                    },
+                ],
                 commands: vec![CommandContribution {
                     id: "observatory.open".to_string(),
-                    title: "Open Observatory".to_string(),
+                    title: text("ext.observatory.command.open", "Open Observatory"),
                     action: "open-page".to_string(),
                     shortcut: Some("Ctrl+Shift+O".to_string()),
                 }],

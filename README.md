@@ -19,6 +19,7 @@
 - 前端主壳已经形成正式 workspace，可统一查看私聊、群聊、run、task、memory 与 extension surface
 - 前端改为 `web/apps + web/packages` 结构，`shell` 通过 `@ennoia/*` package 消费共享能力
 - 打包目录和配置模板已经与 SQLite 默认运行时布局保持一致
+- UI 运行时已具备正式的多语言、多主题与浏览器本地偏好缓存骨架
 
 ## 技术栈
 
@@ -156,3 +157,4 @@ bun run docker:down
 - [docs/hooks-and-events.md](docs/hooks-and-events.md)
 - [docs/api-surface.md](docs/api-surface.md)
 - [docs/extension-development.md](docs/extension-development.md)
+- [docs/i18n-and-theming.md](docs/i18n-and-theming.md)

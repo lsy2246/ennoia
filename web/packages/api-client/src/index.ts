@@ -1,5 +1,8 @@
 import type {
+  ExtensionLocaleContribution,
   ExtensionPageContribution,
+  ExtensionThemeContribution,
+  LocalizedText,
   ExtensionPanelContribution,
 } from "@ennoia/ui-sdk";
 import type { ApiErrorBody } from "@ennoia/contract";
@@ -12,7 +15,7 @@ const logger = createLogger("api-client");
 
 export type Overview = {
   app_name: string;
-  shell_title: string;
+  shell_title: LocalizedText;
   default_theme: string;
   modules: string[];
   counts: Record<string, number>;
@@ -117,6 +120,8 @@ export type ExtensionRegistry = {
   extensions: Array<{ id: string; kind: string; version: string; install_dir: string }>;
   pages: ExtensionPageContribution[];
   panels: ExtensionPanelContribution[];
+  themes: ExtensionThemeContribution[];
+  locales: ExtensionLocaleContribution[];
 };
 
 export type ConversationEnvelope = {
@@ -248,6 +253,49 @@ export type BootstrapResponse = {
   user: User;
   bootstrap: BootstrapState;
   jwt_secret_generated: boolean;
+};
+
+export type UiPreference = {
+  locale?: string | null;
+  theme_id?: string | null;
+  time_zone?: string | null;
+  date_style?: string | null;
+  density?: string | null;
+  motion?: string | null;
+  version: number;
+  updated_at: string;
+};
+
+export type UiPreferenceRecord = {
+  subject_id: string;
+  preference: UiPreference;
+};
+
+export type UiConfig = {
+  shell_title: LocalizedText;
+  default_theme: string;
+  default_locale: string;
+  fallback_locale: string;
+  available_locales: string[];
+  dock_persistence: boolean;
+  default_page: string;
+  show_command_palette: boolean;
+};
+
+export type UiRuntime = {
+  ui_config: UiConfig;
+  registry: {
+    pages: ExtensionPageContribution[];
+    panels: ExtensionPanelContribution[];
+    themes: ExtensionThemeContribution[];
+    locales: ExtensionLocaleContribution[];
+  };
+  user_preference?: UiPreferenceRecord | null;
+  space_preferences: UiPreferenceRecord[];
+  versions: {
+    registry: number;
+    preferences: number;
+  };
 };
 
 // ========== System config ==========
@@ -595,6 +643,49 @@ export async function registerUser(payload: {
 
 export async function fetchBootstrapState() {
   return fetchJson<BootstrapState>("/api/v1/bootstrap/state");
+}
+
+export async function fetchUiRuntime() {
+  return fetchJson<UiRuntime>("/api/v1/ui/runtime");
+}
+
+export async function fetchMyUiPreferences() {
+  return fetchJson<UiPreferenceRecord | null>("/api/v1/me/ui-preferences");
+}
+
+export async function saveMyUiPreferences(payload: {
+  locale?: string | null;
+  theme_id?: string | null;
+  time_zone?: string | null;
+  date_style?: string | null;
+  density?: string | null;
+  motion?: string | null;
+}) {
+  return fetchJson<UiPreferenceRecord>("/api/v1/me/ui-preferences", {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function fetchSpaceUiPreferences(spaceId: string) {
+  return fetchJson<UiPreferenceRecord | null>(`/api/v1/spaces/${spaceId}/ui-preferences`);
+}
+
+export async function saveSpaceUiPreferences(
+  spaceId: string,
+  payload: {
+    locale?: string | null;
+    theme_id?: string | null;
+    time_zone?: string | null;
+    date_style?: string | null;
+    density?: string | null;
+    motion?: string | null;
+  },
+) {
+  return fetchJson<UiPreferenceRecord>(`/api/v1/spaces/${spaceId}/ui-preferences`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
 }
 
 export async function completeBootstrap(payload: {

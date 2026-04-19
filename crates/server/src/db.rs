@@ -3,7 +3,7 @@ use ennoia_extension_host::ExtensionRegistry;
 use ennoia_kernel::{
     AgentConfig, ArtifactKind, ArtifactSpec, ExtensionManifest, MessageRole, MessageSpec,
     OwnerKind, OwnerRef, RunSpec, RunStage, SpaceSpec, TaskKind, TaskSpec, TaskStatus, ThreadKind,
-    ThreadSpec,
+    ThreadSpec, UiPreference,
 };
 use sea_query::{Alias, Expr, Func, Iden, OnConflict, Query, SqliteQueryBuilder};
 use sea_query_binder::SqlxBinder;
@@ -116,6 +116,7 @@ enum Extensions {
     PanelsJson,
     CommandsJson,
     ThemesJson,
+    LocalesJson,
     HooksJson,
     ProvidersJson,
 }
@@ -173,6 +174,12 @@ pub struct JobRow {
     pub created_at: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct UiPreferenceRow {
+    pub subject_id: String,
+    pub preference: UiPreference,
+}
+
 // ========== Schema migration ==========
 
 pub async fn initialize_schema(pool: &SqlitePool) -> Result<(), sqlx::Error> {
@@ -183,7 +190,13 @@ pub async fn initialize_schema(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             .map(str::trim)
             .filter(|statement| !statement.is_empty())
         {
-            sqlx::query(statement).execute(pool).await?;
+            if let Err(error) = sqlx::query(statement).execute(pool).await {
+                let message = error.to_string();
+                if message.contains("duplicate column name") {
+                    continue;
+                }
+                return Err(error);
+            }
         }
     }
     Ok(())
@@ -484,6 +497,7 @@ async fn persist_extension(
             Extensions::PanelsJson,
             Extensions::CommandsJson,
             Extensions::ThemesJson,
+            Extensions::LocalesJson,
             Extensions::HooksJson,
             Extensions::ProvidersJson,
         ])
@@ -506,6 +520,9 @@ async fn persist_extension(
             serde_json::to_string(&manifest.contributes.themes)
                 .unwrap_or_else(|_| "[]".into())
                 .into(),
+            serde_json::to_string(&manifest.contributes.locales)
+                .unwrap_or_else(|_| "[]".into())
+                .into(),
             serde_json::to_string(&manifest.contributes.hooks)
                 .unwrap_or_else(|_| "[]".into())
                 .into(),
@@ -525,6 +542,7 @@ async fn persist_extension(
                     Extensions::PanelsJson,
                     Extensions::CommandsJson,
                     Extensions::ThemesJson,
+                    Extensions::LocalesJson,
                     Extensions::HooksJson,
                     Extensions::ProvidersJson,
                 ])
@@ -795,6 +813,179 @@ pub async fn list_jobs(pool: &SqlitePool) -> Result<Vec<JobRow>, sqlx::Error> {
         .collect())
 }
 
+pub async fn get_user_ui_preference(
+    pool: &SqlitePool,
+    user_id: &str,
+) -> Result<Option<UiPreferenceRow>, sqlx::Error> {
+    let row = sqlx::query(
+        r#"
+        SELECT user_id, locale, theme_id, time_zone, date_style, density, motion, version, updated_at
+        FROM user_ui_preferences
+        WHERE user_id = ?
+        "#,
+    )
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(row.map(|row| UiPreferenceRow {
+        subject_id: row.get("user_id"),
+        preference: map_ui_preference_row(&row),
+    }))
+}
+
+pub async fn upsert_user_ui_preference(
+    pool: &SqlitePool,
+    user_id: &str,
+    preference: &UiPreference,
+) -> Result<UiPreferenceRow, sqlx::Error> {
+    let updated_at = if preference.updated_at.is_empty() {
+        now_iso()
+    } else {
+        preference.updated_at.clone()
+    };
+    sqlx::query(
+        r#"
+        INSERT INTO user_ui_preferences (
+            user_id, locale, theme_id, time_zone, date_style, density, motion, version, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(user_id) DO UPDATE SET
+            locale = excluded.locale,
+            theme_id = excluded.theme_id,
+            time_zone = excluded.time_zone,
+            date_style = excluded.date_style,
+            density = excluded.density,
+            motion = excluded.motion,
+            version = excluded.version,
+            updated_at = excluded.updated_at
+        "#,
+    )
+    .bind(user_id)
+    .bind(preference.locale.clone())
+    .bind(preference.theme_id.clone())
+    .bind(preference.time_zone.clone())
+    .bind(preference.date_style.clone())
+    .bind(preference.density.clone())
+    .bind(preference.motion.clone())
+    .bind(preference.version as i64)
+    .bind(updated_at.clone())
+    .execute(pool)
+    .await?;
+
+    Ok(UiPreferenceRow {
+        subject_id: user_id.to_string(),
+        preference: UiPreference {
+            updated_at,
+            ..preference.clone()
+        },
+    })
+}
+
+pub async fn get_space_ui_preference(
+    pool: &SqlitePool,
+    space_id: &str,
+) -> Result<Option<UiPreferenceRow>, sqlx::Error> {
+    let row = sqlx::query(
+        r#"
+        SELECT space_id, locale, theme_id, time_zone, date_style, density, motion, version, updated_at
+        FROM space_ui_preferences
+        WHERE space_id = ?
+        "#,
+    )
+    .bind(space_id)
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(row.map(|row| UiPreferenceRow {
+        subject_id: row.get("space_id"),
+        preference: map_ui_preference_row(&row),
+    }))
+}
+
+pub async fn list_space_ui_preferences(
+    pool: &SqlitePool,
+) -> Result<Vec<UiPreferenceRow>, sqlx::Error> {
+    let rows = sqlx::query(
+        r#"
+        SELECT space_id, locale, theme_id, time_zone, date_style, density, motion, version, updated_at
+        FROM space_ui_preferences
+        ORDER BY space_id ASC
+        "#,
+    )
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| UiPreferenceRow {
+            subject_id: row.get("space_id"),
+            preference: map_ui_preference_row(&row),
+        })
+        .collect())
+}
+
+pub async fn upsert_space_ui_preference(
+    pool: &SqlitePool,
+    space_id: &str,
+    preference: &UiPreference,
+) -> Result<UiPreferenceRow, sqlx::Error> {
+    let updated_at = if preference.updated_at.is_empty() {
+        now_iso()
+    } else {
+        preference.updated_at.clone()
+    };
+    sqlx::query(
+        r#"
+        INSERT INTO space_ui_preferences (
+            space_id, locale, theme_id, time_zone, date_style, density, motion, version, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(space_id) DO UPDATE SET
+            locale = excluded.locale,
+            theme_id = excluded.theme_id,
+            time_zone = excluded.time_zone,
+            date_style = excluded.date_style,
+            density = excluded.density,
+            motion = excluded.motion,
+            version = excluded.version,
+            updated_at = excluded.updated_at
+        "#,
+    )
+    .bind(space_id)
+    .bind(preference.locale.clone())
+    .bind(preference.theme_id.clone())
+    .bind(preference.time_zone.clone())
+    .bind(preference.date_style.clone())
+    .bind(preference.density.clone())
+    .bind(preference.motion.clone())
+    .bind(preference.version as i64)
+    .bind(updated_at.clone())
+    .execute(pool)
+    .await?;
+
+    Ok(UiPreferenceRow {
+        subject_id: space_id.to_string(),
+        preference: UiPreference {
+            updated_at,
+            ..preference.clone()
+        },
+    })
+}
+
+pub async fn max_ui_preference_version(pool: &SqlitePool) -> Result<u64, sqlx::Error> {
+    let user_max =
+        sqlx::query_scalar::<_, Option<i64>>("SELECT MAX(version) FROM user_ui_preferences")
+            .fetch_one(pool)
+            .await?
+            .unwrap_or(0);
+    let space_max =
+        sqlx::query_scalar::<_, Option<i64>>("SELECT MAX(version) FROM space_ui_preferences")
+            .fetch_one(pool)
+            .await?
+            .unwrap_or(0);
+
+    Ok(user_max.max(space_max) as u64)
+}
+
 // ========== Row mappers ==========
 
 fn map_thread(row: sqlx::sqlite::SqliteRow) -> ThreadSpec {
@@ -866,6 +1057,19 @@ fn map_artifact(row: sqlx::sqlite::SqliteRow) -> ArtifactSpec {
         kind: artifact_kind_from_str(&row.get::<String, _>("artifact_kind")),
         relative_path: row.get("relative_path"),
         created_at: row.get("created_at"),
+    }
+}
+
+fn map_ui_preference_row(row: &sqlx::sqlite::SqliteRow) -> UiPreference {
+    UiPreference {
+        locale: row.get("locale"),
+        theme_id: row.get("theme_id"),
+        time_zone: row.get("time_zone"),
+        date_style: row.get("date_style"),
+        density: row.get("density"),
+        motion: row.get("motion"),
+        version: row.get::<i64, _>("version") as u64,
+        updated_at: row.get("updated_at"),
     }
 }
 

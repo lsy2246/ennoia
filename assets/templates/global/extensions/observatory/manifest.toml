@@ -5,9 +5,10 @@ frontend_bundle = "frontend/index.js"
 backend_entry = "backend/index.js"
 
 [contributes]
-pages = [{ id = "observatory.events", title = "Observatory", route = "/observatory", mount = "observatory.events.page", icon = "activity" }]
-panels = [{ id = "observatory.timeline", title = "Event Timeline", mount = "observatory.timeline.panel", slot = "right", icon = "panel-right" }]
-themes = [{ id = "observatory.daybreak", label = "Daybreak", entry = "frontend/themes/daybreak.css" }]
-commands = [{ id = "observatory.open", title = "Open Observatory", action = "open-page", shortcut = "Ctrl+Shift+O" }]
+pages = [{ id = "observatory.events", title = { key = "ext.observatory.page.events", fallback = "Observatory" }, route = "/observatory", mount = "observatory.events.page", icon = "activity" }]
+panels = [{ id = "observatory.timeline", title = { key = "ext.observatory.panel.timeline", fallback = "Event Timeline" }, mount = "observatory.timeline.panel", slot = "right", icon = "panel-right" }]
+themes = [{ id = "observatory.daybreak", label = { key = "ext.observatory.theme.daybreak", fallback = "Daybreak" }, appearance = "Light", tokens_entry = "frontend/themes/daybreak.css", preview_color = "#F4A261", extends = "system", category = "extension" }]
+locales = [{ locale = "zh-CN", namespace = "ext.observatory", entry = "frontend/locales/zh-CN.json", version = "1" }, { locale = "en-US", namespace = "ext.observatory", entry = "frontend/locales/en-US.json", version = "1" }]
+commands = [{ id = "observatory.open", title = { key = "ext.observatory.command.open", fallback = "Open Observatory" }, action = "open-page", shortcut = "Ctrl+Shift+O" }]
 providers = [{ id = "observatory.feed", kind = "activity-feed", entry = "backend/providers/activity-feed.js" }]
 hooks = [{ event = "run.completed", handler = "backend/hooks/run-completed.js" }]

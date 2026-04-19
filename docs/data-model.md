@@ -113,6 +113,20 @@
 - `extensions`
 - `pages`
 - `panels`
+- `themes`
+- `locales`
+
+### UiPreference
+
+- `subject_id`
+- `locale`
+- `theme_id`
+- `time_zone`
+- `date_style`
+- `density`
+- `motion`
+- `version`
+- `updated_at`
 
 ### SkillSpec
 

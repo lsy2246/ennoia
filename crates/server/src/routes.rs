@@ -11,17 +11,18 @@ use chrono::Utc;
 use ennoia_auth::tokens;
 use ennoia_contract::ApiError;
 use ennoia_extension_host::{
-    ExtensionRegistrySnapshot, RegisteredExtensionSnapshot, RegisteredPageContribution,
-    RegisteredPanelContribution,
+    ExtensionRegistrySnapshot, RegisteredExtensionSnapshot, RegisteredLocaleContribution,
+    RegisteredPageContribution, RegisteredPanelContribution, RegisteredThemeContribution,
 };
 use ennoia_kernel::{
     ApiKey, ArtifactKind, ArtifactSpec, AssembleRequest, AuthMode, BootstrapState,
     ConfigChangeRecord, ConfigEntry, ConfigStore, ContextView, EnqueueRequest, EpisodeKind,
-    EpisodeRequest, JobKind, JobRecord, MemoryKind, MemoryRecord, MemorySource, MessageRole,
-    MessageSpec, OwnerKind, OwnerRef, RecallMode, RecallQuery, RecallResult, RememberReceipt,
-    RememberRequest, ReviewAction, ReviewActionKind, ReviewReceipt, ScheduleKind, Session,
-    Stability, SystemConfig, ThreadKind, ThreadSpec, UpdateUserRequest, User, UserRole,
-    ALL_CONFIG_KEYS, CONFIG_KEY_AUTH, CONFIG_KEY_BOOTSTRAP,
+    EpisodeRequest, JobKind, JobRecord, LocalizedText, MemoryKind, MemoryRecord, MemorySource,
+    MessageRole, MessageSpec, OwnerKind, OwnerRef, RecallMode, RecallQuery, RecallResult,
+    RememberReceipt, RememberRequest, ReviewAction, ReviewActionKind, ReviewReceipt, ScheduleKind,
+    Session, Stability, SystemConfig, ThreadKind, ThreadSpec, UiConfig, UiPreference,
+    UiPreferenceRecord, UpdateUserRequest, User, UserRole, ALL_CONFIG_KEYS, CONFIG_KEY_AUTH,
+    CONFIG_KEY_BOOTSTRAP,
 };
 use ennoia_observability::RequestContext;
 use ennoia_orchestrator::{RunRequest, RunTrigger};
@@ -90,6 +91,15 @@ pub fn build_router(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
         .route("/api/v1/overview", get(overview))
+        .route("/api/v1/ui/runtime", get(ui_runtime))
+        .route(
+            "/api/v1/me/ui-preferences",
+            get(me_ui_preferences).put(me_ui_preferences_put),
+        )
+        .route(
+            "/api/v1/spaces/{space_id}/ui-preferences",
+            get(space_ui_preferences).put(space_ui_preferences_put),
+        )
         .route("/api/v1/extensions", get(extensions))
         .route("/api/v1/extensions/registry", get(extension_registry))
         .route("/api/v1/extensions/pages", get(extension_pages))
@@ -156,10 +166,49 @@ struct HealthResponse {
 #[derive(Debug, Serialize)]
 struct OverviewResponse {
     app_name: String,
-    shell_title: String,
+    shell_title: LocalizedText,
     default_theme: String,
     modules: Vec<String>,
     counts: JsonValue,
+}
+
+#[derive(Debug, Serialize)]
+struct UiRuntimeRegistryResponse {
+    pages: Vec<RegisteredPageContribution>,
+    panels: Vec<RegisteredPanelContribution>,
+    themes: Vec<RegisteredThemeContribution>,
+    locales: Vec<RegisteredLocaleContribution>,
+}
+
+#[derive(Debug, Serialize)]
+struct UiRuntimeVersionsResponse {
+    registry: u64,
+    preferences: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct UiRuntimeResponse {
+    ui_config: UiConfig,
+    registry: UiRuntimeRegistryResponse,
+    user_preference: Option<UiPreferenceRecord>,
+    space_preferences: Vec<UiPreferenceRecord>,
+    versions: UiRuntimeVersionsResponse,
+}
+
+#[derive(Debug, Deserialize)]
+struct UiPreferencePayload {
+    #[serde(default)]
+    locale: Option<String>,
+    #[serde(default)]
+    theme_id: Option<String>,
+    #[serde(default)]
+    time_zone: Option<String>,
+    #[serde(default)]
+    date_style: Option<String>,
+    #[serde(default)]
+    density: Option<String>,
+    #[serde(default)]
+    motion: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -290,8 +339,8 @@ async fn overview(State(state): State<AppState>) -> Json<OverviewResponse> {
 
     Json(OverviewResponse {
         app_name: state.overview.app_name,
-        shell_title: state.ui_config.shell_title,
-        default_theme: state.ui_config.default_theme,
+        shell_title: state.ui_config.shell_title.clone(),
+        default_theme: state.ui_config.default_theme.clone(),
         modules: state.overview.modules,
         counts: serde_json::json!({
             "agents": state.agents.len(),
@@ -307,6 +356,118 @@ async fn overview(State(state): State<AppState>) -> Json<OverviewResponse> {
             "decisions": decision_count
         }),
     })
+}
+
+async fn ui_runtime(
+    State(state): State<AppState>,
+    Extension(user): Extension<AuthedUser>,
+) -> Json<UiRuntimeResponse> {
+    let snapshot = state.extensions.snapshot();
+    let user_preference = if user.id == "anonymous" {
+        None
+    } else {
+        db::get_user_ui_preference(&state.pool, &user.id)
+            .await
+            .ok()
+            .flatten()
+            .map(to_preference_record)
+    };
+    let space_preferences = db::list_space_ui_preferences(&state.pool)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(to_preference_record)
+        .collect::<Vec<_>>();
+    let registry_version = (snapshot.pages.len()
+        + snapshot.panels.len()
+        + snapshot.themes.len()
+        + snapshot.locales.len()) as u64;
+    let preference_version = db::max_ui_preference_version(&state.pool)
+        .await
+        .unwrap_or(0);
+
+    Json(UiRuntimeResponse {
+        ui_config: state.ui_config.clone(),
+        registry: UiRuntimeRegistryResponse {
+            pages: snapshot.pages,
+            panels: snapshot.panels,
+            themes: snapshot.themes,
+            locales: snapshot.locales,
+        },
+        user_preference,
+        space_preferences,
+        versions: UiRuntimeVersionsResponse {
+            registry: registry_version,
+            preferences: preference_version,
+        },
+    })
+}
+
+async fn me_ui_preferences(
+    State(state): State<AppState>,
+    Extension(user): Extension<AuthedUser>,
+) -> Json<Option<UiPreferenceRecord>> {
+    if user.id == "anonymous" {
+        return Json(None);
+    }
+    Json(
+        db::get_user_ui_preference(&state.pool, &user.id)
+            .await
+            .ok()
+            .flatten()
+            .map(to_preference_record),
+    )
+}
+
+async fn me_ui_preferences_put(
+    State(state): State<AppState>,
+    Extension(request): Extension<RequestContext>,
+    Extension(user): Extension<AuthedUser>,
+    Json(payload): Json<UiPreferencePayload>,
+) -> ApiResult<UiPreferenceRecord> {
+    let current = if user.id == "anonymous" {
+        None
+    } else {
+        db::get_user_ui_preference(&state.pool, &user.id)
+            .await
+            .map_err(|e| scoped(ApiError::internal(e.to_string()), &request))?
+    };
+    let preference = merge_ui_preference(current.as_ref().map(|row| &row.preference), payload);
+    let saved = db::upsert_user_ui_preference(&state.pool, &user.id, &preference)
+        .await
+        .map_err(|e| scoped(ApiError::internal(e.to_string()), &request))?;
+    Ok(Json(to_preference_record(saved)))
+}
+
+async fn space_ui_preferences(
+    State(state): State<AppState>,
+    Extension(request): Extension<RequestContext>,
+    Extension(user): Extension<AuthedUser>,
+    Path(space_id): Path<String>,
+) -> ApiResult<Option<UiPreferenceRecord>> {
+    require_admin(&user, &state).map_err(|error| scoped(error, &request))?;
+    let row = db::get_space_ui_preference(&state.pool, &space_id)
+        .await
+        .map_err(|e| scoped(ApiError::internal(e.to_string()), &request))?;
+    Ok(Json(row.map(to_preference_record)))
+}
+
+async fn space_ui_preferences_put(
+    State(state): State<AppState>,
+    Extension(request): Extension<RequestContext>,
+    Extension(user): Extension<AuthedUser>,
+    Path(space_id): Path<String>,
+    Json(payload): Json<UiPreferencePayload>,
+) -> ApiResult<UiPreferenceRecord> {
+    require_admin(&user, &state).map_err(|error| scoped(error, &request))?;
+    let current = db::get_space_ui_preference(&state.pool, &space_id)
+        .await
+        .map_err(|e| scoped(ApiError::internal(e.to_string()), &request))?;
+    let preference = merge_ui_preference(current.as_ref().map(|row| &row.preference), payload);
+    let saved = db::upsert_space_ui_preference(&state.pool, &space_id, &preference)
+        .await
+        .map_err(|e| scoped(ApiError::internal(e.to_string()), &request))?;
+    Ok(Json(to_preference_record(saved)))
 }
 
 async fn extensions(State(state): State<AppState>) -> Json<Vec<RegisteredExtensionSnapshot>> {
@@ -854,6 +1015,41 @@ fn owner_kind_from(value: &str) -> OwnerKind {
 
 fn now_iso() -> String {
     Utc::now().to_rfc3339()
+}
+
+fn to_preference_record(row: db::UiPreferenceRow) -> UiPreferenceRecord {
+    UiPreferenceRecord {
+        subject_id: row.subject_id,
+        preference: row.preference,
+    }
+}
+
+fn merge_ui_preference(
+    current: Option<&UiPreference>,
+    payload: UiPreferencePayload,
+) -> UiPreference {
+    UiPreference {
+        locale: payload
+            .locale
+            .or_else(|| current.and_then(|item| item.locale.clone())),
+        theme_id: payload
+            .theme_id
+            .or_else(|| current.and_then(|item| item.theme_id.clone())),
+        time_zone: payload
+            .time_zone
+            .or_else(|| current.and_then(|item| item.time_zone.clone())),
+        date_style: payload
+            .date_style
+            .or_else(|| current.and_then(|item| item.date_style.clone())),
+        density: payload
+            .density
+            .or_else(|| current.and_then(|item| item.density.clone())),
+        motion: payload
+            .motion
+            .or_else(|| current.and_then(|item| item.motion.clone())),
+        version: current.map(|item| item.version + 1).unwrap_or(1),
+        updated_at: now_iso(),
+    }
 }
 
 // ========== Admin config API ==========

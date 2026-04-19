@@ -1,3 +1,8 @@
+export type LocalizedText = {
+  key: string;
+  fallback: string;
+};
+
 export type ExtensionPageContribution = {
   extension_id: string;
   extension_kind: string;
@@ -5,7 +10,7 @@ export type ExtensionPageContribution = {
   install_dir: string;
   page: {
     id: string;
-    title: string;
+    title: LocalizedText;
     route: string;
     mount: string;
     icon?: string | null;
@@ -19,10 +24,41 @@ export type ExtensionPanelContribution = {
   install_dir: string;
   panel: {
     id: string;
-    title: string;
+    title: LocalizedText;
     mount: string;
     slot: string;
     icon?: string | null;
+  };
+};
+
+export type ThemeAppearance = "light" | "dark" | "system" | "high-contrast";
+
+export type ExtensionThemeContribution = {
+  extension_id: string;
+  extension_kind: string;
+  extension_version: string;
+  install_dir: string;
+  theme: {
+    id: string;
+    label: LocalizedText;
+    appearance: ThemeAppearance;
+    tokens_entry: string;
+    preview_color?: string | null;
+    extends?: string | null;
+    category?: string | null;
+  };
+};
+
+export type ExtensionLocaleContribution = {
+  extension_id: string;
+  extension_kind: string;
+  extension_version: string;
+  install_dir: string;
+  locale: {
+    locale: string;
+    namespace: string;
+    entry: string;
+    version: string;
   };
 };
 
@@ -42,9 +78,13 @@ export type ExtensionPanelDescriptor = {
   metricLabel: string;
 };
 
-export function sortExtensionPages(pages: ExtensionPageContribution[]) {
+export function sortExtensionPages(
+  pages: ExtensionPageContribution[],
+  locale: string,
+  resolveTitle: (value: LocalizedText) => string,
+) {
   return [...pages].sort((left, right) =>
-    left.page.title.localeCompare(right.page.title, "zh-CN"),
+    resolveTitle(left.page.title).localeCompare(resolveTitle(right.page.title), locale),
   );
 }
 

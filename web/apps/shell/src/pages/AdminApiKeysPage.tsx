@@ -8,6 +8,7 @@ import {
   type ApiKey,
   type User,
 } from "@ennoia/api-client";
+import { useUiHelpers } from "@/stores/ui";
 
 export function AdminApiKeysPage() {
   const [keys, setKeys] = useState<ApiKey[]>([]);
@@ -18,6 +19,7 @@ export function AdminApiKeysPage() {
   const [label, setLabel] = useState("");
   const [scopes, setScopes] = useState("");
   const [revealedKey, setRevealedKey] = useState<string | null>(null);
+  const { formatDate, formatDateTime } = useUiHelpers();
 
   async function refresh() {
     try {
@@ -113,8 +115,8 @@ export function AdminApiKeysPage() {
               <td><code>{k.user_id.slice(0, 10)}</code></td>
               <td>{k.label ?? "—"}</td>
               <td>{k.scopes.join(", ") || "—"}</td>
-              <td>{new Date(k.created_at).toLocaleDateString()}</td>
-              <td>{k.last_used_at ? new Date(k.last_used_at).toLocaleString() : "—"}</td>
+              <td>{formatDate(k.created_at)}</td>
+              <td>{k.last_used_at ? formatDateTime(k.last_used_at) : "—"}</td>
               <td>
                 <button className="danger" onClick={() => handleDelete(k.id)}>
                   Revoke

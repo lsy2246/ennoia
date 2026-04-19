@@ -72,7 +72,7 @@ Web Shell
 - 校验 manifest
 - 注册后端 Hook
 - 注册前端贡献
-- 管理 theme、provider、page、panel 和 command
+- 管理 theme、locale、provider、page、panel 和 command
 
 ### server
 
@@ -83,6 +83,7 @@ Web Shell
 - 鉴权和会话订阅
 - 静态资源
 - 主壳注入和扩展注册表输出
+- UI runtime snapshot 与用户/Space UI 偏好同步
 
 ### shell
 
@@ -95,6 +96,7 @@ Web Shell
 - 命令系统
 - 拖拽工作台
 - 使用 `Panda CSS` 维护 shell 的 token、布局样式和可复用视觉约束
+- 使用本地缓存 + 远端同步驱动主题、语言、时区和日期格式
 
 ## 3. 主链路
 

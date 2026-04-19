@@ -5,10 +5,12 @@ import {
   adminListSessions,
   type Session,
 } from "@ennoia/api-client";
+import { useUiHelpers } from "@/stores/ui";
 
 export function AdminSessionsPage() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const { formatDateTime } = useUiHelpers();
 
   async function refresh() {
     try {
@@ -50,9 +52,9 @@ export function AdminSessionsPage() {
             <tr key={s.id}>
               <td><code>{s.id.slice(0, 10)}</code></td>
               <td><code>{s.user_id.slice(0, 10)}</code></td>
-              <td>{new Date(s.created_at).toLocaleString()}</td>
-              <td>{new Date(s.expires_at).toLocaleString()}</td>
-              <td>{s.last_seen_at ? new Date(s.last_seen_at).toLocaleString() : "—"}</td>
+              <td>{formatDateTime(s.created_at)}</td>
+              <td>{formatDateTime(s.expires_at)}</td>
+              <td>{s.last_seen_at ? formatDateTime(s.last_seen_at) : "—"}</td>
               <td>
                 <small>
                   {s.ip ?? "—"}

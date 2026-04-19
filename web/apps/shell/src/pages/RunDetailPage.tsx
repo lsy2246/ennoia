@@ -11,6 +11,7 @@ import {
   type RunStageEvent,
   type Task,
 } from "@ennoia/api-client";
+import { useUiHelpers } from "@/stores/ui";
 
 export function RunDetailPage() {
   const { runId } = useParams({ from: "/shell/runs/$runId" });
@@ -19,6 +20,7 @@ export function RunDetailPage() {
   const [gates, setGates] = useState<GateRecord[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const { formatTime } = useUiHelpers();
 
   useEffect(() => {
     let cancelled = false;
@@ -57,7 +59,7 @@ export function RunDetailPage() {
           <ul className="timeline">
             {stages.map((s) => (
               <li key={s.id} className="timeline__item">
-                <time>{new Date(s.at).toLocaleTimeString()}</time>
+                <time>{formatTime(s.at)}</time>
                 <div>
                   <span className={`stage stage--${s.to_stage}`}>{s.to_stage}</span>
                   {s.from_stage && <small> (from {s.from_stage})</small>}
@@ -111,7 +113,7 @@ export function RunDetailPage() {
                 <td>{d.stage}</td>
                 <td><code>{d.next_action}</code></td>
                 <td><code>{d.policy_rule_id}</code></td>
-                <td>{new Date(d.at).toLocaleTimeString()}</td>
+                <td>{formatTime(d.at)}</td>
               </tr>
             ))}
           </tbody>

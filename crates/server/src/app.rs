@@ -7,9 +7,10 @@ use ennoia_config::SqliteConfigStore;
 use ennoia_extension_host::{ExtensionRegistry, RegisteredExtension};
 use ennoia_kernel::{
     AgentConfig, ApiKeyStore, AppConfig, CommandContribution, ContributionSet, ExtensionKind,
-    ExtensionManifest, GatePipeline, HookContribution, MemoryStore, PageContribution,
-    PanelContribution, PlatformOverview, ProviderContribution, RuntimeStore, SchedulerStore,
-    ServerConfig, SessionStore, SpaceSpec, StageMachine, ThemeContribution, UiConfig, UserStore,
+    ExtensionManifest, GatePipeline, HookContribution, LocaleContribution, LocalizedText,
+    MemoryStore, PageContribution, PanelContribution, PlatformOverview, ProviderContribution,
+    RuntimeStore, SchedulerStore, ServerConfig, SessionStore, SpaceSpec, StageMachine,
+    ThemeAppearance, ThemeContribution, UiConfig, UserStore,
 };
 use ennoia_memory::SqliteMemoryStore;
 use ennoia_observability::{self, ObservabilityGuard};
@@ -334,26 +335,44 @@ fn sample_observatory_manifest() -> ExtensionManifest {
         contributes: ContributionSet {
             pages: vec![PageContribution {
                 id: "observatory.events".to_string(),
-                title: "Observatory".to_string(),
+                title: LocalizedText::new("ext.observatory.page.events", "Observatory"),
                 route: "/observatory".to_string(),
                 mount: "observatory.events.page".to_string(),
                 icon: Some("activity".to_string()),
             }],
             panels: vec![PanelContribution {
                 id: "observatory.timeline".to_string(),
-                title: "Event Timeline".to_string(),
+                title: LocalizedText::new("ext.observatory.panel.timeline", "Event Timeline"),
                 mount: "observatory.timeline.panel".to_string(),
                 slot: "right".to_string(),
                 icon: Some("panel-right".to_string()),
             }],
             themes: vec![ThemeContribution {
                 id: "observatory.daybreak".to_string(),
-                label: "Daybreak".to_string(),
-                entry: Some("frontend/themes/daybreak.css".to_string()),
+                label: LocalizedText::new("ext.observatory.theme.daybreak", "Daybreak"),
+                appearance: ThemeAppearance::Light,
+                tokens_entry: "frontend/themes/daybreak.css".to_string(),
+                preview_color: Some("#F4A261".to_string()),
+                extends: Some("system".to_string()),
+                category: Some("extension".to_string()),
             }],
+            locales: vec![
+                LocaleContribution {
+                    locale: "zh-CN".to_string(),
+                    namespace: "ext.observatory".to_string(),
+                    entry: "frontend/locales/zh-CN.json".to_string(),
+                    version: "1".to_string(),
+                },
+                LocaleContribution {
+                    locale: "en-US".to_string(),
+                    namespace: "ext.observatory".to_string(),
+                    entry: "frontend/locales/en-US.json".to_string(),
+                    version: "1".to_string(),
+                },
+            ],
             commands: vec![CommandContribution {
                 id: "observatory.open".to_string(),
-                title: "Open Observatory".to_string(),
+                title: LocalizedText::new("ext.observatory.command.open", "Open Observatory"),
                 action: "open-page".to_string(),
                 shortcut: Some("Ctrl+Shift+O".to_string()),
             }],

@@ -79,7 +79,6 @@ const settingsRoute = createRoute({
   getParentRoute: () => shellRoute,
   path: "/settings",
   component: SettingsPage,
-  beforeLoad: requireAdmin,
 });
 
 const adminUsersRoute = createRoute({

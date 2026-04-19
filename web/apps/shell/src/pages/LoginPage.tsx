@@ -2,6 +2,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useState, type FormEvent } from "react";
 
 import { useAuthStore } from "@/stores/auth";
+import { useUiHelpers } from "@/stores/ui";
 
 export function LoginPage() {
   const navigate = useNavigate();
@@ -9,6 +10,7 @@ export function LoginPage() {
   const hydrate = useAuthStore((s) => s.hydrate);
   const bootstrap = useAuthStore((s) => s.bootstrap);
   const user = useAuthStore((s) => s.user);
+  const { t } = useUiHelpers();
 
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -44,9 +46,9 @@ export function LoginPage() {
     <div className="page page--centered">
       <form onSubmit={handleSubmit} className="auth-card">
         <h1>Ennoia</h1>
-        <p className="auth-card__subtitle">Sign in to continue</p>
+        <p className="auth-card__subtitle">{t("auth.login.subtitle", "Sign in to continue")}</p>
         <label>
-          Username
+          {t("auth.login.username", "Username")}
           <input
             value={username}
             onChange={(e) => setUsername(e.target.value)}
@@ -55,7 +57,7 @@ export function LoginPage() {
           />
         </label>
         <label>
-          Password
+          {t("auth.login.password", "Password")}
           <input
             value={password}
             onChange={(e) => setPassword(e.target.value)}
@@ -65,7 +67,9 @@ export function LoginPage() {
         </label>
         {error && <div className="auth-card__error">{error}</div>}
         <button type="submit" disabled={busy}>
-          {busy ? "Signing in…" : "Sign in"}
+          {busy
+            ? t("auth.login.submitting", "Signing in…")
+            : t("auth.login.submit", "Sign in")}
         </button>
       </form>
     </div>

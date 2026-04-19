@@ -25,8 +25,11 @@
 
 ### `config/ui.toml`
 
-- `shell_title`
+- `shell_title`：`LocalizedText` 结构，包含 `key` 与 `fallback`
 - `default_theme`
+- `default_locale`
+- `fallback_locale`
+- `available_locales`
 - `dock_persistence`
 - `default_page`
 - `show_command_palette`

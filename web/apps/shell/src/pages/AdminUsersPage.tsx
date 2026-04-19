@@ -8,6 +8,7 @@ import {
   adminUpdateUser,
   type User,
 } from "@ennoia/api-client";
+import { useUiHelpers } from "@/stores/ui";
 
 export function AdminUsersPage() {
   const [users, setUsers] = useState<User[]>([]);
@@ -18,6 +19,7 @@ export function AdminUsersPage() {
   const [newPassword, setNewPassword] = useState("");
   const [newDisplay, setNewDisplay] = useState("");
   const [newRole, setNewRole] = useState<"user" | "admin">("user");
+  const { formatDate, formatDateTime } = useUiHelpers();
 
   async function refresh() {
     setError(null);
@@ -134,8 +136,8 @@ export function AdminUsersPage() {
               <td>
                 <span className={`pill pill--${u.role}`}>{u.role}</span>
               </td>
-              <td>{new Date(u.created_at).toLocaleDateString()}</td>
-              <td>{u.last_login_at ? new Date(u.last_login_at).toLocaleString() : "—"}</td>
+              <td>{formatDate(u.created_at)}</td>
+              <td>{u.last_login_at ? formatDateTime(u.last_login_at) : "—"}</td>
               <td className="row-actions">
                 <button onClick={() => handleToggleRole(u)}>
                   {u.role === "admin" ? "Demote" : "Promote"}

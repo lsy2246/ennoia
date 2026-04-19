@@ -14,13 +14,15 @@ Ennoia 对外统一使用 `Extension` 作为扩展总称，内部区分：
 - Panel
 - Command
 - Theme
+- Locale Bundle
 - Provider
 
 当前 manifest 协议字段：
 
 - `pages[]`：`id`、`title`、`route`、`mount`、`icon`
 - `panels[]`：`id`、`title`、`mount`、`slot`、`icon`
-- `themes[]`：`id`、`label`、`entry`
+- `themes[]`：`id`、`label`、`appearance`、`tokens_entry`、`preview_color`、`extends`
+- `locales[]`：`locale`、`namespace`、`entry`、`version`
 - `commands[]`：`id`、`title`、`action`、`shortcut`
 - `providers[]`：`id`、`kind`、`entry`
 - `hooks[]`：`event`、`handler`
@@ -65,5 +67,6 @@ Ennoia 对外统一使用 `Extension` 作为扩展总称，内部区分：
 - system extension 负责平台扩展
 - skill 负责能力调用
 - Theme 作为 UI contribution 提供
+- 页面、面板、命令与主题文案统一通过 `LocalizedText` 表达
 - 扩展采用编译安装、重启生效
 - 页面、面板、命令和 Provider 优先通过稳定的 `mount` / `entry` 协议接入

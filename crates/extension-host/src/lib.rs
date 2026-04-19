@@ -5,8 +5,8 @@ pub mod registry;
 pub use registry::{
     ExtensionRegistry, ExtensionRegistrySnapshot, RegisteredCommandContribution,
     RegisteredExtension, RegisteredExtensionSnapshot, RegisteredHookContribution,
-    RegisteredPageContribution, RegisteredPanelContribution, RegisteredProviderContribution,
-    RegisteredThemeContribution,
+    RegisteredLocaleContribution, RegisteredPageContribution, RegisteredPanelContribution,
+    RegisteredProviderContribution, RegisteredThemeContribution,
 };
 
 /// Returns the current extension host module name.
@@ -18,7 +18,7 @@ pub fn module_name() -> &'static str {
 mod tests {
     use ennoia_kernel::{
         CommandContribution, ContributionSet, ExtensionKind, ExtensionManifest, HookContribution,
-        PageContribution, PanelContribution, ProviderContribution,
+        LocalizedText, PageContribution, PanelContribution, ProviderContribution,
     };
 
     use crate::ExtensionRegistry;
@@ -34,21 +34,21 @@ mod tests {
             contributes: ContributionSet {
                 pages: vec![PageContribution {
                     id: "observatory.events".to_string(),
-                    title: "Observatory".to_string(),
+                    title: LocalizedText::new("ext.observatory.page.events", "Observatory"),
                     route: "/observatory".to_string(),
                     mount: "observatory.events.page".to_string(),
                     icon: Some("activity".to_string()),
                 }],
                 panels: vec![PanelContribution {
                     id: "observatory.timeline".to_string(),
-                    title: "Event Timeline".to_string(),
+                    title: LocalizedText::new("ext.observatory.panel.timeline", "Event Timeline"),
                     mount: "observatory.timeline.panel".to_string(),
                     slot: "right".to_string(),
                     icon: Some("panel-right".to_string()),
                 }],
                 commands: vec![CommandContribution {
                     id: "observatory.open".to_string(),
-                    title: "Open Observatory".to_string(),
+                    title: LocalizedText::new("ext.observatory.command.open", "Open Observatory"),
                     action: "open-page".to_string(),
                     shortcut: Some("Ctrl+Shift+O".to_string()),
                 }],

@@ -390,6 +390,26 @@ label {
 .tab--active { color: var(--color-text); border-bottom-color: var(--color-primary); }
 
 .settings-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 24px; }
+.settings-personal {
+  margin-bottom: 24px;
+  padding: 20px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 16px;
+}
+.settings-personal__intro h2 { margin: 0 0 8px; }
+.settings-personal__intro p {
+  margin: 0 0 16px;
+  color: var(--color-text-muted);
+  line-height: 1.6;
+}
+.settings-preview {
+  margin-top: 24px;
+  padding: 16px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 16px;
+}
 .json-editor { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 13px; min-height: 320px; }
 .actions { display: flex; gap: 8px; margin-top: 8px; }
 
@@ -520,5 +540,9 @@ label {
 
   .onboarding-actions button {
     width: 100%;
+  }
+
+  .settings-grid {
+    grid-template-columns: 1fr;
   }
 }
