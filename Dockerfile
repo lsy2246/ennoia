@@ -1,43 +1,54 @@
 # syntax=docker/dockerfile:1.6
 
-# -------- build --------
-FROM rust:1.95-slim AS build
+# -------- api build --------
+FROM rust:1.95-slim AS api-build
 WORKDIR /app
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends pkg-config libssl-dev ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Layer cache: copy manifests first
 COPY Cargo.toml Cargo.lock ./
+COPY assets ./assets
 COPY crates ./crates
-COPY migrations ./migrations
 
 RUN cargo build --release --bin ennoia
 
-# -------- runtime --------
-FROM debian:bookworm-slim AS runtime
+# -------- api runtime --------
+FROM debian:bookworm-slim AS api
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Non-root user for runtime safety
 RUN useradd --system --create-home --home-dir /home/ennoia --shell /usr/sbin/nologin ennoia
 
-COPY --from=build /app/target/release/ennoia /usr/local/bin/ennoia
-COPY --from=build /app/crates/cli/templates /opt/ennoia/templates
+COPY --from=api-build /app/target/release/ennoia /usr/local/bin/ennoia
 
 ENV ENNOIA_HOME=/data/ennoia
 WORKDIR /data
 
-# Runtime state volume (SQLite lives here)
-RUN mkdir -p /data/ennoia && chown -R ennoia:ennoia /data /home/ennoia /opt/ennoia
+RUN mkdir -p /data/ennoia && chown -R ennoia:ennoia /data /home/ennoia
 
 USER ennoia
 
 EXPOSE 3710
 
-# On first start, `init` populates the home from the baked-in templates;
-# subsequent starts reuse the existing state. `serve` then runs the server.
-CMD ["sh", "-c", "ennoia init /data/ennoia && ennoia serve /data/ennoia"]
+CMD ["sh", "-c", "ennoia init \"$ENNOIA_HOME\" && sed -i 's/^host = \".*\"/host = \"0.0.0.0\"/' \"$ENNOIA_HOME/config/server.toml\" && ennoia serve \"$ENNOIA_HOME\""]
+
+# -------- web build --------
+FROM oven/bun:1 AS web-build
+WORKDIR /app
+
+COPY .npmrc package.json bun.lock ./
+COPY web ./web
+
+RUN bun install --frozen-lockfile
+RUN bun run --cwd web/apps/shell build
+
+# -------- web runtime --------
+FROM nginx:alpine AS web
+
+COPY --from=web-build /app/web/apps/shell/dist /usr/share/nginx/html
+
+EXPOSE 80

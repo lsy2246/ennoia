@@ -11,8 +11,9 @@ target/
 # Node / web
 node_modules/
 **/node_modules/
-web/shell/dist/
-web/shell/styled-system/
+web/apps/shell/dist/
+web/apps/shell/styled-system/
+dist/
 **/*.tsbuildinfo
 
 # IDE / editor

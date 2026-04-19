@@ -103,6 +103,47 @@ ennoia/
 - `tests/fixtures/`：测试夹具
 - `.tmp-tests/`：测试运行产物目录
 
+## 安装与体验
+
+当前开发阶段已经补齐两条“像用户一样体验”的入口：
+
+### 1. 当前平台 npm 安装
+
+适合验证本机的一键打包和安装体验。
+
+```bash
+bun run package:npm
+npm install -g ./dist/npm/ennoia-0.1.0.tgz
+ennoia init
+ennoia start
+```
+
+说明：
+
+- `bun run package:npm` 会构建当前平台的 `ennoia` CLI 并输出到 `dist/npm/`
+- 生成的 tarball 只适用于打包时所在的平台
+- 默认运行目录为 `~/.ennoia/`
+- 服务默认监听 `127.0.0.1:3710`
+
+### 2. Docker 一键启动
+
+适合快速拉起后端 API 与前端主壳。
+
+```bash
+bun run docker:up
+```
+
+启动后可通过以下地址访问：
+
+- 前端主壳：`http://127.0.0.1:5173`
+- 后端 API：`http://127.0.0.1:3710`
+
+停止命令：
+
+```bash
+bun run docker:down
+```
+
 ## 文档入口
 
 - [docs/roadmap.md](docs/roadmap.md)
