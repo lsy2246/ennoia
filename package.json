@@ -4,12 +4,16 @@
   "private": true,
   "description": "Ennoia source workspace",
   "type": "module",
+  "workspaces": [
+    "web/apps/*",
+    "web/packages/*"
+  ],
   "scripts": {
     "bootstrap": "node ./scripts/bootstrap.mjs",
     "setup": "bun run bootstrap",
-    "build": "bun run --cwd web/shell build",
-    "typecheck": "bun run --cwd web/shell typecheck",
-    "test:web": "bun run --cwd web/shell test:smoke",
+    "build": "bun run --cwd web/apps/shell build",
+    "typecheck": "bun run --cwd web/apps/shell typecheck",
+    "test:web": "bun run --cwd web/apps/shell test:smoke",
     "test:integration": "bun ./tests/integration/runtime-smoke.mjs",
     "test:e2e": "bun ./tests/e2e/platform-smoke.mjs"
   }

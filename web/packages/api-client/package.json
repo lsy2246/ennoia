@@ -1,0 +1,14 @@
+{
+  "name": "@ennoia/api-client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@ennoia/contract": "workspace:*",
+    "@ennoia/observability": "workspace:*",
+    "@ennoia/ui-sdk": "workspace:*"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  }
+}

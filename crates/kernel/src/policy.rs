@@ -308,7 +308,9 @@ mod tests {
     #[test]
     fn pending_without_block_enters_planning() {
         let policy = StagePolicy::builtin();
-        let rule = policy.evaluate(RunStage::Pending, &Signals::default()).unwrap();
+        let rule = policy
+            .evaluate(RunStage::Pending, &Signals::default())
+            .unwrap();
         assert_eq!(rule.id, "R_PENDING_TO_PLANNING");
     }
 

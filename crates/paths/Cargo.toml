@@ -1,0 +1,11 @@
+[package]
+name = "ennoia-paths"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ennoia-kernel = { path = "../kernel" }
+
+[lib]
+path = "src/lib.rs"

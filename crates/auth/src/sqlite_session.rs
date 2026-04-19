@@ -93,10 +93,7 @@ impl SessionStore for SqliteSessionStore {
         Ok(record)
     }
 
-    async fn find_by_token_hash(
-        &self,
-        token_hash: &str,
-    ) -> Result<Option<Session>, AuthError> {
+    async fn find_by_token_hash(&self, token_hash: &str) -> Result<Option<Session>, AuthError> {
         let (sql, values) = Query::select()
             .columns(session_columns())
             .from(Sessions::Table)

@@ -10,11 +10,7 @@ use crate::app::AppState;
 
 /// cors_middleware injects CORS headers from the live CorsConfig and short-circuits
 /// OPTIONS preflight requests.
-pub async fn cors_middleware(
-    State(state): State<AppState>,
-    req: Request,
-    next: Next,
-) -> Response {
+pub async fn cors_middleware(State(state): State<AppState>, req: Request, next: Next) -> Response {
     let cfg = state.system_config.cors.load();
     if !cfg.enabled {
         return next.run(req).await;
@@ -28,7 +24,11 @@ pub async fn cors_middleware(
 
     let allowed_origin = origin_header
         .as_ref()
-        .filter(|origin| cfg.origins.iter().any(|allowed| allowed == *origin || allowed == "*"))
+        .filter(|origin| {
+            cfg.origins
+                .iter()
+                .any(|allowed| allowed == *origin || allowed == "*")
+        })
         .cloned();
 
     let is_preflight = req.method() == Method::OPTIONS;

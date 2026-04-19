@@ -1,18 +1,14 @@
+use ennoia_assets::migrations;
 use ennoia_extension_host::ExtensionRegistry;
 use ennoia_kernel::{
     AgentConfig, ArtifactKind, ArtifactSpec, ExtensionManifest, MessageRole, MessageSpec,
     OwnerKind, OwnerRef, RunSpec, RunStage, SpaceSpec, TaskKind, TaskSpec, TaskStatus, ThreadKind,
     ThreadSpec,
 };
-use sea_query::{Expr, Iden, OnConflict, Query, SqliteQueryBuilder};
+use sea_query::{Alias, Expr, Func, Iden, OnConflict, Query, SqliteQueryBuilder};
 use sea_query_binder::SqlxBinder;
 use serde::Serialize;
 use sqlx::{Row, SqlitePool};
-
-pub const SCHEMA_SQL: &str = include_str!("../../../migrations/0001_ennoia_core.sql");
-pub const SYSTEM_CONFIG_SQL: &str =
-    include_str!("../../../migrations/0002_system_config.sql");
-pub const AUTH_SQL: &str = include_str!("../../../migrations/0003_auth.sql");
 
 // ========== Iden enums ==========
 
@@ -138,6 +134,30 @@ enum Jobs {
     CreatedAt,
 }
 
+#[derive(Iden, Clone, Copy)]
+enum Memories {
+    Table,
+    Id,
+}
+
+#[derive(Iden, Clone, Copy)]
+enum Decisions {
+    Table,
+    Id,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum CountTable {
+    Threads,
+    Messages,
+    Runs,
+    Tasks,
+    Artifacts,
+    Memories,
+    Jobs,
+    Decisions,
+}
+
 // ========== Public types ==========
 
 #[derive(Debug, Clone, Serialize)]
@@ -156,8 +176,9 @@ pub struct JobRow {
 // ========== Schema migration ==========
 
 pub async fn initialize_schema(pool: &SqlitePool) -> Result<(), sqlx::Error> {
-    for migration in [SCHEMA_SQL, SYSTEM_CONFIG_SQL, AUTH_SQL] {
+    for migration in migrations::all() {
         for statement in migration
+            .contents
             .split(';')
             .map(str::trim)
             .filter(|statement| !statement.is_empty())
@@ -222,7 +243,8 @@ pub async fn upsert_agents(pool: &SqlitePool, agents: &[AgentConfig]) -> Result<
 pub async fn upsert_spaces(pool: &SqlitePool, spaces: &[SpaceSpec]) -> Result<(), sqlx::Error> {
     let now = now_iso();
     for space in spaces {
-        let default_agents = serde_json::to_string(&space.default_agents).unwrap_or_else(|_| "[]".into());
+        let default_agents =
+            serde_json::to_string(&space.default_agents).unwrap_or_else(|_| "[]".into());
         let (sql, values) = Query::insert()
             .into_table(Spaces::Table)
             .columns([
@@ -648,17 +670,28 @@ pub async fn list_active_tasks_for_owner(
     owner: &OwnerRef,
     limit: usize,
 ) -> Result<Vec<TaskSpec>, sqlx::Error> {
-    // JOIN across tables — use raw SQL for simplicity.
-    let rows = sqlx::query(
-        "SELECT tasks.id, tasks.run_id, tasks.task_kind, tasks.title, tasks.assigned_agent_id, tasks.status, tasks.created_at, tasks.updated_at \
-         FROM tasks INNER JOIN runs ON runs.id = tasks.run_id \
-         WHERE runs.owner_kind = ? AND runs.owner_id = ? ORDER BY tasks.created_at DESC LIMIT ?",
-    )
-    .bind(owner_kind_str(&owner.kind))
-    .bind(&owner.id)
-    .bind(limit as i64)
-    .fetch_all(pool)
-    .await?;
+    let (sql, values) = Query::select()
+        .columns([
+            (Tasks::Table, Tasks::Id),
+            (Tasks::Table, Tasks::RunId),
+            (Tasks::Table, Tasks::TaskKind),
+            (Tasks::Table, Tasks::Title),
+            (Tasks::Table, Tasks::AssignedAgentId),
+            (Tasks::Table, Tasks::Status),
+            (Tasks::Table, Tasks::CreatedAt),
+            (Tasks::Table, Tasks::UpdatedAt),
+        ])
+        .from(Tasks::Table)
+        .inner_join(
+            Runs::Table,
+            Expr::col((Tasks::Table, Tasks::RunId)).equals((Runs::Table, Runs::Id)),
+        )
+        .and_where(Expr::col((Runs::Table, Runs::OwnerKind)).eq(owner_kind_str(&owner.kind)))
+        .and_where(Expr::col((Runs::Table, Runs::OwnerId)).eq(owner.id.clone()))
+        .order_by((Tasks::Table, Tasks::CreatedAt), sea_query::Order::Desc)
+        .limit(limit as u64)
+        .build_sqlx(SqliteQueryBuilder);
+    let rows = sqlx::query_with(&sql, values).fetch_all(pool).await?;
     Ok(rows.into_iter().map(map_task).collect())
 }
 
@@ -702,9 +735,30 @@ pub async fn list_artifacts_for_run(
     Ok(rows.into_iter().map(map_artifact).collect())
 }
 
-pub async fn count_rows(pool: &SqlitePool, table: &str) -> Result<i64, sqlx::Error> {
-    let statement = format!("SELECT COUNT(*) AS count FROM {table}");
-    let row = sqlx::query(&statement).fetch_one(pool).await?;
+pub async fn count_rows(pool: &SqlitePool, table: CountTable) -> Result<i64, sqlx::Error> {
+    macro_rules! count_query {
+        ($table:expr, $column:expr) => {
+            Query::select()
+                .expr_as(
+                    Func::count(Expr::col(($table, $column))),
+                    Alias::new("count"),
+                )
+                .from($table)
+                .build_sqlx(SqliteQueryBuilder)
+        };
+    }
+
+    let (sql, values) = match table {
+        CountTable::Threads => count_query!(Threads::Table, Threads::Id),
+        CountTable::Messages => count_query!(Messages::Table, Messages::Id),
+        CountTable::Runs => count_query!(Runs::Table, Runs::Id),
+        CountTable::Tasks => count_query!(Tasks::Table, Tasks::Id),
+        CountTable::Artifacts => count_query!(Artifacts::Table, Artifacts::Id),
+        CountTable::Memories => count_query!(Memories::Table, Memories::Id),
+        CountTable::Jobs => count_query!(Jobs::Table, Jobs::Id),
+        CountTable::Decisions => count_query!(Decisions::Table, Decisions::Id),
+    };
+    let row = sqlx::query_with(&sql, values).fetch_one(pool).await?;
     Ok(row.get::<i64, _>("count"))
 }
 

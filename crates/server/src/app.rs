@@ -1,4 +1,3 @@
-use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -13,13 +12,16 @@ use ennoia_kernel::{
     ServerConfig, SessionStore, SpaceSpec, StageMachine, ThemeContribution, UiConfig, UserStore,
 };
 use ennoia_memory::SqliteMemoryStore;
+use ennoia_observability::{self, ObservabilityGuard};
+use ennoia_orchestrator::OrchestratorService;
+use ennoia_paths::{default_home_dir, RuntimePaths};
 use ennoia_policy::PolicySet;
 use ennoia_runtime::{builtin_pipeline, PolicyStageMachine, SqliteRuntimeStore};
 use ennoia_scheduler::{SqliteSchedulerStore, Worker};
-use ennoia_orchestrator::OrchestratorService;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::SqlitePool;
 use tokio::net::TcpListener;
+use tracing::info;
 
 use crate::db;
 use crate::routes::build_router;
@@ -33,7 +35,7 @@ pub struct AppState {
     pub server_config: ServerConfig,
     pub ui_config: UiConfig,
     pub overview: PlatformOverview,
-    pub home_dir: Arc<PathBuf>,
+    pub runtime_paths: Arc<RuntimePaths>,
     pub pool: SqlitePool,
     pub extensions: ExtensionRegistry,
     pub agents: Vec<AgentConfig>,
@@ -50,9 +52,11 @@ pub struct AppState {
     pub session_store: Arc<dyn SessionStore>,
     pub api_key_store: Arc<dyn ApiKeyStore>,
     pub auth_service: AuthService,
+    pub observability_guard: Option<Arc<ObservabilityGuard>>,
 }
 
 pub fn default_app_state() -> AppState {
+    let runtime_paths = Arc::new(RuntimePaths::new(default_home_dir()));
     let pool = SqlitePoolOptions::new()
         .max_connections(1)
         .connect_lazy("sqlite::memory:")
@@ -66,9 +70,8 @@ pub fn default_app_state() -> AppState {
     let runtime_store: Arc<dyn RuntimeStore> = Arc::new(SqliteRuntimeStore::new(pool.clone()));
     let scheduler_store: Arc<dyn SchedulerStore> =
         Arc::new(SqliteSchedulerStore::new(pool.clone()));
-    let stage_machine: Arc<dyn StageMachine> = Arc::new(PolicyStageMachine::new(Arc::new(
-        policies.stage.clone(),
-    )));
+    let stage_machine: Arc<dyn StageMachine> =
+        Arc::new(PolicyStageMachine::new(Arc::new(policies.stage.clone())));
     let gate_pipeline = builtin_pipeline();
     let orchestrator = OrchestratorService::new(stage_machine.clone(), gate_pipeline.clone());
     let config_store = Arc::new(SqliteConfigStore::new(pool.clone()));
@@ -87,10 +90,10 @@ pub fn default_app_state() -> AppState {
         server_config: ServerConfig::default(),
         ui_config: UiConfig::default(),
         overview: PlatformOverview::default(),
-        home_dir: Arc::new(default_home_dir()),
+        runtime_paths: runtime_paths.clone(),
         pool,
-        extensions: fallback_extension_registry(),
-        agents: default_agents(),
+        extensions: fallback_extension_registry(&runtime_paths),
+        agents: default_agents(&runtime_paths),
         spaces: default_spaces(),
         policies,
         memory_store,
@@ -104,22 +107,30 @@ pub fn default_app_state() -> AppState {
         session_store,
         api_key_store,
         auth_service,
+        observability_guard: None,
     }
 }
 
 pub async fn bootstrap_app_state(home_dir: impl AsRef<Path>) -> Result<AppState, AppError> {
-    let home_dir = home_dir.as_ref().to_path_buf();
-    ensure_runtime_layout(&home_dir)?;
+    let runtime_paths = Arc::new(RuntimePaths::new(home_dir.as_ref().to_path_buf()));
+    runtime_paths.ensure_layout()?;
 
-    let app_config: AppConfig = read_toml_or_default(home_dir.join("config/ennoia.toml"))?;
-    let server_config: ServerConfig = read_toml_or_default(home_dir.join("config/server.toml"))?;
-    let ui_config: UiConfig = read_toml_or_default(home_dir.join("config/ui.toml"))?;
-    let agents = load_agent_configs(home_dir.join("config/agents"))?;
+    let app_config: AppConfig = read_toml_or_default(runtime_paths.app_config_file())?;
+    let server_config: ServerConfig = read_toml_or_default(runtime_paths.server_config_file())?;
+    let ui_config: UiConfig = read_toml_or_default(runtime_paths.ui_config_file())?;
+    let observability_guard = Some(Arc::new(ennoia_observability::init(
+        "server",
+        &server_config.log_level,
+        runtime_paths.server_logs_dir(),
+    )?));
+    info!(home = %runtime_paths.home().display(), "bootstrapping app state");
+
+    let agents = load_agent_configs(&runtime_paths)?;
     let spaces = default_spaces();
-    let extensions = load_enabled_extensions(home_dir.join("config/extensions"))?;
-    let policies = Arc::new(PolicySet::load(home_dir.join("policies"))?);
+    let extensions = load_enabled_extensions(&runtime_paths)?;
+    let policies = Arc::new(PolicySet::load(runtime_paths.policies_dir())?);
 
-    let database_path = home_dir.join("state/sqlite/ennoia.db");
+    let database_path = runtime_paths.sqlite_db();
     let connect_options = SqliteConnectOptions::new()
         .filename(&database_path)
         .create_if_missing(true);
@@ -140,9 +151,8 @@ pub async fn bootstrap_app_state(home_dir: impl AsRef<Path>) -> Result<AppState,
     let runtime_store: Arc<dyn RuntimeStore> = Arc::new(SqliteRuntimeStore::new(pool.clone()));
     let scheduler_store: Arc<dyn SchedulerStore> =
         Arc::new(SqliteSchedulerStore::new(pool.clone()));
-    let stage_machine: Arc<dyn StageMachine> = Arc::new(PolicyStageMachine::new(Arc::new(
-        policies.stage.clone(),
-    )));
+    let stage_machine: Arc<dyn StageMachine> =
+        Arc::new(PolicyStageMachine::new(Arc::new(policies.stage.clone())));
     let gate_pipeline = builtin_pipeline();
     let orchestrator = OrchestratorService::new(stage_machine.clone(), gate_pipeline.clone());
     let config_store = Arc::new(SqliteConfigStore::new(pool.clone()));
@@ -162,7 +172,7 @@ pub async fn bootstrap_app_state(home_dir: impl AsRef<Path>) -> Result<AppState,
         server_config,
         ui_config,
         overview: PlatformOverview::default(),
-        home_dir: Arc::new(home_dir),
+        runtime_paths,
         pool,
         extensions,
         agents,
@@ -179,6 +189,7 @@ pub async fn bootstrap_app_state(home_dir: impl AsRef<Path>) -> Result<AppState,
         session_store,
         api_key_store,
         auth_service,
+        observability_guard,
     })
 }
 
@@ -212,13 +223,14 @@ where
     Ok(toml::from_str(&contents)?)
 }
 
-fn load_agent_configs(path: PathBuf) -> Result<Vec<AgentConfig>, AppError> {
-    if !path.exists() {
-        return Ok(default_agents());
+fn load_agent_configs(paths: &RuntimePaths) -> Result<Vec<AgentConfig>, AppError> {
+    let config_dir = paths.agents_config_dir();
+    if !config_dir.exists() {
+        return Ok(default_agents(paths));
     }
 
     let mut agents = Vec::new();
-    for entry in fs::read_dir(path)? {
+    for entry in fs::read_dir(config_dir)? {
         let entry = entry?;
         if !entry.file_type()?.is_file() {
             continue;
@@ -229,25 +241,26 @@ fn load_agent_configs(path: PathBuf) -> Result<Vec<AgentConfig>, AppError> {
     }
 
     if agents.is_empty() {
-        Ok(default_agents())
+        Ok(default_agents(paths))
     } else {
         Ok(agents)
     }
 }
 
-fn load_enabled_extensions(path: PathBuf) -> Result<ExtensionRegistry, AppError> {
+fn load_enabled_extensions(paths: &RuntimePaths) -> Result<ExtensionRegistry, AppError> {
     #[derive(serde::Deserialize)]
     struct ExtensionConfigFile {
         enabled: bool,
         install_dir: String,
     }
 
-    if !path.exists() {
+    let config_dir = paths.extensions_config_dir();
+    if !config_dir.exists() {
         return Ok(ExtensionRegistry::new(vec![sample_observatory_manifest()]));
     }
 
     let mut items = Vec::new();
-    for entry in fs::read_dir(path)? {
+    for entry in fs::read_dir(config_dir)? {
         let entry = entry?;
         if !entry.file_type()?.is_file() {
             continue;
@@ -258,7 +271,7 @@ fn load_enabled_extensions(path: PathBuf) -> Result<ExtensionRegistry, AppError>
             continue;
         }
 
-        let install_dir = expand_home_dir(&config.install_dir);
+        let install_dir = paths.expand_home_token(&config.install_dir);
         let manifest_path = install_dir.join("manifest.toml");
         if manifest_path.exists() {
             let manifest_contents = fs::read_to_string(manifest_path)?;
@@ -271,26 +284,10 @@ fn load_enabled_extensions(path: PathBuf) -> Result<ExtensionRegistry, AppError>
     }
 
     if items.is_empty() {
-        return Ok(fallback_extension_registry());
+        return Ok(fallback_extension_registry(paths));
     }
 
     Ok(ExtensionRegistry::from_registered(items))
-}
-
-fn ensure_runtime_layout(home_dir: &Path) -> Result<(), AppError> {
-    fs::create_dir_all(home_dir.join("config/agents"))?;
-    fs::create_dir_all(home_dir.join("config/extensions"))?;
-    fs::create_dir_all(home_dir.join("policies"))?;
-    fs::create_dir_all(home_dir.join("state/queue"))?;
-    fs::create_dir_all(home_dir.join("state/runs"))?;
-    fs::create_dir_all(home_dir.join("state/cache"))?;
-    fs::create_dir_all(home_dir.join("state/sqlite"))?;
-    fs::create_dir_all(home_dir.join("global/extensions"))?;
-    fs::create_dir_all(home_dir.join("global/skills"))?;
-    fs::create_dir_all(home_dir.join("agents"))?;
-    fs::create_dir_all(home_dir.join("spaces"))?;
-    fs::create_dir_all(home_dir.join("logs"))?;
-    Ok(())
 }
 
 fn default_spaces() -> Vec<SpaceSpec> {
@@ -302,7 +299,7 @@ fn default_spaces() -> Vec<SpaceSpec> {
     }]
 }
 
-fn default_agents() -> Vec<AgentConfig> {
+fn default_agents(paths: &RuntimePaths) -> Vec<AgentConfig> {
     vec![
         AgentConfig {
             id: "coder".to_string(),
@@ -310,9 +307,9 @@ fn default_agents() -> Vec<AgentConfig> {
             kind: "agent".to_string(),
             workspace_mode: "private".to_string(),
             default_model: "gpt-5.4".to_string(),
-            skills_dir: "~/.ennoia/agents/coder/skills".to_string(),
-            workspace_dir: "~/.ennoia/agents/coder/workspace".to_string(),
-            artifacts_dir: "~/.ennoia/agents/coder/artifacts".to_string(),
+            skills_dir: paths.display_with_home_token(paths.agent_skills_dir("coder")),
+            workspace_dir: paths.display_with_home_token(paths.agent_workspace_dir("coder")),
+            artifacts_dir: paths.display_with_home_token(paths.agent_artifacts_dir("coder")),
         },
         AgentConfig {
             id: "planner".to_string(),
@@ -320,9 +317,9 @@ fn default_agents() -> Vec<AgentConfig> {
             kind: "agent".to_string(),
             workspace_mode: "private".to_string(),
             default_model: "gpt-5.4".to_string(),
-            skills_dir: "~/.ennoia/agents/planner/skills".to_string(),
-            workspace_dir: "~/.ennoia/agents/planner/workspace".to_string(),
-            artifacts_dir: "~/.ennoia/agents/planner/artifacts".to_string(),
+            skills_dir: paths.display_with_home_token(paths.agent_skills_dir("planner")),
+            workspace_dir: paths.display_with_home_token(paths.agent_workspace_dir("planner")),
+            artifacts_dir: paths.display_with_home_token(paths.agent_artifacts_dir("planner")),
         },
     ]
 }
@@ -374,23 +371,9 @@ fn sample_observatory_manifest() -> ExtensionManifest {
     }
 }
 
-fn fallback_extension_registry() -> ExtensionRegistry {
+fn fallback_extension_registry(paths: &RuntimePaths) -> ExtensionRegistry {
     ExtensionRegistry::from_registered(vec![RegisteredExtension {
-        install_dir: "~/.ennoia/global/extensions/observatory".to_string(),
+        install_dir: paths.display_with_home_token(paths.global_extension_dir("observatory")),
         manifest: sample_observatory_manifest(),
     }])
-}
-
-fn default_home_dir() -> PathBuf {
-    env::var_os("USERPROFILE")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".ennoia")
-}
-
-fn expand_home_dir(value: &str) -> PathBuf {
-    if let Some(rest) = value.strip_prefix("~/.ennoia") {
-        return default_home_dir().join(rest.trim_start_matches('/'));
-    }
-    PathBuf::from(value)
 }

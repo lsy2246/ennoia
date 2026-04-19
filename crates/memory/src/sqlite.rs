@@ -167,7 +167,9 @@ impl SqliteMemoryStore {
         }
 
         if req.content.trim().is_empty() {
-            return Err(MemoryError::Invalid("content must be non-empty".to_string()));
+            return Err(MemoryError::Invalid(
+                "content must be non-empty".to_string(),
+            ));
         }
 
         Ok(())
@@ -729,9 +731,7 @@ async fn recall_by_namespace(
     builder
         .columns(memory_columns_all())
         .from(Memories::Table)
-        .and_where(
-            Expr::col(Memories::OwnerKind).eq(owner_kind_str(&query.owner.kind).to_string()),
-        )
+        .and_where(Expr::col(Memories::OwnerKind).eq(owner_kind_str(&query.owner.kind).to_string()))
         .and_where(Expr::col(Memories::OwnerId).eq(query.owner.id.clone()))
         .and_where(Expr::col(Memories::Status).eq("active"))
         .and_where(Expr::col(Memories::Namespace).like(namespace_pattern))

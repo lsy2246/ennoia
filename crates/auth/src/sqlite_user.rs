@@ -1,8 +1,6 @@
 use async_trait::async_trait;
 use chrono::Utc;
-use ennoia_kernel::{
-    AuthError, CreateUserRequest, UpdateUserRequest, User, UserRole, UserStore,
-};
+use ennoia_kernel::{AuthError, CreateUserRequest, UpdateUserRequest, User, UserRole, UserStore};
 use sea_query::{Expr, Func, Iden, Query, SqliteQueryBuilder};
 use sea_query_binder::SqlxBinder;
 use sqlx::{Row, SqlitePool};
@@ -144,10 +142,7 @@ impl UserStore for SqliteUserStore {
         Ok(row.map(row_to_user))
     }
 
-    async fn get_by_username(
-        &self,
-        username: &str,
-    ) -> Result<Option<(User, String)>, AuthError> {
+    async fn get_by_username(&self, username: &str) -> Result<Option<(User, String)>, AuthError> {
         let mut cols = user_columns_readonly();
         cols.push(Users::PasswordHash);
         let (sql, values) = Query::select()
@@ -271,7 +266,10 @@ impl UserStore for SqliteUserStore {
 
     async fn count(&self) -> Result<u32, AuthError> {
         let (sql, values) = Query::select()
-            .expr_as(Func::count(Expr::col(Users::Id)), sea_query::Alias::new("n"))
+            .expr_as(
+                Func::count(Expr::col(Users::Id)),
+                sea_query::Alias::new("n"),
+            )
             .from(Users::Table)
             .build_sqlx(SqliteQueryBuilder);
 

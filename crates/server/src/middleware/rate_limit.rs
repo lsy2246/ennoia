@@ -4,10 +4,12 @@ use std::time::{Duration, Instant};
 
 use axum::{
     extract::{Request, State},
-    http::{header, StatusCode},
+    http::header,
     middleware::Next,
     response::{IntoResponse, Response},
 };
+use ennoia_contract::ApiError;
+use ennoia_observability::RequestContext;
 
 use crate::app::AppState;
 use crate::middleware::path_matches;
@@ -31,9 +33,7 @@ impl RateLimitState {
         let now = Instant::now();
         let window_size = Duration::from_secs(60);
 
-        let entry = windows
-            .entry(key.to_string())
-            .or_insert_with(|| (0, now));
+        let entry = windows.entry(key.to_string()).or_insert_with(|| (0, now));
 
         if now.duration_since(entry.1) > window_size {
             *entry = (1, now);
@@ -58,6 +58,10 @@ pub async fn rate_limit_middleware(
     if !cfg.enabled {
         return next.run(req).await;
     }
+    let request_id = req
+        .extensions()
+        .get::<RequestContext>()
+        .map(|ctx| ctx.request_id.clone());
 
     let path = req.uri().path();
     if path_matches(path, &cfg.exempt_paths) {
@@ -73,7 +77,11 @@ pub async fn rate_limit_middleware(
         .check(&key, cfg.per_ip_rpm);
 
     if !allowed {
-        return (StatusCode::TOO_MANY_REQUESTS, "rate limit exceeded").into_response();
+        let error = request_id
+            .as_ref()
+            .map(|id| ApiError::rate_limited("rate limit exceeded").with_request_id(id))
+            .unwrap_or_else(|| ApiError::rate_limited("rate limit exceeded"));
+        return error.into_response();
     }
 
     next.run(req).await

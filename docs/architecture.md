@@ -137,9 +137,10 @@ Web Shell
 
 当前前端已经形成以下正式能力：
 
-- `web/shell` 提供统一 workspace，串联私聊、群聊、任务侧栏、memory 侧栏和 extension surface
-- `web/ui-sdk` 提供 extension page / panel 的共享类型与 slot 归一化助手
-- `web/builtins` 提供主壳内建 page / panel 描述，主壳通过 mount 协议消费描述而不是直接内嵌扩展实现
+- `web/apps/shell` 提供统一 workspace，串联私聊、群聊、任务侧栏、memory 侧栏和 extension surface
+- `web/packages/ui-sdk` 提供 extension page / panel 的共享类型与 slot 归一化助手
+- `web/packages/builtins` 提供主壳内建 page / panel 描述，主壳通过 mount 协议消费描述而不是直接内嵌扩展实现
+- `web/packages/api-client` 与 `web/packages/contract` 提供统一 API 调用与错误契约
 - workspace smoke 与 e2e 已覆盖私聊、群聊、memory、artifacts 与 extension registry 主链路
 
 ## 4. 前端形态

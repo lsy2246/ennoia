@@ -13,7 +13,7 @@ pub const API_KEY_PREFIX: &str = "ek_";
 /// JWT claims.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JwtClaims {
-    pub sub: String,          // user id
+    pub sub: String, // user id
     pub username: String,
     pub role: String,
     pub iat: i64,

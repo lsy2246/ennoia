@@ -1,50 +1,39 @@
 use std::env;
 use std::fs;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
+use ennoia_assets::templates;
+use ennoia_paths::RuntimePaths;
 use ennoia_server::{bootstrap_app_state, default_app_state, run_server, AppState};
-
-const ENNOIA_HOME_ENV: &str = "ENNOIA_HOME";
-
-const APP_CONFIG_TEMPLATE: &str = include_str!("../templates/config/ennoia.toml");
-const SERVER_CONFIG_TEMPLATE: &str = include_str!("../templates/config/server.toml");
-const UI_CONFIG_TEMPLATE: &str = include_str!("../templates/config/ui.toml");
-const CODER_TEMPLATE: &str = include_str!("../templates/config/agents/coder.toml");
-const PLANNER_TEMPLATE: &str = include_str!("../templates/config/agents/planner.toml");
-const OBSERVATORY_TEMPLATE: &str = include_str!("../templates/config/extensions/observatory.toml");
-const OBSERVATORY_MANIFEST_TEMPLATE: &str =
-    include_str!("../templates/global/extensions/observatory/manifest.toml");
-const MEMORY_POLICY_TEMPLATE: &str = include_str!("../templates/policies/memory.toml");
-const STAGE_POLICY_TEMPLATE: &str = include_str!("../templates/policies/stage.toml");
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let args: Vec<String> = env::args().collect();
     match args.get(1).map(String::as_str) {
         Some("init") => {
-            let target = resolve_runtime_path(args.get(2));
-            init_home_template(&target)?;
-            println!("initialized Ennoia home at {}", target.display());
+            let paths = RuntimePaths::resolve(args.get(2).map(String::as_str));
+            init_home_template(&paths)?;
+            println!("initialized Ennoia home at {}", paths.home().display());
         }
         Some("print-config") => {
             print_default_config()?;
         }
         Some("dev") => {
-            let target = resolve_runtime_path(args.get(2));
-            init_home_template(&target)?;
-            let state = bootstrap_app_state(&target).await?;
+            let paths = RuntimePaths::resolve(args.get(2).map(String::as_str));
+            init_home_template(&paths)?;
+            let state = bootstrap_app_state(paths.home()).await?;
             println!(
                 "Ennoia dev runtime ready at {} with {} agents",
-                target.display(),
+                paths.home().display(),
                 state.agents.len()
             );
-            run_server(&target).await?;
+            run_server(paths.home()).await?;
         }
         Some("start") | Some("serve") => {
-            let target = resolve_runtime_path(args.get(2));
-            init_home_template(&target)?;
-            run_server(&target).await?;
+            let paths = RuntimePaths::resolve(args.get(2).map(String::as_str));
+            init_home_template(&paths)?;
+            run_server(paths.home()).await?;
         }
         Some("memory") => {
             memory_command(&args[2..]).await?;
@@ -98,9 +87,9 @@ fn print_default_config() -> Result<(), Box<dyn std::error::Error + Send + Sync>
 }
 
 async fn memory_command(args: &[String]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let target = resolve_runtime_path(None);
-    init_home_template(&target)?;
-    let state = bootstrap_app_state(&target).await?;
+    let paths = RuntimePaths::resolve(None);
+    init_home_template(&paths)?;
+    let state = bootstrap_app_state(paths.home()).await?;
 
     let sub = args.first().map(String::as_str).unwrap_or("list");
     match sub {
@@ -216,53 +205,41 @@ async fn memory_recall(
     Ok(())
 }
 
-fn init_home_template(target: &Path) -> io::Result<()> {
-    let config_dir = target.join("config");
-    let policies_dir = target.join("policies");
-    fs::create_dir_all(config_dir.join("agents"))?;
-    fs::create_dir_all(config_dir.join("extensions"))?;
-    fs::create_dir_all(&policies_dir)?;
-    fs::create_dir_all(target.join("state/queue"))?;
-    fs::create_dir_all(target.join("state/runs"))?;
-    fs::create_dir_all(target.join("state/cache"))?;
-    fs::create_dir_all(target.join("state/sqlite"))?;
-    fs::create_dir_all(target.join("global/extensions/observatory"))?;
-    fs::create_dir_all(target.join("global/skills"))?;
-    fs::create_dir_all(target.join("agents"))?;
-    fs::create_dir_all(target.join("spaces"))?;
-    fs::create_dir_all(target.join("logs"))?;
+fn init_home_template(paths: &RuntimePaths) -> io::Result<()> {
+    paths.ensure_layout()?;
+    fs::create_dir_all(paths.global_extension_dir("observatory"))?;
 
-    write_if_missing(&config_dir.join("ennoia.toml"), APP_CONFIG_TEMPLATE)?;
-    write_if_missing(&config_dir.join("server.toml"), SERVER_CONFIG_TEMPLATE)?;
-    write_if_missing(&config_dir.join("ui.toml"), UI_CONFIG_TEMPLATE)?;
-    write_if_missing(&config_dir.join("agents/coder.toml"), CODER_TEMPLATE)?;
-    write_if_missing(&config_dir.join("agents/planner.toml"), PLANNER_TEMPLATE)?;
+    write_if_missing(&paths.app_config_file(), templates::app_config())?;
+    write_if_missing(&paths.server_config_file(), templates::server_config())?;
+    write_if_missing(&paths.ui_config_file(), templates::ui_config())?;
     write_if_missing(
-        &config_dir.join("extensions/observatory.toml"),
-        OBSERVATORY_TEMPLATE,
+        &paths.agents_config_dir().join("coder.toml"),
+        templates::coder_agent(),
     )?;
     write_if_missing(
-        &target.join("global/extensions/observatory/manifest.toml"),
-        OBSERVATORY_MANIFEST_TEMPLATE,
+        &paths.agents_config_dir().join("planner.toml"),
+        templates::planner_agent(),
     )?;
-    write_if_missing(&policies_dir.join("memory.toml"), MEMORY_POLICY_TEMPLATE)?;
-    write_if_missing(&policies_dir.join("stage.toml"), STAGE_POLICY_TEMPLATE)?;
+    write_if_missing(
+        &paths.extensions_config_dir().join("observatory.toml"),
+        templates::observatory_extension_config(),
+    )?;
+    write_if_missing(
+        &paths
+            .global_extension_dir("observatory")
+            .join("manifest.toml"),
+        templates::observatory_manifest(),
+    )?;
+    write_if_missing(
+        &paths.policies_dir().join("memory.toml"),
+        templates::memory_policy(),
+    )?;
+    write_if_missing(
+        &paths.policies_dir().join("stage.toml"),
+        templates::stage_policy(),
+    )?;
 
     Ok(())
-}
-
-fn default_home_template_path() -> PathBuf {
-    env::var_os("USERPROFILE")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".ennoia")
-}
-
-fn resolve_runtime_path(argument: Option<&String>) -> PathBuf {
-    argument
-        .map(PathBuf::from)
-        .or_else(|| env::var_os(ENNOIA_HOME_ENV).map(PathBuf::from))
-        .unwrap_or_else(default_home_template_path)
 }
 
 fn write_if_missing(path: &Path, contents: &str) -> io::Result<()> {
@@ -274,9 +251,9 @@ fn write_if_missing(path: &Path, contents: &str) -> io::Result<()> {
 }
 
 async fn admin_command(args: &[String]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let target = resolve_runtime_path(None);
-    init_home_template(&target)?;
-    let state = ennoia_server::bootstrap_app_state(&target).await?;
+    let paths = RuntimePaths::resolve(None);
+    init_home_template(&paths)?;
+    let state = ennoia_server::bootstrap_app_state(paths.home()).await?;
 
     let sub = args.first().map(String::as_str).unwrap_or("help");
     match sub {

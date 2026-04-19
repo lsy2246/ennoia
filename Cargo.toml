@@ -1,5 +1,6 @@
 [workspace]
 members = [
+  "crates/assets",
   "crates/kernel",
   "crates/policy",
   "crates/config",
@@ -9,6 +10,9 @@ members = [
   "crates/orchestrator",
   "crates/scheduler",
   "crates/extension-host",
+  "crates/paths",
+  "crates/observability",
+  "crates/contract",
   "crates/server",
   "crates/cli",
 ]
@@ -19,4 +23,3 @@ edition = "2021"
 license = "MIT"
 version = "0.1.0"
 authors = ["Ennoia"]
-

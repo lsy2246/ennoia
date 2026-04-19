@@ -26,15 +26,19 @@ Ennoia 的首版目标是形成一个长期可演进的 AI Agent 平台基础盘
 
 ### 前端与 SDK
 
-- `web/shell`
-- `web/ui-sdk`
-- `web/builtins`
+- `web/apps/shell`
+- `web/packages/ui-sdk`
+- `web/packages/builtins`
+- `web/packages/api-client`
+- `web/packages/observability`
+- `web/packages/contract`
 - `sdk/extension-sdk`
 - `sdk/skill-sdk`
 
 ### 交付与运维
 
-- `migrations`
+- `assets/migrations`
+- `assets/templates`
 - `packaging/home-template`
 - `packaging/npm`
 - `.github/workflows`
@@ -93,7 +97,7 @@ Ennoia 的首版目标是形成一个长期可演进的 AI Agent 平台基础盘
 
 验收：
 
-- `bun run --cwd web/shell build`
+- `bun run --cwd web/apps/shell build`
 
 ### Phase 4：配置、打包与模板
 
@@ -161,7 +165,7 @@ Ennoia 的首版目标是形成一个长期可演进的 AI Agent 平台基础盘
 - 有 `dev`
 - 有 `print-config`
 
-### web/shell
+### web/apps/shell
 
 - 有主壳布局
 - 有子页面区域

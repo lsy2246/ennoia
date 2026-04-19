@@ -5,6 +5,7 @@ pub mod body_limit;
 pub mod cors;
 pub mod logging;
 pub mod rate_limit;
+pub mod request_context;
 pub mod timeout;
 
 pub use auth::{auth_middleware, require_admin, AuthedUser};
@@ -12,6 +13,7 @@ pub use body_limit::body_limit_middleware;
 pub use cors::cors_middleware;
 pub use logging::logging_middleware;
 pub use rate_limit::{rate_limit_middleware, RateLimitState};
+pub use request_context::request_context_middleware;
 pub use timeout::timeout_middleware;
 
 use ennoia_kernel::GlobPattern;

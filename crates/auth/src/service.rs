@@ -117,7 +117,10 @@ impl AuthService {
         self.sessions.delete_by_token_hash(&hash).await
     }
 
-    pub async fn authenticate_session(&self, raw_token: &str) -> Result<(User, Session), AuthError> {
+    pub async fn authenticate_session(
+        &self,
+        raw_token: &str,
+    ) -> Result<(User, Session), AuthError> {
         let hash = hash_token(raw_token);
         let session = self
             .sessions
@@ -182,7 +185,12 @@ impl AuthService {
         Ok((user, claims))
     }
 
-    pub fn mint_jwt(&self, user: &User, secret: &str, ttl_seconds: u32) -> Result<String, AuthError> {
+    pub fn mint_jwt(
+        &self,
+        user: &User,
+        secret: &str,
+        ttl_seconds: u32,
+    ) -> Result<String, AuthError> {
         mint_jwt(user, secret, ttl_seconds)
     }
 

@@ -47,9 +47,7 @@ impl SystemConfigRuntime {
 
     /// Loads every key from the store; missing keys are populated with defaults
     /// (and persisted so subsequent starts are consistent).
-    pub async fn load_from_store(
-        &self,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    pub async fn load_from_store(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         self.hydrate_slot(CONFIG_KEY_AUTH, &self.auth, AuthConfig::default())
             .await?;
         self.hydrate_slot(

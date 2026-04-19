@@ -37,9 +37,9 @@ pub use extension::{
 pub use gate::{GateRecord, GateSeverity, GateVerdict};
 pub use memory::{
     AssembleRequest, ContextFrame, ContextLayer, ContextView, EpisodeKind, EpisodeRecord,
-    EpisodeRequest, MemoryError, MemoryKind, MemoryRecord, MemorySource, MemoryStatus,
-    MemoryStore, RecallMode, RecallQuery, RecallReceipt, RecallResult, RememberReceipt,
-    RememberRequest, ReviewAction, ReviewActionKind, ReviewReceipt, Stability,
+    EpisodeRequest, MemoryError, MemoryKind, MemoryRecord, MemorySource, MemoryStatus, MemoryStore,
+    RecallMode, RecallQuery, RecallReceipt, RecallResult, RememberReceipt, RememberRequest,
+    ReviewAction, ReviewActionKind, ReviewReceipt, Stability,
 };
 pub use overview::{core_modules, PlatformOverview};
 pub use policy::{

@@ -2,10 +2,11 @@ use std::time::Duration;
 
 use axum::{
     extract::{Request, State},
-    http::StatusCode,
     middleware::Next,
     response::{IntoResponse, Response},
 };
+use ennoia_contract::ApiError;
+use ennoia_observability::RequestContext;
 
 use crate::app::AppState;
 
@@ -19,6 +20,10 @@ pub async fn timeout_middleware(
     if !cfg.enabled {
         return next.run(req).await;
     }
+    let request_id = req
+        .extensions()
+        .get::<RequestContext>()
+        .map(|ctx| ctx.request_id.clone());
 
     let path = req.uri().path().to_string();
     let ms = cfg
@@ -30,6 +35,10 @@ pub async fn timeout_middleware(
 
     match tokio::time::timeout(duration, next.run(req)).await {
         Ok(response) => response,
-        Err(_) => (StatusCode::REQUEST_TIMEOUT, "request timed out").into_response(),
+        Err(_) => request_id
+            .as_ref()
+            .map(|id| ApiError::timeout("request timed out").with_request_id(id))
+            .unwrap_or_else(|| ApiError::timeout("request timed out"))
+            .into_response(),
     }
 }

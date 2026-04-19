@@ -1,10 +1,11 @@
 use axum::{
     body::{to_bytes, Body},
     extract::{Request, State},
-    http::StatusCode,
     middleware::Next,
     response::{IntoResponse, Response},
 };
+use ennoia_contract::ApiError;
+use ennoia_observability::RequestContext;
 
 use crate::app::AppState;
 
@@ -19,6 +20,10 @@ pub async fn body_limit_middleware(
     if !cfg.enabled {
         return next.run(req).await;
     }
+    let request_id = req
+        .extensions()
+        .get::<RequestContext>()
+        .map(|ctx| ctx.request_id.clone());
 
     let path = req.uri().path().to_string();
     let limit = cfg
@@ -31,11 +36,16 @@ pub async fn body_limit_middleware(
     let bytes = match to_bytes(body, limit).await {
         Ok(bytes) => bytes,
         Err(_) => {
-            return (
-                StatusCode::PAYLOAD_TOO_LARGE,
-                format!("body exceeds {limit} bytes"),
-            )
-                .into_response()
+            let error = request_id
+                .as_ref()
+                .map(|id| {
+                    ApiError::payload_too_large(format!("body exceeds {limit} bytes"))
+                        .with_request_id(id)
+                })
+                .unwrap_or_else(|| {
+                    ApiError::payload_too_large(format!("body exceeds {limit} bytes"))
+                });
+            return error.into_response();
         }
     };
     let rebuilt = Request::from_parts(parts, Body::from(bytes));

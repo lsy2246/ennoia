@@ -15,8 +15,9 @@
 - 核心命名和目录已经确定
 - Rust workspace 已经拆分出核心模块
 - 文档体系覆盖架构、路线图、运行目录、数据模型、配置模型和扩展模型
+- 后端已经收敛出 `assets / paths / observability / contract` 四个基础层，资源、路径、日志和错误不再散落在业务 crate 中
 - 前端主壳已经形成正式 workspace，可统一查看私聊、群聊、run、task、memory 与 extension surface
-- `web/ui-sdk` 与 `web/builtins` 已提供最小正式挂载描述，支持 page / panel 按 registry 协议接入主壳
+- 前端改为 `web/apps + web/packages` 结构，`shell` 通过 `@ennoia/*` package 消费共享能力
 - 打包目录和配置模板已经与 SQLite 默认运行时布局保持一致
 
 ## 技术栈
@@ -33,21 +34,29 @@
 - `memory`：记忆实体、上下文视图、连续性、复盘与索引
 - `orchestrator`：线程到 run、run 到 task、任务门禁和执行链路
 - `scheduler`：定时器、延迟任务、周期作业、重试和维护作业
+- `assets`：内建模板、默认策略与 SQLite migration 的唯一编译期资源入口
+- `paths`：运行目录、SQLite、日志、owner 产物目录的唯一解析入口
+- `observability`：日志初始化、request id 与观测上下文字段的统一入口
+- `contract`：后端 API 错误响应与稳定错误码契约
 - `extension-host`：system extension、skill、Hook、页面与面板贡献注册
 - `server`：HTTP API、WebSocket、扩展注册表、前端主壳注入
 - `cli`：初始化、开发、启动、本地输出和运行目录生成
-- `web/shell`：主壳、子页面、面板和扩展 UI 容器
-- `web/ui-sdk`：前端 extension page / panel 的共享类型与挂载助手
-- `web/builtins`：主壳内建 extension 描述与默认 surface 元数据
+- `assets/`：仓库级内建资源目录，包含模板与 migration
+- `web/apps/shell`：主壳、子页面、面板和扩展 UI 容器
+- `web/packages/ui-sdk`：前端 extension page / panel 的共享类型与挂载助手
+- `web/packages/builtins`：主壳内建 extension 描述与默认 surface 元数据
+- `web/packages/api-client`：前端统一 API 访问层
+- `web/packages/observability`：前端统一 logger
+- `web/packages/contract`：前端错误契约与共享类型
 
 ## 目录概览
 
 ```text
 ennoia/
+├─ assets/
 ├─ crates/
 ├─ web/
 ├─ sdk/
-├─ migrations/
 ├─ packaging/
 ├─ tests/
 ├─ docs/

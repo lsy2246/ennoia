@@ -8,8 +8,8 @@ pub fn hash_password(plain: &str) -> Result<String, AuthError> {
     OsRng
         .try_fill_bytes(&mut salt_bytes)
         .map_err(|e| AuthError::Backend(e.to_string()))?;
-    let salt = SaltString::encode_b64(&salt_bytes)
-        .map_err(|e| AuthError::Backend(e.to_string()))?;
+    let salt =
+        SaltString::encode_b64(&salt_bytes).map_err(|e| AuthError::Backend(e.to_string()))?;
     let argon = Argon2::default();
     let hashed = argon
         .hash_password(plain.as_bytes(), &salt)

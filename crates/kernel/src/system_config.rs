@@ -256,11 +256,7 @@ pub trait ConfigStore: Send + Sync {
         payload: &serde_json::Value,
         updated_by: Option<&str>,
     ) -> Result<ConfigEntry, ConfigError>;
-    async fn history(
-        &self,
-        key: &str,
-        limit: u32,
-    ) -> Result<Vec<ConfigChangeRecord>, ConfigError>;
+    async fn history(&self, key: &str, limit: u32) -> Result<Vec<ConfigChangeRecord>, ConfigError>;
 }
 
 // ========== Error ==========

@@ -3,7 +3,9 @@ use axum::{
     middleware::Next,
     response::Response,
 };
+use ennoia_observability::RequestContext;
 use std::time::Instant;
+use tracing::info;
 
 use crate::app::AppState;
 
@@ -26,15 +28,25 @@ pub async fn logging_middleware(
 
     let method = req.method().clone();
     let path = req.uri().path().to_string();
+    let request_id = req
+        .extensions()
+        .get::<RequestContext>()
+        .map(|ctx| ctx.request_id.clone())
+        .unwrap_or_else(|| "unknown".to_string());
     let started = Instant::now();
 
     let response = next.run(req).await;
 
     let elapsed_ms = started.elapsed().as_millis();
     let status = response.status().as_u16();
-    eprintln!(
-        "[{level}] {method} {path} -> {status} {elapsed_ms}ms",
-        level = cfg.level
+    info!(
+        request_id = %request_id,
+        http_method = %method,
+        http_path = %path,
+        http_status = status,
+        elapsed_ms,
+        configured_level = %cfg.level,
+        "http request completed"
     );
     response
 }

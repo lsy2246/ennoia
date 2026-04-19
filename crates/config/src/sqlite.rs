@@ -194,11 +194,7 @@ impl ConfigStore for SqliteConfigStore {
         })
     }
 
-    async fn history(
-        &self,
-        key: &str,
-        limit: u32,
-    ) -> Result<Vec<ConfigChangeRecord>, ConfigError> {
+    async fn history(&self, key: &str, limit: u32) -> Result<Vec<ConfigChangeRecord>, ConfigError> {
         let (sql, values) = Query::select()
             .columns([
                 SystemConfigHistory::Id,

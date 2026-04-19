@@ -1,9 +1,11 @@
 use axum::{
     extract::{Request, State},
-    http::{header, StatusCode},
+    http::header,
     middleware::Next,
     response::{IntoResponse, Response},
 };
+use ennoia_contract::ApiError;
+use ennoia_observability::RequestContext;
 use serde::Serialize;
 
 use crate::app::AppState;
@@ -53,6 +55,10 @@ pub async fn auth_middleware(
 
     // Step 1: extract everything we need from the request into owned values.
     let path = req.uri().path().to_string();
+    let request_id = req
+        .extensions()
+        .get::<RequestContext>()
+        .map(|ctx| ctx.request_id.clone());
     let api_key_value = header_string(&req, "x-api-key");
     let bearer_value = bearer_token(&req);
     let cookie_session = cookie_session_token(&req);
@@ -92,9 +98,17 @@ pub async fn auth_middleware(
                 return next.run(req).await;
             }
             if is_protected {
-                return (StatusCode::UNAUTHORIZED, "authentication required").into_response();
+                let error = request_id
+                    .as_ref()
+                    .map(|id| ApiError::unauthorized("authentication required").with_request_id(id))
+                    .unwrap_or_else(|| ApiError::unauthorized("authentication required"));
+                return error.into_response();
             }
-            (StatusCode::UNAUTHORIZED, "authentication required").into_response()
+            request_id
+                .as_ref()
+                .map(|id| ApiError::unauthorized("authentication required").with_request_id(id))
+                .unwrap_or_else(|| ApiError::unauthorized("authentication required"))
+                .into_response()
         }
     }
 }
@@ -162,7 +176,7 @@ fn cookie_session_token(req: &Request) -> Option<String> {
 }
 
 /// require_admin is a small helper for admin-only handlers.
-pub fn require_admin(user: &AuthedUser, state: &AppState) -> Result<(), (StatusCode, String)> {
+pub fn require_admin(user: &AuthedUser, state: &AppState) -> Result<(), ApiError> {
     let cfg = state.system_config.auth.load_full();
     if !cfg.enabled {
         return Ok(());
@@ -170,6 +184,6 @@ pub fn require_admin(user: &AuthedUser, state: &AppState) -> Result<(), (StatusC
     if user.is_admin() {
         Ok(())
     } else {
-        Err((StatusCode::FORBIDDEN, "admin role required".to_string()))
+        Err(ApiError::forbidden("admin role required"))
     }
 }

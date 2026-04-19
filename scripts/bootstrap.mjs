@@ -129,14 +129,14 @@ if (!commandExists("bun")) {
 
 runStep("安装根目录依赖", "bun", ["install"]);
 
-const shellDir = resolve(rootDir, "web", "shell");
+const shellDir = resolve(rootDir, "web", "apps", "shell");
 if (!existsSync(shellDir)) {
-  console.error("[bootstrap] 缺少 web/shell 目录，无法继续。");
+  console.error("[bootstrap] 缺少 web/apps/shell 目录，无法继续。");
   process.exit(1);
 }
 
-runStep("安装 web/shell 依赖", "bun", ["install", "--cwd", "web/shell"]);
-runStep("执行 web/shell typecheck", "bun", ["run", "--cwd", "web/shell", "typecheck"]);
+runStep("安装 web/apps/shell 依赖", "bun", ["install", "--cwd", "web/apps/shell"]);
+runStep("执行 web/apps/shell typecheck", "bun", ["run", "--cwd", "web/apps/shell", "typecheck"]);
 
 if (commandExists("cargo")) {
   if (process.platform === "win32") {
