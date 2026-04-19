@@ -8,10 +8,9 @@ use std::sync::Arc;
 use arc_swap::ArcSwap;
 use ennoia_config::SqliteConfigStore;
 use ennoia_kernel::{
-    AuthConfig, BodyLimitConfig, BootstrapState, ConfigStore, CorsConfig, LoggingConfig,
-    RateLimitConfig, SystemConfig, TimeoutConfig, CONFIG_KEY_AUTH, CONFIG_KEY_BODY_LIMIT,
-    CONFIG_KEY_BOOTSTRAP, CONFIG_KEY_CORS, CONFIG_KEY_LOGGING, CONFIG_KEY_RATE_LIMIT,
-    CONFIG_KEY_TIMEOUT,
+    BodyLimitConfig, BootstrapState, ConfigStore, CorsConfig, LoggingConfig, RateLimitConfig,
+    SystemConfig, TimeoutConfig, CONFIG_KEY_BODY_LIMIT, CONFIG_KEY_BOOTSTRAP, CONFIG_KEY_CORS,
+    CONFIG_KEY_LOGGING, CONFIG_KEY_RATE_LIMIT, CONFIG_KEY_TIMEOUT,
 };
 
 use crate::middleware::RateLimitState;
@@ -20,7 +19,6 @@ use crate::middleware::RateLimitState;
 #[derive(Clone)]
 pub struct SystemConfigRuntime {
     pub store: Arc<SqliteConfigStore>,
-    pub auth: Arc<ArcSwap<AuthConfig>>,
     pub rate_limit: Arc<ArcSwap<RateLimitConfig>>,
     pub cors: Arc<ArcSwap<CorsConfig>>,
     pub timeout: Arc<ArcSwap<TimeoutConfig>>,
@@ -34,7 +32,6 @@ impl SystemConfigRuntime {
     pub fn defaulted(store: Arc<SqliteConfigStore>) -> Self {
         Self {
             store,
-            auth: Arc::new(ArcSwap::from_pointee(AuthConfig::default())),
             rate_limit: Arc::new(ArcSwap::from_pointee(RateLimitConfig::default())),
             cors: Arc::new(ArcSwap::from_pointee(CorsConfig::default())),
             timeout: Arc::new(ArcSwap::from_pointee(TimeoutConfig::default())),
@@ -48,8 +45,6 @@ impl SystemConfigRuntime {
     /// Loads every key from the store; missing keys are populated with defaults
     /// (and persisted so subsequent starts are consistent).
     pub async fn load_from_store(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        self.hydrate_slot(CONFIG_KEY_AUTH, &self.auth, AuthConfig::default())
-            .await?;
         self.hydrate_slot(
             CONFIG_KEY_RATE_LIMIT,
             &self.rate_limit,
@@ -103,7 +98,6 @@ impl SystemConfigRuntime {
     /// Build a full `SystemConfig` snapshot from the current live values.
     pub fn snapshot(&self) -> SystemConfig {
         SystemConfig {
-            auth: (**self.auth.load()).clone(),
             rate_limit: (**self.rate_limit.load()).clone(),
             cors: (**self.cors.load()).clone(),
             timeout: (**self.timeout.load()).clone(),
@@ -116,10 +110,6 @@ impl SystemConfigRuntime {
     /// Apply an already-parsed value to the matching slot. Returns false if `key` unknown.
     pub fn apply(&self, key: &str, payload: &serde_json::Value) -> Result<bool, serde_json::Error> {
         match key {
-            CONFIG_KEY_AUTH => {
-                let v: AuthConfig = serde_json::from_value(payload.clone())?;
-                self.auth.store(Arc::new(v));
-            }
             CONFIG_KEY_RATE_LIMIT => {
                 let v: RateLimitConfig = serde_json::from_value(payload.clone())?;
                 self.rate_limit.store(Arc::new(v));

@@ -6,73 +6,94 @@ import {
   redirect,
 } from "@tanstack/react-router";
 
-import { AdminApiKeysPage } from "@/pages/AdminApiKeysPage";
-import { AdminSessionsPage } from "@/pages/AdminSessionsPage";
-import { AdminUsersPage } from "@/pages/AdminUsersPage";
-import { DashboardPage } from "@/pages/DashboardPage";
-import { LoginPage } from "@/pages/LoginPage";
-import { MemoriesPage } from "@/pages/MemoriesPage";
-import { OnboardingPage } from "@/pages/OnboardingPage";
+import { AgentsPage } from "@/pages/AgentsPage";
+import { ArtifactsPage } from "@/pages/ArtifactsPage";
+import { ConversationDetailPage } from "@/pages/ConversationDetailPage";
+import { ConversationsPage } from "@/pages/ConversationsPage";
 import { RunDetailPage } from "@/pages/RunDetailPage";
 import { SettingsPage } from "@/pages/SettingsPage";
+import { SpacesPage } from "@/pages/SpacesPage";
+import { WelcomePage } from "@/pages/WelcomePage";
+import { WorkflowsPage } from "@/pages/WorkflowsPage";
 import { AppShell } from "@/shell/AppShell";
-import { useAuthStore } from "@/stores/auth";
+import { useRuntimeStore } from "@/stores/runtime";
 
-function requireAuth() {
-  const { user, bootstrap } = useAuthStore.getState();
-  if (bootstrap && !bootstrap.completed) {
-    throw redirect({ to: "/onboarding" });
-  }
-  if (!user) {
-    throw redirect({ to: "/login" });
+function requireInitialized() {
+  const { bootstrap } = useRuntimeStore.getState();
+  if (bootstrap && !bootstrap.is_initialized) {
+    throw redirect({ to: "/welcome" });
   }
 }
 
-function requireAdmin() {
-  requireAuth();
-  const { user } = useAuthStore.getState();
-  if (user && user.role !== "admin" && user.role !== "anonymous") {
-    throw redirect({ to: "/" });
+function redirectToWorkspace() {
+  const { bootstrap } = useRuntimeStore.getState();
+  if (bootstrap?.is_initialized) {
+    throw redirect({ to: "/conversations" });
   }
 }
 
 const rootRoute = createRootRoute({ component: () => <Outlet /> });
 
-const loginRoute = createRoute({
+const welcomeRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: "/login",
-  component: LoginPage,
-});
-
-const onboardingRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/onboarding",
-  component: OnboardingPage,
+  path: "/welcome",
+  component: WelcomePage,
+  beforeLoad: redirectToWorkspace,
 });
 
 const shellRoute = createRoute({
   getParentRoute: () => rootRoute,
   id: "shell",
   component: AppShell,
-  beforeLoad: requireAuth,
+  beforeLoad: requireInitialized,
 });
 
-const dashboardRoute = createRoute({
+const homeRoute = createRoute({
   getParentRoute: () => shellRoute,
   path: "/",
-  component: DashboardPage,
+  component: ConversationsPage,
 });
 
-const runDetailRoute = createRoute({
+const conversationsRoute = createRoute({
   getParentRoute: () => shellRoute,
-  path: "/runs/$runId",
+  path: "/conversations",
+  component: ConversationsPage,
+});
+
+const conversationDetailRoute = createRoute({
+  getParentRoute: () => shellRoute,
+  path: "/conversations/$conversationId",
+  component: ConversationDetailPage,
+});
+
+const spacesRoute = createRoute({
+  getParentRoute: () => shellRoute,
+  path: "/spaces",
+  component: SpacesPage,
+});
+
+const agentsRoute = createRoute({
+  getParentRoute: () => shellRoute,
+  path: "/agents",
+  component: AgentsPage,
+});
+
+const artifactsRoute = createRoute({
+  getParentRoute: () => shellRoute,
+  path: "/artifacts",
+  component: ArtifactsPage,
+});
+
+const workflowsRoute = createRoute({
+  getParentRoute: () => shellRoute,
+  path: "/workflows",
+  component: WorkflowsPage,
+});
+
+const workflowDetailRoute = createRoute({
+  getParentRoute: () => shellRoute,
+  path: "/workflows/$runId",
   component: RunDetailPage,
-});
-
-const memoriesRoute = createRoute({
-  getParentRoute: () => shellRoute,
-  path: "/memories",
-  component: MemoriesPage,
 });
 
 const settingsRoute = createRoute({
@@ -81,38 +102,18 @@ const settingsRoute = createRoute({
   component: SettingsPage,
 });
 
-const adminUsersRoute = createRoute({
-  getParentRoute: () => shellRoute,
-  path: "/admin/users",
-  component: AdminUsersPage,
-  beforeLoad: requireAdmin,
-});
-
-const adminSessionsRoute = createRoute({
-  getParentRoute: () => shellRoute,
-  path: "/admin/sessions",
-  component: AdminSessionsPage,
-  beforeLoad: requireAdmin,
-});
-
-const adminApiKeysRoute = createRoute({
-  getParentRoute: () => shellRoute,
-  path: "/admin/api-keys",
-  component: AdminApiKeysPage,
-  beforeLoad: requireAdmin,
-});
-
 const routeTree = rootRoute.addChildren([
-  loginRoute,
-  onboardingRoute,
+  welcomeRoute,
   shellRoute.addChildren([
-    dashboardRoute,
-    runDetailRoute,
-    memoriesRoute,
+    homeRoute,
+    conversationsRoute,
+    conversationDetailRoute,
+    spacesRoute,
+    agentsRoute,
+    artifactsRoute,
+    workflowsRoute,
+    workflowDetailRoute,
     settingsRoute,
-    adminUsersRoute,
-    adminSessionsRoute,
-    adminApiKeysRoute,
   ]),
 ]);
 

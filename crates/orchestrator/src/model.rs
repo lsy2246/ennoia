@@ -1,6 +1,6 @@
 use ennoia_kernel::{
-    ContextView, Decision, DecisionSnapshot, GateRecord, GateVerdict, MessageSpec, OwnerRef,
-    RunSpec, RunStageEvent, Signals, TaskSpec, ThreadSpec,
+    ContextView, ConversationSpec, Decision, DecisionSnapshot, GateRecord, GateVerdict,
+    MessageSpec, OwnerRef, RunSpec, RunStageEvent, Signals, TaskSpec,
 };
 use serde::{Deserialize, Serialize};
 
@@ -8,17 +8,17 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum RunTrigger {
-    DirectMessage,
-    SpaceMessage,
-    ScheduledJob,
+    DirectConversation,
+    GroupConversation,
+    Workflow,
 }
 
 impl RunTrigger {
     pub fn as_str(&self) -> &'static str {
         match self {
-            RunTrigger::DirectMessage => "direct_message",
-            RunTrigger::SpaceMessage => "space_message",
-            RunTrigger::ScheduledJob => "scheduled_job",
+            RunTrigger::DirectConversation => "direct_conversation",
+            RunTrigger::GroupConversation => "group_conversation",
+            RunTrigger::Workflow => "workflow",
         }
     }
 }
@@ -27,7 +27,7 @@ impl RunTrigger {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RunRequest {
     pub owner: OwnerRef,
-    pub thread: ThreadSpec,
+    pub conversation: ConversationSpec,
     pub message: MessageSpec,
     pub trigger: RunTrigger,
     pub goal: String,
@@ -37,7 +37,7 @@ pub struct RunRequest {
 /// PlannedRun is the normalized result emitted by the orchestrator.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PlannedRun {
-    pub thread: ThreadSpec,
+    pub conversation: ConversationSpec,
     pub message: MessageSpec,
     pub run: RunSpec,
     pub tasks: Vec<TaskSpec>,

@@ -1,20 +1,20 @@
 # Ennoia 架构总览
 
-## 1. 顶层目标
+## 目标
 
-`Ennoia` 是一个 `Space-first` 的 AI 工作台平台。
+`Ennoia` 的当前目标是一套单操作者、多 Agent 的本地工作台。
 
-- `Space`：私聊、群聊、线程和多人协作的统一上下文容器
-- `Agent`：能参与对话、执行任务、拥有私有技能和私有工作区的参与者
-- `Run`：一次完整的编排执行实例
-- `Task`：Run 内的可追踪工作单元
-- `Extension`：系统扩展总称
-- `Skill`：面向 Agent 与 Task 的能力包
+系统关键约束已经固定：
 
-## 2. 系统分层
+- 只有一个本地操作者
+- 通过欢迎引导建立实例级 `workspace_profile`
+- 会话分为 `direct` 与 `group`
+- `Space` 负责承载项目上下文与长期协作容器
+
+## 分层
 
 ```text
-Web Shell
+Shell
   -> Server
     -> Kernel
     -> Memory
@@ -23,140 +23,76 @@ Web Shell
     -> Extension Host
 ```
 
-### kernel
+### Kernel
 
-负责定义系统是什么：
+负责定义共享领域模型：
 
-- 核心对象模型
-- 配置协议
-- 扩展 manifest 契约
-- 公共枚举、标识、运行时上下文
+- `WorkspaceProfile`
+- `ConversationSpec`
+- `LaneSpec`
+- `HandoffSpec`
+- `RunSpec / TaskSpec / ArtifactSpec`
 
-### memory
+### Memory
 
-负责定义系统如何记住：
+负责记忆和上下文组装。
 
-- truth memory
-- working memory
-- context artifact
-- active view
-- projection
-- review workbench
-- graph sidecar
+当前实现保留原始记录，并围绕 owner、conversation 和 run 组装上下文视图。
 
-### orchestrator
+### Orchestrator
 
-负责定义系统如何工作：
+负责把一条会话消息转换为：
 
-- 消息转 run
-- run 转 task
-- 计划与门禁
-- 多 Agent 编排
-- owner 归属和产物定位
+- 一个 `run`
+- 若干个 `task`
+- 一次阶段流转
+- 一组 gate verdict
 
-### scheduler
+### Server
 
-负责定义系统如何后台推进：
+负责提供：
 
-- cron
-- delay
-- retry
-- maintenance
-- wake
+- bootstrap 引导
+- runtime profile / preferences
+- conversation / lane / handoff API
+- runs / tasks / artifacts / memories / jobs API
+- extension registry 与 UI runtime snapshot
 
-### extension-host
+### Shell
 
-负责定义系统如何扩展：
+负责提供：
 
-- 扫描扩展目录
-- 校验 manifest
-- 注册后端 Hook
-- 注册前端贡献
-- 管理 theme、locale、provider、page、panel 和 command
+- 首次欢迎引导
+- direct/group 会话工作台
+- 工作流与产物视图
+- 本地缓存驱动的多语言与多主题切换
 
-### server
+## 主链路
 
-负责定义系统如何对外提供服务：
+### 首次启动
 
-- HTTP API
-- WebSocket
-- 鉴权和会话订阅
-- 静态资源
-- 主壳注入和扩展注册表输出
-- UI runtime snapshot 与用户/Space UI 偏好同步
+1. Shell 读取 `/api/v1/bootstrap/status`
+2. 若未初始化，进入欢迎页
+3. 提交 `workspace_profile + instance_ui_preferences`
+4. Server 落盘并把 bootstrap 标记为已完成
 
-### shell
+### 一对一会话
 
-负责定义系统如何呈现：
+1. 创建 `conversation(topology=direct)`
+2. 自动创建默认 `lane`
+3. 操作者发送消息
+4. Orchestrator 创建单 Agent run 与 response task
+5. 结果写入 artifact、memory 和 runtime audit
 
-- 顶部栏
-- 侧栏
-- 子页面
-- 面板
-- 命令系统
-- 拖拽工作台
-- 使用 `Panda CSS` 维护 shell 的 token、布局样式和可复用视觉约束
-- 使用本地缓存 + 远端同步驱动主题、语言、时区和日期格式
+### 多 Agent 会话
 
-## 3. 主链路
+1. 创建 `conversation(topology=group)`
+2. 一个会话下可有多条 `lane`
+3. 每条消息按 lane 参与者生成协作 task 集
+4. 跨线信息通过 `handoff` 传递
 
-### 私聊链路
+## 偏好与缓存
 
-1. 用户向某个 Agent 发消息
-2. Server upsert 私聊 thread，并写入 user message
-3. Memory 按 owner/thread 召回记忆并组装上下文视图
-4. Orchestrator 基于 message 创建 run 与 response task
-5. Server 写入 run、task、memory 和 artifact summary
-6. Agent 执行 skill / extension / provider，并继续追加消息与产物
-
-### 群聊链路
-
-1. 用户在某个 Space 发消息
-2. Server 判断提及策略和参与者，并 upsert Space thread
-3. Memory 按 owner/thread 召回共享上下文
-4. Orchestrator 生成群聊 run 与 collaboration task 集
-5. 各 Agent 在共享 Space 上下文中协作
-6. 结果写回消息流、task 状态、memory 和 artifacts
-
-### 后台链路
-
-1. 用户或系统注册定时任务
-2. Scheduler 到点触发 job
-3. Orchestrator 创建后台 run
-4. 执行结果按 owner 归档
-5. Shell 的日志页、任务页、通知中心实时可见
-
-## 3.1 Phase 2 当前事实
-
-当前后端已经形成以下正式能力：
-
-- `threads/messages/runs/tasks/artifacts/memories` 进入统一 SQLite 持久化
-- `memory` 支持按 `owner/thread/run` 作用域召回
-- `orchestrator` 以消息为输入创建正式 run/task 生命周期
-- `server` 同时提供正式 conversation API 和兼容旧壳子的 run API
-
-## 3.2 Phase 3 当前事实
-
-当前前端已经形成以下正式能力：
-
-- `web/apps/shell` 提供统一 workspace，串联私聊、群聊、任务侧栏、memory 侧栏和 extension surface
-- `web/packages/ui-sdk` 提供 extension page / panel 的共享类型与 slot 归一化助手
-- `web/packages/builtins` 提供主壳内建 page / panel 描述，主壳通过 mount 协议消费描述而不是直接内嵌扩展实现
-- `web/packages/api-client` 与 `web/packages/contract` 提供统一 API 调用与错误契约
-- workspace smoke 与 e2e 已覆盖私聊、群聊、memory、artifacts 与 extension registry 主链路
-
-## 4. 前端形态
-
-前端由一个统一 `Shell` 承载：
-
-- `Shell` 是唯一主壳
-- 扩展注册的是 `Shell` 下的子页面和面板
-- 子页面挂载在内容区
-- 面板挂载在 Dock 区域，支持拖拽、停靠、分栏和恢复
-
-## 5. 运行时事实源
-
-- 数据库：以 `SQLite` 作为首版默认事实源，文件位于 `~/.ennoia/state/sqlite/ennoia.db`
-- 文件系统：工作区、扩展安装位、产物、缓存
-
-系统核心命名统一使用 `kernel / memory / orchestrator / scheduler / extension-host / server / shell` 体系。
+- 浏览器缓存负责首屏无闪烁启动
+- 服务端 `instance_ui_preferences` 负责实例级同步
+- `space_ui_preferences` 负责项目级覆盖

@@ -9,8 +9,8 @@ pub struct PlatformOverview {
     pub modules: Vec<String>,
     pub primary_database: String,
     pub default_owner_kind: OwnerKind,
-    pub supports_private_threads: bool,
-    pub supports_space_threads: bool,
+    pub supports_direct_conversations: bool,
+    pub supports_group_conversations: bool,
 }
 
 impl Default for PlatformOverview {
@@ -20,8 +20,8 @@ impl Default for PlatformOverview {
             modules: core_modules(),
             primary_database: "sqlite".to_string(),
             default_owner_kind: OwnerKind::Space,
-            supports_private_threads: true,
-            supports_space_threads: true,
+            supports_direct_conversations: true,
+            supports_group_conversations: true,
         }
     }
 }

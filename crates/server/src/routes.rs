@@ -1,28 +1,26 @@
+use std::collections::{HashMap, HashSet};
 use std::fs;
 
 use axum::{
-    extract::{Extension, Path, State},
-    http::{HeaderMap, StatusCode},
+    extract::{Path, Query, State},
     middleware as axum_middleware,
     routing::{get, post},
-    Json, Router,
+    Extension, Json, Router,
 };
 use chrono::Utc;
-use ennoia_auth::tokens;
 use ennoia_contract::ApiError;
 use ennoia_extension_host::{
     ExtensionRegistrySnapshot, RegisteredExtensionSnapshot, RegisteredLocaleContribution,
     RegisteredPageContribution, RegisteredPanelContribution, RegisteredThemeContribution,
 };
 use ennoia_kernel::{
-    ApiKey, ArtifactKind, ArtifactSpec, AssembleRequest, AuthMode, BootstrapState,
-    ConfigChangeRecord, ConfigEntry, ConfigStore, ContextView, EnqueueRequest, EpisodeKind,
-    EpisodeRequest, JobKind, JobRecord, LocalizedText, MemoryKind, MemoryRecord, MemorySource,
-    MessageRole, MessageSpec, OwnerKind, OwnerRef, RecallMode, RecallQuery, RecallResult,
-    RememberReceipt, RememberRequest, ReviewAction, ReviewActionKind, ReviewReceipt, ScheduleKind,
-    Session, Stability, SystemConfig, ThreadKind, ThreadSpec, UiConfig, UiPreference,
-    UiPreferenceRecord, UpdateUserRequest, User, UserRole, ALL_CONFIG_KEYS, CONFIG_KEY_AUTH,
-    CONFIG_KEY_BOOTSTRAP,
+    ArtifactKind, ArtifactSpec, AssembleRequest, BootstrapState, ConfigChangeRecord, ConfigEntry,
+    ConfigStore, ContextView, ConversationSpec, ConversationTopology, EpisodeKind, EpisodeRequest,
+    HandoffSpec, JobKind, JobRecord, LaneSpec, LocalizedText, MemoryKind, MemoryRecord,
+    MemorySource, MessageRole, MessageSpec, OwnerKind, OwnerRef, RecallMode, RecallQuery,
+    RecallResult, RememberReceipt, RememberRequest, ReviewAction, ReviewActionKind, ReviewReceipt,
+    RunSpec, ScheduleKind, Stability, SystemConfig, TaskSpec, UiConfig, UiPreference,
+    UiPreferenceRecord, WorkspaceProfile, ALL_CONFIG_KEYS, CONFIG_KEY_BOOTSTRAP,
 };
 use ennoia_observability::RequestContext;
 use ennoia_orchestrator::{RunRequest, RunTrigger};
@@ -33,69 +31,69 @@ use uuid::Uuid;
 use crate::app::AppState;
 use crate::db::{self, JobRow};
 use crate::middleware::{
-    auth_middleware, body_limit_middleware, cors_middleware, logging_middleware,
-    rate_limit_middleware, request_context_middleware, require_admin, timeout_middleware,
-    AuthedUser,
+    body_limit_middleware, cors_middleware, logging_middleware, rate_limit_middleware,
+    request_context_middleware, timeout_middleware,
 };
 
 type ApiResult<T> = Result<Json<T>, ApiError>;
-type StatusResult = Result<StatusCode, ApiError>;
 
 fn scoped(error: ApiError, request: &RequestContext) -> ApiError {
     error.with_request_id(&request.request_id)
 }
 
 pub fn build_router(state: AppState) -> Router {
-    let admin = Router::new()
-        .route("/api/v1/admin/config", get(config_list))
+    let bootstrap = Router::new()
+        .route("/api/v1/bootstrap/status", get(bootstrap_status))
+        .route("/api/v1/bootstrap/setup", post(bootstrap_setup));
+
+    let runtime = Router::new()
         .route(
-            "/api/v1/admin/config/{key}",
+            "/api/v1/runtime/profile",
+            get(runtime_profile).put(runtime_profile_put),
+        )
+        .route(
+            "/api/v1/runtime/preferences",
+            get(runtime_preferences).put(runtime_preferences_put),
+        )
+        .route("/api/v1/runtime/config", get(config_list))
+        .route("/api/v1/runtime/config/snapshot", get(config_snapshot))
+        .route(
+            "/api/v1/runtime/config/{key}",
             get(config_get).put(config_put),
         )
-        .route("/api/v1/admin/config/{key}/history", get(config_history))
-        .route("/api/v1/admin/config/snapshot", get(config_snapshot))
-        .route("/api/v1/admin/users", get(users_list).post(users_create))
+        .route("/api/v1/runtime/config/{key}/history", get(config_history));
+
+    let conversations = Router::new()
         .route(
-            "/api/v1/admin/users/{user_id}",
-            get(users_get).put(users_update).delete(users_delete),
+            "/api/v1/conversations",
+            get(conversations_list).post(conversations_create),
         )
         .route(
-            "/api/v1/admin/users/{user_id}/reset-password",
-            post(users_reset_password),
-        )
-        .route("/api/v1/admin/sessions", get(sessions_list))
-        .route(
-            "/api/v1/admin/sessions/{session_id}",
-            axum::routing::delete(sessions_delete),
+            "/api/v1/conversations/{conversation_id}",
+            get(conversation_detail),
         )
         .route(
-            "/api/v1/admin/api-keys",
-            get(api_keys_list).post(api_keys_create),
+            "/api/v1/conversations/{conversation_id}/messages",
+            get(conversation_messages).post(conversation_messages_create),
         )
         .route(
-            "/api/v1/admin/api-keys/{key_id}",
-            axum::routing::delete(api_keys_delete),
+            "/api/v1/conversations/{conversation_id}/runs",
+            get(conversation_runs),
+        )
+        .route(
+            "/api/v1/conversations/{conversation_id}/lanes",
+            get(conversation_lanes),
+        )
+        .route(
+            "/api/v1/lanes/{lane_id}/handoffs",
+            get(lane_handoffs).post(lane_handoffs_create),
         );
-
-    let auth_public = Router::new()
-        .route("/api/v1/auth/register", post(auth_register))
-        .route("/api/v1/auth/login", post(auth_login))
-        .route("/api/v1/auth/logout", post(auth_logout))
-        .route("/api/v1/auth/me", get(auth_me))
-        .route("/api/v1/auth/refresh", post(auth_refresh));
-
-    let bootstrap = Router::new()
-        .route("/api/v1/bootstrap/state", get(bootstrap_state_handler))
-        .route("/api/v1/bootstrap", post(bootstrap_complete));
 
     Router::new()
         .route("/health", get(health))
         .route("/api/v1/overview", get(overview))
         .route("/api/v1/ui/runtime", get(ui_runtime))
-        .route(
-            "/api/v1/me/ui-preferences",
-            get(me_ui_preferences).put(me_ui_preferences_put),
-        )
+        .route("/api/v1/ui/messages", get(ui_messages))
         .route(
             "/api/v1/spaces/{space_id}/ui-preferences",
             get(space_ui_preferences).put(space_ui_preferences_put),
@@ -106,14 +104,6 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/extensions/panels", get(extension_panels))
         .route("/api/v1/agents", get(agents))
         .route("/api/v1/spaces", get(spaces))
-        .route("/api/v1/threads", get(threads))
-        .route("/api/v1/threads/{thread_id}/messages", get(thread_messages))
-        .route("/api/v1/threads/{thread_id}/runs", get(thread_runs))
-        .route(
-            "/api/v1/threads/private/messages",
-            post(create_private_message),
-        )
-        .route("/api/v1/threads/space/messages", post(create_space_message))
         .route("/api/v1/runs", get(runs))
         .route("/api/v1/runs/{run_id}/tasks", get(run_tasks))
         .route("/api/v1/runs/{run_id}/artifacts", get(run_artifacts))
@@ -126,13 +116,9 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/memories/recall", post(memories_recall))
         .route("/api/v1/memories/review", post(memories_review))
         .route("/api/v1/jobs", get(jobs_list).post(jobs_create))
-        .merge(admin)
-        .merge(auth_public)
         .merge(bootstrap)
-        .layer(axum_middleware::from_fn_with_state(
-            state.clone(),
-            auth_middleware,
-        ))
+        .merge(runtime)
+        .merge(conversations)
         .layer(axum_middleware::from_fn_with_state(
             state.clone(),
             rate_limit_middleware,
@@ -190,9 +176,34 @@ struct UiRuntimeVersionsResponse {
 struct UiRuntimeResponse {
     ui_config: UiConfig,
     registry: UiRuntimeRegistryResponse,
-    user_preference: Option<UiPreferenceRecord>,
+    instance_preference: Option<UiPreferenceRecord>,
     space_preferences: Vec<UiPreferenceRecord>,
     versions: UiRuntimeVersionsResponse,
+}
+
+#[derive(Debug, Serialize)]
+struct UiMessageBundleResponse {
+    locale: String,
+    resolved_locale: String,
+    namespace: String,
+    messages: HashMap<String, String>,
+    source: String,
+    version: String,
+}
+
+#[derive(Debug, Serialize)]
+struct UiMessagesResponse {
+    locale: String,
+    fallback_locale: String,
+    bundles: Vec<UiMessageBundleResponse>,
+}
+
+#[derive(Debug, Deserialize)]
+struct UiMessagesQuery {
+    #[serde(default)]
+    locale: Option<String>,
+    #[serde(default)]
+    namespaces: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -212,29 +223,110 @@ struct UiPreferencePayload {
 }
 
 #[derive(Debug, Deserialize)]
-struct PrivateMessageRequest {
-    agent_id: String,
-    body: String,
-    goal: Option<String>,
+struct BootstrapSetupPayload {
+    #[serde(default)]
+    display_name: Option<String>,
+    #[serde(default)]
+    locale: Option<String>,
+    #[serde(default)]
+    time_zone: Option<String>,
+    #[serde(default)]
+    default_space_id: Option<String>,
+    #[serde(default)]
+    theme_id: Option<String>,
+    #[serde(default)]
+    date_style: Option<String>,
+    #[serde(default)]
+    density: Option<String>,
+    #[serde(default)]
+    motion: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct BootstrapSetupResponse {
+    bootstrap: BootstrapState,
+    profile: WorkspaceProfile,
+    preference: UiPreferenceRecord,
 }
 
 #[derive(Debug, Deserialize)]
-struct SpaceMessageRequest {
-    space_id: String,
-    addressed_agents: Vec<String>,
+struct WorkspaceProfilePayload {
+    #[serde(default)]
+    display_name: Option<String>,
+    #[serde(default)]
+    locale: Option<String>,
+    #[serde(default)]
+    time_zone: Option<String>,
+    #[serde(default)]
+    default_space_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CreateConversationPayload {
+    topology: String,
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    space_id: Option<String>,
+    #[serde(default)]
+    agent_ids: Vec<String>,
+    #[serde(default)]
+    lane_name: Option<String>,
+    #[serde(default)]
+    lane_type: Option<String>,
+    #[serde(default)]
+    lane_goal: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct ConversationCreateResponse {
+    conversation: ConversationSpec,
+    default_lane: LaneSpec,
+}
+
+#[derive(Debug, Serialize)]
+struct ConversationDetailResponse {
+    conversation: ConversationSpec,
+    lanes: Vec<LaneSpec>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ConversationMessagePayload {
     body: String,
+    #[serde(default)]
     goal: Option<String>,
+    #[serde(default)]
+    lane_id: Option<String>,
+    #[serde(default)]
+    addressed_agents: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct HandoffPayload {
+    to_lane_id: String,
+    #[serde(default)]
+    from_agent_id: Option<String>,
+    #[serde(default)]
+    to_agent_id: Option<String>,
+    summary: String,
+    instructions: String,
+    #[serde(default)]
+    status: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 struct CreateJobRequest {
     owner_kind: String,
     owner_id: String,
-    job_kind: String,
+    #[serde(default)]
+    job_kind: Option<String>,
     schedule_kind: String,
     schedule_value: String,
+    #[serde(default)]
     payload: Option<JsonValue>,
+    #[serde(default)]
     max_retries: Option<u32>,
+    #[serde(default)]
     run_at: Option<String>,
 }
 
@@ -293,15 +385,22 @@ struct ReviewPayload {
 
 #[derive(Debug, Serialize)]
 struct ConversationEnvelope {
-    thread: ThreadSpec,
+    conversation: ConversationSpec,
+    lane: LaneSpec,
     message: MessageSpec,
-    run: ennoia_kernel::RunSpec,
-    tasks: Vec<ennoia_kernel::TaskSpec>,
+    run: RunSpec,
+    tasks: Vec<TaskSpec>,
     artifacts: Vec<ArtifactSpec>,
     context: ContextView,
     gate_verdicts: Vec<ennoia_kernel::GateVerdict>,
     stage_event: ennoia_kernel::RunStageEvent,
     decision: ennoia_kernel::Decision,
+}
+
+#[derive(Debug, Deserialize)]
+struct ConfigPutPayload {
+    payload: JsonValue,
+    updated_by: Option<String>,
 }
 
 async fn health() -> Json<HealthResponse> {
@@ -312,7 +411,7 @@ async fn health() -> Json<HealthResponse> {
 }
 
 async fn overview(State(state): State<AppState>) -> Json<OverviewResponse> {
-    let thread_count = db::count_rows(&state.pool, db::CountTable::Threads)
+    let conversation_count = db::count_rows(&state.pool, db::CountTable::Conversations)
         .await
         .unwrap_or(0);
     let message_count = db::count_rows(&state.pool, db::CountTable::Messages)
@@ -346,7 +445,7 @@ async fn overview(State(state): State<AppState>) -> Json<OverviewResponse> {
             "agents": state.agents.len(),
             "spaces": state.spaces.len(),
             "extensions": state.extensions.items().len(),
-            "threads": thread_count,
+            "conversations": conversation_count,
             "messages": message_count,
             "runs": run_count,
             "tasks": task_count,
@@ -358,20 +457,13 @@ async fn overview(State(state): State<AppState>) -> Json<OverviewResponse> {
     })
 }
 
-async fn ui_runtime(
-    State(state): State<AppState>,
-    Extension(user): Extension<AuthedUser>,
-) -> Json<UiRuntimeResponse> {
+async fn ui_runtime(State(state): State<AppState>) -> Json<UiRuntimeResponse> {
     let snapshot = state.extensions.snapshot();
-    let user_preference = if user.id == "anonymous" {
-        None
-    } else {
-        db::get_user_ui_preference(&state.pool, &user.id)
-            .await
-            .ok()
-            .flatten()
-            .map(to_preference_record)
-    };
+    let instance_preference = db::get_instance_ui_preference(&state.pool)
+        .await
+        .ok()
+        .flatten()
+        .map(to_preference_record);
     let space_preferences = db::list_space_ui_preferences(&state.pool)
         .await
         .unwrap_or_default()
@@ -394,7 +486,7 @@ async fn ui_runtime(
             themes: snapshot.themes,
             locales: snapshot.locales,
         },
-        user_preference,
+        instance_preference,
         space_preferences,
         versions: UiRuntimeVersionsResponse {
             registry: registry_version,
@@ -403,71 +495,32 @@ async fn ui_runtime(
     })
 }
 
-async fn me_ui_preferences(
+async fn ui_messages(
     State(state): State<AppState>,
-    Extension(user): Extension<AuthedUser>,
-) -> Json<Option<UiPreferenceRecord>> {
-    if user.id == "anonymous" {
-        return Json(None);
-    }
-    Json(
-        db::get_user_ui_preference(&state.pool, &user.id)
-            .await
-            .ok()
-            .flatten()
-            .map(to_preference_record),
-    )
-}
+    Query(query): Query<UiMessagesQuery>,
+) -> Json<UiMessagesResponse> {
+    let locale = query
+        .locale
+        .unwrap_or_else(|| state.ui_config.default_locale.clone());
+    let namespaces = query
+        .namespaces
+        .as_deref()
+        .map(parse_namespaces)
+        .filter(|items| !items.is_empty())
+        .unwrap_or_else(builtin_message_namespaces);
 
-async fn me_ui_preferences_put(
-    State(state): State<AppState>,
-    Extension(request): Extension<RequestContext>,
-    Extension(user): Extension<AuthedUser>,
-    Json(payload): Json<UiPreferencePayload>,
-) -> ApiResult<UiPreferenceRecord> {
-    let current = if user.id == "anonymous" {
-        None
-    } else {
-        db::get_user_ui_preference(&state.pool, &user.id)
-            .await
-            .map_err(|e| scoped(ApiError::internal(e.to_string()), &request))?
-    };
-    let preference = merge_ui_preference(current.as_ref().map(|row| &row.preference), payload);
-    let saved = db::upsert_user_ui_preference(&state.pool, &user.id, &preference)
-        .await
-        .map_err(|e| scoped(ApiError::internal(e.to_string()), &request))?;
-    Ok(Json(to_preference_record(saved)))
-}
+    let bundles = namespaces
+        .iter()
+        .filter_map(|namespace| {
+            builtin_message_bundle(&locale, &state.ui_config.fallback_locale, namespace)
+        })
+        .collect::<Vec<_>>();
 
-async fn space_ui_preferences(
-    State(state): State<AppState>,
-    Extension(request): Extension<RequestContext>,
-    Extension(user): Extension<AuthedUser>,
-    Path(space_id): Path<String>,
-) -> ApiResult<Option<UiPreferenceRecord>> {
-    require_admin(&user, &state).map_err(|error| scoped(error, &request))?;
-    let row = db::get_space_ui_preference(&state.pool, &space_id)
-        .await
-        .map_err(|e| scoped(ApiError::internal(e.to_string()), &request))?;
-    Ok(Json(row.map(to_preference_record)))
-}
-
-async fn space_ui_preferences_put(
-    State(state): State<AppState>,
-    Extension(request): Extension<RequestContext>,
-    Extension(user): Extension<AuthedUser>,
-    Path(space_id): Path<String>,
-    Json(payload): Json<UiPreferencePayload>,
-) -> ApiResult<UiPreferenceRecord> {
-    require_admin(&user, &state).map_err(|error| scoped(error, &request))?;
-    let current = db::get_space_ui_preference(&state.pool, &space_id)
-        .await
-        .map_err(|e| scoped(ApiError::internal(e.to_string()), &request))?;
-    let preference = merge_ui_preference(current.as_ref().map(|row| &row.preference), payload);
-    let saved = db::upsert_space_ui_preference(&state.pool, &space_id, &preference)
-        .await
-        .map_err(|e| scoped(ApiError::internal(e.to_string()), &request))?;
-    Ok(Json(to_preference_record(saved)))
+    Json(UiMessagesResponse {
+        locale,
+        fallback_locale: state.ui_config.fallback_locale.clone(),
+        bundles,
+    })
 }
 
 async fn extensions(State(state): State<AppState>) -> Json<Vec<RegisteredExtensionSnapshot>> {
@@ -494,40 +547,383 @@ async fn spaces(State(state): State<AppState>) -> Json<Vec<ennoia_kernel::SpaceS
     Json(state.spaces)
 }
 
-async fn threads(State(state): State<AppState>) -> Json<Vec<ThreadSpec>> {
-    Json(db::list_threads(&state.pool).await.unwrap_or_default())
+async fn bootstrap_status(State(state): State<AppState>) -> Json<BootstrapState> {
+    Json((**state.system_config.bootstrap.load()).clone())
 }
 
-async fn thread_messages(
+async fn bootstrap_setup(
     State(state): State<AppState>,
-    Path(thread_id): Path<String>,
+    Extension(request): Extension<RequestContext>,
+    Json(payload): Json<BootstrapSetupPayload>,
+) -> ApiResult<BootstrapSetupResponse> {
+    let current = (**state.system_config.bootstrap.load()).clone();
+    if current.is_initialized {
+        return Err(scoped(
+            ApiError::conflict("bootstrap already completed"),
+            &request,
+        ));
+    }
+
+    let now = now_iso();
+    let profile = WorkspaceProfile {
+        id: "workspace".to_string(),
+        display_name: payload
+            .display_name
+            .unwrap_or_else(|| "Operator".to_string()),
+        locale: payload.locale.unwrap_or_else(|| "zh-CN".to_string()),
+        time_zone: payload
+            .time_zone
+            .unwrap_or_else(|| "Asia/Shanghai".to_string()),
+        default_space_id: payload
+            .default_space_id
+            .or_else(|| state.spaces.first().map(|space| space.id.clone())),
+        created_at: now.clone(),
+        updated_at: now.clone(),
+    };
+    let saved_profile = db::update_workspace_profile(&state.pool, &profile)
+        .await
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?;
+
+    let preference = UiPreference {
+        locale: Some(saved_profile.locale.clone()),
+        theme_id: payload
+            .theme_id
+            .or_else(|| Some(state.ui_config.default_theme.clone())),
+        time_zone: Some(saved_profile.time_zone.clone()),
+        date_style: payload.date_style,
+        density: payload.density,
+        motion: payload.motion,
+        version: 1,
+        updated_at: now.clone(),
+    };
+    let saved_preference = db::upsert_instance_ui_preference(&state.pool, &preference)
+        .await
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?;
+
+    let bootstrap = BootstrapState {
+        is_initialized: true,
+        initialized_at: Some(now.clone()),
+    };
+    let boot_value = serde_json::to_value(&bootstrap)
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?;
+    state
+        .system_config
+        .store
+        .put(CONFIG_KEY_BOOTSTRAP, &boot_value, Some("bootstrap"))
+        .await
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?;
+    let _ = state.system_config.apply(CONFIG_KEY_BOOTSTRAP, &boot_value);
+
+    Ok(Json(BootstrapSetupResponse {
+        bootstrap,
+        profile: saved_profile,
+        preference: to_preference_record(saved_preference),
+    }))
+}
+
+async fn runtime_profile(State(state): State<AppState>) -> Json<Option<WorkspaceProfile>> {
+    Json(
+        db::get_workspace_profile(&state.pool)
+            .await
+            .unwrap_or_default(),
+    )
+}
+
+async fn runtime_profile_put(
+    State(state): State<AppState>,
+    Extension(request): Extension<RequestContext>,
+    Json(payload): Json<WorkspaceProfilePayload>,
+) -> ApiResult<WorkspaceProfile> {
+    let current = db::get_workspace_profile(&state.pool)
+        .await
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?;
+    let now = now_iso();
+    let profile = WorkspaceProfile {
+        id: current
+            .as_ref()
+            .map(|profile| profile.id.clone())
+            .unwrap_or_else(|| "workspace".to_string()),
+        display_name: payload
+            .display_name
+            .or_else(|| current.as_ref().map(|profile| profile.display_name.clone()))
+            .unwrap_or_else(|| "Operator".to_string()),
+        locale: payload
+            .locale
+            .or_else(|| current.as_ref().map(|profile| profile.locale.clone()))
+            .unwrap_or_else(|| "zh-CN".to_string()),
+        time_zone: payload
+            .time_zone
+            .or_else(|| current.as_ref().map(|profile| profile.time_zone.clone()))
+            .unwrap_or_else(|| "Asia/Shanghai".to_string()),
+        default_space_id: payload.default_space_id.or_else(|| {
+            current
+                .as_ref()
+                .and_then(|profile| profile.default_space_id.clone())
+        }),
+        created_at: current
+            .as_ref()
+            .map(|profile| profile.created_at.clone())
+            .unwrap_or_else(|| now.clone()),
+        updated_at: now,
+    };
+    let saved = db::update_workspace_profile(&state.pool, &profile)
+        .await
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?;
+    Ok(Json(saved))
+}
+
+async fn runtime_preferences(State(state): State<AppState>) -> Json<Option<UiPreferenceRecord>> {
+    Json(
+        db::get_instance_ui_preference(&state.pool)
+            .await
+            .unwrap_or_default()
+            .map(to_preference_record),
+    )
+}
+
+async fn runtime_preferences_put(
+    State(state): State<AppState>,
+    Extension(request): Extension<RequestContext>,
+    Json(payload): Json<UiPreferencePayload>,
+) -> ApiResult<UiPreferenceRecord> {
+    let current = db::get_instance_ui_preference(&state.pool)
+        .await
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?;
+    let preference = merge_ui_preference(current.as_ref().map(|row| &row.preference), payload);
+    let saved = db::upsert_instance_ui_preference(&state.pool, &preference)
+        .await
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?;
+    Ok(Json(to_preference_record(saved)))
+}
+
+async fn space_ui_preferences(
+    State(state): State<AppState>,
+    Extension(request): Extension<RequestContext>,
+    Path(space_id): Path<String>,
+) -> ApiResult<Option<UiPreferenceRecord>> {
+    let row = db::get_space_ui_preference(&state.pool, &space_id)
+        .await
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?;
+    Ok(Json(row.map(to_preference_record)))
+}
+
+async fn space_ui_preferences_put(
+    State(state): State<AppState>,
+    Extension(request): Extension<RequestContext>,
+    Path(space_id): Path<String>,
+    Json(payload): Json<UiPreferencePayload>,
+) -> ApiResult<UiPreferenceRecord> {
+    let current = db::get_space_ui_preference(&state.pool, &space_id)
+        .await
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?;
+    let preference = merge_ui_preference(current.as_ref().map(|row| &row.preference), payload);
+    let saved = db::upsert_space_ui_preference(&state.pool, &space_id, &preference)
+        .await
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?;
+    Ok(Json(to_preference_record(saved)))
+}
+
+async fn conversations_list(State(state): State<AppState>) -> Json<Vec<ConversationSpec>> {
+    Json(
+        db::list_conversations(&state.pool)
+            .await
+            .unwrap_or_default(),
+    )
+}
+
+async fn conversations_create(
+    State(state): State<AppState>,
+    Extension(request): Extension<RequestContext>,
+    Json(payload): Json<CreateConversationPayload>,
+) -> ApiResult<ConversationCreateResponse> {
+    let topology = conversation_topology_from_value(&payload.topology).ok_or_else(|| {
+        scoped(
+            ApiError::bad_request("invalid conversation topology"),
+            &request,
+        )
+    })?;
+    let agent_ids = normalize_agent_ids(&state, &payload.agent_ids);
+    if agent_ids.is_empty() {
+        return Err(scoped(
+            ApiError::bad_request("at least one agent is required"),
+            &request,
+        ));
+    }
+    if matches!(topology, ConversationTopology::Direct) && agent_ids.len() != 1 {
+        return Err(scoped(
+            ApiError::bad_request("direct conversation must target exactly one agent"),
+            &request,
+        ));
+    }
+
+    let now = now_iso();
+    let participants = build_participants(&agent_ids);
+    let owner = resolve_owner(&topology, payload.space_id.as_deref(), &agent_ids);
+    let conversation_id = format!("conv-{}", Uuid::new_v4());
+    let lane_id = format!("lane-{}", Uuid::new_v4());
+    let conversation = ConversationSpec {
+        id: conversation_id.clone(),
+        topology,
+        owner,
+        space_id: payload.space_id.clone(),
+        title: payload
+            .title
+            .unwrap_or_else(|| default_conversation_title(&state, topology, &agent_ids)),
+        participants: participants.clone(),
+        default_lane_id: Some(lane_id.clone()),
+        created_at: now.clone(),
+        updated_at: now.clone(),
+    };
+    let lane = LaneSpec {
+        id: lane_id,
+        conversation_id: conversation_id,
+        space_id: payload.space_id,
+        name: payload.lane_name.unwrap_or_else(|| "主线".to_string()),
+        lane_type: payload.lane_type.unwrap_or_else(|| "primary".to_string()),
+        status: "active".to_string(),
+        goal: payload
+            .lane_goal
+            .unwrap_or_else(|| "围绕当前会话持续推进".to_string()),
+        participants,
+        created_at: now.clone(),
+        updated_at: now,
+    };
+
+    db::upsert_conversation(&state.pool, &conversation)
+        .await
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?;
+    db::insert_lane(&state.pool, &lane)
+        .await
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?;
+
+    Ok(Json(ConversationCreateResponse {
+        conversation,
+        default_lane: lane,
+    }))
+}
+
+async fn conversation_detail(
+    State(state): State<AppState>,
+    Extension(request): Extension<RequestContext>,
+    Path(conversation_id): Path<String>,
+) -> ApiResult<ConversationDetailResponse> {
+    let conversation = db::get_conversation(&state.pool, &conversation_id)
+        .await
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?
+        .ok_or_else(|| scoped(ApiError::not_found("conversation not found"), &request))?;
+    let lanes = db::list_lanes_for_conversation(&state.pool, &conversation_id)
+        .await
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?;
+    Ok(Json(ConversationDetailResponse {
+        conversation,
+        lanes,
+    }))
+}
+
+async fn conversation_messages(
+    State(state): State<AppState>,
+    Path(conversation_id): Path<String>,
 ) -> Json<Vec<MessageSpec>> {
     Json(
-        db::list_messages_for_thread(&state.pool, &thread_id)
+        db::list_messages_for_conversation(&state.pool, &conversation_id)
             .await
             .unwrap_or_default(),
     )
 }
 
-async fn thread_runs(
+async fn conversation_messages_create(
     State(state): State<AppState>,
-    Path(thread_id): Path<String>,
-) -> Json<Vec<ennoia_kernel::RunSpec>> {
+    Extension(request): Extension<RequestContext>,
+    Path(conversation_id): Path<String>,
+    Json(payload): Json<ConversationMessagePayload>,
+) -> ApiResult<ConversationEnvelope> {
+    let conversation = db::get_conversation(&state.pool, &conversation_id)
+        .await
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?
+        .ok_or_else(|| scoped(ApiError::not_found("conversation not found"), &request))?;
+    let lanes = db::list_lanes_for_conversation(&state.pool, &conversation_id)
+        .await
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?;
+    let lane = select_lane(&lanes, payload.lane_id.as_deref())
+        .ok_or_else(|| scoped(ApiError::bad_request("lane not found"), &request))?;
+    let goal = payload.goal.clone().unwrap_or_else(|| payload.body.clone());
+    drive_run(
+        &state,
+        conversation,
+        lane,
+        &payload.body,
+        &goal,
+        payload.addressed_agents,
+    )
+    .await
+    .map(Json)
+    .map_err(|error| scoped(ApiError::bad_request(error), &request))
+}
+
+async fn conversation_runs(
+    State(state): State<AppState>,
+    Path(conversation_id): Path<String>,
+) -> Json<Vec<RunSpec>> {
     Json(
-        db::list_runs_for_thread(&state.pool, &thread_id)
+        db::list_runs_for_conversation(&state.pool, &conversation_id)
             .await
             .unwrap_or_default(),
     )
 }
 
-async fn runs(State(state): State<AppState>) -> Json<Vec<ennoia_kernel::RunSpec>> {
+async fn conversation_lanes(
+    State(state): State<AppState>,
+    Path(conversation_id): Path<String>,
+) -> Json<Vec<LaneSpec>> {
+    Json(
+        db::list_lanes_for_conversation(&state.pool, &conversation_id)
+            .await
+            .unwrap_or_default(),
+    )
+}
+
+async fn lane_handoffs(
+    State(state): State<AppState>,
+    Path(lane_id): Path<String>,
+) -> Json<Vec<HandoffSpec>> {
+    Json(
+        db::list_handoffs_for_lane(&state.pool, &lane_id)
+            .await
+            .unwrap_or_default(),
+    )
+}
+
+async fn lane_handoffs_create(
+    State(state): State<AppState>,
+    Extension(request): Extension<RequestContext>,
+    Path(lane_id): Path<String>,
+    Json(payload): Json<HandoffPayload>,
+) -> ApiResult<HandoffSpec> {
+    let handoff = HandoffSpec {
+        id: format!("handoff-{}", Uuid::new_v4()),
+        from_lane_id: lane_id,
+        to_lane_id: payload.to_lane_id,
+        from_agent_id: payload.from_agent_id,
+        to_agent_id: payload.to_agent_id,
+        summary: payload.summary,
+        instructions: payload.instructions,
+        status: payload.status.unwrap_or_else(|| "open".to_string()),
+        created_at: now_iso(),
+    };
+    db::insert_handoff(&state.pool, &handoff)
+        .await
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?;
+    Ok(Json(handoff))
+}
+
+async fn runs(State(state): State<AppState>) -> Json<Vec<RunSpec>> {
     Json(db::list_runs(&state.pool).await.unwrap_or_default())
 }
 
 async fn run_tasks(
     State(state): State<AppState>,
     Path(run_id): Path<String>,
-) -> Json<Vec<ennoia_kernel::TaskSpec>> {
+) -> Json<Vec<TaskSpec>> {
     Json(
         db::list_tasks_for_run(&state.pool, &run_id)
             .await
@@ -585,7 +981,7 @@ async fn run_gates(
     )
 }
 
-async fn tasks(State(state): State<AppState>) -> Json<Vec<ennoia_kernel::TaskSpec>> {
+async fn tasks(State(state): State<AppState>) -> Json<Vec<TaskSpec>> {
     Json(db::list_tasks(&state.pool).await.unwrap_or_default())
 }
 
@@ -641,8 +1037,7 @@ async fn memories_recall(
     Extension(request): Extension<RequestContext>,
     Json(payload): Json<RecallPayload>,
 ) -> ApiResult<RecallResult> {
-    let mode = payload.mode.as_deref().unwrap_or("namespace");
-    let mode = match mode {
+    let mode = match payload.mode.as_deref().unwrap_or("namespace") {
         "fts" => RecallMode::Fts,
         "hybrid" => RecallMode::Hybrid,
         _ => RecallMode::Namespace,
@@ -707,9 +1102,9 @@ async fn jobs_create(
         kind: owner_kind_from(&payload.owner_kind),
         id: payload.owner_id,
     };
-    let enqueue = EnqueueRequest {
+    let enqueue = ennoia_kernel::EnqueueRequest {
         owner,
-        job_kind: JobKind::from_str(&payload.job_kind),
+        job_kind: JobKind::from_str(payload.job_kind.as_deref().unwrap_or("maintenance")),
         schedule_kind: ScheduleKind::from_str(&payload.schedule_kind),
         schedule_value: payload.schedule_value,
         payload: payload.payload.unwrap_or(JsonValue::Null),
@@ -724,167 +1119,177 @@ async fn jobs_create(
         .map_err(|error| scoped(ApiError::bad_request(error.to_string()), &request))
 }
 
-async fn create_private_message(
+async fn config_list(State(state): State<AppState>) -> Json<Vec<ConfigEntry>> {
+    let raw = state.system_config.store.list().await.unwrap_or_default();
+    Json(ensure_full_config_set(raw))
+}
+
+async fn config_get(
     State(state): State<AppState>,
     Extension(request): Extension<RequestContext>,
-    Json(payload): Json<PrivateMessageRequest>,
-) -> ApiResult<ConversationEnvelope> {
-    let goal = payload.goal.unwrap_or_else(|| payload.body.clone());
-    process_private_message(&state, &payload.agent_id, &payload.body, &goal)
+    Path(key): Path<String>,
+) -> ApiResult<ConfigEntry> {
+    if !ALL_CONFIG_KEYS.contains(&key.as_str()) {
+        return Err(scoped(
+            ApiError::not_found(format!("unknown config key '{key}'")),
+            &request,
+        ));
+    }
+    state
+        .system_config
+        .store
+        .get(&key)
         .await
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?
         .map(Json)
-        .map_err(|error| scoped(ApiError::bad_request(error), &request))
+        .ok_or_else(|| {
+            scoped(
+                ApiError::not_found(format!("config '{key}' not initialized")),
+                &request,
+            )
+        })
 }
 
-async fn create_space_message(
+async fn config_put(
     State(state): State<AppState>,
     Extension(request): Extension<RequestContext>,
-    Json(payload): Json<SpaceMessageRequest>,
-) -> ApiResult<ConversationEnvelope> {
-    let goal = payload.goal.unwrap_or_else(|| payload.body.clone());
-    process_space_message(
-        &state,
-        &payload.space_id,
-        &payload.addressed_agents,
-        &payload.body,
-        &goal,
-    )
-    .await
-    .map(Json)
-    .map_err(|error| scoped(ApiError::bad_request(error), &request))
+    Path(key): Path<String>,
+    Json(payload): Json<ConfigPutPayload>,
+) -> ApiResult<ConfigEntry> {
+    if !ALL_CONFIG_KEYS.contains(&key.as_str()) {
+        return Err(scoped(
+            ApiError::not_found(format!("unknown config key '{key}'")),
+            &request,
+        ));
+    }
+    let entry = state
+        .system_config
+        .store
+        .put(&key, &payload.payload, payload.updated_by.as_deref())
+        .await
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?;
+
+    let applied = state
+        .system_config
+        .apply(&key, &payload.payload)
+        .map_err(|error| scoped(ApiError::bad_request(error.to_string()), &request))?;
+    if !applied {
+        return Err(scoped(
+            ApiError::bad_request(format!("unsupported key '{key}'")),
+            &request,
+        ));
+    }
+
+    Ok(Json(entry))
 }
 
-async fn process_private_message(
-    state: &AppState,
-    agent_id: &str,
-    body: &str,
-    goal: &str,
-) -> Result<ConversationEnvelope, String> {
-    let now = now_iso();
-    let owner = OwnerRef {
-        kind: OwnerKind::Agent,
-        id: agent_id.to_string(),
-    };
-    let thread = ThreadSpec {
-        id: format!("thread-private-{agent_id}"),
-        kind: ThreadKind::Private,
-        owner: owner.clone(),
-        space_id: None,
-        title: format!("与 {agent_id} 的私聊"),
-        participants: vec!["user".to_string(), agent_id.to_string()],
-        created_at: now.clone(),
-        updated_at: now.clone(),
-    };
-    let message = MessageSpec {
-        id: format!("msg-{}", Uuid::new_v4()),
-        thread_id: thread.id.clone(),
-        sender: "user".to_string(),
-        role: MessageRole::User,
-        body: body.to_string(),
-        mentions: vec![agent_id.to_string()],
-        created_at: now.clone(),
-    };
-
-    drive_run(
-        state,
-        thread,
-        message,
-        owner,
-        RunTrigger::DirectMessage,
-        goal,
-        vec![agent_id.to_string()],
+async fn config_history(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+) -> Json<Vec<ConfigChangeRecord>> {
+    Json(
+        state
+            .system_config
+            .store
+            .history(&key, 50)
+            .await
+            .unwrap_or_default(),
     )
-    .await
 }
 
-async fn process_space_message(
-    state: &AppState,
-    space_id: &str,
-    addressed_agents: &[String],
-    body: &str,
-    goal: &str,
-) -> Result<ConversationEnvelope, String> {
-    let now = now_iso();
-    let owner = OwnerRef {
-        kind: OwnerKind::Space,
-        id: space_id.to_string(),
-    };
-    let resolved_agents = resolve_space_agents(state, space_id, addressed_agents);
-    let mut participants = vec!["user".to_string()];
-    participants.extend(resolved_agents.iter().cloned());
-    let thread = ThreadSpec {
-        id: format!("thread-space-{space_id}"),
-        kind: ThreadKind::Space,
-        owner: owner.clone(),
-        space_id: Some(space_id.to_string()),
-        title: format!("{space_id} 协作线程"),
-        participants,
-        created_at: now.clone(),
-        updated_at: now.clone(),
-    };
-    let message = MessageSpec {
-        id: format!("msg-{}", Uuid::new_v4()),
-        thread_id: thread.id.clone(),
-        sender: "user".to_string(),
-        role: MessageRole::User,
-        body: body.to_string(),
-        mentions: resolved_agents.clone(),
-        created_at: now.clone(),
-    };
-
-    drive_run(
-        state,
-        thread,
-        message,
-        owner,
-        RunTrigger::SpaceMessage,
-        goal,
-        resolved_agents,
-    )
-    .await
+async fn config_snapshot(State(state): State<AppState>) -> Json<SystemConfig> {
+    Json(state.system_config.snapshot())
 }
 
 async fn drive_run(
     state: &AppState,
-    thread: ThreadSpec,
-    message: MessageSpec,
-    owner: OwnerRef,
-    trigger: RunTrigger,
+    conversation: ConversationSpec,
+    lane: LaneSpec,
+    body: &str,
     goal: &str,
     addressed_agents: Vec<String>,
 ) -> Result<ConversationEnvelope, String> {
-    db::upsert_thread(&state.pool, &thread)
-        .await
-        .map_err(|e| e.to_string())?;
+    let now = now_iso();
+    let target_agents = resolve_addressed_agents(&conversation, &lane, addressed_agents);
+    if target_agents.is_empty() {
+        return Err("no addressed agents resolved for this message".to_string());
+    }
+
+    let message = MessageSpec {
+        id: format!("msg-{}", Uuid::new_v4()),
+        conversation_id: conversation.id.clone(),
+        lane_id: Some(lane.id.clone()),
+        sender: "operator".to_string(),
+        role: MessageRole::Operator,
+        body: body.to_string(),
+        mentions: target_agents.clone(),
+        created_at: now.clone(),
+    };
+
     db::insert_message(&state.pool, &message)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|error| error.to_string())?;
+    db::upsert_conversation(
+        &state.pool,
+        &ConversationSpec {
+            updated_at: now.clone(),
+            ..conversation.clone()
+        },
+    )
+    .await
+    .map_err(|error| error.to_string())?;
+    db::insert_lane(
+        &state.pool,
+        &LaneSpec {
+            updated_at: now.clone(),
+            goal: if lane.goal.is_empty() {
+                goal.to_string()
+            } else {
+                lane.goal.clone()
+            },
+            ..lane.clone()
+        },
+    )
+    .await
+    .map_err(|error| error.to_string())?;
 
-    let assemble = AssembleRequest {
-        owner: owner.clone(),
-        thread_id: Some(thread.id.clone()),
-        run_id: None,
-        recent_messages: vec![format!("{}: {}", message.sender, message.body)],
-        active_tasks: Vec::new(),
-        budget_chars: None,
-    };
+    let recent_messages = db::list_messages_for_conversation(&state.pool, &conversation.id)
+        .await
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .rev()
+        .take(12)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .map(|item| format!("{}: {}", item.sender, item.body))
+        .collect::<Vec<_>>();
+
     let context = state
         .memory_store
-        .assemble_context(assemble)
+        .assemble_context(AssembleRequest {
+            owner: conversation.owner.clone(),
+            thread_id: Some(conversation.id.clone()),
+            run_id: None,
+            recent_messages,
+            active_tasks: Vec::new(),
+            budget_chars: None,
+        })
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|error| error.to_string())?;
 
-    let available_agents: Vec<String> = state.agents.iter().map(|a| a.id.clone()).collect();
-
+    let available_agents: Vec<String> = state.agents.iter().map(|agent| agent.id.clone()).collect();
     let request = RunRequest {
-        owner: owner.clone(),
-        thread: thread.clone(),
+        owner: conversation.owner.clone(),
+        conversation: conversation.clone(),
         message: message.clone(),
-        trigger,
+        trigger: match conversation.topology {
+            ConversationTopology::Direct => RunTrigger::DirectConversation,
+            ConversationTopology::Group => RunTrigger::GroupConversation,
+        },
         goal: goal.to_string(),
-        addressed_agents,
+        addressed_agents: target_agents,
     };
-
     let plan = state
         .orchestrator
         .plan_run(request, context.clone(), available_agents)
@@ -892,57 +1297,78 @@ async fn drive_run(
 
     db::upsert_run(&state.pool, &plan.run)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|error| error.to_string())?;
     for task in &plan.tasks {
         db::upsert_task(&state.pool, task)
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|error| error.to_string())?;
     }
 
     state
         .runtime_store
         .log_stage_event(&plan.stage_event)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|error| error.to_string())?;
     state
         .runtime_store
         .log_decision(&plan.decision_snapshot)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|error| error.to_string())?;
     for record in &plan.gate_records {
         state
             .runtime_store
             .log_gate_verdict(record)
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|error| error.to_string())?;
     }
 
     let _ = state
         .memory_store
         .record_episode(EpisodeRequest {
-            owner: owner.clone(),
-            namespace: format!("threads/{}", thread.id),
-            thread_id: Some(thread.id.clone()),
+            owner: conversation.owner.clone(),
+            namespace: format!("conversations/{}", conversation.id),
+            thread_id: Some(conversation.id.clone()),
             run_id: Some(plan.run.id.clone()),
             episode_kind: EpisodeKind::Message,
-            role: Some("user".to_string()),
+            role: Some("operator".to_string()),
             content: message.body.clone(),
             content_type: None,
             source_uri: None,
             entities: Vec::new(),
-            tags: Vec::new(),
-            importance: None,
+            tags: lane.participants.clone(),
+            importance: Some(0.4),
             occurred_at: Some(message.created_at.clone()),
         })
         .await;
 
-    let artifact = persist_run_artifact(state, &owner, &plan.run.id, goal);
+    let _ = state
+        .memory_store
+        .remember(RememberRequest {
+            owner: conversation.owner.clone(),
+            namespace: format!("conversations/{}/ledger", conversation.id),
+            memory_kind: MemoryKind::Context,
+            stability: Stability::Working,
+            title: Some(goal.to_string()),
+            content: format!("lane={} operator_request={body}", lane.name),
+            summary: Some(goal.to_string()),
+            confidence: Some(0.6),
+            importance: Some(0.4),
+            valid_from: None,
+            valid_to: None,
+            sources: Vec::new(),
+            tags: lane.participants.clone(),
+            entities: Vec::new(),
+        })
+        .await;
+
+    let artifact = persist_run_artifact(state, &plan.run, &conversation.owner, goal);
     db::insert_artifact(&state.pool, &artifact)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|error| error.to_string())?;
 
     Ok(ConversationEnvelope {
-        thread: plan.thread,
+        conversation: plan.conversation,
+        lane,
         message: plan.message,
         run: plan.run,
         tasks: plan.tasks,
@@ -956,21 +1382,22 @@ async fn drive_run(
 
 fn persist_run_artifact(
     state: &AppState,
+    run: &RunSpec,
     owner: &OwnerRef,
-    run_id: &str,
     goal: &str,
 ) -> ArtifactSpec {
-    let owner_root = state.runtime_paths.owner_run_artifact_dir(owner, run_id);
-
+    let owner_root = state.runtime_paths.owner_run_artifact_dir(owner, &run.id);
     let _ = fs::create_dir_all(&owner_root);
     let relative_path = state
         .runtime_paths
-        .owner_run_artifact_relative_path(owner, run_id);
+        .owner_run_artifact_relative_path(owner, &run.id);
 
     let _ = fs::write(
         owner_root.join("summary.json"),
         serde_json::to_string_pretty(&serde_json::json!({
-            "run_id": run_id,
+            "run_id": run.id,
+            "conversation_id": run.conversation_id,
+            "lane_id": run.lane_id,
             "owner": owner,
             "goal": goal
         }))
@@ -980,29 +1407,233 @@ fn persist_run_artifact(
     ArtifactSpec {
         id: format!("art-{}", Uuid::new_v4()),
         owner: owner.clone(),
-        run_id: run_id.to_string(),
-        kind: ArtifactKind::Report,
+        run_id: run.id.clone(),
+        conversation_id: Some(run.conversation_id.clone()),
+        lane_id: run.lane_id.clone(),
+        kind: ArtifactKind::Summary,
         relative_path,
         created_at: now_iso(),
     }
 }
 
-fn resolve_space_agents(
-    state: &AppState,
-    space_id: &str,
-    addressed_agents: &[String],
+fn resolve_owner(
+    topology: &ConversationTopology,
+    space_id: Option<&str>,
+    agent_ids: &[String],
+) -> OwnerRef {
+    match topology {
+        ConversationTopology::Direct => OwnerRef::agent(agent_ids[0].clone()),
+        ConversationTopology::Group => {
+            if let Some(space_id) = space_id {
+                OwnerRef::space(space_id.to_string())
+            } else {
+                OwnerRef::global("workspace")
+            }
+        }
+    }
+}
+
+type StaticMessages = &'static [(&'static str, &'static str)];
+type StaticCatalog = &'static [(&'static str, StaticMessages)];
+
+fn parse_namespaces(value: &str) -> Vec<String> {
+    let mut seen = HashSet::new();
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+        .filter_map(|item| {
+            let namespace = item.to_string();
+            if seen.insert(namespace.clone()) {
+                Some(namespace)
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn builtin_message_namespaces() -> Vec<String> {
+    vec![
+        "shell".to_string(),
+        "settings".to_string(),
+        "ext.observatory".to_string(),
+    ]
+}
+
+fn builtin_message_bundle(
+    locale: &str,
+    fallback_locale: &str,
+    namespace: &str,
+) -> Option<UiMessageBundleResponse> {
+    const SHELL_ZH_CN: StaticMessages = &[("shell.title", "Ennoia")];
+    const SHELL_EN_US: StaticMessages = &[("shell.title", "Ennoia")];
+    const SETTINGS_ZH_CN: StaticMessages = &[("settings.personal.saved", "偏好已保存。")];
+    const SETTINGS_EN_US: StaticMessages = &[("settings.personal.saved", "Preferences saved.")];
+    const OBSERVATORY_ZH_CN: StaticMessages = &[
+        ("ext.observatory.page.events", "观测台"),
+        ("ext.observatory.panel.timeline", "事件时间线"),
+        ("ext.observatory.theme.daybreak", "Daybreak"),
+        ("ext.observatory.command.open", "打开观测台"),
+    ];
+    const OBSERVATORY_EN_US: StaticMessages = &[
+        ("ext.observatory.page.events", "Observatory"),
+        ("ext.observatory.panel.timeline", "Event Timeline"),
+        ("ext.observatory.theme.daybreak", "Daybreak"),
+        ("ext.observatory.command.open", "Open Observatory"),
+    ];
+
+    let (source, version, catalogs): (&str, &str, StaticCatalog) = match namespace {
+        "shell" => (
+            "builtin:shell",
+            "1",
+            &[("zh-CN", SHELL_ZH_CN), ("en-US", SHELL_EN_US)],
+        ),
+        "settings" => (
+            "builtin:settings",
+            "1",
+            &[("zh-CN", SETTINGS_ZH_CN), ("en-US", SETTINGS_EN_US)],
+        ),
+        "ext.observatory" => (
+            "builtin:ext.observatory",
+            "1",
+            &[("zh-CN", OBSERVATORY_ZH_CN), ("en-US", OBSERVATORY_EN_US)],
+        ),
+        _ => return None,
+    };
+
+    let (resolved_locale, messages) = select_messages_for_locale(locale, fallback_locale, catalogs);
+
+    Some(UiMessageBundleResponse {
+        locale: locale.to_string(),
+        resolved_locale: resolved_locale.to_string(),
+        namespace: namespace.to_string(),
+        messages: messages
+            .iter()
+            .map(|(key, value)| (key.to_string(), value.to_string()))
+            .collect(),
+        source: source.to_string(),
+        version: version.to_string(),
+    })
+}
+
+fn select_messages_for_locale(
+    locale: &str,
+    fallback_locale: &str,
+    catalogs: StaticCatalog,
+) -> (&'static str, StaticMessages) {
+    let normalized = locale.to_lowercase();
+    let language = normalized.split('-').next().unwrap_or_default();
+    let fallback_normalized = fallback_locale.to_lowercase();
+    let fallback_language = fallback_normalized.split('-').next().unwrap_or_default();
+
+    catalogs
+        .iter()
+        .find(|(candidate, _)| candidate.to_lowercase() == normalized)
+        .copied()
+        .or_else(|| {
+            catalogs
+                .iter()
+                .find(|(candidate, _)| {
+                    candidate
+                        .to_lowercase()
+                        .split('-')
+                        .next()
+                        .unwrap_or_default()
+                        == language
+                })
+                .copied()
+        })
+        .or_else(|| {
+            catalogs
+                .iter()
+                .find(|(candidate, _)| candidate.to_lowercase() == fallback_normalized)
+                .copied()
+        })
+        .or_else(|| {
+            catalogs
+                .iter()
+                .find(|(candidate, _)| {
+                    candidate
+                        .to_lowercase()
+                        .split('-')
+                        .next()
+                        .unwrap_or_default()
+                        == fallback_language
+                })
+                .copied()
+        })
+        .or_else(|| {
+            catalogs
+                .iter()
+                .find(|(candidate, _)| candidate.eq_ignore_ascii_case("en-US"))
+                .copied()
+        })
+        .or_else(|| catalogs.first().copied())
+        .unwrap_or(("en-US", &[]))
+}
+
+fn resolve_addressed_agents(
+    conversation: &ConversationSpec,
+    lane: &LaneSpec,
+    addressed_agents: Vec<String>,
 ) -> Vec<String> {
     if !addressed_agents.is_empty() {
-        return addressed_agents.to_vec();
+        return addressed_agents;
     }
 
-    state
-        .spaces
+    let source = if !lane.participants.is_empty() {
+        &lane.participants
+    } else {
+        &conversation.participants
+    };
+    source
         .iter()
-        .find(|space| space.id == space_id)
-        .map(|space| space.default_agents.clone())
-        .filter(|agents| !agents.is_empty())
-        .unwrap_or_else(|| vec!["coder".to_string(), "planner".to_string()])
+        .filter(|participant| participant.as_str() != "operator")
+        .cloned()
+        .collect()
+}
+
+fn build_participants(agent_ids: &[String]) -> Vec<String> {
+    let mut participants = vec!["operator".to_string()];
+    participants.extend(agent_ids.iter().cloned());
+    participants
+}
+
+fn default_conversation_title(
+    state: &AppState,
+    topology: ConversationTopology,
+    agent_ids: &[String],
+) -> String {
+    match topology {
+        ConversationTopology::Direct => {
+            let agent_id = &agent_ids[0];
+            let label = state
+                .agents
+                .iter()
+                .find(|agent| agent.id == *agent_id)
+                .map(|agent| agent.display_name.clone())
+                .unwrap_or_else(|| agent_id.clone());
+            format!("与 {label} 的会话")
+        }
+        ConversationTopology::Group => "多 Agent 协作会话".to_string(),
+    }
+}
+
+fn normalize_agent_ids(state: &AppState, requested: &[String]) -> Vec<String> {
+    let known: HashSet<String> = state.agents.iter().map(|agent| agent.id.clone()).collect();
+    requested
+        .iter()
+        .filter(|agent_id| known.contains(agent_id.as_str()))
+        .cloned()
+        .collect()
+}
+
+fn select_lane<'a>(lanes: &'a [LaneSpec], lane_id: Option<&str>) -> Option<LaneSpec> {
+    if let Some(lane_id) = lane_id {
+        return lanes.iter().find(|lane| lane.id == lane_id).cloned();
+    }
+    lanes.first().cloned()
 }
 
 fn owner_kind_from(value: &str) -> OwnerKind {
@@ -1010,6 +1641,14 @@ fn owner_kind_from(value: &str) -> OwnerKind {
         "agent" => OwnerKind::Agent,
         "space" => OwnerKind::Space,
         _ => OwnerKind::Global,
+    }
+}
+
+fn conversation_topology_from_value(value: &str) -> Option<ConversationTopology> {
+    match value {
+        "direct" => Some(ConversationTopology::Direct),
+        "group" => Some(ConversationTopology::Group),
+        _ => None,
     }
 }
 
@@ -1052,98 +1691,8 @@ fn merge_ui_preference(
     }
 }
 
-// ========== Admin config API ==========
-
-#[derive(Debug, Deserialize)]
-struct ConfigPutPayload {
-    payload: JsonValue,
-    updated_by: Option<String>,
-}
-
-async fn config_list(State(state): State<AppState>) -> Json<Vec<ConfigEntry>> {
-    let raw = state.system_config.store.list().await.unwrap_or_default();
-    Json(ensure_full_config_set(raw))
-}
-
-async fn config_get(
-    State(state): State<AppState>,
-    Extension(request): Extension<RequestContext>,
-    Path(key): Path<String>,
-) -> ApiResult<ConfigEntry> {
-    if !ALL_CONFIG_KEYS.contains(&key.as_str()) {
-        return Err(scoped(
-            ApiError::not_found(format!("unknown config key '{key}'")),
-            &request,
-        ));
-    }
-    state
-        .system_config
-        .store
-        .get(&key)
-        .await
-        .map_err(|e| scoped(ApiError::internal(e.to_string()), &request))?
-        .map(Json)
-        .ok_or_else(|| {
-            scoped(
-                ApiError::not_found(format!("config '{key}' not initialized")),
-                &request,
-            )
-        })
-}
-
-async fn config_put(
-    State(state): State<AppState>,
-    Extension(request): Extension<RequestContext>,
-    Path(key): Path<String>,
-    Json(payload): Json<ConfigPutPayload>,
-) -> ApiResult<ConfigEntry> {
-    if !ALL_CONFIG_KEYS.contains(&key.as_str()) {
-        return Err(scoped(
-            ApiError::not_found(format!("unknown config key '{key}'")),
-            &request,
-        ));
-    }
-    let entry = state
-        .system_config
-        .store
-        .put(&key, &payload.payload, payload.updated_by.as_deref())
-        .await
-        .map_err(|e| scoped(ApiError::internal(e.to_string()), &request))?;
-
-    let applied = state
-        .system_config
-        .apply(&key, &payload.payload)
-        .map_err(|e| scoped(ApiError::bad_request(e.to_string()), &request))?;
-    if !applied {
-        return Err(scoped(
-            ApiError::bad_request(format!("unsupported key '{key}'")),
-            &request,
-        ));
-    }
-
-    Ok(Json(entry))
-}
-
-async fn config_history(
-    State(state): State<AppState>,
-    Path(key): Path<String>,
-) -> Json<Vec<ConfigChangeRecord>> {
-    Json(
-        state
-            .system_config
-            .store
-            .history(&key, 50)
-            .await
-            .unwrap_or_default(),
-    )
-}
-
-async fn config_snapshot(State(state): State<AppState>) -> Json<SystemConfig> {
-    Json(state.system_config.snapshot())
-}
-
 fn ensure_full_config_set(mut rows: Vec<ConfigEntry>) -> Vec<ConfigEntry> {
-    let have: std::collections::HashSet<String> = rows.iter().map(|r| r.key.clone()).collect();
+    let have: HashSet<String> = rows.iter().map(|row| row.key.clone()).collect();
     for key in ALL_CONFIG_KEYS {
         if !have.contains(*key) {
             rows.push(ConfigEntry {
@@ -1156,536 +1705,6 @@ fn ensure_full_config_set(mut rows: Vec<ConfigEntry>) -> Vec<ConfigEntry> {
             });
         }
     }
-    rows.sort_by(|a, b| a.key.cmp(&b.key));
+    rows.sort_by(|left, right| left.key.cmp(&right.key));
     rows
-}
-
-// ========== Auth public API ==========
-
-#[derive(Debug, Deserialize)]
-struct RegisterPayload {
-    username: String,
-    password: String,
-    #[serde(default)]
-    display_name: Option<String>,
-    #[serde(default)]
-    email: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct LoginPayload {
-    username: String,
-    password: String,
-}
-
-#[derive(Debug, Serialize)]
-struct LoginResponse {
-    user: User,
-    token: String,
-    token_kind: &'static str,
-    expires_at: String,
-}
-
-#[derive(Debug, Serialize)]
-struct RegisterResponse {
-    user: User,
-}
-
-async fn auth_register(
-    State(state): State<AppState>,
-    Extension(request): Extension<RequestContext>,
-    Json(payload): Json<RegisterPayload>,
-) -> ApiResult<RegisterResponse> {
-    let cfg = state.system_config.auth.load();
-    if !cfg.allow_registration {
-        return Err(scoped(
-            ApiError::forbidden("registration is disabled"),
-            &request,
-        ));
-    }
-    let user = state
-        .auth_service
-        .register(
-            &payload.username,
-            &payload.password,
-            payload.display_name,
-            payload.email,
-            UserRole::User,
-        )
-        .await
-        .map_err(|e| scoped(ApiError::bad_request(e.to_string()), &request))?;
-    Ok(Json(RegisterResponse { user }))
-}
-
-async fn auth_login(
-    State(state): State<AppState>,
-    Extension(request): Extension<RequestContext>,
-    headers: HeaderMap,
-    Json(payload): Json<LoginPayload>,
-) -> ApiResult<LoginResponse> {
-    let cfg = state.system_config.auth.load();
-    let ttl = cfg.session_ttl_seconds;
-    let user_agent = headers
-        .get("user-agent")
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_string());
-    let ip = headers
-        .get("x-forwarded-for")
-        .or_else(|| headers.get("x-real-ip"))
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.split(',').next().unwrap_or("").trim().to_string());
-
-    match cfg.mode {
-        AuthMode::Jwt => {
-            // JWT still requires username+password to authenticate against the user store.
-            let (user, password_hash) = state
-                .user_store
-                .get_by_username(&payload.username)
-                .await
-                .map_err(|e| scoped(ApiError::internal(e.to_string()), &request))?
-                .ok_or_else(|| scoped(ApiError::unauthorized("invalid credentials"), &request))?;
-            let ok = ennoia_auth::verify_password(&payload.password, &password_hash)
-                .map_err(|e| scoped(ApiError::internal(e.to_string()), &request))?;
-            if !ok {
-                return Err(scoped(
-                    ApiError::unauthorized("invalid credentials"),
-                    &request,
-                ));
-            }
-            let secret = cfg
-                .jwt_secret
-                .as_deref()
-                .ok_or_else(|| scoped(ApiError::internal("jwt secret not configured"), &request))?;
-            let token = state
-                .auth_service
-                .mint_jwt(&user, secret, ttl)
-                .map_err(|e| scoped(ApiError::internal(e.to_string()), &request))?;
-            let expires_at = (Utc::now() + chrono::Duration::seconds(ttl as i64)).to_rfc3339();
-            let _ = state.user_store.touch_login(&user.id, &now_iso()).await;
-            Ok(Json(LoginResponse {
-                user,
-                token,
-                token_kind: "jwt",
-                expires_at,
-            }))
-        }
-        _ => {
-            let outcome = state
-                .auth_service
-                .login(&payload.username, &payload.password, ttl, user_agent, ip)
-                .await
-                .map_err(|e| scoped(ApiError::unauthorized(e.to_string()), &request))?;
-            Ok(Json(LoginResponse {
-                user: outcome.user,
-                token: outcome.raw_token,
-                token_kind: "session",
-                expires_at: outcome.session.expires_at,
-            }))
-        }
-    }
-}
-
-async fn auth_logout(State(state): State<AppState>, headers: HeaderMap) -> StatusResult {
-    let token = headers
-        .get(axum::http::header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer "))
-        .map(|s| s.trim().to_string());
-    if let Some(t) = token {
-        let _ = state.auth_service.logout(&t).await;
-    }
-    Ok(StatusCode::NO_CONTENT)
-}
-
-async fn auth_me(Extension(user): Extension<AuthedUser>) -> Json<AuthedUser> {
-    Json(user)
-}
-
-#[derive(Debug, Deserialize)]
-struct RefreshPayload {
-    token: String,
-}
-
-async fn auth_refresh(
-    State(state): State<AppState>,
-    Extension(request): Extension<RequestContext>,
-    Json(payload): Json<RefreshPayload>,
-) -> ApiResult<LoginResponse> {
-    let cfg = state.system_config.auth.load();
-    let secret = cfg
-        .jwt_secret
-        .as_deref()
-        .ok_or_else(|| scoped(ApiError::bad_request("jwt secret not configured"), &request))?;
-    let (user, _claims) = state
-        .auth_service
-        .authenticate_jwt(&payload.token, secret)
-        .await
-        .map_err(|e| scoped(ApiError::unauthorized(e.to_string()), &request))?;
-    let ttl = cfg.session_ttl_seconds;
-    let token = state
-        .auth_service
-        .mint_jwt(&user, secret, ttl)
-        .map_err(|e| scoped(ApiError::internal(e.to_string()), &request))?;
-    let expires_at = (Utc::now() + chrono::Duration::seconds(ttl as i64)).to_rfc3339();
-    Ok(Json(LoginResponse {
-        user,
-        token,
-        token_kind: "jwt",
-        expires_at,
-    }))
-}
-
-// ========== Admin users API ==========
-
-#[derive(Debug, Deserialize)]
-struct AdminCreateUserPayload {
-    username: String,
-    password: String,
-    #[serde(default)]
-    display_name: Option<String>,
-    #[serde(default)]
-    email: Option<String>,
-    #[serde(default)]
-    role: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct AdminUpdateUserPayload {
-    #[serde(default)]
-    display_name: Option<String>,
-    #[serde(default)]
-    email: Option<String>,
-    #[serde(default)]
-    role: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct AdminResetPasswordPayload {
-    new_password: String,
-}
-
-async fn users_list(
-    State(state): State<AppState>,
-    Extension(request): Extension<RequestContext>,
-    Extension(user): Extension<AuthedUser>,
-) -> ApiResult<Vec<User>> {
-    require_admin(&user, &state).map_err(|error| scoped(error, &request))?;
-    state
-        .user_store
-        .list()
-        .await
-        .map(Json)
-        .map_err(|e| scoped(ApiError::internal(e.to_string()), &request))
-}
-
-async fn users_create(
-    State(state): State<AppState>,
-    Extension(request): Extension<RequestContext>,
-    Extension(user): Extension<AuthedUser>,
-    Json(payload): Json<AdminCreateUserPayload>,
-) -> ApiResult<User> {
-    require_admin(&user, &state).map_err(|error| scoped(error, &request))?;
-    let role = payload
-        .role
-        .as_deref()
-        .map(UserRole::from_str)
-        .unwrap_or(UserRole::User);
-    state
-        .auth_service
-        .register(
-            &payload.username,
-            &payload.password,
-            payload.display_name,
-            payload.email,
-            role,
-        )
-        .await
-        .map(Json)
-        .map_err(|e| scoped(ApiError::bad_request(e.to_string()), &request))
-}
-
-async fn users_get(
-    State(state): State<AppState>,
-    Extension(request): Extension<RequestContext>,
-    Extension(caller): Extension<AuthedUser>,
-    Path(user_id): Path<String>,
-) -> ApiResult<User> {
-    require_admin(&caller, &state).map_err(|error| scoped(error, &request))?;
-    state
-        .user_store
-        .get(&user_id)
-        .await
-        .map_err(|e| scoped(ApiError::internal(e.to_string()), &request))?
-        .map(Json)
-        .ok_or_else(|| scoped(ApiError::not_found(format!("user {user_id}")), &request))
-}
-
-async fn users_update(
-    State(state): State<AppState>,
-    Extension(request): Extension<RequestContext>,
-    Extension(caller): Extension<AuthedUser>,
-    Path(user_id): Path<String>,
-    Json(payload): Json<AdminUpdateUserPayload>,
-) -> ApiResult<User> {
-    require_admin(&caller, &state).map_err(|error| scoped(error, &request))?;
-    let update = UpdateUserRequest {
-        display_name: payload.display_name,
-        email: payload.email,
-        role: payload.role.as_deref().map(UserRole::from_str),
-    };
-    state
-        .user_store
-        .update(&user_id, update)
-        .await
-        .map(Json)
-        .map_err(|e| scoped(ApiError::bad_request(e.to_string()), &request))
-}
-
-async fn users_delete(
-    State(state): State<AppState>,
-    Extension(request): Extension<RequestContext>,
-    Extension(caller): Extension<AuthedUser>,
-    Path(user_id): Path<String>,
-) -> StatusResult {
-    require_admin(&caller, &state).map_err(|error| scoped(error, &request))?;
-    state
-        .user_store
-        .delete(&user_id)
-        .await
-        .map(|_| StatusCode::NO_CONTENT)
-        .map_err(|e| scoped(ApiError::bad_request(e.to_string()), &request))
-}
-
-async fn users_reset_password(
-    State(state): State<AppState>,
-    Extension(request): Extension<RequestContext>,
-    Extension(caller): Extension<AuthedUser>,
-    Path(user_id): Path<String>,
-    Json(payload): Json<AdminResetPasswordPayload>,
-) -> StatusResult {
-    require_admin(&caller, &state).map_err(|error| scoped(error, &request))?;
-    let hash = ennoia_auth::hash_password(&payload.new_password)
-        .map_err(|e| scoped(ApiError::bad_request(e.to_string()), &request))?;
-    state
-        .user_store
-        .set_password(&user_id, &hash)
-        .await
-        .map(|_| StatusCode::NO_CONTENT)
-        .map_err(|e| scoped(ApiError::bad_request(e.to_string()), &request))
-}
-
-// ========== Admin sessions API ==========
-
-async fn sessions_list(
-    State(state): State<AppState>,
-    Extension(request): Extension<RequestContext>,
-    Extension(caller): Extension<AuthedUser>,
-) -> ApiResult<Vec<Session>> {
-    require_admin(&caller, &state).map_err(|error| scoped(error, &request))?;
-    state
-        .session_store
-        .list_all()
-        .await
-        .map(Json)
-        .map_err(|e| scoped(ApiError::internal(e.to_string()), &request))
-}
-
-async fn sessions_delete(
-    State(state): State<AppState>,
-    Extension(request): Extension<RequestContext>,
-    Extension(caller): Extension<AuthedUser>,
-    Path(session_id): Path<String>,
-) -> StatusResult {
-    require_admin(&caller, &state).map_err(|error| scoped(error, &request))?;
-    state
-        .session_store
-        .delete(&session_id)
-        .await
-        .map(|_| StatusCode::NO_CONTENT)
-        .map_err(|e| scoped(ApiError::bad_request(e.to_string()), &request))
-}
-
-// ========== Admin API keys API ==========
-
-#[derive(Debug, Deserialize)]
-struct AdminCreateApiKeyPayload {
-    user_id: String,
-    #[serde(default)]
-    label: Option<String>,
-    #[serde(default)]
-    scopes: Vec<String>,
-    #[serde(default)]
-    expires_at: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-struct AdminCreateApiKeyResponse {
-    key: ApiKey,
-    raw_key: String,
-}
-
-async fn api_keys_list(
-    State(state): State<AppState>,
-    Extension(request): Extension<RequestContext>,
-    Extension(caller): Extension<AuthedUser>,
-) -> ApiResult<Vec<ApiKey>> {
-    require_admin(&caller, &state).map_err(|error| scoped(error, &request))?;
-    state
-        .api_key_store
-        .list()
-        .await
-        .map(Json)
-        .map_err(|e| scoped(ApiError::internal(e.to_string()), &request))
-}
-
-async fn api_keys_create(
-    State(state): State<AppState>,
-    Extension(request): Extension<RequestContext>,
-    Extension(caller): Extension<AuthedUser>,
-    Json(payload): Json<AdminCreateApiKeyPayload>,
-) -> ApiResult<AdminCreateApiKeyResponse> {
-    require_admin(&caller, &state).map_err(|error| scoped(error, &request))?;
-    let (key, raw) = state
-        .auth_service
-        .create_api_key(
-            &payload.user_id,
-            payload.label,
-            payload.scopes,
-            payload.expires_at,
-        )
-        .await
-        .map_err(|e| scoped(ApiError::bad_request(e.to_string()), &request))?;
-    Ok(Json(AdminCreateApiKeyResponse { key, raw_key: raw }))
-}
-
-async fn api_keys_delete(
-    State(state): State<AppState>,
-    Extension(request): Extension<RequestContext>,
-    Extension(caller): Extension<AuthedUser>,
-    Path(key_id): Path<String>,
-) -> StatusResult {
-    require_admin(&caller, &state).map_err(|error| scoped(error, &request))?;
-    state
-        .api_key_store
-        .delete(&key_id)
-        .await
-        .map(|_| StatusCode::NO_CONTENT)
-        .map_err(|e| scoped(ApiError::bad_request(e.to_string()), &request))
-}
-
-// ========== Bootstrap API ==========
-
-#[derive(Debug, Deserialize)]
-struct BootstrapPayload {
-    admin_username: String,
-    admin_password: String,
-    #[serde(default)]
-    admin_display_name: Option<String>,
-    #[serde(default)]
-    auth_mode: Option<String>,
-    #[serde(default)]
-    allow_registration: Option<bool>,
-}
-
-#[derive(Debug, Serialize)]
-struct BootstrapResponse {
-    user: User,
-    bootstrap: BootstrapState,
-    jwt_secret_generated: bool,
-}
-
-async fn bootstrap_state_handler(State(state): State<AppState>) -> Json<BootstrapState> {
-    Json((**state.system_config.bootstrap.load()).clone())
-}
-
-async fn bootstrap_complete(
-    State(state): State<AppState>,
-    Extension(request): Extension<RequestContext>,
-    Json(payload): Json<BootstrapPayload>,
-) -> ApiResult<BootstrapResponse> {
-    let current = (**state.system_config.bootstrap.load()).clone();
-    if current.completed {
-        return Err(scoped(
-            ApiError::conflict("bootstrap already completed"),
-            &request,
-        ));
-    }
-
-    let count = state
-        .user_store
-        .count()
-        .await
-        .map_err(|e| scoped(ApiError::internal(e.to_string()), &request))?;
-    if count > 0 {
-        return Err(scoped(
-            ApiError::conflict("users already exist; bootstrap disabled"),
-            &request,
-        ));
-    }
-
-    let admin = state
-        .auth_service
-        .register(
-            &payload.admin_username,
-            &payload.admin_password,
-            payload.admin_display_name,
-            None,
-            UserRole::Admin,
-        )
-        .await
-        .map_err(|e| scoped(ApiError::bad_request(e.to_string()), &request))?;
-
-    let mut auth_cfg = (**state.system_config.auth.load()).clone();
-    auth_cfg.enabled = true;
-    auth_cfg.mode = payload
-        .auth_mode
-        .as_deref()
-        .map(|m| match m {
-            "api_key" => AuthMode::ApiKey,
-            "jwt" => AuthMode::Jwt,
-            "none" => AuthMode::None,
-            _ => AuthMode::Session,
-        })
-        .unwrap_or(AuthMode::Session);
-    if let Some(allow) = payload.allow_registration {
-        auth_cfg.allow_registration = allow;
-    }
-
-    let mut generated_secret = false;
-    if auth_cfg.jwt_secret.is_none() {
-        let secret = tokens::generate_jwt_secret()
-            .map_err(|e| scoped(ApiError::internal(e.to_string()), &request))?;
-        auth_cfg.jwt_secret = Some(secret);
-        generated_secret = true;
-    }
-
-    let auth_value = serde_json::to_value(&auth_cfg)
-        .map_err(|e| scoped(ApiError::internal(e.to_string()), &request))?;
-    state
-        .system_config
-        .store
-        .put(CONFIG_KEY_AUTH, &auth_value, Some("bootstrap"))
-        .await
-        .map_err(|e| scoped(ApiError::internal(e.to_string()), &request))?;
-    let _ = state.system_config.apply(CONFIG_KEY_AUTH, &auth_value);
-
-    let bootstrap = BootstrapState {
-        completed: true,
-        admin_created_at: Some(now_iso()),
-    };
-    let boot_value = serde_json::to_value(&bootstrap)
-        .map_err(|e| scoped(ApiError::internal(e.to_string()), &request))?;
-    state
-        .system_config
-        .store
-        .put(CONFIG_KEY_BOOTSTRAP, &boot_value, Some("bootstrap"))
-        .await
-        .map_err(|e| scoped(ApiError::internal(e.to_string()), &request))?;
-    let _ = state.system_config.apply(CONFIG_KEY_BOOTSTRAP, &boot_value);
-
-    Ok(Json(BootstrapResponse {
-        user: admin,
-        bootstrap,
-        jwt_secret_generated: generated_secret,
-    }))
 }

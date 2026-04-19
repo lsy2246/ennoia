@@ -1,9 +1,8 @@
 //! Kernel defines Ennoia's shared domain model, traits and policy contracts.
 //!
 //! All cross-crate contracts live here. Implementation crates (memory / runtime /
-//! scheduler / auth / policy-loader) depend only on `ennoia-kernel`.
+//! scheduler / policy-loader) depend only on `ennoia-kernel`.
 
-pub mod auth;
 pub mod config;
 pub mod decision;
 pub mod domain;
@@ -21,15 +20,12 @@ pub mod ui;
 
 // ========== Re-exports ==========
 
-pub use auth::{
-    ApiKey, ApiKeyStore, AuthError, CreateApiKeyRequest, CreateSessionRequest, CreateUserRequest,
-    Session, SessionStore, UpdateUserRequest, User, UserRole, UserStore,
-};
 pub use config::{AgentConfig, AppConfig, ServerConfig, UiConfig};
 pub use decision::{Decision, DecisionSnapshot, NextAction};
 pub use domain::{
-    AgentSpec, ArtifactKind, ArtifactSpec, MessageRole, MessageSpec, OwnerKind, OwnerRef, RunSpec,
-    SpaceSpec, TaskKind, TaskSpec, TaskStatus, ThreadKind, ThreadSpec,
+    AgentSpec, ArtifactKind, ArtifactSpec, ConversationSpec, ConversationTopology, HandoffSpec,
+    LaneSpec, MessageRole, MessageSpec, OwnerKind, OwnerRef, ParticipantRef, ParticipantType,
+    RunSpec, SpaceSpec, TaskKind, TaskSpec, TaskStatus, WorkspaceProfile,
 };
 pub use extension::{
     CommandContribution, ContributionSet, ExtensionKind, ExtensionManifest, HookContribution,
@@ -57,10 +53,10 @@ pub use scheduler::{
 pub use signals::{EvidenceSignals, ExecutionSignals, IntentSignals, Signals};
 pub use stage::{RunStage, RunStageEvent, StageTransition};
 pub use system_config::{
-    AuthConfig, AuthMode, BodyLimitConfig, BootstrapState, ConfigChangeRecord, ConfigEntry,
-    ConfigError, ConfigStore, CorsConfig, LoggingConfig, RateLimitConfig, SystemConfig,
-    TimeoutConfig, ALL_CONFIG_KEYS, CONFIG_KEY_AUTH, CONFIG_KEY_BODY_LIMIT, CONFIG_KEY_BOOTSTRAP,
-    CONFIG_KEY_CORS, CONFIG_KEY_LOGGING, CONFIG_KEY_RATE_LIMIT, CONFIG_KEY_TIMEOUT,
+    BodyLimitConfig, BootstrapState, ConfigChangeRecord, ConfigEntry, ConfigError, ConfigStore,
+    CorsConfig, LoggingConfig, RateLimitConfig, SystemConfig, TimeoutConfig, ALL_CONFIG_KEYS,
+    CONFIG_KEY_BODY_LIMIT, CONFIG_KEY_BOOTSTRAP, CONFIG_KEY_CORS, CONFIG_KEY_LOGGING,
+    CONFIG_KEY_RATE_LIMIT, CONFIG_KEY_TIMEOUT,
 };
 pub use ui::{LocalizedText, ThemeAppearance, UiPreference, UiPreferenceRecord};
 

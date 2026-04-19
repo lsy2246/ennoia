@@ -1,17 +1,15 @@
 import type {
   ExtensionLocaleContribution,
   ExtensionPageContribution,
+  ExtensionPanelContribution,
   ExtensionThemeContribution,
   LocalizedText,
-  ExtensionPanelContribution,
 } from "@ennoia/ui-sdk";
 import type { ApiErrorBody } from "@ennoia/contract";
 import { createLogger } from "@ennoia/observability";
 
 const API_BASE = import.meta.env.VITE_ENNOIA_API_URL ?? "http://127.0.0.1:3710";
 const logger = createLogger("api-client");
-
-// ========== Core types (existing) ==========
 
 export type Overview = {
   app_name: string;
@@ -24,21 +22,53 @@ export type Overview = {
 export type Agent = {
   id: string;
   display_name: string;
+  kind: string;
+  workspace_mode: string;
   default_model: string;
+  skills_dir: string;
+  workspace_dir: string;
+  artifacts_dir: string;
 };
 
 export type Space = {
   id: string;
   display_name: string;
+  description: string;
+  primary_goal: string;
+  mention_policy: string;
   default_agents: string[];
 };
 
-export type Thread = {
+export type WorkspaceProfile = {
   id: string;
-  kind: "Private" | "Space" | "private" | "space";
+  display_name: string;
+  locale: string;
+  time_zone: string;
+  default_space_id?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type Conversation = {
+  id: string;
+  topology: "direct" | "group";
   owner: { kind: string; id: string };
   space_id?: string | null;
   title: string;
+  participants: string[];
+  default_lane_id?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type Lane = {
+  id: string;
+  conversation_id: string;
+  space_id?: string | null;
+  name: string;
+  lane_type: string;
+  status: string;
+  goal: string;
   participants: string[];
   created_at: string;
   updated_at: string;
@@ -46,7 +76,8 @@ export type Thread = {
 
 export type Message = {
   id: string;
-  thread_id: string;
+  conversation_id: string;
+  lane_id?: string | null;
   sender: string;
   role: string;
   body: string;
@@ -57,7 +88,8 @@ export type Message = {
 export type Run = {
   id: string;
   owner: { kind: string; id: string };
-  thread_id: string;
+  conversation_id: string;
+  lane_id?: string | null;
   trigger: string;
   stage: string;
   goal: string;
@@ -68,6 +100,8 @@ export type Run = {
 export type Task = {
   id: string;
   run_id: string;
+  conversation_id: string;
+  lane_id?: string | null;
   task_kind: string;
   title: string;
   assigned_agent_id: string;
@@ -80,8 +114,22 @@ export type Artifact = {
   id: string;
   owner: { kind: string; id: string };
   run_id: string;
+  conversation_id?: string | null;
+  lane_id?: string | null;
   kind: string;
   relative_path: string;
+  created_at: string;
+};
+
+export type Handoff = {
+  id: string;
+  from_lane_id: string;
+  to_lane_id: string;
+  from_agent_id?: string | null;
+  to_agent_id?: string | null;
+  summary: string;
+  instructions: string;
+  status: string;
   created_at: string;
 };
 
@@ -124,16 +172,6 @@ export type ExtensionRegistry = {
   locales: ExtensionLocaleContribution[];
 };
 
-export type ConversationEnvelope = {
-  thread: Thread;
-  message: Message;
-  run: Run;
-  tasks: Task[];
-  artifacts: Artifact[];
-};
-
-// ========== Runtime audit ==========
-
 export type RunStageEvent = {
   id: string;
   run_id: string;
@@ -166,8 +204,6 @@ export type GateRecord = {
   at: string;
 };
 
-// ========== Memory requests/responses ==========
-
 export type RememberReceipt = {
   receipt_id: string;
   memory_id: string;
@@ -193,66 +229,15 @@ export type ReviewReceipt = {
   created_at: string;
 };
 
-// ========== Auth ==========
-
-export type AuthedUser = {
-  id: string;
-  username: string;
-  role: string;
-  auth_method: string;
-};
-
-export type User = {
-  id: string;
-  username: string;
-  display_name?: string | null;
-  email?: string | null;
-  role: "user" | "admin";
-  owner_kind?: string | null;
-  owner_id?: string | null;
-  created_at: string;
-  updated_at: string;
-  last_login_at?: string | null;
-};
-
-export type Session = {
-  id: string;
-  user_id: string;
-  token_hash: string;
-  created_at: string;
-  expires_at: string;
-  last_seen_at?: string | null;
-  user_agent?: string | null;
-  ip?: string | null;
-};
-
-export type ApiKey = {
-  id: string;
-  user_id: string;
-  key_hash: string;
-  label?: string | null;
-  scopes: string[];
-  created_at: string;
-  expires_at?: string | null;
-  last_used_at?: string | null;
-};
-
-export type LoginResponse = {
-  user: User;
-  token: string;
-  token_kind: "session" | "jwt";
-  expires_at: string;
-};
-
 export type BootstrapState = {
-  completed: boolean;
-  admin_created_at?: string | null;
+  is_initialized: boolean;
+  initialized_at?: string | null;
 };
 
-export type BootstrapResponse = {
-  user: User;
+export type BootstrapSetupResponse = {
   bootstrap: BootstrapState;
-  jwt_secret_generated: boolean;
+  profile: WorkspaceProfile;
+  preference: UiPreferenceRecord;
 };
 
 export type UiPreference = {
@@ -290,7 +275,7 @@ export type UiRuntime = {
     themes: ExtensionThemeContribution[];
     locales: ExtensionLocaleContribution[];
   };
-  user_preference?: UiPreferenceRecord | null;
+  instance_preference?: UiPreferenceRecord | null;
   space_preferences: UiPreferenceRecord[];
   versions: {
     registry: number;
@@ -298,7 +283,20 @@ export type UiRuntime = {
   };
 };
 
-// ========== System config ==========
+export type UiMessageBundle = {
+  locale: string;
+  resolved_locale: string;
+  namespace: string;
+  messages: Record<string, string>;
+  source: string;
+  version: string;
+};
+
+export type UiMessagesResponse = {
+  locale: string;
+  fallback_locale: string;
+  bundles: UiMessageBundle[];
+};
 
 export type ConfigEntry = {
   key: string;
@@ -316,16 +314,6 @@ export type ConfigChangeRecord = {
   new_payload_json: string;
   changed_by?: string | null;
   changed_at: string;
-};
-
-export type AuthConfig = {
-  enabled: boolean;
-  mode: "none" | "api_key" | "jwt" | "session";
-  jwt_secret?: string | null;
-  session_ttl_seconds: number;
-  protected_paths: string[];
-  public_paths: string[];
-  allow_registration: boolean;
 };
 
 export type RateLimitConfig = {
@@ -364,7 +352,6 @@ export type BodyLimitConfig = {
 };
 
 export type SystemConfig = {
-  auth: AuthConfig;
   rate_limit: RateLimitConfig;
   cors: CorsConfig;
   timeout: TimeoutConfig;
@@ -373,13 +360,31 @@ export type SystemConfig = {
   bootstrap: BootstrapState;
 };
 
-// ========== Snapshot ==========
+export type ConversationCreateResponse = {
+  conversation: Conversation;
+  default_lane: Lane;
+};
+
+export type ConversationDetailResponse = {
+  conversation: Conversation;
+  lanes: Lane[];
+};
+
+export type ConversationEnvelope = {
+  conversation: Conversation;
+  lane: Lane;
+  message: Message;
+  run: Run;
+  tasks: Task[];
+  artifacts: Artifact[];
+};
 
 export type WorkspaceSnapshot = {
   overview: Overview;
+  profile: WorkspaceProfile | null;
   agents: Agent[];
   spaces: Space[];
-  threads: Thread[];
+  conversations: Conversation[];
   runs: Run[];
   tasks: Task[];
   artifacts: Artifact[];
@@ -387,32 +392,6 @@ export type WorkspaceSnapshot = {
   jobs: Job[];
   registry: ExtensionRegistry;
 };
-
-// ========== Token management ==========
-
-const TOKEN_KEY = "ennoia_auth_token";
-
-export function getAuthToken(): string | null {
-  try {
-    return localStorage.getItem(TOKEN_KEY);
-  } catch {
-    return null;
-  }
-}
-
-export function setAuthToken(token: string | null) {
-  try {
-    if (token === null) {
-      localStorage.removeItem(TOKEN_KEY);
-    } else {
-      localStorage.setItem(TOKEN_KEY, token);
-    }
-  } catch {
-    // localStorage unavailable; ignore
-  }
-}
-
-// ========== Fetch wrapper ==========
 
 export class ApiError extends Error {
   constructor(
@@ -430,24 +409,21 @@ async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
     "content-type": "application/json",
     ...((init?.headers as Record<string, string>) ?? {}),
   };
-  const token = getAuthToken();
-  if (token) {
-    headers["authorization"] = `Bearer ${token}`;
-  }
 
   const response = await fetch(`${API_BASE}${path}`, {
     ...init,
     headers,
   });
 
-  if (response.status === 401) {
-    setAuthToken(null);
-    throw new ApiError(401, "UNAUTHORIZED", "unauthorized");
-  }
   if (!response.ok) {
     const body = await response.text().catch(() => "");
+    let parsed: ApiErrorBody | null = null;
     try {
-      const parsed = JSON.parse(body) as ApiErrorBody;
+      parsed = JSON.parse(body) as ApiErrorBody;
+    } catch {
+      parsed = null;
+    }
+    if (parsed) {
       logger.warn("request failed", {
         path,
         status: response.status,
@@ -460,24 +436,24 @@ async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
         parsed.message || `request failed: ${response.status}`,
         parsed.request_id,
       );
-    } catch {
-      throw new ApiError(response.status, "INTERNAL", body || `request failed: ${response.status}`);
     }
+    throw new ApiError(response.status, "INTERNAL", body || `request failed: ${response.status}`);
   }
+
   if (response.status === 204) {
     return undefined as unknown as T;
   }
+
   return (await response.json()) as T;
 }
-
-// ========== Workspace ==========
 
 export async function loadWorkspaceSnapshot(): Promise<WorkspaceSnapshot> {
   const [
     overview,
+    profile,
     agents,
     spaces,
-    threads,
+    conversations,
     runs,
     tasks,
     artifacts,
@@ -486,9 +462,10 @@ export async function loadWorkspaceSnapshot(): Promise<WorkspaceSnapshot> {
     registry,
   ] = await Promise.all([
     fetchJson<Overview>("/api/v1/overview"),
+    fetchJson<WorkspaceProfile | null>("/api/v1/runtime/profile"),
     fetchJson<Agent[]>("/api/v1/agents"),
     fetchJson<Space[]>("/api/v1/spaces"),
-    fetchJson<Thread[]>("/api/v1/threads"),
+    fetchJson<Conversation[]>("/api/v1/conversations"),
     fetchJson<Run[]>("/api/v1/runs"),
     fetchJson<Task[]>("/api/v1/tasks"),
     fetchJson<Artifact[]>("/api/v1/artifacts"),
@@ -497,51 +474,181 @@ export async function loadWorkspaceSnapshot(): Promise<WorkspaceSnapshot> {
     fetchJson<ExtensionRegistry>("/api/v1/extensions/registry"),
   ]);
 
-  return { overview, agents, spaces, threads, runs, tasks, artifacts, memories, jobs, registry };
+  return {
+    overview,
+    profile,
+    agents,
+    spaces,
+    conversations,
+    runs,
+    tasks,
+    artifacts,
+    memories,
+    jobs,
+    registry,
+  };
 }
 
-export async function sendPrivateMessage(payload: {
-  agent_id: string;
-  body: string;
-  goal: string;
+export async function fetchBootstrapStatus() {
+  return fetchJson<BootstrapState>("/api/v1/bootstrap/status");
+}
+
+export async function bootstrapSetup(payload: {
+  display_name?: string;
+  locale?: string;
+  time_zone?: string;
+  default_space_id?: string;
+  theme_id?: string;
+  date_style?: string;
+  density?: string;
+  motion?: string;
 }) {
-  return fetchJson<ConversationEnvelope>("/api/v1/threads/private/messages", {
+  return fetchJson<BootstrapSetupResponse>("/api/v1/bootstrap/setup", {
     method: "POST",
     body: JSON.stringify(payload),
   });
 }
 
-export async function sendSpaceMessage(payload: {
-  space_id: string;
-  addressed_agents: string[];
-  body: string;
-  goal: string;
+export async function fetchUiRuntime(): Promise<UiRuntime> {
+  return fetchJson<UiRuntime>("/api/v1/ui/runtime");
+}
+
+export async function fetchUiMessages(
+  locale: string,
+  namespaces: string[] = [],
+): Promise<UiMessagesResponse> {
+  const params = new URLSearchParams({ locale });
+  if (namespaces.length > 0) {
+    params.set("namespaces", namespaces.join(","));
+  }
+  return fetchJson<UiMessagesResponse>(`/api/v1/ui/messages?${params.toString()}`);
+}
+
+export async function fetchRuntimeProfile() {
+  return fetchJson<WorkspaceProfile | null>("/api/v1/runtime/profile");
+}
+
+export async function saveRuntimeProfile(payload: {
+  display_name?: string | null;
+  locale?: string | null;
+  time_zone?: string | null;
+  default_space_id?: string | null;
 }) {
-  return fetchJson<ConversationEnvelope>("/api/v1/threads/space/messages", {
+  return fetchJson<WorkspaceProfile>("/api/v1/runtime/profile", {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function fetchRuntimePreferences() {
+  return fetchJson<UiPreferenceRecord | null>("/api/v1/runtime/preferences");
+}
+
+export async function saveInstanceUiPreferences(payload: {
+  locale?: string | null;
+  theme_id?: string | null;
+  time_zone?: string | null;
+  date_style?: string | null;
+  density?: string | null;
+  motion?: string | null;
+}) {
+  return fetchJson<UiPreferenceRecord>("/api/v1/runtime/preferences", {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function fetchSpaceUiPreferences(spaceId: string) {
+  return fetchJson<UiPreferenceRecord | null>(`/api/v1/spaces/${spaceId}/ui-preferences`);
+}
+
+export async function saveSpaceUiPreferences(
+  spaceId: string,
+  payload: {
+    locale?: string | null;
+    theme_id?: string | null;
+    time_zone?: string | null;
+    date_style?: string | null;
+    density?: string | null;
+    motion?: string | null;
+  },
+) {
+  return fetchJson<UiPreferenceRecord>(`/api/v1/spaces/${spaceId}/ui-preferences`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function listConversations() {
+  return fetchJson<Conversation[]>("/api/v1/conversations");
+}
+
+export async function createConversation(payload: {
+  topology: "direct" | "group";
+  title?: string;
+  space_id?: string;
+  agent_ids: string[];
+  lane_name?: string;
+  lane_type?: string;
+  lane_goal?: string;
+}) {
+  return fetchJson<ConversationCreateResponse>("/api/v1/conversations", {
     method: "POST",
     body: JSON.stringify(payload),
   });
 }
 
-export async function createJob(payload: {
-  owner_kind: string;
-  owner_id: string;
-  job_kind: string;
-  schedule_kind: string;
-  schedule_value: string;
-  payload?: unknown;
-}) {
-  return fetchJson<Job>("/api/v1/jobs", {
+export async function getConversation(conversationId: string) {
+  return fetchJson<ConversationDetailResponse>(`/api/v1/conversations/${conversationId}`);
+}
+
+export async function loadConversationMessages(conversationId: string) {
+  return fetchJson<Message[]>(`/api/v1/conversations/${conversationId}/messages`);
+}
+
+export async function loadConversationRuns(conversationId: string) {
+  return fetchJson<Run[]>(`/api/v1/conversations/${conversationId}/runs`);
+}
+
+export async function loadConversationLanes(conversationId: string) {
+  return fetchJson<Lane[]>(`/api/v1/conversations/${conversationId}/lanes`);
+}
+
+export async function sendConversationMessage(
+  conversationId: string,
+  payload: {
+    lane_id?: string;
+    body: string;
+    goal?: string;
+    addressed_agents?: string[];
+  },
+) {
+  return fetchJson<ConversationEnvelope>(`/api/v1/conversations/${conversationId}/messages`, {
     method: "POST",
     body: JSON.stringify(payload),
   });
 }
 
-export async function loadThreadMessages(threadId: string) {
-  return fetchJson<Message[]>(`/api/v1/threads/${threadId}/messages`);
+export async function loadLaneHandoffs(laneId: string) {
+  return fetchJson<Handoff[]>(`/api/v1/lanes/${laneId}/handoffs`);
 }
 
-// ========== Run detail ==========
+export async function createLaneHandoff(
+  laneId: string,
+  payload: {
+    to_lane_id: string;
+    from_agent_id?: string;
+    to_agent_id?: string;
+    summary: string;
+    instructions: string;
+    status?: string;
+  },
+) {
+  return fetchJson<Handoff>(`/api/v1/lanes/${laneId}/handoffs`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
 
 export async function loadRunStages(runId: string) {
   return fetchJson<RunStageEvent[]>(`/api/v1/runs/${runId}/stages`);
@@ -558,8 +665,6 @@ export async function loadRunGates(runId: string) {
 export async function loadRunTasks(runId: string) {
   return fetchJson<Task[]>(`/api/v1/runs/${runId}/tasks`);
 }
-
-// ========== Memory ==========
 
 export async function listMemories() {
   return fetchJson<Memory[]>("/api/v1/memories");
@@ -610,190 +715,39 @@ export async function reviewMemory(payload: {
   });
 }
 
-// ========== Auth ==========
-
-export async function login(payload: { username: string; password: string }) {
-  return fetchJson<LoginResponse>("/api/v1/auth/login", {
+export async function createJob(payload: {
+  owner_kind: string;
+  owner_id: string;
+  job_kind?: string;
+  schedule_kind: string;
+  schedule_value: string;
+  payload?: unknown;
+}) {
+  return fetchJson<Job>("/api/v1/jobs", {
     method: "POST",
     body: JSON.stringify(payload),
   });
 }
-
-export async function logout() {
-  return fetchJson<void>("/api/v1/auth/logout", { method: "POST" });
-}
-
-export async function fetchMe() {
-  return fetchJson<AuthedUser>("/api/v1/auth/me");
-}
-
-export async function registerUser(payload: {
-  username: string;
-  password: string;
-  display_name?: string;
-  email?: string;
-}) {
-  return fetchJson<{ user: User }>("/api/v1/auth/register", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-}
-
-// ========== Bootstrap ==========
-
-export async function fetchBootstrapState() {
-  return fetchJson<BootstrapState>("/api/v1/bootstrap/state");
-}
-
-export async function fetchUiRuntime() {
-  return fetchJson<UiRuntime>("/api/v1/ui/runtime");
-}
-
-export async function fetchMyUiPreferences() {
-  return fetchJson<UiPreferenceRecord | null>("/api/v1/me/ui-preferences");
-}
-
-export async function saveMyUiPreferences(payload: {
-  locale?: string | null;
-  theme_id?: string | null;
-  time_zone?: string | null;
-  date_style?: string | null;
-  density?: string | null;
-  motion?: string | null;
-}) {
-  return fetchJson<UiPreferenceRecord>("/api/v1/me/ui-preferences", {
-    method: "PUT",
-    body: JSON.stringify(payload),
-  });
-}
-
-export async function fetchSpaceUiPreferences(spaceId: string) {
-  return fetchJson<UiPreferenceRecord | null>(`/api/v1/spaces/${spaceId}/ui-preferences`);
-}
-
-export async function saveSpaceUiPreferences(
-  spaceId: string,
-  payload: {
-    locale?: string | null;
-    theme_id?: string | null;
-    time_zone?: string | null;
-    date_style?: string | null;
-    density?: string | null;
-    motion?: string | null;
-  },
-) {
-  return fetchJson<UiPreferenceRecord>(`/api/v1/spaces/${spaceId}/ui-preferences`, {
-    method: "PUT",
-    body: JSON.stringify(payload),
-  });
-}
-
-export async function completeBootstrap(payload: {
-  admin_username: string;
-  admin_password: string;
-  admin_display_name?: string;
-  auth_mode?: "none" | "api_key" | "jwt" | "session";
-  allow_registration?: boolean;
-}) {
-  return fetchJson<BootstrapResponse>("/api/v1/bootstrap", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-}
-
-// ========== Config ==========
 
 export async function listConfig() {
-  return fetchJson<ConfigEntry[]>("/api/v1/admin/config");
+  return fetchJson<ConfigEntry[]>("/api/v1/runtime/config");
 }
 
 export async function getConfig(key: string) {
-  return fetchJson<ConfigEntry>(`/api/v1/admin/config/${key}`);
+  return fetchJson<ConfigEntry>(`/api/v1/runtime/config/${key}`);
 }
 
 export async function putConfig(key: string, payload: unknown, updatedBy?: string) {
-  return fetchJson<ConfigEntry>(`/api/v1/admin/config/${key}`, {
+  return fetchJson<ConfigEntry>(`/api/v1/runtime/config/${key}`, {
     method: "PUT",
     body: JSON.stringify({ payload, updated_by: updatedBy }),
   });
 }
 
 export async function getConfigHistory(key: string) {
-  return fetchJson<ConfigChangeRecord[]>(`/api/v1/admin/config/${key}/history`);
+  return fetchJson<ConfigChangeRecord[]>(`/api/v1/runtime/config/${key}/history`);
 }
 
 export async function getConfigSnapshot() {
-  return fetchJson<SystemConfig>("/api/v1/admin/config/snapshot");
-}
-
-// ========== Admin users ==========
-
-export async function adminListUsers() {
-  return fetchJson<User[]>("/api/v1/admin/users");
-}
-
-export async function adminCreateUser(payload: {
-  username: string;
-  password: string;
-  display_name?: string;
-  email?: string;
-  role?: "user" | "admin";
-}) {
-  return fetchJson<User>("/api/v1/admin/users", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-}
-
-export async function adminUpdateUser(
-  id: string,
-  payload: { display_name?: string; email?: string; role?: "user" | "admin" },
-) {
-  return fetchJson<User>(`/api/v1/admin/users/${id}`, {
-    method: "PUT",
-    body: JSON.stringify(payload),
-  });
-}
-
-export async function adminDeleteUser(id: string) {
-  return fetchJson<void>(`/api/v1/admin/users/${id}`, { method: "DELETE" });
-}
-
-export async function adminResetPassword(id: string, newPassword: string) {
-  return fetchJson<void>(`/api/v1/admin/users/${id}/reset-password`, {
-    method: "POST",
-    body: JSON.stringify({ new_password: newPassword }),
-  });
-}
-
-// ========== Admin sessions ==========
-
-export async function adminListSessions() {
-  return fetchJson<Session[]>("/api/v1/admin/sessions");
-}
-
-export async function adminDeleteSession(id: string) {
-  return fetchJson<void>(`/api/v1/admin/sessions/${id}`, { method: "DELETE" });
-}
-
-// ========== Admin API keys ==========
-
-export async function adminListApiKeys() {
-  return fetchJson<ApiKey[]>("/api/v1/admin/api-keys");
-}
-
-export async function adminCreateApiKey(payload: {
-  user_id: string;
-  label?: string;
-  scopes?: string[];
-  expires_at?: string;
-}) {
-  return fetchJson<{ key: ApiKey; raw_key: string }>("/api/v1/admin/api-keys", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-}
-
-export async function adminDeleteApiKey(id: string) {
-  return fetchJson<void>(`/api/v1/admin/api-keys/${id}`, { method: "DELETE" });
+  return fetchJson<SystemConfig>("/api/v1/runtime/config/snapshot");
 }

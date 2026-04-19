@@ -2,9 +2,9 @@ use std::sync::Arc;
 
 use chrono::Utc;
 use ennoia_kernel::{
-    ContextView, DecisionSnapshot, EvidenceSignals, ExecutionSignals, GateContext, GatePipeline,
-    GateRecord, GateSeverity, GateVerdict, IntentSignals, RunSpec, RunStage, RunStageEvent,
-    Signals, StageMachine, TaskKind, TaskSpec, TaskStatus, ThreadKind,
+    ContextView, ConversationTopology, DecisionSnapshot, EvidenceSignals, ExecutionSignals,
+    GateContext, GatePipeline, GateRecord, GateSeverity, GateVerdict, IntentSignals, RunSpec,
+    RunStage, RunStageEvent, Signals, StageMachine, TaskKind, TaskSpec, TaskStatus,
 };
 use uuid::Uuid;
 
@@ -35,9 +35,9 @@ impl OrchestratorService {
     ) -> PlannedRun {
         let now = now_iso();
         let run_id = format!("run-{}", Uuid::new_v4());
-        let task_kind = match request.thread.kind {
-            ThreadKind::Private => TaskKind::Response,
-            ThreadKind::Space => TaskKind::Collaboration,
+        let task_kind = match request.conversation.topology {
+            ConversationTopology::Direct => TaskKind::Response,
+            ConversationTopology::Group => TaskKind::Collaboration,
         };
 
         let assigned_agents = if request.addressed_agents.is_empty() {
@@ -54,7 +54,8 @@ impl OrchestratorService {
         let run = RunSpec {
             id: run_id.clone(),
             owner: request.owner.clone(),
-            thread_id: request.thread.id.clone(),
+            conversation_id: request.conversation.id.clone(),
+            lane_id: request.message.lane_id.clone(),
             trigger: request.trigger.as_str().to_string(),
             stage: transition.to,
             goal: request.goal.clone(),
@@ -68,6 +69,8 @@ impl OrchestratorService {
             .map(|(index, agent_id)| TaskSpec {
                 id: format!("task-{run_id}-{}", index + 1),
                 run_id: run_id.clone(),
+                conversation_id: request.conversation.id.clone(),
+                lane_id: request.message.lane_id.clone(),
                 task_kind,
                 title: format!("{} · {}", request.goal, agent_id),
                 assigned_agent_id: agent_id.clone(),
@@ -113,7 +116,7 @@ impl OrchestratorService {
         };
 
         PlannedRun {
-            thread: request.thread,
+            conversation: request.conversation,
             message: request.message,
             run,
             tasks,

@@ -1,32 +1,48 @@
 # Ennoia 数据模型
 
-## 1. 核心实体
+## 核心实体
 
-### Agent
+### WorkspaceProfile
 
 - `id`
 - `display_name`
-- `kind`
-- `default_model`
-- `workspace_mode`
-- `enabled_skills`
+- `locale`
+- `time_zone`
+- `default_space_id`
+- `created_at`
+- `updated_at`
 
 ### Space
 
 - `id`
 - `display_name`
-- `kind`
+- `description`
+- `primary_goal`
 - `mention_policy`
 - `default_agents`
 
-### Thread
+### Conversation
 
 - `id`
+- `topology`
 - `owner_kind`
 - `owner_id`
 - `space_id`
-- `thread_kind`
 - `title`
+- `participants`
+- `default_lane_id`
+- `created_at`
+- `updated_at`
+
+### Lane
+
+- `id`
+- `conversation_id`
+- `space_id`
+- `name`
+- `lane_type`
+- `status`
+- `goal`
 - `participants`
 - `created_at`
 - `updated_at`
@@ -34,11 +50,24 @@
 ### Message
 
 - `id`
-- `thread_id`
+- `conversation_id`
+- `lane_id`
 - `sender`
 - `role`
 - `body`
 - `mentions`
+- `created_at`
+
+### Handoff
+
+- `id`
+- `from_lane_id`
+- `to_lane_id`
+- `from_agent_id`
+- `to_agent_id`
+- `summary`
+- `instructions`
+- `status`
 - `created_at`
 
 ### Run
@@ -46,9 +75,10 @@
 - `id`
 - `owner_kind`
 - `owner_id`
-- `thread_id`
+- `conversation_id`
+- `lane_id`
 - `trigger`
-- `status`
+- `stage`
 - `goal`
 - `created_at`
 - `updated_at`
@@ -57,10 +87,12 @@
 
 - `id`
 - `run_id`
+- `conversation_id`
+- `lane_id`
 - `task_kind`
 - `title`
-- `status`
 - `assigned_agent_id`
+- `status`
 - `created_at`
 - `updated_at`
 
@@ -70,55 +102,16 @@
 - `owner_kind`
 - `owner_id`
 - `run_id`
+- `conversation_id`
+- `lane_id`
 - `artifact_kind`
 - `relative_path`
 - `created_at`
 
-## 2. 记忆实体
+## UI 偏好
 
-### MemoryRecord
+### InstanceUiPreference
 
-- `id`
-- `owner_kind`
-- `owner_id`
-- `memory_kind`
-- `source`
-- `content`
-- `summary`
-- `thread_id`
-- `run_id`
-- `created_at`
-
-### ContextView
-
-- `thread_facts`
-- `recent_messages`
-- `active_tasks`
-- `recalled_memories`
-- `workspace_summary`
-
-## 3. 扩展实体
-
-### ExtensionManifest
-
-- `id`
-- `kind`
-- `version`
-- `frontend_bundle`
-- `backend_entry`
-- `contributes`
-
-### ExtensionRegistryView
-
-- `extensions`
-- `pages`
-- `panels`
-- `themes`
-- `locales`
-
-### UiPreference
-
-- `subject_id`
 - `locale`
 - `theme_id`
 - `time_zone`
@@ -128,58 +121,26 @@
 - `version`
 - `updated_at`
 
-### SkillSpec
+### SpaceUiPreference
 
-- `id`
-- `entry`
-- `input_contract`
-- `output_contract`
-- `capabilities`
+- 与实例级偏好字段一致
+- 按 `space_id` 作用
 
-## 4. 调度实体
+## SQLite 当前主表
 
-### ScheduledJob
-
-- `id`
-- `job_kind`
-- `schedule_kind`
-- `owner_kind`
-- `owner_id`
-- `status`
-
-## 5. 归属模型
-
-所有业务对象遵循统一 owner 模型：
-
-- `Global`
-- `Agent(<agent_id>)`
-- `Space(<space_id>)`
-
-这个模型同时用于：
-
-- run 归属
-- artifact 归属
-- memory 归属
-- scheduler job 归属
-
-## 6. 当前持久化事实源
-
-当前 SQLite schema 已经落地以下正式表：
-
-- `agents`
+- `workspace_profile`
+- `instance_ui_preferences`
+- `space_ui_preferences`
 - `spaces`
-- `threads`
+- `conversations`
+- `conversation_participants`
+- `lanes`
+- `lane_members`
 - `messages`
+- `handoffs`
 - `runs`
 - `tasks`
 - `artifacts`
 - `memories`
 - `jobs`
 - `extensions`
-
-前端主壳直接消费以下正式派生视图：
-
-- `overview`
-- `registry.pages`
-- `registry.panels`
-- `threads -> messages -> runs -> tasks -> artifacts -> memories`

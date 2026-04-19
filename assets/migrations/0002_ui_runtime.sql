@@ -1,7 +1,7 @@
 ALTER TABLE extensions ADD COLUMN locales_json TEXT NOT NULL DEFAULT '[]';
 
-CREATE TABLE IF NOT EXISTS user_ui_preferences (
-  user_id TEXT PRIMARY KEY,
+CREATE TABLE IF NOT EXISTS instance_ui_preferences (
+  id TEXT PRIMARY KEY,
   locale TEXT,
   theme_id TEXT,
   time_zone TEXT,

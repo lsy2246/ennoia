@@ -2,30 +2,23 @@ import { RouterProvider } from "@tanstack/react-router";
 import { useEffect } from "react";
 
 import { router } from "@/router";
-import { useAuthStore } from "@/stores/auth";
+import { useRuntimeStore } from "@/stores/runtime";
 import { useUiStore } from "@/stores/ui";
 
 export function App() {
-  const hydrate = useAuthStore((s) => s.hydrate);
-  const authStatus = useAuthStore((s) => s.status);
-  const authToken = useAuthStore((s) => s.token);
-  const uiHydrate = useUiStore((s) => s.hydrate);
-  const uiStatus = useUiStore((s) => s.status);
+  const runtimeHydrate = useRuntimeStore((state) => state.hydrate);
+  const runtimeStatus = useRuntimeStore((state) => state.status);
+  const uiHydrate = useUiStore((state) => state.hydrate);
+  const uiStatus = useUiStore((state) => state.status);
 
   useEffect(() => {
-    hydrate();
+    runtimeHydrate();
     uiHydrate();
-  }, [hydrate, uiHydrate]);
-
-  useEffect(() => {
-    if (authStatus === "ready") {
-      uiHydrate();
-    }
-  }, [authStatus, authToken, uiHydrate]);
+  }, [runtimeHydrate, uiHydrate]);
 
   if (
-    authStatus === "idle" ||
-    authStatus === "checking" ||
+    runtimeStatus === "idle" ||
+    runtimeStatus === "checking" ||
     uiStatus === "idle" ||
     uiStatus === "checking"
   ) {

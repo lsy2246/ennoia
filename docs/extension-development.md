@@ -7,17 +7,19 @@ Ennoia 对外统一使用 `Extension` 作为扩展总称，内部区分：
 - `system extension`
 - `skill`
 
-## 2. system extension 可以贡献
+## 2. system extension manifest
 
-- Hook
+`system extension` 统一通过 `ExtensionManifest.contributes` 暴露能力。
+
+当前 manifest 贡献字段：
+
 - Child Page
 - Panel
 - Command
 - Theme
 - Locale Bundle
 - Provider
-
-当前 manifest 协议字段：
+- Hook
 
 - `pages[]`：`id`、`title`、`route`、`mount`、`icon`
 - `panels[]`：`id`、`title`、`mount`、`slot`、`icon`
@@ -26,6 +28,8 @@ Ennoia 对外统一使用 `Extension` 作为扩展总称，内部区分：
 - `commands[]`：`id`、`title`、`action`、`shortcut`
 - `providers[]`：`id`、`kind`、`entry`
 - `hooks[]`：`event`、`handler`
+
+`hooks[]` 是 `contributes` 里的一个标准 contribution，和页面、面板、主题、语言包走同一份 manifest 协议。
 
 ## 3. skill 可以贡献
 
@@ -59,8 +63,8 @@ Ennoia 对外统一使用 `Extension` 作为扩展总称，内部区分：
 1. 安装到 `~/.ennoia/global/extensions/` 或技能目录
 2. 在 `config/extensions/*.toml` 中启用
 3. Server 启动时扫描并注册
-4. Server 通过 `/api/v1/extensions/registry`、`/api/v1/extensions/pages`、`/api/v1/extensions/panels` 暴露挂载协议
-5. Shell 读取注册表后挂载页面、面板和命令
+4. Server 通过 `/api/v1/extensions/registry`、`/api/v1/extensions/pages`、`/api/v1/extensions/panels` 和 `/api/v1/ui/messages` 暴露运行时协议
+5. Shell 读取注册表后挂载页面、面板、命令并装载 locale bundle
 
 ## 6. 开发原则
 

@@ -1,4 +1,4 @@
-//! System-wide runtime configuration (middleware + auth + bootstrap state).
+//! System-wide runtime configuration (middleware + bootstrap state).
 //!
 //! All config shapes live in the kernel. The `ennoia-config` crate provides
 //! the SqliteConfigStore. The server layer wraps each sub-config in
@@ -11,10 +11,9 @@ use serde::{Deserialize, Serialize};
 
 // ========== Top-level SystemConfig ==========
 
-/// SystemConfig bundles every runtime-configurable middleware/auth/bootstrap state.
+/// SystemConfig bundles every runtime-configurable middleware/bootstrap state.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct SystemConfig {
-    pub auth: AuthConfig,
     pub rate_limit: RateLimitConfig,
     pub cors: CorsConfig,
     pub timeout: TimeoutConfig,
@@ -24,7 +23,6 @@ pub struct SystemConfig {
 }
 
 /// Stable config keys used in the `system_config` table.
-pub const CONFIG_KEY_AUTH: &str = "auth";
 pub const CONFIG_KEY_RATE_LIMIT: &str = "rate_limit";
 pub const CONFIG_KEY_CORS: &str = "cors";
 pub const CONFIG_KEY_TIMEOUT: &str = "timeout";
@@ -33,7 +31,6 @@ pub const CONFIG_KEY_BODY_LIMIT: &str = "body_limit";
 pub const CONFIG_KEY_BOOTSTRAP: &str = "bootstrap";
 
 pub const ALL_CONFIG_KEYS: &[&str] = &[
-    CONFIG_KEY_AUTH,
     CONFIG_KEY_RATE_LIMIT,
     CONFIG_KEY_CORS,
     CONFIG_KEY_TIMEOUT,
@@ -41,64 +38,6 @@ pub const ALL_CONFIG_KEYS: &[&str] = &[
     CONFIG_KEY_BODY_LIMIT,
     CONFIG_KEY_BOOTSTRAP,
 ];
-
-// ========== AuthConfig ==========
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct AuthConfig {
-    pub enabled: bool,
-    pub mode: AuthMode,
-    pub jwt_secret: Option<String>,
-    pub session_ttl_seconds: u32,
-    pub protected_paths: Vec<String>,
-    pub public_paths: Vec<String>,
-    pub allow_registration: bool,
-}
-
-impl Default for AuthConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            mode: AuthMode::None,
-            jwt_secret: None,
-            session_ttl_seconds: 60 * 60 * 24 * 7, // 7 days
-            protected_paths: vec!["/api/v1/admin/**".to_string()],
-            public_paths: vec![
-                "/health".to_string(),
-                "/api/v1/auth/**".to_string(),
-                "/api/v1/bootstrap/**".to_string(),
-                "/api/v1/ui/runtime".to_string(),
-            ],
-            allow_registration: false,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AuthMode {
-    None,
-    ApiKey,
-    Jwt,
-    Session,
-}
-
-impl Default for AuthMode {
-    fn default() -> Self {
-        AuthMode::None
-    }
-}
-
-impl AuthMode {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            AuthMode::None => "none",
-            AuthMode::ApiKey => "api_key",
-            AuthMode::Jwt => "jwt",
-            AuthMode::Session => "session",
-        }
-    }
-}
 
 // ========== RateLimitConfig ==========
 
@@ -219,8 +158,8 @@ impl Default for BodyLimitConfig {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BootstrapState {
-    pub completed: bool,
-    pub admin_created_at: Option<String>,
+    pub is_initialized: bool,
+    pub initialized_at: Option<String>,
 }
 
 // ========== ConfigStore trait ==========

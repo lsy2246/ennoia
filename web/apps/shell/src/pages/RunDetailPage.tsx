@@ -14,7 +14,7 @@ import {
 import { useUiHelpers } from "@/stores/ui";
 
 export function RunDetailPage() {
-  const { runId } = useParams({ from: "/shell/runs/$runId" });
+  const { runId } = useParams({ from: "/shell/workflows/$runId" });
   const [stages, setStages] = useState<RunStageEvent[]>([]);
   const [decisions, setDecisions] = useState<DecisionSnapshot[]>([]);
   const [gates, setGates] = useState<GateRecord[]>([]);

@@ -37,19 +37,46 @@ impl OwnerRef {
     }
 }
 
-/// ThreadKind describes the conversation topology.
+/// WorkspaceProfile is the single local operator profile for this runtime instance.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WorkspaceProfile {
+    pub id: String,
+    pub display_name: String,
+    pub locale: String,
+    pub time_zone: String,
+    pub default_space_id: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// ConversationTopology describes whether a conversation is one-to-one or multi-agent.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum ThreadKind {
-    Private,
-    Space,
+pub enum ConversationTopology {
+    Direct,
+    Group,
+}
+
+/// ParticipantType distinguishes the operator from agents.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum ParticipantType {
+    Operator,
+    Agent,
+}
+
+/// ParticipantRef is the stable envelope for a conversation participant.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub struct ParticipantRef {
+    pub kind: ParticipantType,
+    pub id: String,
 }
 
 /// MessageRole describes who produced one message.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum MessageRole {
-    User,
+    Operator,
     Agent,
     System,
     Tool,
@@ -72,6 +99,7 @@ pub enum TaskKind {
     Response,
     Collaboration,
     Maintenance,
+    Workflow,
 }
 
 /// ArtifactKind distinguishes stored output types.
@@ -83,6 +111,8 @@ pub enum ArtifactKind {
     Report,
     Export,
     Log,
+    Summary,
+    Handoff,
 }
 
 /// AgentSpec is the runtime representation of an agent participant.
@@ -90,26 +120,45 @@ pub enum ArtifactKind {
 pub struct AgentSpec {
     pub id: String,
     pub display_name: String,
+    pub role_kind: String,
     pub default_model: String,
 }
 
-/// SpaceSpec describes a collaboration space.
+/// SpaceSpec describes one project/work container.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SpaceSpec {
     pub id: String,
     pub display_name: String,
+    pub description: String,
+    pub primary_goal: String,
     pub mention_policy: String,
     pub default_agents: Vec<String>,
 }
 
-/// ThreadSpec describes one private or space thread.
+/// ConversationSpec describes one direct or group conversation.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ThreadSpec {
+pub struct ConversationSpec {
     pub id: String,
-    pub kind: ThreadKind,
+    pub topology: ConversationTopology,
     pub owner: OwnerRef,
     pub space_id: Option<String>,
     pub title: String,
+    pub participants: Vec<String>,
+    pub default_lane_id: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// LaneSpec is one work line inside a conversation.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LaneSpec {
+    pub id: String,
+    pub conversation_id: String,
+    pub space_id: Option<String>,
+    pub name: String,
+    pub lane_type: String,
+    pub status: String,
+    pub goal: String,
     pub participants: Vec<String>,
     pub created_at: String,
     pub updated_at: String,
@@ -119,7 +168,8 @@ pub struct ThreadSpec {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MessageSpec {
     pub id: String,
-    pub thread_id: String,
+    pub conversation_id: String,
+    pub lane_id: Option<String>,
     pub sender: String,
     pub role: MessageRole,
     pub body: String,
@@ -132,7 +182,8 @@ pub struct MessageSpec {
 pub struct RunSpec {
     pub id: String,
     pub owner: OwnerRef,
-    pub thread_id: String,
+    pub conversation_id: String,
+    pub lane_id: Option<String>,
     pub trigger: String,
     pub stage: crate::stage::RunStage,
     pub goal: String,
@@ -145,6 +196,8 @@ pub struct RunSpec {
 pub struct TaskSpec {
     pub id: String,
     pub run_id: String,
+    pub conversation_id: String,
+    pub lane_id: Option<String>,
     pub task_kind: TaskKind,
     pub title: String,
     pub assigned_agent_id: String,
@@ -159,7 +212,23 @@ pub struct ArtifactSpec {
     pub id: String,
     pub owner: OwnerRef,
     pub run_id: String,
+    pub conversation_id: Option<String>,
+    pub lane_id: Option<String>,
     pub kind: ArtifactKind,
     pub relative_path: String,
+    pub created_at: String,
+}
+
+/// HandoffSpec describes one cross-lane transfer package.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HandoffSpec {
+    pub id: String,
+    pub from_lane_id: String,
+    pub to_lane_id: String,
+    pub from_agent_id: Option<String>,
+    pub to_agent_id: Option<String>,
+    pub summary: String,
+    pub instructions: String,
+    pub status: String,
     pub created_at: String,
 }

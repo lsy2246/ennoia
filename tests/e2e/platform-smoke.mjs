@@ -28,120 +28,150 @@ try {
   serverHandle = startServer(runtimeDir);
   await waitForServer(baseUrl, serverHandle);
 
-  const privateConversation = await fetchJson(baseUrl, "/api/v1/threads/private/messages", {
+  await fetchJson(baseUrl, "/api/v1/bootstrap/setup", {
     method: "POST",
     body: JSON.stringify({
-      agent_id: "coder",
-      goal: "实现 settings 页面",
-      body: "请整理 settings 页面需求",
+      display_name: "Operator",
+      locale: "zh-CN",
+      time_zone: "Asia/Shanghai",
+      theme_id: "system",
     }),
   });
-  const spaceConversation = await fetchJson(baseUrl, "/api/v1/threads/space/messages", {
+
+  const directConversation = await fetchJson(baseUrl, "/api/v1/conversations", {
     method: "POST",
     body: JSON.stringify({
+      topology: "direct",
+      agent_ids: ["coder"],
+    }),
+  });
+  const groupConversation = await fetchJson(baseUrl, "/api/v1/conversations", {
+    method: "POST",
+    body: JSON.stringify({
+      topology: "group",
       space_id: "studio",
-      addressed_agents: ["coder", "planner"],
-      goal: "整理 roadmap",
-      body: "请一起整理 roadmap",
+      agent_ids: ["coder", "planner"],
     }),
   });
-  const legacyPrivateRun = await fetchJson(baseUrl, "/api/v1/runs/private", {
-    method: "POST",
-    body: JSON.stringify({
-      agent_id: "planner",
-      goal: "整理 phase2 backlog",
-      message: "请整理 phase2 backlog",
-    }),
-  });
+
+  const directEnvelope = await fetchJson(
+    baseUrl,
+    `/api/v1/conversations/${directConversation.conversation.id}/messages`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        lane_id: directConversation.default_lane.id,
+        goal: "实现 settings 页面",
+        body: "请整理 settings 页面需求",
+      }),
+    },
+  );
+  const groupEnvelope = await fetchJson(
+    baseUrl,
+    `/api/v1/conversations/${groupConversation.conversation.id}/messages`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        lane_id: groupConversation.default_lane.id,
+        goal: "整理 roadmap",
+        body: "请一起整理 roadmap",
+      }),
+    },
+  );
+
   const job = await fetchJson(baseUrl, "/api/v1/jobs", {
     method: "POST",
     body: JSON.stringify({
       owner_kind: "space",
       owner_id: "studio",
+      job_kind: "maintenance",
       schedule_kind: "cron",
       schedule_value: "0 */6 * * *",
-      description: "nightly review",
     }),
   });
 
   const overview = await fetchJson(baseUrl, "/api/v1/overview");
-  const threads = await fetchJson(baseUrl, "/api/v1/threads");
-  const privateMessages = await fetchJson(
+  const uiMessages = await fetchJson(
     baseUrl,
-    `/api/v1/threads/${privateConversation.thread.id}/messages`,
+    "/api/v1/ui/messages?locale=zh-CN&namespaces=shell,ext.observatory",
   );
-  const spaceMessages = await fetchJson(
+  const conversations = await fetchJson(baseUrl, "/api/v1/conversations");
+  const directMessages = await fetchJson(
     baseUrl,
-    `/api/v1/threads/${spaceConversation.thread.id}/messages`,
+    `/api/v1/conversations/${directConversation.conversation.id}/messages`,
+  );
+  const groupMessages = await fetchJson(
+    baseUrl,
+    `/api/v1/conversations/${groupConversation.conversation.id}/messages`,
   );
   const runs = await fetchJson(baseUrl, "/api/v1/runs");
   const tasks = await fetchJson(baseUrl, "/api/v1/tasks");
-  const privateRunTasks = await fetchJson(
+  const directRunTasks = await fetchJson(
     baseUrl,
-    `/api/v1/runs/${privateConversation.run.id}/tasks`,
+    `/api/v1/runs/${directEnvelope.run.id}/tasks`,
   );
-  const spaceRunTasks = await fetchJson(
+  const groupRunTasks = await fetchJson(
     baseUrl,
-    `/api/v1/runs/${spaceConversation.run.id}/tasks`,
+    `/api/v1/runs/${groupEnvelope.run.id}/tasks`,
   );
-  const privateArtifacts = await fetchJson(
+  const directArtifacts = await fetchJson(
     baseUrl,
-    `/api/v1/runs/${privateConversation.run.id}/artifacts`,
+    `/api/v1/runs/${directEnvelope.run.id}/artifacts`,
   );
   const artifacts = await fetchJson(baseUrl, "/api/v1/artifacts");
   const jobs = await fetchJson(baseUrl, "/api/v1/jobs");
   const memories = await fetchJson(baseUrl, "/api/v1/memories");
 
   assert(overview.counts.extensions >= 1, "overview should expose extensions count");
-  assert(overview.counts.threads >= 2, "overview should expose thread count");
-  assert(overview.counts.messages >= 3, "overview should expose message count");
-  assert(privateConversation.run.owner.id === "coder", "private run owner should be coder");
-  assert(spaceConversation.run.owner.id === "studio", "space run owner should be studio");
-  assert(legacyPrivateRun.run.owner.id === "planner", "legacy run wrapper should stay available");
+  assert(uiMessages.bundles.length === 2, "ui messages should include requested builtin bundles");
+  assert(overview.counts.conversations >= 2, "overview should expose conversation count");
+  assert(overview.counts.messages >= 2, "overview should expose message count");
+  assert(directEnvelope.run.owner.id === "coder", "direct run owner should be coder");
+  assert(groupEnvelope.run.owner.id === "studio", "group run owner should be studio");
   assert(job.schedule_kind === "cron", "job schedule kind should stay normalized");
-  assert(threads.length >= 2, "threads should include private and space threads");
-  assert(privateMessages.length === 1, "private thread should contain one message");
-  assert(spaceMessages.length === 1, "space thread should contain one message");
-  assert(runs.length >= 3, "runs should include new and legacy run entries");
-  assert(tasks.length >= 4, "tasks should include private, space and legacy planned tasks");
-  assert(privateRunTasks.length === 1, "private run should keep one response task");
-  assert(spaceRunTasks.length === 2, "space run should create one task per addressed agent");
-  assert(privateArtifacts.length === 1, "private run should expose one artifact");
-  assert(artifacts.length >= 3, "artifacts should include all persisted summaries");
+  assert(conversations.length >= 2, "conversations should include direct and group sessions");
+  assert(directMessages.length === 1, "direct conversation should contain one message");
+  assert(groupMessages.length === 1, "group conversation should contain one message");
+  assert(runs.length >= 2, "runs should include direct and group entries");
+  assert(tasks.length >= 3, "tasks should include direct and group planned tasks");
+  assert(directRunTasks.length === 1, "direct run should keep one response task");
+  assert(groupRunTasks.length === 2, "group run should create one task per addressed agent");
+  assert(directArtifacts.length === 1, "direct run should expose one artifact");
+  assert(artifacts.length >= 2, "artifacts should include all persisted summaries");
   assert(jobs.length >= 1, "jobs should include the created job");
-  assert(memories.length >= 3, "memories should include created context records");
+  assert(memories.length >= 2, "memories should include created conversation summaries");
   assert(
-    memories.some((memory) => memory.run_id === privateConversation.run.id),
-    "memory should bind private run id",
+    memories.some((memory) => memory.namespace.includes(directConversation.conversation.id)),
+    "memory should retain direct conversation ledger",
   );
 
-  const privateArtifactPath = join(
+  const directArtifactPath = join(
     runtimeDir,
     "agents",
     "coder",
     "artifacts",
     "runs",
-    privateConversation.run.id,
+    directEnvelope.run.id,
     "summary.json",
   );
-  const spaceArtifactPath = join(
+  const groupArtifactPath = join(
     runtimeDir,
     "spaces",
     "studio",
     "artifacts",
     "runs",
-    spaceConversation.run.id,
+    groupEnvelope.run.id,
     "summary.json",
   );
 
-  assert(existsSync(privateArtifactPath), "private run artifact should exist");
-  assert(existsSync(spaceArtifactPath), "space run artifact should exist");
+  assert(existsSync(directArtifactPath), "direct run artifact should exist");
+  assert(existsSync(groupArtifactPath), "group run artifact should exist");
 
-  const privateArtifact = JSON.parse(readFileSync(privateArtifactPath, "utf8"));
-  const spaceArtifact = JSON.parse(readFileSync(spaceArtifactPath, "utf8"));
+  const directArtifact = JSON.parse(readFileSync(directArtifactPath, "utf8"));
+  const groupArtifact = JSON.parse(readFileSync(groupArtifactPath, "utf8"));
 
-  assert(privateArtifact.goal === "实现 settings 页面", "private artifact goal should match");
-  assert(spaceArtifact.goal === "整理 roadmap", "space artifact goal should match");
+  assert(directArtifact.goal === "实现 settings 页面", "direct artifact goal should match");
+  assert(groupArtifact.goal === "整理 roadmap", "group artifact goal should match");
 
   console.log("[e2e] platform smoke passed");
 } finally {
