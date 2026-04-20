@@ -1,15 +1,19 @@
 use std::env;
 use std::fs;
 use std::fs::OpenOptions;
-use std::io;
+use std::io::{self, Read, Write};
 use std::net::TcpListener;
+use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::mpsc;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use ennoia_assets::templates;
 use ennoia_kernel::{ExtensionManifest, ExtensionSourceMode, ServerConfig};
 use ennoia_paths::RuntimePaths;
 use ennoia_server::{bootstrap_app_state, default_app_state, run_server, AppState};
+use notify::{Config as NotifyConfig, RecommendedWatcher, RecursiveMode, Watcher};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -30,22 +34,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             let server_config: ServerConfig = read_toml_or_default(&paths.server_config_file())?;
             ensure_port_available(server_config.port, "API")?;
             ensure_port_available(5173, "Shell")?;
-            let mut dev_processes = DevProcessGroup::new();
-            dev_processes.start_shell(&paths, &server_config)?;
-            dev_processes.start_extension_frontends(&paths)?;
-            println!("Ennoia dev runtime starting at {}", paths.home().display());
-            println!("Shell: http://127.0.0.1:5173");
-            println!("API: http://{}:{}", server_config.host, server_config.port);
-            println!("Press Ctrl+C to stop API, Shell and extension dev processes.");
-            tokio::select! {
-                result = run_server(paths.home()) => {
-                    result?;
-                }
-                signal = tokio::signal::ctrl_c() => {
-                    signal?;
-                    println!("stopping Ennoia dev runtime...");
-                }
-            }
+            run_dev_supervisor(paths, server_config).await?;
         }
         Some("start") | Some("serve") => {
             let paths = RuntimePaths::resolve(args.get(2).map(String::as_str));
@@ -312,6 +301,252 @@ async fn extension_command(
     Ok(())
 }
 
+const BACKEND_RELOAD_DEBOUNCE: Duration = Duration::from_millis(800);
+const WATCH_POLL_INTERVAL: Duration = Duration::from_millis(250);
+const API_READY_TIMEOUT: Duration = Duration::from_secs(15);
+
+async fn run_dev_supervisor(
+    paths: RuntimePaths,
+    server_config: ServerConfig,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let repo_root = env::current_dir()?;
+    let mut dev_processes = DevProcessGroup::new();
+    dev_processes.start_shell(&paths, &server_config)?;
+    dev_processes.start_extension_frontends(&paths)?;
+
+    let mut api = ApiDevProcess::new(repo_root.clone(), paths.clone(), server_config.clone());
+    api.start_initial().await?;
+
+    let (watch_tx, watch_rx) = mpsc::channel();
+    let _watcher = start_backend_watcher(&repo_root, watch_tx)?;
+
+    println!("Ennoia dev runtime starting at {}", paths.home().display());
+    println!("Shell: http://127.0.0.1:5173");
+    println!("API: http://{}:{}", server_config.host, server_config.port);
+    println!("Backend hot reload: watching crates/, assets/, Cargo.toml and Cargo.lock.");
+    println!("Press Ctrl+C to stop API, Shell and extension dev processes.");
+
+    let mut ticker = tokio::time::interval(WATCH_POLL_INTERVAL);
+    let mut pending_backend_change: Option<Instant> = None;
+
+    loop {
+        tokio::select! {
+            signal = tokio::signal::ctrl_c() => {
+                signal?;
+                println!("stopping Ennoia dev runtime...");
+                break;
+            }
+            _ = ticker.tick() => {
+                let mut saw_change = false;
+                while watch_rx.try_recv().is_ok() {
+                    saw_change = true;
+                }
+                if saw_change {
+                    pending_backend_change = Some(Instant::now());
+                }
+                if pending_backend_change
+                    .map(|changed_at| changed_at.elapsed() >= BACKEND_RELOAD_DEBOUNCE)
+                    .unwrap_or(false)
+                {
+                    pending_backend_change = None;
+                    if let Err(error) = api.rebuild_and_restart().await {
+                        eprintln!("backend hot reload failed: {error}");
+                    }
+                }
+            }
+        }
+    }
+
+    api.stop();
+    drop(dev_processes);
+    Ok(())
+}
+
+struct ApiDevProcess {
+    repo_root: PathBuf,
+    paths: RuntimePaths,
+    server_config: ServerConfig,
+    target_dir: PathBuf,
+    current: Option<ApiChild>,
+}
+
+struct ApiChild {
+    snapshot_path: PathBuf,
+    child: Child,
+}
+
+impl ApiDevProcess {
+    fn new(repo_root: PathBuf, paths: RuntimePaths, server_config: ServerConfig) -> Self {
+        let target_dir = repo_root.join("target").join("ennoia-dev-api");
+        Self {
+            repo_root,
+            paths,
+            server_config,
+            target_dir,
+            current: None,
+        }
+    }
+
+    async fn start_initial(&mut self) -> io::Result<()> {
+        println!("building API dev binary...");
+        let built = self.build_api_binary()?;
+        let snapshot = self.stage_api_binary(&built)?;
+        self.current = Some(self.launch_snapshot(snapshot).await?);
+        println!("started api; log={}", self.api_log_path().display());
+        Ok(())
+    }
+
+    async fn rebuild_and_restart(&mut self) -> io::Result<()> {
+        println!("backend change detected; rebuilding API...");
+        let built = match self.build_api_binary() {
+            Ok(path) => path,
+            Err(error) => {
+                eprintln!(
+                    "backend build failed; keeping previous API process alive; log={}",
+                    self.build_log_path().display()
+                );
+                return Err(error);
+            }
+        };
+        let snapshot = self.stage_api_binary(&built)?;
+        let previous_snapshot = self
+            .current
+            .as_ref()
+            .map(|child| child.snapshot_path.clone());
+
+        if let Some(child) = self.current.as_mut() {
+            child.stop();
+        }
+        self.current = None;
+
+        match self.launch_snapshot(snapshot.clone()).await {
+            Ok(child) => {
+                self.current = Some(child);
+                println!("restarted api from {}", snapshot.display());
+                Ok(())
+            }
+            Err(error) => {
+                eprintln!("new API process failed; attempting rollback: {error}");
+                if let Some(previous_snapshot) = previous_snapshot {
+                    self.current = Some(self.launch_snapshot(previous_snapshot).await?);
+                    eprintln!("rolled back to previous API binary");
+                }
+                Err(error)
+            }
+        }
+    }
+
+    fn stop(&mut self) {
+        if let Some(child) = self.current.as_mut() {
+            child.stop();
+        }
+        self.current = None;
+    }
+
+    fn build_api_binary(&self) -> io::Result<PathBuf> {
+        if let Some(parent) = self.build_log_path().parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let stdout = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(self.build_log_path())?;
+        let stderr = stdout.try_clone()?;
+        let status = Command::new("cargo")
+            .arg("build")
+            .arg("-p")
+            .arg("ennoia-cli")
+            .env("CARGO_TARGET_DIR", &self.target_dir)
+            .current_dir(&self.repo_root)
+            .stdout(Stdio::from(stdout))
+            .stderr(Stdio::from(stderr))
+            .status()?;
+
+        if !status.success() {
+            return Err(io::Error::other(format!(
+                "cargo build -p ennoia-cli failed; log={}",
+                self.build_log_path().display()
+            )));
+        }
+
+        let binary = self.target_dir.join("debug").join(if cfg!(windows) {
+            "ennoia.exe"
+        } else {
+            "ennoia"
+        });
+        if !binary.exists() {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("built API binary not found at {}", binary.display()),
+            ));
+        }
+        Ok(binary)
+    }
+
+    fn stage_api_binary(&self, built_binary: &Path) -> io::Result<PathBuf> {
+        let dir = self.paths.state_cache_dir().join("dev").join("api-bin");
+        fs::create_dir_all(&dir)?;
+        let filename = if cfg!(windows) {
+            format!("ennoia-api-{}.exe", unique_suffix())
+        } else {
+            format!("ennoia-api-{}", unique_suffix())
+        };
+        let snapshot = dir.join(filename);
+        fs::copy(built_binary, &snapshot)?;
+        Ok(snapshot)
+    }
+
+    async fn launch_snapshot(&self, snapshot: PathBuf) -> io::Result<ApiChild> {
+        let stdout = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(self.api_log_path())?;
+        let stderr = stdout.try_clone()?;
+        let mut child = Command::new(&snapshot)
+            .arg("start")
+            .arg(self.paths.home())
+            .current_dir(&self.repo_root)
+            .stdout(Stdio::from(stdout))
+            .stderr(Stdio::from(stderr))
+            .spawn()?;
+
+        if let Err(error) = wait_for_api_ready(&self.server_config, API_READY_TIMEOUT).await {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(error);
+        }
+
+        Ok(ApiChild {
+            snapshot_path: snapshot,
+            child,
+        })
+    }
+
+    fn api_log_path(&self) -> PathBuf {
+        self.paths.server_logs_dir().join("api-dev.log")
+    }
+
+    fn build_log_path(&self) -> PathBuf {
+        self.paths.server_logs_dir().join("api-build.log")
+    }
+}
+
+impl ApiChild {
+    fn stop(&mut self) {
+        if self.child.try_wait().ok().flatten().is_none() {
+            let _ = self.child.kill();
+        }
+        let _ = self.child.wait();
+        println!("stopped api");
+    }
+}
+
+impl Drop for ApiDevProcess {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
 struct DevProcessGroup {
     children: Vec<DevChild>,
 }
@@ -416,6 +651,120 @@ impl Drop for DevProcessGroup {
     }
 }
 
+fn start_backend_watcher(repo_root: &Path, tx: mpsc::Sender<()>) -> io::Result<RecommendedWatcher> {
+    let filter_root = repo_root.to_path_buf();
+    let mut watcher = RecommendedWatcher::new(
+        move |result: Result<notify::Event, notify::Error>| {
+            if let Ok(event) = result {
+                if event
+                    .paths
+                    .iter()
+                    .any(|path| is_backend_reload_path(&filter_root, path))
+                {
+                    let _ = tx.send(());
+                }
+            }
+        },
+        NotifyConfig::default(),
+    )
+    .map_err(io::Error::other)?;
+
+    watch_if_exists(
+        &mut watcher,
+        &repo_root.join("crates"),
+        RecursiveMode::Recursive,
+    )?;
+    watch_if_exists(
+        &mut watcher,
+        &repo_root.join("assets"),
+        RecursiveMode::Recursive,
+    )?;
+    watch_if_exists(
+        &mut watcher,
+        &repo_root.join("Cargo.toml"),
+        RecursiveMode::NonRecursive,
+    )?;
+    watch_if_exists(
+        &mut watcher,
+        &repo_root.join("Cargo.lock"),
+        RecursiveMode::NonRecursive,
+    )?;
+
+    Ok(watcher)
+}
+
+fn watch_if_exists(
+    watcher: &mut RecommendedWatcher,
+    path: &Path,
+    mode: RecursiveMode,
+) -> io::Result<()> {
+    if path.exists() {
+        watcher.watch(path, mode).map_err(io::Error::other)?;
+    }
+    Ok(())
+}
+
+fn is_backend_reload_path(repo_root: &Path, path: &Path) -> bool {
+    let Ok(relative) = path.strip_prefix(repo_root) else {
+        return false;
+    };
+    if relative.starts_with("target") || relative.starts_with("web") {
+        return false;
+    }
+    if relative == Path::new("Cargo.toml") || relative == Path::new("Cargo.lock") {
+        return true;
+    }
+    if !(relative.starts_with("crates") || relative.starts_with("assets")) {
+        return false;
+    }
+    match path.extension().and_then(|value| value.to_str()) {
+        Some("rs" | "toml" | "sql" | "json" | "js" | "ts" | "css" | "html") => true,
+        None => true,
+        _ => false,
+    }
+}
+
+async fn wait_for_api_ready(config: &ServerConfig, timeout: Duration) -> io::Result<()> {
+    let started = Instant::now();
+    loop {
+        let host = config.host.clone();
+        let port = config.port;
+        if tokio::task::spawn_blocking(move || probe_api_health(&host, port))
+            .await
+            .unwrap_or(false)
+        {
+            return Ok(());
+        }
+        if started.elapsed() >= timeout {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                format!("API did not become ready within {}s", timeout.as_secs()),
+            ));
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+}
+
+fn probe_api_health(host: &str, port: u16) -> bool {
+    let Ok(mut stream) = TcpStream::connect((host, port)) else {
+        return false;
+    };
+    let _ = stream.set_read_timeout(Some(Duration::from_millis(800)));
+    let _ = stream.set_write_timeout(Some(Duration::from_millis(800)));
+    if stream
+        .write_all(format!("GET /health HTTP/1.1\r\nHost: {host}:{port}\r\n\r\n").as_bytes())
+        .is_err()
+    {
+        return false;
+    }
+
+    let mut buffer = [0_u8; 128];
+    match stream.read(&mut buffer) {
+        Ok(count) => String::from_utf8_lossy(&buffer[..count]).contains("200 OK"),
+        Err(_) => false,
+    }
+}
+
 fn shell_command(command: &str, cwd: &Path) -> Command {
     if cfg!(windows) {
         let mut item = Command::new("powershell.exe");
@@ -432,6 +781,14 @@ fn shell_command(command: &str, cwd: &Path) -> Command {
         item.arg("-lc").arg(command).current_dir(cwd);
         item
     }
+}
+
+fn unique_suffix() -> String {
+    let millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    millis.to_string()
 }
 
 fn ensure_port_available(port: u16, label: &str) -> io::Result<()> {

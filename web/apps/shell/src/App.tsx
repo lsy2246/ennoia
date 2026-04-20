@@ -3,20 +3,19 @@ import { useEffect } from "react";
 
 import { router } from "@/router";
 import { useRuntimeStore } from "@/stores/runtime";
-import { subscribeUiRuntime, useUiStore } from "@/stores/ui";
+import { useUiHelpers, useUiStore } from "@/stores/ui";
 
 export function App() {
   const runtimeHydrate = useRuntimeStore((state) => state.hydrate);
   const runtimeStatus = useRuntimeStore((state) => state.status);
   const uiHydrate = useUiStore((state) => state.hydrate);
   const uiStatus = useUiStore((state) => state.status);
+  const { t } = useUiHelpers();
 
   useEffect(() => {
     runtimeHydrate();
     uiHydrate();
   }, [runtimeHydrate, uiHydrate]);
-
-  useEffect(() => subscribeUiRuntime(), []);
 
   if (
     runtimeStatus === "idle" ||
@@ -26,7 +25,7 @@ export function App() {
   ) {
     return (
       <div className="page page--centered">
-        <p>Connecting to Ennoia…</p>
+        <p>{t("shell.loading.connecting", "Connecting to Ennoia…")}</p>
       </div>
     );
   }

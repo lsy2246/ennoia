@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::path::{Path as StdPath, PathBuf};
 use std::time::Duration;
 
 use axum::{
@@ -7,9 +8,9 @@ use axum::{
     http::header,
     http::StatusCode,
     middleware as axum_middleware,
-    response::sse::{Event, Sse},
+    response::sse::{Event, KeepAlive, Sse},
     response::IntoResponse,
-    routing::{delete, get, post},
+    routing::{delete, get, post, put},
     Extension, Json, Router,
 };
 use chrono::Utc;
@@ -36,7 +37,7 @@ use serde_json::Value as JsonValue;
 use uuid::Uuid;
 
 use crate::app::AppState;
-use crate::db::{self, JobRow, LogRecordRow};
+use crate::db::{self, JobDetailRow, JobRow, LogRecordRow};
 use crate::middleware::{
     body_limit_middleware, cors_middleware, logging_middleware, rate_limit_middleware,
     request_context_middleware, timeout_middleware,
@@ -106,6 +107,10 @@ pub fn build_router(state: AppState) -> Router {
             get(space_ui_preferences).put(space_ui_preferences_put),
         )
         .route("/api/v1/extensions", get(extensions))
+        .route(
+            "/api/v1/extensions/{extension_id}/enabled",
+            put(extension_enabled_put),
+        )
         .route("/api/v1/extensions/runtime", get(extensions_runtime))
         .route("/api/v1/extensions/events", get(extension_events))
         .route(
@@ -127,6 +132,10 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/api/v1/extensions/{extension_id}/frontend/module",
             get(extension_frontend_module),
+        )
+        .route(
+            "/api/v1/extensions/{extension_id}/themes/{theme_id}/stylesheet",
+            get(extension_theme_stylesheet),
         )
         .route(
             "/api/v1/extensions/{extension_id}/logs",
@@ -159,6 +168,13 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/memories/recall", post(memories_recall))
         .route("/api/v1/memories/review", post(memories_review))
         .route("/api/v1/jobs", get(jobs_list).post(jobs_create))
+        .route(
+            "/api/v1/jobs/{job_id}",
+            get(job_detail).put(job_update).delete(job_delete),
+        )
+        .route("/api/v1/jobs/{job_id}/run", post(job_run_now))
+        .route("/api/v1/jobs/{job_id}/enable", post(job_enable))
+        .route("/api/v1/jobs/{job_id}/disable", post(job_disable))
         .merge(bootstrap)
         .merge(runtime)
         .merge(conversations)
@@ -374,6 +390,48 @@ struct CreateJobRequest {
 }
 
 #[derive(Debug, Deserialize)]
+struct UpdateJobRequest {
+    #[serde(default)]
+    job_kind: Option<String>,
+    #[serde(default)]
+    schedule_kind: Option<String>,
+    #[serde(default)]
+    schedule_value: Option<String>,
+    #[serde(default)]
+    payload: Option<JsonValue>,
+    #[serde(default)]
+    max_retries: Option<u32>,
+    #[serde(default)]
+    run_at: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ExtensionEnabledPayload {
+    enabled: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct ExtensionWorkbenchRecord {
+    id: String,
+    name: String,
+    enabled: bool,
+    status: String,
+    version: String,
+    kind: String,
+    source_mode: String,
+    install_dir: String,
+    source_root: String,
+    diagnostics: Vec<ExtensionDiagnostic>,
+}
+
+#[derive(Debug, Deserialize)]
+struct LegacyExtensionConfigFileRecord {
+    #[serde(default)]
+    enabled: bool,
+    install_dir: String,
+}
+
+#[derive(Debug, Deserialize)]
 struct RememberPayload {
     owner_kind: String,
     owner_id: String,
@@ -570,10 +628,19 @@ async fn ui_messages(
         .filter(|items| !items.is_empty())
         .unwrap_or_else(builtin_message_namespaces);
 
+    let snapshot = state.extensions.snapshot();
     let bundles = namespaces
         .iter()
         .filter_map(|namespace| {
-            builtin_message_bundle(&locale, &state.ui_config.fallback_locale, namespace)
+            extension_message_bundle(
+                &snapshot.locales,
+                &locale,
+                &state.ui_config.fallback_locale,
+                namespace,
+            )
+            .or_else(|| {
+                builtin_message_bundle(&locale, &state.ui_config.fallback_locale, namespace)
+            })
         })
         .collect::<Vec<_>>();
 
@@ -584,8 +651,8 @@ async fn ui_messages(
     })
 }
 
-async fn extensions(State(state): State<AppState>) -> Json<Vec<ResolvedExtensionSnapshot>> {
-    Json(state.extensions.snapshot().extensions)
+async fn extensions(State(state): State<AppState>) -> Json<Vec<ExtensionWorkbenchRecord>> {
+    Json(list_extension_workbench_records(&state))
 }
 
 async fn extensions_runtime(State(state): State<AppState>) -> Json<ExtensionRuntimeSnapshot> {
@@ -628,7 +695,7 @@ async fn extension_events_stream(
 ) -> Sse<impl futures_core::Stream<Item = Result<Event, std::convert::Infallible>>> {
     let extensions = state.extensions.clone();
     let stream = async_stream::stream! {
-        let mut last_generation = 0_u64;
+        let mut last_generation = extensions.snapshot().generation;
         loop {
             let snapshot = extensions.snapshot();
             if snapshot.generation > last_generation {
@@ -643,7 +710,7 @@ async fn extension_events_stream(
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
     };
-    Sse::new(stream)
+    Sse::new(stream).keep_alive(KeepAlive::default())
 }
 
 async fn extension_detail(
@@ -704,6 +771,38 @@ async fn extension_frontend_module(
     };
 
     Ok(([(header::CONTENT_TYPE, "application/javascript")], body))
+}
+
+async fn extension_theme_stylesheet(
+    State(state): State<AppState>,
+    Extension(request): Extension<RequestContext>,
+    Path((extension_id, theme_id)): Path<(String, String)>,
+) -> Result<impl IntoResponse, ApiError> {
+    let extension = state.extensions.get(&extension_id).ok_or_else(|| {
+        scoped(
+            ApiError::not_found(format!("extension '{extension_id}' not found")),
+            &request,
+        )
+    })?;
+    let theme = extension
+        .themes
+        .iter()
+        .find(|item| item.id == theme_id)
+        .ok_or_else(|| {
+            scoped(
+                ApiError::not_found(format!(
+                    "theme '{theme_id}' not found in extension '{extension_id}'"
+                )),
+                &request,
+            )
+        })?;
+    let source_root = PathBuf::from(&extension.source_root);
+    let stylesheet_path = resolve_safe_extension_asset(&source_root, &theme.tokens_entry)
+        .map_err(|error| scoped(ApiError::bad_request(error.to_string()), &request))?;
+    let body = fs::read_to_string(stylesheet_path)
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?;
+
+    Ok(([(header::CONTENT_TYPE, "text/css; charset=utf-8")], body))
 }
 
 async fn extension_logs(
@@ -798,6 +897,45 @@ async fn extension_detach(
     Ok(StatusCode::NO_CONTENT)
 }
 
+async fn extension_enabled_put(
+    State(state): State<AppState>,
+    Extension(request): Extension<RequestContext>,
+    Path(extension_id): Path<String>,
+    Json(payload): Json<ExtensionEnabledPayload>,
+) -> ApiResult<ExtensionWorkbenchRecord> {
+    let existing_records = list_extension_workbench_records(&state);
+    let existing = existing_records
+        .into_iter()
+        .find(|item| item.id == extension_id)
+        .ok_or_else(|| {
+            scoped(
+                ApiError::not_found(format!("extension '{extension_id}' not found")),
+                &request,
+            )
+        })?;
+
+    state
+        .extensions
+        .set_legacy_extension_enabled(&extension_id, &existing.install_dir, payload.enabled)
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?;
+
+    let snapshot = state.extensions.snapshot();
+    let _ = db::upsert_extensions_runtime(&state.pool, &snapshot).await;
+    let updated = list_extension_workbench_records(&state)
+        .into_iter()
+        .find(|item| item.id == extension_id)
+        .unwrap_or(ExtensionWorkbenchRecord {
+            enabled: payload.enabled,
+            status: if payload.enabled {
+                "ready".to_string()
+            } else {
+                "disabled".to_string()
+            },
+            ..existing
+        });
+    Ok(Json(updated))
+}
+
 async fn agents(State(state): State<AppState>) -> Json<Vec<ennoia_kernel::AgentConfig>> {
     Json(state.agents)
 }
@@ -824,12 +962,26 @@ async fn bootstrap_setup(
     }
 
     let now = now_iso();
+    let locale = ensure_supported_locale(
+        &state,
+        &request,
+        payload
+            .locale
+            .unwrap_or_else(|| state.ui_config.default_locale.clone()),
+    )?;
+    let theme_id = ensure_supported_theme_id(
+        &state,
+        &request,
+        payload
+            .theme_id
+            .unwrap_or_else(|| state.ui_config.default_theme.clone()),
+    )?;
     let profile = WorkspaceProfile {
         id: "workspace".to_string(),
         display_name: payload
             .display_name
             .unwrap_or_else(|| "Operator".to_string()),
-        locale: payload.locale.unwrap_or_else(|| "zh-CN".to_string()),
+        locale,
         time_zone: payload
             .time_zone
             .unwrap_or_else(|| "Asia/Shanghai".to_string()),
@@ -845,9 +997,7 @@ async fn bootstrap_setup(
 
     let preference = UiPreference {
         locale: Some(saved_profile.locale.clone()),
-        theme_id: payload
-            .theme_id
-            .or_else(|| Some(state.ui_config.default_theme.clone())),
+        theme_id: Some(theme_id),
         time_zone: Some(saved_profile.time_zone.clone()),
         date_style: payload.date_style,
         density: payload.density,
@@ -897,6 +1047,10 @@ async fn runtime_profile_put(
         .await
         .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?;
     let now = now_iso();
+    let requested_locale = payload
+        .locale
+        .map(|locale| ensure_supported_locale(&state, &request, locale))
+        .transpose()?;
     let profile = WorkspaceProfile {
         id: current
             .as_ref()
@@ -906,10 +1060,9 @@ async fn runtime_profile_put(
             .display_name
             .or_else(|| current.as_ref().map(|profile| profile.display_name.clone()))
             .unwrap_or_else(|| "Operator".to_string()),
-        locale: payload
-            .locale
+        locale: requested_locale
             .or_else(|| current.as_ref().map(|profile| profile.locale.clone()))
-            .unwrap_or_else(|| "zh-CN".to_string()),
+            .unwrap_or_else(|| state.ui_config.default_locale.clone()),
         time_zone: payload
             .time_zone
             .or_else(|| current.as_ref().map(|profile| profile.time_zone.clone()))
@@ -948,6 +1101,7 @@ async fn runtime_preferences_put(
     let current = db::get_instance_ui_preference(&state.pool)
         .await
         .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?;
+    validate_ui_preference_payload(&state, &request, &payload)?;
     let preference = merge_ui_preference(current.as_ref().map(|row| &row.preference), payload);
     let saved = db::upsert_instance_ui_preference(&state.pool, &preference)
         .await
@@ -975,6 +1129,7 @@ async fn space_ui_preferences_put(
     let current = db::get_space_ui_preference(&state.pool, &space_id)
         .await
         .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?;
+    validate_ui_preference_payload(&state, &request, &payload)?;
     let preference = merge_ui_preference(current.as_ref().map(|row| &row.preference), payload);
     let saved = db::upsert_space_ui_preference(&state.pool, &space_id, &preference)
         .await
@@ -1408,6 +1563,106 @@ async fn jobs_create(
         .map_err(|error| scoped(ApiError::bad_request(error.to_string()), &request))
 }
 
+async fn job_detail(
+    State(state): State<AppState>,
+    Extension(request): Extension<RequestContext>,
+    Path(job_id): Path<String>,
+) -> ApiResult<JobDetailRow> {
+    db::get_job(&state.pool, &job_id)
+        .await
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?
+        .map(Json)
+        .ok_or_else(|| scoped(ApiError::not_found("job not found"), &request))
+}
+
+async fn job_update(
+    State(state): State<AppState>,
+    Extension(request): Extension<RequestContext>,
+    Path(job_id): Path<String>,
+    Json(payload): Json<UpdateJobRequest>,
+) -> ApiResult<JobDetailRow> {
+    let current = db::get_job(&state.pool, &job_id)
+        .await
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?
+        .ok_or_else(|| scoped(ApiError::not_found("job not found"), &request))?;
+    let payload_json = payload
+        .payload
+        .map(|value| serde_json::to_string(&value).unwrap_or_else(|_| "null".to_string()))
+        .unwrap_or(current.payload_json.clone());
+    let updated = db::update_job(
+        &state.pool,
+        &job_id,
+        payload.job_kind.as_deref().unwrap_or(&current.job_kind),
+        payload
+            .schedule_kind
+            .as_deref()
+            .unwrap_or(&current.schedule_kind),
+        payload
+            .schedule_value
+            .as_deref()
+            .unwrap_or(&current.schedule_value),
+        &payload_json,
+        payload.run_at.or(current.next_run_at),
+        payload.max_retries.unwrap_or(current.max_retries),
+    )
+    .await
+    .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?;
+
+    updated
+        .map(Json)
+        .ok_or_else(|| scoped(ApiError::not_found("job not found"), &request))
+}
+
+async fn job_run_now(
+    State(state): State<AppState>,
+    Extension(request): Extension<RequestContext>,
+    Path(job_id): Path<String>,
+) -> ApiResult<JobDetailRow> {
+    db::run_job_now(&state.pool, &job_id)
+        .await
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?
+        .map(Json)
+        .ok_or_else(|| scoped(ApiError::not_found("job not found"), &request))
+}
+
+async fn job_enable(
+    State(state): State<AppState>,
+    Extension(request): Extension<RequestContext>,
+    Path(job_id): Path<String>,
+) -> ApiResult<JobDetailRow> {
+    db::set_job_status(&state.pool, &job_id, "pending")
+        .await
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?
+        .map(Json)
+        .ok_or_else(|| scoped(ApiError::not_found("job not found"), &request))
+}
+
+async fn job_disable(
+    State(state): State<AppState>,
+    Extension(request): Extension<RequestContext>,
+    Path(job_id): Path<String>,
+) -> ApiResult<JobDetailRow> {
+    db::set_job_status(&state.pool, &job_id, "disabled")
+        .await
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?
+        .map(Json)
+        .ok_or_else(|| scoped(ApiError::not_found("job not found"), &request))
+}
+
+async fn job_delete(
+    State(state): State<AppState>,
+    Extension(request): Extension<RequestContext>,
+    Path(job_id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    let deleted = db::delete_job(&state.pool, &job_id)
+        .await
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?;
+    if !deleted {
+        return Err(scoped(ApiError::not_found("job not found"), &request));
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
 async fn config_list(State(state): State<AppState>) -> Json<Vec<ConfigEntry>> {
     let raw = state.system_config.store.list().await.unwrap_or_default();
     Json(ensure_full_config_set(raw))
@@ -1806,6 +2061,72 @@ fn builtin_message_bundle(
     })
 }
 
+fn extension_message_bundle(
+    locales: &[RegisteredLocaleContribution],
+    locale: &str,
+    fallback_locale: &str,
+    namespace: &str,
+) -> Option<UiMessageBundleResponse> {
+    let contribution =
+        select_registered_locale_contribution(locales, locale, fallback_locale, namespace)?;
+    let source_root = PathBuf::from(&contribution.install_dir);
+    let message_path =
+        resolve_safe_extension_asset(&source_root, &contribution.locale.entry).ok()?;
+    let messages = fs::read_to_string(message_path).ok()?;
+    let parsed = serde_json::from_str::<HashMap<String, String>>(&messages).ok()?;
+
+    Some(UiMessageBundleResponse {
+        locale: locale.to_string(),
+        resolved_locale: contribution.locale.locale.clone(),
+        namespace: namespace.to_string(),
+        messages: parsed,
+        source: format!("extension:{}", contribution.extension_id),
+        version: contribution.locale.version.clone(),
+    })
+}
+
+fn select_registered_locale_contribution<'a>(
+    locales: &'a [RegisteredLocaleContribution],
+    locale: &str,
+    fallback_locale: &str,
+    namespace: &str,
+) -> Option<&'a RegisteredLocaleContribution> {
+    let candidates = locales
+        .iter()
+        .filter(|item| item.locale.namespace == namespace)
+        .collect::<Vec<_>>();
+    if candidates.is_empty() {
+        return None;
+    }
+
+    find_registered_locale_match(&candidates, locale)
+        .or_else(|| find_registered_locale_match(&candidates, fallback_locale))
+}
+
+fn find_registered_locale_match<'a>(
+    candidates: &[&'a RegisteredLocaleContribution],
+    locale: &str,
+) -> Option<&'a RegisteredLocaleContribution> {
+    let normalized = locale.to_lowercase();
+    let language = normalized.split('-').next().unwrap_or_default();
+
+    candidates
+        .iter()
+        .copied()
+        .find(|item| item.locale.locale.to_lowercase() == normalized)
+        .or_else(|| {
+            candidates.iter().copied().find(|item| {
+                item.locale
+                    .locale
+                    .to_lowercase()
+                    .split('-')
+                    .next()
+                    .unwrap_or_default()
+                    == language
+            })
+        })
+}
+
 fn select_messages_for_locale(
     locale: &str,
     fallback_locale: &str,
@@ -1945,6 +2266,83 @@ fn now_iso() -> String {
     Utc::now().to_rfc3339()
 }
 
+const BUILTIN_THEME_IDS: &[&str] = &[
+    "system",
+    "ennoia.midnight",
+    "ennoia.paper",
+    "observatory.daybreak",
+];
+
+fn ensure_supported_locale(
+    state: &AppState,
+    request: &RequestContext,
+    locale: String,
+) -> Result<String, ApiError> {
+    if state
+        .ui_config
+        .available_locales
+        .iter()
+        .any(|item| item == &locale)
+    {
+        return Ok(locale);
+    }
+    Err(scoped(
+        ApiError::bad_request(format!("unsupported locale '{locale}'")),
+        request,
+    ))
+}
+
+fn ensure_supported_theme_id(
+    state: &AppState,
+    request: &RequestContext,
+    theme_id: String,
+) -> Result<String, ApiError> {
+    if supported_theme_ids(state).contains(&theme_id) {
+        return Ok(theme_id);
+    }
+    Err(scoped(
+        ApiError::bad_request(format!("unsupported theme '{theme_id}'")),
+        request,
+    ))
+}
+
+fn validate_ui_preference_payload(
+    state: &AppState,
+    request: &RequestContext,
+    payload: &UiPreferencePayload,
+) -> Result<(), ApiError> {
+    if let Some(locale) = &payload.locale {
+        ensure_supported_locale(state, request, locale.clone())?;
+    }
+    if let Some(theme_id) = &payload.theme_id {
+        ensure_supported_theme_id(state, request, theme_id.clone())?;
+    }
+    Ok(())
+}
+
+fn supported_theme_ids(state: &AppState) -> HashSet<String> {
+    let mut ids = BUILTIN_THEME_IDS
+        .iter()
+        .map(|item| item.to_string())
+        .collect::<HashSet<_>>();
+    for theme in state.extensions.snapshot().themes {
+        ids.insert(theme.theme.id);
+    }
+    ids
+}
+
+fn resolve_safe_extension_asset(root: &StdPath, entry: &str) -> std::io::Result<PathBuf> {
+    let canonical_root = fs::canonicalize(root)?;
+    let canonical_asset = fs::canonicalize(root.join(entry))?;
+    if !canonical_asset.starts_with(&canonical_root) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "extension asset must stay inside the extension root",
+        ));
+    }
+    Ok(canonical_asset)
+}
+
 fn to_preference_record(row: db::UiPreferenceRow) -> UiPreferenceRecord {
     UiPreferenceRecord {
         subject_id: row.subject_id,
@@ -1996,4 +2394,83 @@ fn ensure_full_config_set(mut rows: Vec<ConfigEntry>) -> Vec<ConfigEntry> {
     }
     rows.sort_by(|left, right| left.key.cmp(&right.key));
     rows
+}
+
+fn list_extension_workbench_records(state: &AppState) -> Vec<ExtensionWorkbenchRecord> {
+    let mut by_id = state
+        .extensions
+        .snapshot()
+        .extensions
+        .into_iter()
+        .map(|item| (item.id.clone(), map_extension_workbench_record(&item)))
+        .collect::<HashMap<_, _>>();
+
+    let config_dir = state.runtime_paths.extensions_config_dir();
+    if let Ok(entries) = fs::read_dir(config_dir) {
+        for entry in entries.flatten() {
+            if !entry
+                .file_type()
+                .map(|kind| kind.is_file())
+                .unwrap_or(false)
+            {
+                continue;
+            }
+            let path = entry.path();
+            let Some(id) = path.file_stem().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            let Ok(contents) = fs::read_to_string(&path) else {
+                continue;
+            };
+            let Ok(record) = toml::from_str::<LegacyExtensionConfigFileRecord>(&contents) else {
+                continue;
+            };
+            by_id
+                .entry(id.to_string())
+                .or_insert(ExtensionWorkbenchRecord {
+                    id: id.to_string(),
+                    name: id.to_string(),
+                    enabled: record.enabled,
+                    status: if record.enabled {
+                        "ready".to_string()
+                    } else {
+                        "disabled".to_string()
+                    },
+                    version: "unknown".to_string(),
+                    kind: "extension".to_string(),
+                    source_mode: "package".to_string(),
+                    install_dir: record.install_dir.clone(),
+                    source_root: record.install_dir,
+                    diagnostics: Vec::new(),
+                });
+        }
+    }
+
+    let mut items = by_id.into_values().collect::<Vec<_>>();
+    items.sort_by(|left, right| left.id.cmp(&right.id));
+    items
+}
+
+fn map_extension_workbench_record(
+    extension: &ResolvedExtensionSnapshot,
+) -> ExtensionWorkbenchRecord {
+    ExtensionWorkbenchRecord {
+        id: extension.id.clone(),
+        name: extension.name.clone(),
+        enabled: !matches!(extension.health, ennoia_kernel::ExtensionHealth::Stopped),
+        status: match extension.health {
+            ennoia_kernel::ExtensionHealth::Ready => "ready".to_string(),
+            ennoia_kernel::ExtensionHealth::Failed => "failed".to_string(),
+            ennoia_kernel::ExtensionHealth::Degraded => "degraded".to_string(),
+            ennoia_kernel::ExtensionHealth::Stopped => "disabled".to_string(),
+            ennoia_kernel::ExtensionHealth::Discovering => "discovering".to_string(),
+            ennoia_kernel::ExtensionHealth::Resolving => "resolving".to_string(),
+        },
+        version: extension.version.clone(),
+        kind: format!("{:?}", extension.kind),
+        source_mode: format!("{:?}", extension.source_mode),
+        install_dir: extension.install_dir.clone(),
+        source_root: extension.source_root.clone(),
+        diagnostics: extension.diagnostics.clone(),
+    }
 }

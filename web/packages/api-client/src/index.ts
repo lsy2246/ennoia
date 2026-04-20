@@ -1,13 +1,8 @@
 import type {
-  ExtensionCommandContribution,
   ExtensionDiagnostic,
-  ExtensionHookContribution,
   ExtensionLocaleContribution,
   ExtensionPageContribution,
   ExtensionPanelContribution,
-  ExtensionProviderContribution,
-  ExtensionRuntimeExtension,
-  ExtensionRuntimeSnapshot,
   ExtensionThemeContribution,
   LocalizedText,
 } from "@ennoia/ui-sdk";
@@ -21,236 +16,9 @@ export function getApiBaseUrl() {
   return API_BASE;
 }
 
-export type Overview = {
-  app_name: string;
-  shell_title: LocalizedText;
-  default_theme: string;
-  modules: string[];
-  counts: Record<string, number>;
-};
-
-export type Agent = {
-  id: string;
-  display_name: string;
-  kind: string;
-  workspace_mode: string;
-  default_model: string;
-  skills_dir: string;
-  workspace_dir: string;
-  artifacts_dir: string;
-};
-
-export type Space = {
-  id: string;
-  display_name: string;
-  description: string;
-  primary_goal: string;
-  mention_policy: string;
-  default_agents: string[];
-};
-
-export type WorkspaceProfile = {
-  id: string;
-  display_name: string;
-  locale: string;
-  time_zone: string;
-  default_space_id?: string | null;
-  created_at: string;
-  updated_at: string;
-};
-
-export type Conversation = {
-  id: string;
-  topology: "direct" | "group";
-  owner: { kind: string; id: string };
-  space_id?: string | null;
-  title: string;
-  participants: string[];
-  default_lane_id?: string | null;
-  created_at: string;
-  updated_at: string;
-};
-
-export type Lane = {
-  id: string;
-  conversation_id: string;
-  space_id?: string | null;
-  name: string;
-  lane_type: string;
-  status: string;
-  goal: string;
-  participants: string[];
-  created_at: string;
-  updated_at: string;
-};
-
-export type Message = {
-  id: string;
-  conversation_id: string;
-  lane_id?: string | null;
-  sender: string;
-  role: string;
-  body: string;
-  mentions: string[];
-  created_at: string;
-};
-
-export type Run = {
-  id: string;
-  owner: { kind: string; id: string };
-  conversation_id: string;
-  lane_id?: string | null;
-  trigger: string;
-  stage: string;
-  goal: string;
-  created_at: string;
-  updated_at: string;
-};
-
-export type Task = {
-  id: string;
-  run_id: string;
-  conversation_id: string;
-  lane_id?: string | null;
-  task_kind: string;
-  title: string;
-  assigned_agent_id: string;
-  status: string;
-  created_at: string;
-  updated_at: string;
-};
-
-export type Artifact = {
-  id: string;
-  owner: { kind: string; id: string };
-  run_id: string;
-  conversation_id?: string | null;
-  lane_id?: string | null;
-  kind: string;
-  relative_path: string;
-  created_at: string;
-};
-
-export type Handoff = {
-  id: string;
-  from_lane_id: string;
-  to_lane_id: string;
-  from_agent_id?: string | null;
-  to_agent_id?: string | null;
-  summary: string;
-  instructions: string;
-  status: string;
-  created_at: string;
-};
-
-export type Memory = {
-  id: string;
-  owner: { kind: string; id: string };
-  namespace: string;
-  memory_kind: string;
-  stability: string;
-  status: string;
-  title?: string | null;
-  content: string;
-  summary?: string | null;
-  confidence: number;
-  importance: number;
-  sources: { kind: string; reference: string }[];
-  tags: string[];
-  entities: string[];
-  created_at: string;
-  updated_at: string;
-};
-
-export type Job = {
-  id: string;
-  owner_kind: string;
-  owner_id: string;
-  job_kind: string;
-  schedule_kind: string;
-  schedule_value: string;
-  status: string;
-  next_run_at?: string | null;
-  created_at: string;
-};
-
-export type LogRecord = {
-  id: string;
-  kind: string;
-  level: string;
-  title: string;
-  summary: string;
-  run_id?: string | null;
-  task_id?: string | null;
-  at: string;
-};
-
-export type RunStageEvent = {
-  id: string;
-  run_id: string;
-  from_stage?: string | null;
-  to_stage: string;
-  policy_rule_id?: string | null;
-  reason?: string | null;
-  at: string;
-};
-
-export type DecisionSnapshot = {
-  id: string;
-  run_id?: string | null;
-  task_id?: string | null;
-  stage: string;
-  signals_json: string;
-  next_action: string;
-  policy_rule_id: string;
-  at: string;
-};
-
-export type GateRecord = {
-  id: string;
-  run_id?: string | null;
-  task_id?: string | null;
-  gate_name: string;
-  verdict: string;
-  reason?: string | null;
-  details_json: string;
-  at: string;
-};
-
-export type RememberReceipt = {
-  receipt_id: string;
-  memory_id: string;
-  action: string;
-  policy_rule_id?: string | null;
-  created_at: string;
-};
-
-export type RecallResult = {
-  memories: Memory[];
-  receipt_id: string;
-  mode: string;
-  total_chars: number;
-};
-
-export type ReviewReceipt = {
-  receipt_id: string;
-  target_memory_id: string;
-  action: string;
-  old_status?: string | null;
-  new_status: string;
-  reviewer: string;
-  created_at: string;
-};
-
 export type BootstrapState = {
   is_initialized: boolean;
   initialized_at?: string | null;
-};
-
-export type BootstrapSetupResponse = {
-  bootstrap: BootstrapState;
-  profile: WorkspaceProfile;
-  preference: UiPreferenceRecord;
 };
 
 export type UiPreference = {
@@ -311,7 +79,222 @@ export type UiMessagesResponse = {
   bundles: UiMessageBundle[];
 };
 
-export type ConfigEntry = {
+export type WorkspaceProfile = {
+  id: string;
+  display_name: string;
+  locale: string;
+  time_zone: string;
+  default_space_id?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type BootstrapSetupResponse = {
+  bootstrap: BootstrapState;
+  profile: WorkspaceProfile;
+  preference: UiPreferenceRecord;
+};
+
+export type AgentProfile = {
+  id: string;
+  display_name: string;
+  kind: string;
+  workspace_mode: string;
+  default_model: string;
+  skills_dir: string;
+  workspace_dir: string;
+  artifacts_dir: string;
+};
+
+export type ChatThread = {
+  id: string;
+  topology: "direct" | "group";
+  owner: { kind: string; id: string };
+  title: string;
+  participants: string[];
+  default_lane_id?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ChatLane = {
+  id: string;
+  conversation_id: string;
+  name: string;
+  lane_type: string;
+  status: string;
+  goal: string;
+  participants: string[];
+  created_at: string;
+  updated_at: string;
+};
+
+export type ChatMessage = {
+  id: string;
+  conversation_id: string;
+  lane_id?: string | null;
+  sender: string;
+  role: "operator" | "agent" | "system" | "tool";
+  body: string;
+  mentions: string[];
+  created_at: string;
+};
+
+export type ExecutionRun = {
+  id: string;
+  owner: { kind: string; id: string };
+  conversation_id: string;
+  lane_id?: string | null;
+  trigger: string;
+  stage: string;
+  goal: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ExecutionStep = {
+  id: string;
+  run_id: string;
+  conversation_id: string;
+  lane_id?: string | null;
+  task_kind: string;
+  title: string;
+  assigned_agent_id: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type RunOutput = {
+  id: string;
+  owner: { kind: string; id: string };
+  run_id: string;
+  conversation_id?: string | null;
+  lane_id?: string | null;
+  kind: string;
+  relative_path: string;
+  created_at: string;
+};
+
+export type DelegationThread = {
+  id: string;
+  parent_message_id: string;
+  title: string;
+  summary: string;
+  status: string;
+  participants: string[];
+  created_at: string;
+};
+
+export type DelegationMessage = {
+  id: string;
+  sender: string;
+  role: "system" | "agent" | "tool";
+  body: string;
+  created_at: string;
+};
+
+export type ChatThreadDetail = {
+  thread: ChatThread;
+  lanes: ChatLane[];
+  messages: ChatMessage[];
+  runs: ExecutionRun[];
+  tasks: ExecutionStep[];
+  outputs: RunOutput[];
+  delegations: DelegationThread[];
+};
+
+export type ChatSendResponse = {
+  conversation: ChatThread;
+  lane: ChatLane;
+  message: ChatMessage;
+  run: ExecutionRun;
+  tasks: ExecutionStep[];
+  artifacts: RunOutput[];
+};
+
+export type Schedule = {
+  id: string;
+  owner_kind: string;
+  owner_id: string;
+  job_kind: string;
+  schedule_kind: string;
+  schedule_value: string;
+  status: string;
+  next_run_at?: string | null;
+  created_at: string;
+};
+
+export type ScheduleDetail = {
+  id: string;
+  owner_kind: string;
+  owner_id: string;
+  job_kind: string;
+  schedule_kind: string;
+  schedule_value: string;
+  payload_json: string;
+  status: string;
+  retry_count: number;
+  max_retries: number;
+  last_run_at?: string | null;
+  next_run_at?: string | null;
+  error?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ExtensionRuntimeState = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  status: string;
+  version: string;
+  kind: string;
+  source_mode: string;
+  install_dir: string;
+  source_root: string;
+  diagnostics: ExtensionDiagnostic[];
+};
+
+export type ExtensionDetail = {
+  id: string;
+  name: string;
+  kind: string;
+  version: string;
+  source_mode: string;
+  source_root: string;
+  install_dir: string;
+  generation: number;
+  health: string;
+  diagnostics: ExtensionDiagnostic[];
+  frontend?: {
+    kind: string;
+    entry: string;
+    hmr: boolean;
+  } | null;
+  backend?: {
+    kind: string;
+    runtime: string;
+    entry: string;
+    command?: string | null;
+    healthcheck?: string | null;
+    status: string;
+    pid?: number | null;
+  } | null;
+};
+
+export type SystemLog = {
+  id: string;
+  kind: string;
+  level: string;
+  title: string;
+  summary: string;
+  run_id?: string | null;
+  task_id?: string | null;
+  at: string;
+};
+
+export type RuntimeConfigEntry = {
   key: string;
   payload_json: string;
   enabled: boolean;
@@ -329,81 +312,21 @@ export type ConfigChangeRecord = {
   changed_at: string;
 };
 
-export type RateLimitConfig = {
-  enabled: boolean;
-  per_ip_rpm: number;
-  per_user_rpm: number;
-  burst: number;
-  exempt_paths: string[];
-};
-
-export type CorsConfig = {
-  enabled: boolean;
-  origins: string[];
-  methods: string[];
-  credentials: boolean;
-  max_age_seconds: number;
-};
-
-export type TimeoutConfig = {
-  enabled: boolean;
-  default_ms: number;
-  per_path_ms: Record<string, number>;
-};
-
-export type LoggingConfig = {
-  enabled: boolean;
-  level: string;
-  sample_rate: number;
-  redact_headers: string[];
-};
-
-export type BodyLimitConfig = {
-  enabled: boolean;
-  max_bytes: number;
-  per_path_max: Record<string, number>;
-};
-
 export type SystemConfig = {
-  rate_limit: RateLimitConfig;
-  cors: CorsConfig;
-  timeout: TimeoutConfig;
-  logging: LoggingConfig;
-  body_limit: BodyLimitConfig;
+  rate_limit: unknown;
+  cors: unknown;
+  timeout: unknown;
+  logging: unknown;
+  body_limit: unknown;
   bootstrap: BootstrapState;
 };
 
-export type ConversationCreateResponse = {
-  conversation: Conversation;
-  default_lane: Lane;
-};
-
-export type ConversationDetailResponse = {
-  conversation: Conversation;
-  lanes: Lane[];
-};
-
-export type ConversationEnvelope = {
-  conversation: Conversation;
-  lane: Lane;
-  message: Message;
-  run: Run;
-  tasks: Task[];
-  artifacts: Artifact[];
-};
-
 export type WorkspaceSnapshot = {
-  overview: Overview;
-  profile: WorkspaceProfile | null;
-  agents: Agent[];
-  spaces: Space[];
-  conversations: Conversation[];
-  runs: Run[];
-  tasks: Task[];
-  artifacts: Artifact[];
-  memories: Memory[];
-  jobs: Job[];
-  registry: ExtensionRuntimeSnapshot;
+  chats: ChatThread[];
+  agents: AgentProfile[];
+  schedules: Schedule[];
+  extensions: ExtensionRuntimeState[];
+  logs: SystemLog[];
 };
 
 export class ApiError extends Error {
@@ -455,7 +378,7 @@ async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   if (response.status === 204) {
-    return undefined as unknown as T;
+    return undefined as T;
   }
 
   return (await response.json()) as T;
@@ -488,45 +411,14 @@ function shouldAttachJsonContentType(
 }
 
 export async function loadWorkspaceSnapshot(): Promise<WorkspaceSnapshot> {
-  const [
-    overview,
-    profile,
-    agents,
-    spaces,
-    conversations,
-    runs,
-    tasks,
-    artifacts,
-    memories,
-    jobs,
-    registry,
-  ] = await Promise.all([
-    fetchJson<Overview>("/api/v1/overview"),
-    fetchJson<WorkspaceProfile | null>("/api/v1/runtime/profile"),
-    fetchJson<Agent[]>("/api/v1/agents"),
-    fetchJson<Space[]>("/api/v1/spaces"),
-    fetchJson<Conversation[]>("/api/v1/conversations"),
-    fetchJson<Run[]>("/api/v1/runs"),
-    fetchJson<Task[]>("/api/v1/tasks"),
-    fetchJson<Artifact[]>("/api/v1/artifacts"),
-    fetchJson<Memory[]>("/api/v1/memories"),
-    fetchJson<Job[]>("/api/v1/jobs"),
-    fetchJson<ExtensionRuntimeSnapshot>("/api/v1/extensions/runtime"),
+  const [chats, agents, schedules, extensions, logs] = await Promise.all([
+    listChats(),
+    listAgents(),
+    listSchedules(),
+    listExtensions(),
+    listLogs(),
   ]);
-
-  return {
-    overview,
-    profile,
-    agents,
-    spaces,
-    conversations,
-    runs,
-    tasks,
-    artifacts,
-    memories,
-    jobs,
-    registry,
-  };
+  return { chats, agents, schedules, extensions, logs };
 }
 
 export async function fetchBootstrapStatus() {
@@ -549,14 +441,11 @@ export async function bootstrapSetup(payload: {
   });
 }
 
-export async function fetchUiRuntime(): Promise<UiRuntime> {
+export async function fetchUiRuntime() {
   return fetchJson<UiRuntime>("/api/v1/ui/runtime");
 }
 
-export async function fetchUiMessages(
-  locale: string,
-  namespaces: string[] = [],
-): Promise<UiMessagesResponse> {
+export async function fetchUiMessages(locale: string, namespaces: string[] = []) {
   const params = new URLSearchParams({ locale });
   if (namespaces.length > 0) {
     params.set("namespaces", namespaces.join(","));
@@ -598,70 +487,59 @@ export async function saveInstanceUiPreferences(payload: {
   });
 }
 
-export async function fetchSpaceUiPreferences(spaceId: string) {
-  return fetchJson<UiPreferenceRecord | null>(`/api/v1/spaces/${spaceId}/ui-preferences`);
+export async function listAgents() {
+  return fetchJson<AgentProfile[]>("/api/v1/agents");
 }
 
-export async function saveSpaceUiPreferences(
-  spaceId: string,
-  payload: {
-    locale?: string | null;
-    theme_id?: string | null;
-    time_zone?: string | null;
-    date_style?: string | null;
-    density?: string | null;
-    motion?: string | null;
-  },
-) {
-  return fetchJson<UiPreferenceRecord>(`/api/v1/spaces/${spaceId}/ui-preferences`, {
-    method: "PUT",
-    body: JSON.stringify(payload),
-  });
+export async function listChats() {
+  return fetchJson<ChatThread[]>("/api/v1/conversations");
 }
 
-export async function listConversations() {
-  return fetchJson<Conversation[]>("/api/v1/conversations");
-}
-
-export async function createConversation(payload: {
+export async function createChat(payload: {
   topology: "direct" | "group";
   title?: string;
-  space_id?: string;
   agent_ids: string[];
   lane_name?: string;
   lane_type?: string;
   lane_goal?: string;
 }) {
-  return fetchJson<ConversationCreateResponse>("/api/v1/conversations", {
+  return fetchJson<{ conversation: ChatThread; default_lane: ChatLane }>("/api/v1/conversations", {
     method: "POST",
     body: JSON.stringify(payload),
   });
 }
 
-export async function deleteConversation(conversationId: string) {
-  return fetchJson<void>(`/api/v1/conversations/${conversationId}`, {
+export async function deleteChat(chatId: string) {
+  return fetchJson<void>(`/api/v1/conversations/${chatId}`, {
     method: "DELETE",
   });
 }
 
-export async function getConversation(conversationId: string) {
-  return fetchJson<ConversationDetailResponse>(`/api/v1/conversations/${conversationId}`);
+export async function getChat(chatId: string): Promise<ChatThreadDetail> {
+  const [detail, messages, runs] = await Promise.all([
+    fetchJson<{ conversation: ChatThread; lanes: ChatLane[] }>(`/api/v1/conversations/${chatId}`),
+    fetchJson<ChatMessage[]>(`/api/v1/conversations/${chatId}/messages`),
+    fetchJson<ExecutionRun[]>(`/api/v1/conversations/${chatId}/runs`),
+  ]);
+  const taskBuckets = await Promise.all(
+    runs.map((run) => fetchJson<ExecutionStep[]>(`/api/v1/runs/${run.id}/tasks`)),
+  );
+  const outputBuckets = await Promise.all(
+    runs.map((run) => fetchJson<RunOutput[]>(`/api/v1/runs/${run.id}/artifacts`)),
+  );
+  return {
+    thread: detail.conversation,
+    lanes: detail.lanes,
+    messages,
+    runs,
+    tasks: taskBuckets.flat(),
+    outputs: outputBuckets.flat(),
+    delegations: buildMockDelegations(detail.conversation, runs),
+  };
 }
 
-export async function loadConversationMessages(conversationId: string) {
-  return fetchJson<Message[]>(`/api/v1/conversations/${conversationId}/messages`);
-}
-
-export async function loadConversationRuns(conversationId: string) {
-  return fetchJson<Run[]>(`/api/v1/conversations/${conversationId}/runs`);
-}
-
-export async function loadConversationLanes(conversationId: string) {
-  return fetchJson<Lane[]>(`/api/v1/conversations/${conversationId}/lanes`);
-}
-
-export async function sendConversationMessage(
-  conversationId: string,
+export async function sendChatMessage(
+  chatId: string,
   payload: {
     lane_id?: string;
     body: string;
@@ -669,126 +547,175 @@ export async function sendConversationMessage(
     addressed_agents?: string[];
   },
 ) {
-  return fetchJson<ConversationEnvelope>(`/api/v1/conversations/${conversationId}/messages`, {
+  return fetchJson<ChatSendResponse>(`/api/v1/conversations/${chatId}/messages`, {
     method: "POST",
     body: JSON.stringify(payload),
   });
 }
 
-export async function loadLaneHandoffs(laneId: string) {
-  return fetchJson<Handoff[]>(`/api/v1/lanes/${laneId}/handoffs`);
+export async function getDelegation(
+  chatId: string,
+  delegationId: string,
+): Promise<{ thread: DelegationThread; messages: DelegationMessage[] }> {
+  const chat = await getChat(chatId);
+  const thread = chat.delegations.find((item) => item.id === delegationId);
+  if (!thread) {
+    throw new ApiError(404, "NOT_FOUND", "delegation not found");
+  }
+  return {
+    thread,
+    messages: [
+      {
+        id: `${delegationId}:system`,
+        sender: "system",
+        role: "system",
+        body: `子 Agent 上下文已从主聊天 ${chat.thread.title} 派生。`,
+        created_at: thread.created_at,
+      },
+      {
+        id: `${delegationId}:agent`,
+        sender: thread.participants[0] ?? "agent",
+        role: "agent",
+        body: thread.summary,
+        created_at: thread.created_at,
+      },
+    ],
+  };
 }
 
-export async function createLaneHandoff(
-  laneId: string,
-  payload: {
-    to_lane_id: string;
-    from_agent_id?: string;
-    to_agent_id?: string;
-    summary: string;
-    instructions: string;
-    status?: string;
-  },
-) {
-  return fetchJson<Handoff>(`/api/v1/lanes/${laneId}/handoffs`, {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
+export async function listSchedules() {
+  return fetchJson<Schedule[]>("/api/v1/jobs");
 }
 
-export async function loadRunStages(runId: string) {
-  return fetchJson<RunStageEvent[]>(`/api/v1/runs/${runId}/stages`);
-}
-
-export async function loadRunDecisions(runId: string) {
-  return fetchJson<DecisionSnapshot[]>(`/api/v1/runs/${runId}/decisions`);
-}
-
-export async function loadRunGates(runId: string) {
-  return fetchJson<GateRecord[]>(`/api/v1/runs/${runId}/gates`);
-}
-
-export async function loadRunTasks(runId: string) {
-  return fetchJson<Task[]>(`/api/v1/runs/${runId}/tasks`);
-}
-
-export async function listMemories() {
-  return fetchJson<Memory[]>("/api/v1/memories");
-}
-
-export async function createMemory(payload: {
-  owner_kind: string;
-  owner_id: string;
-  namespace: string;
-  memory_kind: string;
-  stability: string;
-  title?: string;
-  content: string;
-  summary?: string;
-  sources?: { kind: string; reference: string }[];
-  tags?: string[];
-  entities?: string[];
-}) {
-  return fetchJson<RememberReceipt>("/api/v1/memories", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-}
-
-export async function recallMemories(payload: {
-  owner_kind: string;
-  owner_id: string;
-  query_text?: string;
-  namespace_prefix?: string;
-  mode?: "namespace" | "fts" | "hybrid";
-  limit?: number;
-}) {
-  return fetchJson<RecallResult>("/api/v1/memories/recall", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-}
-
-export async function reviewMemory(payload: {
-  target_memory_id: string;
-  reviewer: string;
-  action: "approve" | "reject" | "supersede" | "retire";
-  notes?: string;
-}) {
-  return fetchJson<ReviewReceipt>("/api/v1/memories/review", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-}
-
-export async function createJob(payload: {
+export async function createSchedule(payload: {
   owner_kind: string;
   owner_id: string;
   job_kind?: string;
   schedule_kind: string;
   schedule_value: string;
   payload?: unknown;
+  max_retries?: number;
+  run_at?: string;
 }) {
-  return fetchJson<Job>("/api/v1/jobs", {
+  return fetchJson<ScheduleDetail>("/api/v1/jobs", {
     method: "POST",
     body: JSON.stringify(payload),
   });
 }
 
+export async function getSchedule(scheduleId: string) {
+  return fetchJson<ScheduleDetail>(`/api/v1/jobs/${scheduleId}`);
+}
+
+export async function updateSchedule(
+  scheduleId: string,
+  payload: {
+    job_kind?: string;
+    schedule_kind?: string;
+    schedule_value?: string;
+    payload?: unknown;
+    max_retries?: number;
+    run_at?: string;
+  },
+) {
+  return fetchJson<ScheduleDetail>(`/api/v1/jobs/${scheduleId}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteSchedule(scheduleId: string) {
+  return fetchJson<void>(`/api/v1/jobs/${scheduleId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function runScheduleNow(scheduleId: string) {
+  return fetchJson<ScheduleDetail>(`/api/v1/jobs/${scheduleId}/run`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+export async function enableSchedule(scheduleId: string) {
+  return fetchJson<ScheduleDetail>(`/api/v1/jobs/${scheduleId}/enable`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+export async function disableSchedule(scheduleId: string) {
+  return fetchJson<ScheduleDetail>(`/api/v1/jobs/${scheduleId}/disable`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+export async function listExtensions() {
+  return fetchJson<ExtensionRuntimeState[]>("/api/v1/extensions");
+}
+
+export async function getExtension(extensionId: string) {
+  return fetchJson<ExtensionDetail>(`/api/v1/extensions/${extensionId}`);
+}
+
+export async function getExtensionDiagnostics(extensionId: string) {
+  return fetchJson<ExtensionDiagnostic[]>(`/api/v1/extensions/${extensionId}/diagnostics`);
+}
+
+export async function setExtensionEnabled(extensionId: string, enabled: boolean) {
+  return fetchJson<ExtensionRuntimeState>(`/api/v1/extensions/${extensionId}/enabled`, {
+    method: "PUT",
+    body: JSON.stringify({ enabled }),
+  });
+}
+
+export async function attachExtensionWorkspace(path: string) {
+  return fetchJson<ExtensionDetail>("/api/v1/extensions/attach", {
+    method: "POST",
+    body: JSON.stringify({ path }),
+  });
+}
+
+export async function reloadExtension(extensionId: string) {
+  return fetchJson<ExtensionDetail>(`/api/v1/extensions/${extensionId}/reload`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+export async function restartExtension(extensionId: string) {
+  return fetchJson<ExtensionDetail>(`/api/v1/extensions/${extensionId}/restart`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+export async function detachExtensionWorkspace(extensionId: string) {
+  return fetchJson<void>(`/api/v1/extensions/attach/${extensionId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function getExtensionLogs(extensionId: string) {
+  const response = await fetch(`${API_BASE}/api/v1/extensions/${extensionId}/logs`);
+  return response.text();
+}
+
 export async function listLogs(limit = 50) {
-  return fetchJson<LogRecord[]>(`/api/v1/logs?limit=${limit}`);
+  return fetchJson<SystemLog[]>(`/api/v1/logs?limit=${limit}`);
 }
 
 export async function listConfig() {
-  return fetchJson<ConfigEntry[]>("/api/v1/runtime/config");
+  return fetchJson<RuntimeConfigEntry[]>("/api/v1/runtime/config");
 }
 
 export async function getConfig(key: string) {
-  return fetchJson<ConfigEntry>(`/api/v1/runtime/config/${key}`);
+  return fetchJson<RuntimeConfigEntry>(`/api/v1/runtime/config/${key}`);
 }
 
 export async function putConfig(key: string, payload: unknown, updatedBy?: string) {
-  return fetchJson<ConfigEntry>(`/api/v1/runtime/config/${key}`, {
+  return fetchJson<RuntimeConfigEntry>(`/api/v1/runtime/config/${key}`, {
     method: "PUT",
     body: JSON.stringify({ payload, updated_by: updatedBy }),
   });
@@ -802,67 +729,22 @@ export async function getConfigSnapshot() {
   return fetchJson<SystemConfig>("/api/v1/runtime/config/snapshot");
 }
 
-export async function getExtensionRuntime() {
-  return fetchJson<ExtensionRuntimeSnapshot>("/api/v1/extensions/runtime");
-}
-
-export async function listExtensionEvents(limit = 50) {
-  return fetchJson<
-    Array<{
-      event_id: string;
-      extension_id?: string | null;
-      generation: number;
-      event: string;
-      health?: string | null;
-      summary: string;
-      diagnostics: ExtensionDiagnostic[];
-      occurred_at: string;
-    }>
-  >(`/api/v1/extensions/events?limit=${limit}`);
-}
-
-export async function getExtensionDetail(extensionId: string) {
-  return fetchJson<ExtensionRuntimeExtension>(`/api/v1/extensions/${extensionId}`);
-}
-
-export async function getExtensionDiagnostics(extensionId: string) {
-  return fetchJson<ExtensionDiagnostic[]>(
-    `/api/v1/extensions/${extensionId}/diagnostics`,
-  );
-}
-
 export function getExtensionFrontendModuleUrl(extensionId: string) {
   return `${API_BASE}/api/v1/extensions/${extensionId}/frontend/module`;
 }
 
-export async function getExtensionLogs(extensionId: string) {
-  const response = await fetch(`${API_BASE}/api/v1/extensions/${extensionId}/logs`);
-  return response.text();
+export function getExtensionThemeStylesheetUrl(extensionId: string, themeId: string) {
+  return `${API_BASE}/api/v1/extensions/${extensionId}/themes/${encodeURIComponent(themeId)}/stylesheet`;
 }
 
-export async function attachExtensionWorkspace(path: string) {
-  return fetchJson<ExtensionRuntimeExtension>("/api/v1/extensions/attach", {
-    method: "POST",
-    body: JSON.stringify({ path }),
-  });
-}
-
-export async function reloadExtension(extensionId: string) {
-  return fetchJson<ExtensionRuntimeExtension>(`/api/v1/extensions/${extensionId}/reload`, {
-    method: "POST",
-    body: JSON.stringify({}),
-  });
-}
-
-export async function restartExtension(extensionId: string) {
-  return fetchJson<ExtensionRuntimeExtension>(`/api/v1/extensions/${extensionId}/restart`, {
-    method: "POST",
-    body: JSON.stringify({}),
-  });
-}
-
-export async function detachExtensionWorkspace(extensionId: string) {
-  return fetchJson<void>(`/api/v1/extensions/attach/${extensionId}`, {
-    method: "DELETE",
-  });
+function buildMockDelegations(chat: ChatThread, runs: ExecutionRun[]): DelegationThread[] {
+  return runs.slice(0, 3).map((run, index) => ({
+    id: `delegation-${run.id}`,
+    parent_message_id: `message-${run.id}`,
+    title: `${chat.title} / 子 Agent ${index + 1}`,
+    summary: `${run.goal || "围绕当前消息"} 的子任务分派与回传记录。`,
+    status: index === 0 ? "running" : "completed",
+    participants: [run.owner.id],
+    created_at: run.created_at,
+  }));
 }

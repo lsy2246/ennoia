@@ -1,265 +1,190 @@
 import { useEffect, useMemo, useState } from "react";
 
-import {
-  getConfigHistory,
-  getConfigSnapshot,
-  putConfig,
-  saveRuntimeProfile,
-  type ConfigChangeRecord,
-  type SystemConfig,
-} from "@ennoia/api-client";
-import { PageHeader } from "@/components/PageHeader";
+import { getConfig, getConfigHistory, listConfig, putConfig, saveRuntimeProfile } from "@ennoia/api-client";
+import { applyTheme, readUiBootstrapCache, writeUiBootstrapCache } from "@ennoia/theme-runtime";
+import { buildTimeZoneOptionGroups } from "@/lib/timeZones";
 import { useRuntimeStore } from "@/stores/runtime";
 import { useUiHelpers, useUiStore } from "@/stores/ui";
 
-const TABS = [
-  { key: "rate_limit", label: "Rate Limit" },
-  { key: "cors", label: "CORS" },
-  { key: "timeout", label: "Timeout" },
-  { key: "logging", label: "Logging" },
-  { key: "body_limit", label: "Body Limit" },
-  { key: "bootstrap", label: "Bootstrap" },
-] as const;
-
-type TabKey = (typeof TABS)[number]["key"];
-
-const TIME_ZONES = [
-  { value: "", label: "Browser default" },
-  { value: "UTC", label: "UTC" },
-  { value: "Asia/Shanghai", label: "Asia/Shanghai" },
-  { value: "America/New_York", label: "America/New_York" },
-] as const;
+const CONFIG_TABS = ["rate_limit", "cors", "timeout", "logging", "body_limit", "bootstrap"] as const;
+type ConfigTab = (typeof CONFIG_TABS)[number];
 
 export function SettingsPage() {
-  const profile = useRuntimeStore((state) => state.profile);
-  const hydrateRuntime = useRuntimeStore((state) => state.hydrate);
-  const runtime = useUiStore((state) => state.runtime);
-  const locale = useUiStore((state) => state.locale);
-  const themeId = useUiStore((state) => state.themeId);
-  const timeZone = useUiStore((state) => state.timeZone);
-  const dateStyle = useUiStore((state) => state.dateStyle);
+  const runtimeProfile = useRuntimeStore((state) => state.profile);
+  const refreshRuntime = useRuntimeStore((state) => state.hydrate);
   const savePreferences = useUiStore((state) => state.savePreferences);
-  const { t, formatDateTime, availableThemes } = useUiHelpers();
-
-  const [snapshot, setSnapshot] = useState<SystemConfig | null>(null);
-  const [tab, setTab] = useState<TabKey>("rate_limit");
-  const [editorText, setEditorText] = useState("");
-  const [history, setHistory] = useState<ConfigChangeRecord[]>([]);
+  const previewLocale = useUiStore((state) => state.previewLocale);
+  const currentThemeId = useUiStore((state) => state.themeId);
+  const { availableLocales, availableThemes, t } = useUiHelpers();
+  const [displayName, setDisplayName] = useState(runtimeProfile?.display_name ?? "");
+  const [locale, setLocale] = useState(runtimeProfile?.locale ?? availableLocales[0] ?? "zh-CN");
+  const [themeId, setThemeId] = useState(currentThemeId);
+  const [timeZone, setTimeZone] = useState(runtimeProfile?.time_zone ?? "Asia/Shanghai");
+  const [activeTab, setActiveTab] = useState<ConfigTab>("rate_limit");
+  const [configPayload, setConfigPayload] = useState("{}");
+  const [history, setHistory] = useState<Array<{ changed_at: string; changed_by?: string | null }>>([]);
   const [message, setMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
 
-  const [displayName, setDisplayName] = useState(profile?.display_name ?? "Operator");
-  const [prefLocale, setPrefLocale] = useState(locale);
-  const [prefTheme, setPrefTheme] = useState(themeId);
-  const [prefTimeZone, setPrefTimeZone] = useState(timeZone ?? "");
-  const [prefDateStyle, setPrefDateStyle] = useState(dateStyle ?? "locale");
-
-  const localeOptions = runtime?.ui_config.available_locales ?? ["zh-CN", "en-US"];
-  const themeOptions = useMemo(
-    () =>
-      availableThemes.map((item) => ({
-        value: item.id,
-        label: item.label,
-      })),
-    [availableThemes],
-  );
+  const timeZoneGroups = useMemo(() => buildTimeZoneOptionGroups(t, true), [t]);
 
   useEffect(() => {
-    setDisplayName(profile?.display_name ?? "Operator");
-  }, [profile]);
-
-  useEffect(() => {
-    setPrefLocale(locale);
-    setPrefTheme(themeId);
-    setPrefTimeZone(timeZone ?? "");
-    setPrefDateStyle(dateStyle ?? "locale");
-  }, [dateStyle, locale, themeId, timeZone]);
-
-  async function refreshConfig() {
-    try {
-      const nextSnapshot = await getConfigSnapshot();
-      setSnapshot(nextSnapshot);
-    } catch (err) {
-      setError(String(err));
+    if (runtimeProfile) {
+      setDisplayName(runtimeProfile.display_name);
+      setLocale(runtimeProfile.locale);
+      setTimeZone(runtimeProfile.time_zone);
     }
+  }, [runtimeProfile]);
+
+  useEffect(() => {
+    setThemeId((current) => {
+      if (availableThemes.length === 0) {
+        return current;
+      }
+      return availableThemes.some((item) => item.id === current) ? current : availableThemes[0].id;
+    });
+  }, [availableThemes]);
+
+  useEffect(() => {
+    void (async () => {
+      const entries = await listConfig();
+      const current = entries.find((item) => item.key === activeTab);
+      if (current) {
+        setConfigPayload(current.payload_json || "{}");
+      }
+      const nextHistory = await getConfigHistory(activeTab);
+      setHistory(nextHistory.map((item) => ({ changed_at: item.changed_at, changed_by: item.changed_by })));
+    })();
+  }, [activeTab]);
+
+  async function handleSaveProfile() {
+    await saveRuntimeProfile({
+      display_name: displayName,
+      locale,
+      time_zone: timeZone,
+    });
+    await savePreferences({
+      locale,
+      theme_id: themeId,
+      time_zone: timeZone,
+    });
+    await refreshRuntime();
+    setMessage(t("settings.personal.saved", "偏好已保存。"));
   }
 
-  useEffect(() => {
-    refreshConfig();
-  }, []);
-
-  useEffect(() => {
-    if (!snapshot) return;
-    const payload = (snapshot as unknown as Record<string, unknown>)[tab];
-    setEditorText(JSON.stringify(payload, null, 2));
-    getConfigHistory(tab).then(setHistory).catch(() => setHistory([]));
-  }, [snapshot, tab]);
-
-  async function saveSystemConfig() {
-    setError(null);
-    setMessage(null);
-    try {
-      const parsed = JSON.parse(editorText);
-      await putConfig(tab, parsed, "shell");
-      await refreshConfig();
-      setHistory(await getConfigHistory(tab));
-      setMessage(`Saved ${tab} and applied it live.`);
-    } catch (err) {
-      setError(String(err));
-    }
+  async function handleLocaleChange(nextLocale: string) {
+    setLocale(nextLocale);
+    await previewLocale(nextLocale);
   }
 
-  async function saveProfileAndPreferences() {
-    setError(null);
-    setMessage(null);
-    try {
-      await Promise.all([
-        saveRuntimeProfile({
-          display_name: displayName,
-          locale: prefLocale,
-          time_zone: prefTimeZone || null,
-        }),
-        savePreferences({
-          locale: prefLocale,
-          theme_id: prefTheme,
-          time_zone: prefTimeZone || null,
-          date_style: prefDateStyle || null,
-        }),
-      ]);
-      await hydrateRuntime();
-      setMessage(t("settings.personal.saved", "Preferences saved."));
-    } catch (err) {
-      setError(String(err));
-    }
+  function handleThemeChange(nextThemeId: string) {
+    setThemeId(nextThemeId);
+    applyTheme(nextThemeId);
+    writeUiBootstrapCache({
+      ...readUiBootstrapCache(),
+      theme_id: nextThemeId,
+      updated_at: new Date().toISOString(),
+    });
+  }
+
+  async function handleSaveConfig() {
+    const parsed = JSON.parse(configPayload);
+    await putConfig(activeTab, parsed, "operator");
+    const current = await getConfig(activeTab);
+    setConfigPayload(current.payload_json || "{}");
+    const nextHistory = await getConfigHistory(activeTab);
+    setHistory(nextHistory.map((item) => ({ changed_at: item.changed_at, changed_by: item.changed_by })));
+    setMessage(t("settings.runtime.saved", "{tab} 已保存并已实时应用。").replace("{tab}", activeTab));
   }
 
   return (
     <div className="page">
-      <PageHeader
-        title={t("shell.page.settings.title", "Settings")}
-        description={t(
-          "shell.page.settings.description",
-          "Manage workspace preferences, theme, locale and runtime configuration.",
-        )}
-        meta={[
-          profile?.display_name ?? "Operator",
-          runtime?.registry.themes.length ? `${runtime.registry.themes.length} themes` : "builtin themes",
-        ]}
-      />
-
-      <section className="settings-personal">
-        <div className="settings-personal__intro">
-          <h2>Workspace profile</h2>
-          <p>浏览器会先读取本地缓存，再与当前实例的偏好同步，避免每次刷新都依赖远端状态。</p>
-        </div>
-        <div className="form-row">
-          <label>
-            Display name
-            <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
-          </label>
-          <label>
-            Language
-            <select value={prefLocale} onChange={(event) => setPrefLocale(event.target.value)}>
-              {localeOptions.map((option) => (
-                <option key={option} value={option}>
-                  {option}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-        <div className="form-row">
-          <label>
-            Theme
-            <select value={prefTheme} onChange={(event) => setPrefTheme(event.target.value)}>
-              {themeOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Time zone
-            <select value={prefTimeZone} onChange={(event) => setPrefTimeZone(event.target.value)}>
-              {TIME_ZONES.map((option) => (
-                <option key={option.label} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-        <div className="form-row">
-          <label>
-            Date format
-            <select value={prefDateStyle} onChange={(event) => setPrefDateStyle(event.target.value)}>
-              <option value="locale">Locale default</option>
-              <option value="iso">ISO 8601</option>
-            </select>
-          </label>
-        </div>
-        <div className="actions">
-          <button onClick={saveProfileAndPreferences}>Save profile & preferences</button>
-        </div>
-      </section>
-
-      <section className="settings-personal settings-personal--runtime">
-        <div className="settings-personal__intro">
-          <h2>Runtime config</h2>
-          <p>单用户实例依然保留热更新配置能力，方便我们在开发期快速调试限流、超时和日志。</p>
-        </div>
-      </section>
-
-      <div className="tabs">
-        {TABS.map((item) => (
-          <button
-            key={item.key}
-            className={`tab ${item.key === tab ? "tab--active" : ""}`}
-            onClick={() => setTab(item.key)}
-          >
-            {item.label}
-          </button>
-        ))}
-      </div>
-
-      <div className="settings-grid">
-        <section>
-          <h3>{TABS.find((item) => item.key === tab)?.label} payload</h3>
-          <textarea
-            className="json-editor"
-            value={editorText}
-            onChange={(event) => setEditorText(event.target.value)}
-            spellCheck={false}
-            rows={20}
-          />
-          <div className="actions">
-            <button onClick={saveSystemConfig}>Save & apply</button>
-            <button onClick={refreshConfig} className="secondary">
-              Reload
+      <div className="settings-layout">
+        <section className="surface-panel">
+          <h1>{t("shell.nav.settings", "设置")}</h1>
+          {message ? <div className="success">{message}</div> : null}
+          <div className="form-stack">
+            <label>
+              {t("settings.profile.display_name", "显示名称")}
+              <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
+            </label>
+            <label>
+              {t("settings.profile.language", "语言")}
+              <select value={locale} onChange={(event) => void handleLocaleChange(event.target.value)}>
+                {availableLocales.map((item) => (
+                  <option key={item} value={item}>
+                    {item}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              {t("settings.profile.theme", "主题")}
+              <select value={themeId} onChange={(event) => handleThemeChange(event.target.value)}>
+                {availableThemes.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              {t("settings.profile.time_zone", "时区")}
+              <select value={timeZone} onChange={(event) => setTimeZone(event.target.value)}>
+                {timeZoneGroups.map((group) => (
+                  <optgroup key={group.label} label={group.label}>
+                    {group.options.map((option) => (
+                      <option key={`${group.label}:${option.value}`} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+            </label>
+            <p className="muted">
+              {t(
+                "settings.timezone.description",
+                "只影响工作台里的时间显示，不影响调度、存储或后端时间。",
+              )}
+            </p>
+            <button onClick={() => void handleSaveProfile()}>
+              {t("settings.profile.save", "保存资料与偏好")}
             </button>
           </div>
         </section>
 
-        <section>
-          <h3>Recent changes</h3>
-          {history.length === 0 ? (
-            <p className="muted">(no history)</p>
-          ) : (
-            <ul className="history-list">
-              {history.map((item) => (
-                <li key={item.id}>
-                  <time>{formatDateTime(item.changed_at)}</time>
-                  <span>by {item.changed_by ?? "unknown"}</span>
-                </li>
-              ))}
-            </ul>
-          )}
+        <section className="surface-panel">
+          <h2>{t("settings.runtime.title", "运行时配置")}</h2>
+          <div className="tabs">
+            {CONFIG_TABS.map((tab) => (
+              <button
+                key={tab}
+                className={tab === activeTab ? "tab tab--active" : "tab"}
+                onClick={() => setActiveTab(tab)}
+              >
+                {tab}
+              </button>
+            ))}
+          </div>
+
+          <label>
+            {t("settings.runtime.payload", "{tab} 配置载荷").replace("{tab}", activeTab)}
+            <textarea rows={14} value={configPayload} onChange={(event) => setConfigPayload(event.target.value)} />
+          </label>
+          <button onClick={() => void handleSaveConfig()}>
+            {t("settings.runtime.save_apply", "保存并应用")}
+          </button>
+
+          <div className="stack-list stack-list--compact">
+            {history.map((item, index) => (
+              <div key={`${item.changed_at}:${index}`} className="execution-row">
+                <strong>{item.changed_by ?? t("settings.runtime.unknown", "未知")}</strong>
+                <span>{item.changed_at}</span>
+              </div>
+            ))}
+          </div>
         </section>
       </div>
-
-      {error && <div className="error">{error}</div>}
-      {message && <div className="success">{message}</div>}
     </div>
   );
 }

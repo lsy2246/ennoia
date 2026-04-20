@@ -3,114 +3,53 @@ import { Link, Outlet } from "@tanstack/react-router";
 import { useRuntimeStore } from "@/stores/runtime";
 import { useUiHelpers, useUiStore } from "@/stores/ui";
 
+const NAV_ITEMS = [
+  { to: "/chat", key: "shell.nav.chat", fallback: "聊天" },
+  { to: "/schedules", key: "shell.nav.schedules", fallback: "计划任务" },
+  { to: "/agents", key: "shell.nav.agents", fallback: "Agent" },
+  { to: "/extensions", key: "shell.nav.extensions", fallback: "扩展" },
+  { to: "/logs", key: "shell.nav.logs", fallback: "日志" },
+  { to: "/settings", key: "shell.nav.settings", fallback: "设置" },
+];
+
 export function AppShell() {
   const profile = useRuntimeStore((state) => state.profile);
   const locale = useUiStore((state) => state.locale);
   const themeId = useUiStore((state) => state.themeId);
   const { resolveText, runtime, t } = useUiHelpers();
-  const dynamicPages = runtime?.registry.pages ?? [];
 
   return (
-    <div className="app-shell">
-      <nav className="app-nav">
-        <div className="app-nav__brand">
-          <Link to="/conversations">
-            {runtime ? resolveText(runtime.ui_config.shell_title) : "Ennoia"}
+    <div className="workbench-shell">
+      <aside className="workbench-sidebar">
+        <div className="workbench-brand">
+          <Link to="/chat">
+            {runtime ? resolveText(runtime.ui_config.shell_title) : t("shell.title", "Ennoia")}
           </Link>
+          <p>{t("shell.brand.subtitle", "本地多 Agent 工作台")}</p>
         </div>
-        <div className="app-nav__links">
-          <Link
-            to="/conversations"
-            className="app-nav__link"
-            activeProps={{ className: "app-nav__link app-nav__link--active" }}
-          >
-            {t("shell.nav.conversations", "Conversations")}
-          </Link>
-          <Link
-            to="/spaces"
-            className="app-nav__link"
-            activeProps={{ className: "app-nav__link app-nav__link--active" }}
-          >
-            {t("shell.nav.spaces", "Spaces")}
-          </Link>
-          <Link
-            to="/jobs"
-            className="app-nav__link"
-            activeProps={{ className: "app-nav__link app-nav__link--active" }}
-          >
-            {t("shell.nav.jobs", "Jobs")}
-          </Link>
-          <Link
-            to="/workflows"
-            className="app-nav__link"
-            activeProps={{ className: "app-nav__link app-nav__link--active" }}
-          >
-            {t("shell.nav.workflows", "Workflows")}
-          </Link>
-          <Link
-            to="/memories"
-            className="app-nav__link"
-            activeProps={{ className: "app-nav__link app-nav__link--active" }}
-          >
-            {t("shell.nav.memories", "Memories")}
-          </Link>
-          <Link
-            to="/extensions"
-            className="app-nav__link"
-            activeProps={{ className: "app-nav__link app-nav__link--active" }}
-          >
-            {t("shell.nav.extensions", "Extensions")}
-          </Link>
-          {dynamicPages.slice(0, 4).map((page) => (
+
+        <nav className="workbench-nav">
+          {NAV_ITEMS.map((item) => (
             <Link
-              key={`${page.extension_id}:${page.page.id}`}
-              to="/ext/$extensionId/$pageId"
-              params={{ extensionId: page.extension_id, pageId: page.page.id }}
-              className="app-nav__link"
-              activeProps={{ className: "app-nav__link app-nav__link--active" }}
+              key={item.to}
+              to={item.to}
+              className="workbench-nav__item"
+              activeProps={{ className: "workbench-nav__item workbench-nav__item--active" }}
             >
-              {resolveText(page.page.title)}
+              {t(item.key, item.fallback)}
             </Link>
           ))}
-          <Link
-            to="/agents"
-            className="app-nav__link"
-            activeProps={{ className: "app-nav__link app-nav__link--active" }}
-          >
-            {t("shell.nav.agents", "Agents")}
-          </Link>
-          <Link
-            to="/artifacts"
-            className="app-nav__link"
-            activeProps={{ className: "app-nav__link app-nav__link--active" }}
-          >
-            {t("shell.nav.artifacts", "Artifacts")}
-          </Link>
-          <Link
-            to="/logs"
-            className="app-nav__link"
-            activeProps={{ className: "app-nav__link app-nav__link--active" }}
-          >
-            {t("shell.nav.logs", "Logs")}
-          </Link>
-          <Link
-            to="/settings"
-            className="app-nav__link"
-            activeProps={{ className: "app-nav__link app-nav__link--active" }}
-          >
-            {t("shell.nav.settings", "Settings")}
-          </Link>
+        </nav>
+
+        <div className="workbench-profile">
+          <strong>{profile?.display_name ?? t("settings.profile.default_name", "Operator")}</strong>
+          <span>
+            {locale} · {themeId}
+          </span>
         </div>
-        <div className="app-nav__user">
-          <div className="app-nav__user-meta">
-            <span className="app-nav__user-label">{profile?.display_name ?? "Operator"}</span>
-            <span className="app-nav__meta">
-              {locale} · {themeId}
-            </span>
-          </div>
-        </div>
-      </nav>
-      <main className="app-main">
+      </aside>
+
+      <main className="workbench-main">
         <Outlet />
       </main>
     </div>

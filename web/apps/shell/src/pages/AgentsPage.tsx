@@ -1,64 +1,44 @@
+import { Link } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
+
+import { listAgents, type AgentProfile } from "@ennoia/api-client";
 import { PageHeader } from "@/components/PageHeader";
-import { useWorkspaceSnapshot } from "@/hooks/useWorkspaceSnapshot";
 import { useUiHelpers } from "@/stores/ui";
 
 export function AgentsPage() {
-  const { snapshot, loading, error, refresh } = useWorkspaceSnapshot();
   const { t } = useUiHelpers();
+  const [agents, setAgents] = useState<AgentProfile[]>([]);
 
-  if (loading || !snapshot) {
-    return <div className="page"><p>{t("shell.loading.agents", "Loading agents…")}</p></div>;
-  }
+  useEffect(() => {
+    void listAgents().then(setAgents);
+  }, []);
 
   return (
     <div className="page">
       <PageHeader
-        title={t("shell.page.agents.title", "Agents")}
+        title={t("shell.agents.page_title", "Agent")}
         description={t(
-          "shell.page.agents.description",
-          "Inspect agent configuration, default model, skill directories and runtime workspaces.",
+          "shell.agents.page_description",
+          "Agent 是可长期配置的协作者档案，包含默认模型、工作区、技能目录和默认参与策略。",
         )}
-        meta={[`${snapshot.agents.length} ${t("shell.meta.total", "total")}`]}
-        actions={
-          <button className="secondary" onClick={() => void refresh()}>
-            {t("shell.action.refresh", "Refresh")}
-          </button>
-        }
       />
 
-      {error && <div className="error">{error}</div>}
-
-      <section>
-        <table className="table">
-          <thead>
-            <tr>
-              <th>{t("shell.agents.name", "Agent")}</th>
-              <th>{t("shell.agents.kind", "Kind")}</th>
-              <th>{t("shell.agents.model", "Model")}</th>
-              <th>{t("shell.agents.workspace_mode", "Workspace mode")}</th>
-              <th>{t("shell.extensions.skills", "Skills dir")}</th>
-              <th>{t("shell.agents.workspace", "Workspace")}</th>
-              <th>{t("shell.agents.artifacts", "Artifacts")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {snapshot.agents.map((agent) => (
-              <tr key={agent.id}>
-                <td>
-                  <strong>{agent.display_name}</strong>
-                  <div className="muted">{agent.id}</div>
-                </td>
-                <td>{agent.kind}</td>
-                <td>{agent.default_model}</td>
-                <td>{agent.workspace_mode}</td>
-                <td><code>{agent.skills_dir}</code></td>
-                <td><code>{agent.workspace_dir}</code></td>
-                <td><code>{agent.artifacts_dir}</code></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </section>
+      <div className="stack-list">
+        {agents.map((agent) => (
+          <article key={agent.id} className="thread-card">
+            <div>
+              <div className="thread-card__title">
+                <Link to="/agents/$agentId" params={{ agentId: agent.id }}>
+                  {agent.display_name}
+                </Link>
+              </div>
+              <p>
+                {agent.default_model} · {agent.workspace_mode}
+              </p>
+            </div>
+          </article>
+        ))}
+      </div>
     </div>
   );
 }

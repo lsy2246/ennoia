@@ -37,16 +37,13 @@ class MemoryI18nRegistry implements I18nRegistry {
 
     return namespaces.flatMap((namespace) => {
       const runtimeBundle = runtimeLocaleBuckets?.get(namespace);
-      if (runtimeBundle) {
-        return [runtimeBundle];
-      }
-
       const module = this.modules.get(namespace);
       if (!module) {
-        return [];
+        return runtimeBundle ? [runtimeBundle] : [];
       }
 
-      return [bundleFromModule(locale, module)];
+      const builtinBundle = bundleFromModule(locale, module);
+      return runtimeBundle ? [runtimeBundle, builtinBundle] : [builtinBundle];
     });
   }
 

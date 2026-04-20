@@ -168,7 +168,7 @@ struct RunnerProcess {
     child: Child,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct LegacyExtensionConfigFile {
     #[serde(default)]
     enabled: bool,
@@ -305,6 +305,33 @@ impl ExtensionRuntime {
         )?;
         let _ = self.refresh_from_disk(&format!("workspace {extension_id} detached"))?;
         Ok(true)
+    }
+
+    pub fn set_legacy_extension_enabled(
+        &self,
+        extension_id: &str,
+        install_dir: &str,
+        enabled: bool,
+    ) -> io::Result<Option<ResolvedExtensionSnapshot>> {
+        let config_path = self
+            .config
+            .legacy_extensions_config_dir
+            .join(format!("{extension_id}.toml"));
+        let payload = LegacyExtensionConfigFile {
+            enabled,
+            install_dir: install_dir.to_string(),
+        };
+        fs::write(
+            config_path,
+            toml::to_string_pretty(&payload).map_err(io::Error::other)?,
+        )?;
+        let summary = if enabled {
+            format!("extension {extension_id} enabled")
+        } else {
+            format!("extension {extension_id} disabled")
+        };
+        let _ = self.refresh_from_disk(&summary)?;
+        Ok(self.get(extension_id))
     }
 }
 
@@ -993,7 +1020,7 @@ fn equivalent_snapshots(
     current: &ExtensionRuntimeSnapshot,
     next: &ExtensionRuntimeSnapshot,
 ) -> bool {
-    current.extensions == next.extensions
+    normalize_extensions(&current.extensions) == normalize_extensions(&next.extensions)
         && current.pages == next.pages
         && current.panels == next.panels
         && current.themes == next.themes
@@ -1001,6 +1028,19 @@ fn equivalent_snapshots(
         && current.commands == next.commands
         && current.providers == next.providers
         && current.hooks == next.hooks
+}
+
+fn normalize_extensions(
+    extensions: &[ResolvedExtensionSnapshot],
+) -> Vec<ResolvedExtensionSnapshot> {
+    extensions
+        .iter()
+        .cloned()
+        .map(|mut extension| {
+            extension.generation = 0;
+            extension
+        })
+        .collect()
 }
 
 fn empty_snapshot() -> ExtensionRuntimeSnapshot {

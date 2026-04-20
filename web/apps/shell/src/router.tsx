@@ -6,20 +6,18 @@ import {
   redirect,
 } from "@tanstack/react-router";
 
+import { AgentDetailPage } from "@/pages/AgentDetailPage";
 import { AgentsPage } from "@/pages/AgentsPage";
-import { ArtifactsPage } from "@/pages/ArtifactsPage";
-import { ConversationDetailPage } from "@/pages/ConversationDetailPage";
-import { ConversationsPage } from "@/pages/ConversationsPage";
-import { DynamicExtensionPage } from "@/pages/DynamicExtensionPage";
+import { ChatDetailPage } from "@/pages/ChatDetailPage";
+import { ChatPage } from "@/pages/ChatPage";
+import { DelegationDetailPage } from "@/pages/DelegationDetailPage";
+import { ExtensionDetailPage } from "@/pages/ExtensionDetailPage";
 import { ExtensionsPage } from "@/pages/ExtensionsPage";
-import { JobsPage } from "@/pages/JobsPage";
 import { LogsPage } from "@/pages/LogsPage";
-import { MemoriesPage } from "@/pages/MemoriesPage";
-import { RunDetailPage } from "@/pages/RunDetailPage";
+import { ScheduleDetailPage } from "@/pages/ScheduleDetailPage";
+import { SchedulesPage } from "@/pages/SchedulesPage";
 import { SettingsPage } from "@/pages/SettingsPage";
-import { SpacesPage } from "@/pages/SpacesPage";
 import { WelcomePage } from "@/pages/WelcomePage";
-import { WorkflowsPage } from "@/pages/WorkflowsPage";
 import { AppShell } from "@/shell/AppShell";
 import { useRuntimeStore } from "@/stores/runtime";
 
@@ -33,7 +31,7 @@ function requireInitialized() {
 function redirectToWorkspace() {
   const { bootstrap } = useRuntimeStore.getState();
   if (bootstrap?.is_initialized) {
-    throw redirect({ to: "/conversations" });
+    throw redirect({ to: "/chat" });
   }
 }
 
@@ -56,49 +54,39 @@ const shellRoute = createRoute({
 const homeRoute = createRoute({
   getParentRoute: () => shellRoute,
   path: "/",
-  component: ConversationsPage,
+  beforeLoad: () => {
+    throw redirect({ to: "/chat" });
+  },
 });
 
-const conversationsRoute = createRoute({
+const chatRoute = createRoute({
   getParentRoute: () => shellRoute,
-  path: "/conversations",
-  component: ConversationsPage,
+  path: "/chat",
+  component: ChatPage,
 });
 
-const conversationDetailRoute = createRoute({
+const chatDetailRoute = createRoute({
   getParentRoute: () => shellRoute,
-  path: "/conversations/$conversationId",
-  component: ConversationDetailPage,
+  path: "/chat/$chatId",
+  component: ChatDetailPage,
 });
 
-const spacesRoute = createRoute({
+const delegationDetailRoute = createRoute({
   getParentRoute: () => shellRoute,
-  path: "/spaces",
-  component: SpacesPage,
+  path: "/chat/$chatId/delegations/$delegationId",
+  component: DelegationDetailPage,
 });
 
-const jobsRoute = createRoute({
+const schedulesRoute = createRoute({
   getParentRoute: () => shellRoute,
-  path: "/jobs",
-  component: JobsPage,
+  path: "/schedules",
+  component: SchedulesPage,
 });
 
-const memoriesRoute = createRoute({
+const scheduleDetailRoute = createRoute({
   getParentRoute: () => shellRoute,
-  path: "/memories",
-  component: MemoriesPage,
-});
-
-const extensionsRoute = createRoute({
-  getParentRoute: () => shellRoute,
-  path: "/extensions",
-  component: ExtensionsPage,
-});
-
-const dynamicExtensionPageRoute = createRoute({
-  getParentRoute: () => shellRoute,
-  path: "/ext/$extensionId/$pageId",
-  component: DynamicExtensionPage,
+  path: "/schedules/$scheduleId",
+  component: ScheduleDetailPage,
 });
 
 const agentsRoute = createRoute({
@@ -107,28 +95,22 @@ const agentsRoute = createRoute({
   component: AgentsPage,
 });
 
-const artifactsRoute = createRoute({
+const agentDetailRoute = createRoute({
   getParentRoute: () => shellRoute,
-  path: "/artifacts",
-  component: ArtifactsPage,
+  path: "/agents/$agentId",
+  component: AgentDetailPage,
 });
 
-const workflowsRoute = createRoute({
+const extensionsRoute = createRoute({
   getParentRoute: () => shellRoute,
-  path: "/workflows",
-  component: WorkflowsPage,
+  path: "/extensions",
+  component: ExtensionsPage,
 });
 
-const workflowDetailRoute = createRoute({
+const extensionDetailRoute = createRoute({
   getParentRoute: () => shellRoute,
-  path: "/workflows/$runId",
-  component: RunDetailPage,
-});
-
-const settingsRoute = createRoute({
-  getParentRoute: () => shellRoute,
-  path: "/settings",
-  component: SettingsPage,
+  path: "/extensions/$extensionId",
+  component: ExtensionDetailPage,
 });
 
 const logsRoute = createRoute({
@@ -137,21 +119,25 @@ const logsRoute = createRoute({
   component: LogsPage,
 });
 
+const settingsRoute = createRoute({
+  getParentRoute: () => shellRoute,
+  path: "/settings",
+  component: SettingsPage,
+});
+
 const routeTree = rootRoute.addChildren([
   welcomeRoute,
   shellRoute.addChildren([
     homeRoute,
-    conversationsRoute,
-    conversationDetailRoute,
-    spacesRoute,
-    jobsRoute,
-    memoriesRoute,
-    extensionsRoute,
-    dynamicExtensionPageRoute,
+    chatRoute,
+    chatDetailRoute,
+    delegationDetailRoute,
+    schedulesRoute,
+    scheduleDetailRoute,
     agentsRoute,
-    artifactsRoute,
-    workflowsRoute,
-    workflowDetailRoute,
+    agentDetailRoute,
+    extensionsRoute,
+    extensionDetailRoute,
     logsRoute,
     settingsRoute,
   ]),

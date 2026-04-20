@@ -1,11 +1,17 @@
 export type ThemeAppearance = "light" | "dark" | "system" | "high-contrast";
 
+export type ThemeSource = "builtin" | "extension";
+
 export type ThemeDefinition = {
   id: string;
   label: string;
   appearance: ThemeAppearance;
   previewColor: string;
-  variables: Record<string, string>;
+  variables?: Record<string, string>;
+  source: ThemeSource;
+  cssUrl?: string | null;
+  extends?: string | null;
+  category?: string | null;
 };
 
 export type UiBootstrapCache = {
@@ -18,6 +24,7 @@ export type UiBootstrapCache = {
 };
 
 export const UI_BOOTSTRAP_CACHE_KEY = "ennoia.ui.bootstrap";
+const ACTIVE_THEME_LINK_ID = "ennoia-runtime-theme-link";
 
 export const BUILTIN_THEMES: ThemeDefinition[] = [
   {
@@ -26,6 +33,7 @@ export const BUILTIN_THEMES: ThemeDefinition[] = [
     appearance: "system",
     previewColor: "#5b8def",
     variables: {},
+    source: "builtin",
   },
   {
     id: "ennoia.midnight",
@@ -42,6 +50,7 @@ export const BUILTIN_THEMES: ThemeDefinition[] = [
       "--color-primary": "#5b8def",
       "--color-primary-hover": "#7aa3ff",
     },
+    source: "builtin",
   },
   {
     id: "ennoia.paper",
@@ -58,6 +67,7 @@ export const BUILTIN_THEMES: ThemeDefinition[] = [
       "--color-primary": "#2f6fed",
       "--color-primary-hover": "#3f7cff",
     },
+    source: "builtin",
   },
   {
     id: "observatory.daybreak",
@@ -74,12 +84,73 @@ export const BUILTIN_THEMES: ThemeDefinition[] = [
       "--color-primary": "#d97706",
       "--color-primary-hover": "#ea8c1d",
     },
+    source: "builtin",
   },
 ];
 
-const THEME_VARIABLE_KEYS = Array.from(
-  new Set(BUILTIN_THEMES.flatMap((theme) => Object.keys(theme.variables))),
-);
+const BUILTIN_THEME_MAP = new Map(BUILTIN_THEMES.map((theme) => [theme.id, theme]));
+let runtimeThemeMap = new Map(BUILTIN_THEMES.map((theme) => [theme.id, theme]));
+let systemThemeCleanup: (() => void) | null = null;
+
+function activeThemeDefinitions() {
+  return [...runtimeThemeMap.values()];
+}
+
+function themeVariableKeys() {
+  return Array.from(
+    new Set(activeThemeDefinitions().flatMap((theme) => Object.keys(theme.variables ?? {}))),
+  );
+}
+
+function ensureSystemThemeObserver() {
+  if (typeof window === "undefined" || systemThemeCleanup) {
+    return;
+  }
+  const media = window.matchMedia("(prefers-color-scheme: dark)");
+  const handler = () => {
+    const activeThemeId = readUiBootstrapCache().theme_id ?? document.documentElement.dataset.theme;
+    applyTheme(activeThemeId ?? "system");
+  };
+  if (typeof media.addEventListener === "function") {
+    media.addEventListener("change", handler);
+    systemThemeCleanup = () => media.removeEventListener("change", handler);
+    return;
+  }
+  media.addListener(handler);
+  systemThemeCleanup = () => media.removeListener(handler);
+}
+
+function ensureThemeLink() {
+  if (typeof document === "undefined") {
+    return null;
+  }
+  let link = document.getElementById(ACTIVE_THEME_LINK_ID) as HTMLLinkElement | null;
+  if (!link) {
+    link = document.createElement("link");
+    link.id = ACTIVE_THEME_LINK_ID;
+    link.rel = "stylesheet";
+    document.head.appendChild(link);
+  }
+  return link;
+}
+
+function removeThemeLink() {
+  if (typeof document === "undefined") {
+    return;
+  }
+  document.getElementById(ACTIVE_THEME_LINK_ID)?.remove();
+}
+
+export function registerRuntimeThemes(themes: ThemeDefinition[]) {
+  runtimeThemeMap = new Map(BUILTIN_THEMES.map((theme) => [theme.id, theme]));
+  for (const theme of themes) {
+    runtimeThemeMap.set(theme.id, theme);
+  }
+}
+
+export function listThemeDefinitions() {
+  return activeThemeDefinitions();
+}
 
 export function readUiBootstrapCache(): UiBootstrapCache {
   if (typeof window === "undefined") {
@@ -100,29 +171,56 @@ export function writeUiBootstrapCache(cache: UiBootstrapCache) {
 }
 
 export function resolveThemeDefinition(themeId?: string | null) {
-  return BUILTIN_THEMES.find((item) => item.id === themeId) ?? BUILTIN_THEMES[0];
+  return runtimeThemeMap.get(themeId ?? "") ?? BUILTIN_THEME_MAP.get("system")!;
+}
+
+function resolveSystemBaseTheme() {
+  return window.matchMedia("(prefers-color-scheme: dark)").matches
+    ? BUILTIN_THEME_MAP.get("ennoia.midnight")!
+    : BUILTIN_THEME_MAP.get("ennoia.paper")!;
+}
+
+function resolveBaseTheme(theme: ThemeDefinition): ThemeDefinition {
+  if (theme.appearance === "system") {
+    return resolveSystemBaseTheme();
+  }
+  if (!theme.extends) {
+    return theme.source === "builtin" ? theme : resolveSystemBaseTheme();
+  }
+  if (theme.extends === "system") {
+    return theme.appearance === "dark"
+      ? BUILTIN_THEME_MAP.get("ennoia.midnight")!
+      : BUILTIN_THEME_MAP.get("ennoia.paper")!;
+  }
+  return resolveThemeDefinition(theme.extends);
 }
 
 export function applyTheme(themeId?: string | null) {
-  if (typeof document === "undefined") {
+  if (typeof document === "undefined" || typeof window === "undefined") {
     return;
   }
+  ensureSystemThemeObserver();
+
   const root = document.documentElement;
   const theme = resolveThemeDefinition(themeId);
+  const baseTheme = resolveBaseTheme(theme);
+
   root.dataset.theme = theme.id;
-  for (const key of THEME_VARIABLE_KEYS) {
+  for (const key of themeVariableKeys()) {
     root.style.removeProperty(key);
   }
-  const resolved =
-    theme.appearance === "system"
-      ? window.matchMedia("(prefers-color-scheme: dark)").matches
-        ? resolveThemeDefinition("ennoia.midnight")
-        : resolveThemeDefinition("ennoia.paper")
-      : theme;
-  root.style.colorScheme = resolved.appearance === "dark" ? "dark" : "light";
+  removeThemeLink();
 
-  for (const [key, value] of Object.entries(resolved.variables)) {
+  root.style.colorScheme = baseTheme.appearance === "dark" ? "dark" : "light";
+  for (const [key, value] of Object.entries(baseTheme.variables ?? {})) {
     root.style.setProperty(key, value);
+  }
+
+  if (theme.source === "extension" && theme.cssUrl) {
+    const link = ensureThemeLink();
+    if (link) {
+      link.href = theme.cssUrl;
+    }
   }
 }
 

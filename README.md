@@ -2,22 +2,35 @@
 
 `Ennoia` 是一个面向单操作者、多 Agent 的本地 AI 工作台。
 
-当前源码仓库已经完成第一轮统一重构，系统主语义固定为：
+当前仓库已经切换到新的正式产品结构，一级导航固定为：
 
-- 单操作者实例，通过欢迎引导建立 `workspace_profile`
-- 原生支持 `一对一会话 + 多 Agent 会话`
-- `Space` 作为项目与工作容器承载长期上下文
-- UI 偏好采用“浏览器本地缓存优先 + 实例级偏好同步”
+- `聊天`
+- `计划任务`
+- `Agent`
+- `扩展`
+- `日志`
+- `设置`
 
-## 当前能力
+## 当前产品结构
 
-- Rust workspace 已拆分为 `kernel / memory / orchestrator / scheduler / extension-host / server / cli`
-- 后端已经切换到 `workspace_profile / conversations / lanes / handoffs / runs / tasks / artifacts` 模型
-- 扩展系统已经切到 `ExtensionRuntime`，统一暴露 workspace/package 描述、运行时快照、诊断与 reload/attach 链路
-- 前端 `web/apps/shell` 现在提供首次引导、会话、空间、工作流、定时任务、记忆、扩展、Agent、产物、日志、设置等正式控制台视图
-- 多语言、多主题和本地偏好缓存已接入正式运行链路，主题切换和控制台导航统一走运行时配置
-- 会话已经具备创建、查看、删除的完整治理链路
-- 默认运行目录与 SQLite 布局固定在 `~/.ennoia/`
+- `聊天`
+  - 私聊与群聊统一为 `ChatThread`
+  - 主视图是聊天盒子，不再拆成“会话 / 空间”两套入口
+  - 子 Agent 调用是消息流中的一环，可进入非正式子聊天窗口查看
+  - 工具调用、思考过程、执行过程、输出都围绕消息流展示
+- `计划任务`
+  - 基于统一调度记录承载
+  - 支持创建、编辑、删除、启停、立即执行
+- `Agent`
+  - 作为长期可配置的协作者档案
+- `扩展`
+  - 支持挂载开发目录、启用、停用、重载、重启、查看诊断与日志
+- `日志`
+  - 只保留系统级、扩展级、任务级总览日志
+  - 业务过程日志贴近聊天和任务详情页
+- `设置`
+  - 管理语言、主题、时区、运行时配置
+  - 主题与语言支持即时预览，保存后持久化
 
 ## 技术栈
 
@@ -30,29 +43,16 @@
 ## 核心模块
 
 - `crates/kernel`：共享领域模型与系统配置协议
-- `crates/memory`：记忆、上下文组装与回顾
-- `crates/orchestrator`：会话消息到 run/task 的编排
-- `crates/scheduler`：定时作业与后台推进
-- `crates/extension-host`：扩展、页面、面板、主题、语言包注册
+- `crates/memory`：上下文、记忆、回顾
+- `crates/orchestrator`：聊天消息到执行计划的编排
+- `crates/scheduler`：计划任务与后台推进
+- `crates/extension-host`：扩展运行时、挂载、热刷新、诊断
 - `crates/server`：HTTP API 与运行时装配
 - `crates/cli`：初始化、开发与启动入口
-- `web/apps/shell`：单一前端主壳与正式控制台
+- `web/apps/shell`：前端主壳与工作台
 - `web/packages/api-client`：前端统一 API 访问层
 
 ## 启动方式
-
-### Docker
-
-```bash
-docker compose up -d
-```
-
-默认访问地址：
-
-- Shell：`http://127.0.0.1:5173`
-- API：`http://127.0.0.1:3710`
-
-首次打开 Shell 时，如果实例尚未初始化，会自动进入欢迎引导页。
 
 ### 本地开发
 
@@ -60,32 +60,28 @@ docker compose up -d
 cargo run -p ennoia-cli -- dev
 ```
 
-`dev` 是一键开发编排入口，会自动：
+`dev` 是一键开发入口，会自动：
 
 - 初始化运行目录
-- 扫描并 attach `./extensions/*/ennoia.extension.toml`
 - 启动 Shell Vite dev server
 - 启动 API Server
+- 监听 Rust 代码变化并自动重编译/重启 API
 - 启动扩展前端 `frontend.dev_command`
 - 由 Extension Runtime 托管扩展后端 `backend.dev_command`
 - 汇总日志到 `~/.ennoia/logs/`
-- `Ctrl+C` 时统一停止子进程
 
-扩展开发常用命令：
+默认地址：
+
+- Shell：`http://127.0.0.1:5173`
+- API：`http://127.0.0.1:3710`
+
+如果开发入口提示 `API port 3710 is already in use`，先关闭已有 `ennoia-api-*.exe` 进程后再重试。
+
+### Docker
 
 ```bash
-cargo run -p ennoia-cli -- ext attach <path>
-cargo run -p ennoia-cli -- ext inspect <id>
-cargo run -p ennoia-cli -- ext reload <id>
-cargo run -p ennoia-cli -- ext logs
-cargo run -p ennoia-cli -- ext graph
+docker compose up -d
 ```
-
-当你从仓库根目录执行 `ennoia dev` 时，CLI 会自动扫描 `./extensions/*/ennoia.extension.toml` 并写入实例级 attach 清单。
-
-环境示例文件：
-
-- 仓库根目录：`.env.example`
 
 ## 验证命令
 
@@ -95,6 +91,8 @@ cargo run -p ennoia-cli -- ext graph
 - `bun run --cwd web/apps/shell typecheck`
 - `bun run --cwd web/apps/shell build`
 
+当前 `web/apps/shell` 还没有单独的 `lint` 脚本。
+
 ## 文档入口
 
 - [AGENTS.md](AGENTS.md)
@@ -103,6 +101,5 @@ cargo run -p ennoia-cli -- ext graph
 - [docs/data-model.md](docs/data-model.md)
 - [docs/api-surface.md](docs/api-surface.md)
 - [docs/extension-development.md](docs/extension-development.md)
-- [docs/extension-runtime-rfc.md](docs/extension-runtime-rfc.md)
 - [docs/runtime-layout.md](docs/runtime-layout.md)
 - [docs/i18n-and-theming.md](docs/i18n-and-theming.md)

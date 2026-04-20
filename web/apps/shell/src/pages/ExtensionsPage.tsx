@@ -1,236 +1,111 @@
-import { builtinExtensionPages, builtinExtensionPanels } from "@ennoia/builtins";
+import { Link } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 
+import {
+  attachExtensionWorkspace,
+  listExtensions,
+  reloadExtension,
+  restartExtension,
+  setExtensionEnabled,
+  type ExtensionRuntimeState,
+} from "@ennoia/api-client";
 import { PageHeader } from "@/components/PageHeader";
-import { useWorkspaceSnapshot } from "@/hooks/useWorkspaceSnapshot";
 import { useUiHelpers } from "@/stores/ui";
 
 export function ExtensionsPage() {
-  const { snapshot, loading, error, refresh } = useWorkspaceSnapshot();
-  const { t, resolveText } = useUiHelpers();
+  const { t } = useUiHelpers();
+  const [items, setItems] = useState<ExtensionRuntimeState[]>([]);
+  const [path, setPath] = useState("");
+  const [error, setError] = useState<string | null>(null);
 
-  if (loading || !snapshot) {
-    return <div className="page"><p>{t("shell.loading.extensions", "Loading extensions…")}</p></div>;
+  async function refresh() {
+    try {
+      setItems(await listExtensions());
+    } catch (err) {
+      setError(String(err));
+    }
   }
+
+  useEffect(() => {
+    void refresh();
+  }, []);
 
   return (
     <div className="page">
       <PageHeader
-        title={t("shell.page.extensions.title", "Extensions")}
+        title={t("shell.extensions.page_title", "扩展")}
         description={t(
-          "shell.page.extensions.description",
-          "Inspect installed extensions, contributed pages/panels/themes/locales and skill directories.",
+          "shell.extensions.page_description",
+          "扩展是正式可控能力，支持挂载开发目录、启用、停用、重载和查看诊断。",
         )}
-        meta={[
-          `g${snapshot.registry.generation}`,
-          `${snapshot.registry.extensions.length} ${t("shell.extensions.installed", "installed")}`,
-          `${snapshot.registry.pages.length} ${t("shell.extensions.pages", "pages")}`,
-          `${snapshot.registry.panels.length} ${t("shell.extensions.panels", "panels")}`,
-        ]}
-        actions={
-          <button className="secondary" onClick={() => void refresh()}>
-            {t("shell.action.refresh", "Refresh")}
-          </button>
-        }
       />
 
-      {error && <div className="error">{error}</div>}
+      {error ? <div className="error">{error}</div> : null}
 
-      <section>
-        <h2>{t("shell.extensions.registry", "Installed extensions")}</h2>
-        <table className="table">
-          <thead>
-            <tr>
-              <th>ID</th>
-              <th>Name</th>
-              <th>{t("shell.extensions.kind", "Kind")}</th>
-              <th>Source</th>
-              <th>Health</th>
-              <th>{t("shell.extensions.version", "Version")}</th>
-              <th>{t("shell.extensions.install_dir", "Install dir")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {snapshot.registry.extensions.map((extension) => (
-              <tr key={extension.id}>
-                <td><code>{extension.id}</code></td>
-                <td>{extension.name}</td>
-                <td>{extension.kind}</td>
-                <td>{extension.source_mode}</td>
-                <td>{extension.health}</td>
-                <td>{extension.version}</td>
-                <td><code>{extension.install_dir}</code></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </section>
-
-      <section className="split-grid">
-        <div>
-          <h2>{t("shell.extensions.pages", "Pages")}</h2>
-          <table className="table">
-            <thead>
-              <tr>
-                <th>{t("shell.extensions.title", "Title")}</th>
-                <th>Route</th>
-                <th>Mount</th>
-              </tr>
-            </thead>
-            <tbody>
-              {snapshot.registry.pages.map((page) => {
-                const builtin = builtinExtensionPages[page.page.mount];
-                return (
-                  <tr key={page.page.id}>
-                    <td>
-                      <strong>{resolveText(page.page.title)}</strong>
-                      <div className="muted">{builtin?.summary ?? page.extension_id}</div>
-                    </td>
-                    <td><code>{page.page.route}</code></td>
-                    <td><code>{page.page.mount}</code></td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-
-        <div>
-          <h2>{t("shell.extensions.panels", "Panels")}</h2>
-          <table className="table">
-            <thead>
-              <tr>
-                <th>{t("shell.extensions.title", "Title")}</th>
-                <th>{t("shell.extensions.slot", "Slot")}</th>
-                <th>Mount</th>
-              </tr>
-            </thead>
-            <tbody>
-              {snapshot.registry.panels.map((panel) => {
-                const builtin = builtinExtensionPanels[panel.panel.mount];
-                return (
-                  <tr key={panel.panel.id}>
-                    <td>
-                      <strong>{resolveText(panel.panel.title)}</strong>
-                      <div className="muted">{builtin?.summary ?? panel.extension_id}</div>
-                    </td>
-                    <td>{panel.panel.slot}</td>
-                    <td><code>{panel.panel.mount}</code></td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-
-        <div>
-          <h2>Runtime</h2>
-          <table className="table">
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Frontend</th>
-                <th>Backend</th>
-                <th>Diagnostics</th>
-              </tr>
-            </thead>
-            <tbody>
-              {snapshot.registry.extensions.map((extension) => (
-                <tr key={`${extension.id}:runtime`}>
-                  <td><code>{extension.id}</code></td>
-                  <td>
-                    {extension.frontend ? (
-                      <>
-                        <div><code>{extension.frontend.kind}</code></div>
-                        <div className="muted">{extension.frontend.entry}</div>
-                      </>
-                    ) : (
-                      <span className="muted">none</span>
-                    )}
-                  </td>
-                  <td>
-                    {extension.backend ? (
-                      <>
-                        <div><code>{extension.backend.kind}</code> · {extension.backend.runtime}</div>
-                        <div className="muted">{extension.backend.entry}</div>
-                      </>
-                    ) : (
-                      <span className="muted">none</span>
-                    )}
-                  </td>
-                  <td>{extension.diagnostics.length}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      <section className="surface-panel">
+        <div className="form-row">
+          <label>
+            {t("shell.extensions.attach", "挂载开发目录")}
+            <input value={path} onChange={(event) => setPath(event.target.value)} />
+          </label>
+          <button
+            onClick={() =>
+              void attachExtensionWorkspace(path)
+                .then(() => {
+                  setPath("");
+                  return refresh();
+                })
+                .catch((err) => setError(String(err)))
+            }
+          >
+            {t("shell.extensions.attach_action", "挂载")}
+          </button>
         </div>
       </section>
 
-      <section className="split-grid">
-        <div>
-          <h2>{t("shell.extensions.themes", "Theme contributions")}</h2>
-          <table className="table">
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>{t("shell.extensions.title", "Title")}</th>
-                <th>{t("shell.extensions.kind", "Appearance")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {snapshot.registry.themes.map((theme) => (
-                <tr key={theme.theme.id}>
-                  <td><code>{theme.theme.id}</code></td>
-                  <td>{resolveText(theme.theme.label)}</td>
-                  <td>{theme.theme.appearance}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      <section className="surface-panel">
+        <div className="stack-list">
+          {items.map((item) => (
+            <article key={item.id} className="thread-card">
+              <div>
+                <div className="thread-card__title">
+                  <Link to="/extensions/$extensionId" params={{ extensionId: item.id }}>
+                    {item.name}
+                  </Link>
+                </div>
+                <p>
+                  {item.status} · {item.source_mode}
+                </p>
+              </div>
+              <div className="button-row">
+                <button
+                  className="secondary"
+                  onClick={() =>
+                    void setExtensionEnabled(item.id, !item.enabled)
+                      .then(refresh)
+                      .catch((err) => setError(String(err)))
+                  }
+                >
+                  {item.enabled ? t("shell.extensions.disable", "停用") : t("shell.extensions.enable", "启用")}
+                </button>
+                <button
+                  className="secondary"
+                  onClick={() => void reloadExtension(item.id).then(refresh).catch((err) => setError(String(err)))}
+                >
+                  {t("shell.action.reload", "重载")}
+                </button>
+                <button
+                  className="secondary"
+                  onClick={() =>
+                    void restartExtension(item.id).then(refresh).catch((err) => setError(String(err)))
+                  }
+                >
+                  {t("shell.extensions.restart", "重启")}
+                </button>
+              </div>
+            </article>
+          ))}
         </div>
-
-        <div>
-          <h2>{t("shell.extensions.locales", "Locale contributions")}</h2>
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Locale</th>
-                <th>Namespace</th>
-                <th>{t("shell.extensions.version", "Version")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {snapshot.registry.locales.map((locale) => (
-                <tr key={`${locale.locale.locale}:${locale.locale.namespace}`}>
-                  <td>{locale.locale.locale}</td>
-                  <td><code>{locale.locale.namespace}</code></td>
-                  <td>{locale.locale.version}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <section>
-        <h2>{t("shell.extensions.skills", "Skill directories")}</h2>
-        <table className="table">
-          <thead>
-            <tr>
-              <th>{t("shell.owner.agent", "Agent")}</th>
-              <th>{t("shell.extensions.skills", "Skills dir")}</th>
-              <th>{t("shell.extensions.install_dir", "Workspace dir")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {snapshot.agents.map((agent) => (
-              <tr key={agent.id}>
-                <td>{agent.display_name}</td>
-                <td><code>{agent.skills_dir}</code></td>
-                <td><code>{agent.workspace_dir}</code></td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
       </section>
     </div>
   );
