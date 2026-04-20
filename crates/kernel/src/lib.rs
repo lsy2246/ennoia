@@ -56,10 +56,10 @@ pub use scheduler::{
 pub use signals::{EvidenceSignals, ExecutionSignals, IntentSignals, Signals};
 pub use stage::{RunStage, RunStageEvent, StageTransition};
 pub use system_config::{
-    BodyLimitConfig, BootstrapState, ConfigChangeRecord, ConfigEntry, ConfigError, ConfigStore,
-    CorsConfig, LoggingConfig, RateLimitConfig, SystemConfig, TimeoutConfig, ALL_CONFIG_KEYS,
-    CONFIG_KEY_BODY_LIMIT, CONFIG_KEY_BOOTSTRAP, CONFIG_KEY_CORS, CONFIG_KEY_LOGGING,
-    CONFIG_KEY_RATE_LIMIT, CONFIG_KEY_TIMEOUT,
+    default_local_dev_origins, BodyLimitConfig, BootstrapState, ConfigChangeRecord, ConfigEntry,
+    ConfigError, ConfigStore, CorsConfig, LoggingConfig, RateLimitConfig, SystemConfig,
+    TimeoutConfig, ALL_CONFIG_KEYS, CONFIG_KEY_BODY_LIMIT, CONFIG_KEY_BOOTSTRAP, CONFIG_KEY_CORS,
+    CONFIG_KEY_LOGGING, CONFIG_KEY_RATE_LIMIT, CONFIG_KEY_TIMEOUT,
 };
 pub use ui::{LocalizedText, ThemeAppearance, UiPreference, UiPreferenceRecord};
 

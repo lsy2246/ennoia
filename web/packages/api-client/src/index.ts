@@ -418,10 +418,11 @@ export class ApiError extends Error {
 }
 
 async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const headers: Record<string, string> = {
-    "content-type": "application/json",
-    ...((init?.headers as Record<string, string>) ?? {}),
-  };
+  const headers = new Headers(init?.headers);
+  const method = (init?.method ?? "GET").toUpperCase();
+  if (shouldAttachJsonContentType(method, init?.body, headers)) {
+    headers.set("content-type", "application/json");
+  }
 
   const response = await fetch(`${API_BASE}${path}`, {
     ...init,
@@ -458,6 +459,32 @@ async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   return (await response.json()) as T;
+}
+
+function shouldAttachJsonContentType(
+  method: string,
+  body: RequestInit["body"],
+  headers: Headers,
+) {
+  if (headers.has("content-type")) {
+    return false;
+  }
+  if (method === "GET" || method === "HEAD" || body == null) {
+    return false;
+  }
+  if (typeof FormData !== "undefined" && body instanceof FormData) {
+    return false;
+  }
+  if (typeof URLSearchParams !== "undefined" && body instanceof URLSearchParams) {
+    return false;
+  }
+  if (typeof Blob !== "undefined" && body instanceof Blob) {
+    return false;
+  }
+  if (body instanceof ArrayBuffer || ArrayBuffer.isView(body)) {
+    return false;
+  }
+  return true;
 }
 
 export async function loadWorkspaceSnapshot(): Promise<WorkspaceSnapshot> {

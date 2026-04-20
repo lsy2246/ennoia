@@ -73,17 +73,27 @@ pub struct CorsConfig {
     pub max_age_seconds: u32,
 }
 
+pub fn default_local_dev_origins() -> Vec<String> {
+    vec![
+        "http://localhost:5173".to_string(),
+        "http://127.0.0.1:5173".to_string(),
+        "http://[::1]:5173".to_string(),
+    ]
+}
+
 impl Default for CorsConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            origins: vec!["http://localhost:5173".to_string()],
+            origins: default_local_dev_origins(),
             methods: vec![
                 "GET".to_string(),
+                "HEAD".to_string(),
                 "POST".to_string(),
                 "PUT".to_string(),
                 "DELETE".to_string(),
                 "PATCH".to_string(),
+                "OPTIONS".to_string(),
             ],
             credentials: true,
             max_age_seconds: 3600,

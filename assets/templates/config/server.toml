@@ -1,5 +1,9 @@
 host = "127.0.0.1"
 port = 3710
 log_level = "info"
-allow_origins = ["http://localhost:5173"]
+allow_origins = [
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+  "http://[::1]:5173",
+]
 enable_ws = true

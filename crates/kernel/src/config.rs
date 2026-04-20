@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+use crate::system_config::default_local_dev_origins;
 use crate::ui::LocalizedText;
 
 /// AppConfig stores startup-wide settings loaded from `config/ennoia.toml`.
@@ -46,7 +47,7 @@ impl Default for ServerConfig {
             host: "127.0.0.1".to_string(),
             port: 3710,
             log_level: "info".to_string(),
-            allow_origins: vec!["http://localhost:5173".to_string()],
+            allow_origins: default_local_dev_origins(),
             enable_ws: true,
         }
     }
