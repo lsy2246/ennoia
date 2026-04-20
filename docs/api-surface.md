@@ -29,9 +29,23 @@
 ## 目录与扩展
 
 - `GET /api/v1/extensions`
+- `GET /api/v1/extensions/runtime`
+- `GET /api/v1/extensions/events`
+- `GET /api/v1/extensions/events/stream`
 - `GET /api/v1/extensions/registry`
 - `GET /api/v1/extensions/pages`
 - `GET /api/v1/extensions/panels`
+- `GET /api/v1/extensions/commands`
+- `GET /api/v1/extensions/providers`
+- `GET /api/v1/extensions/hooks`
+- `GET /api/v1/extensions/{extension_id}`
+- `GET /api/v1/extensions/{extension_id}/diagnostics`
+- `GET /api/v1/extensions/{extension_id}/frontend/module`
+- `GET /api/v1/extensions/{extension_id}/logs`
+- `POST /api/v1/extensions/{extension_id}/reload`
+- `POST /api/v1/extensions/{extension_id}/restart`
+- `POST /api/v1/extensions/attach`
+- `DELETE /api/v1/extensions/attach/{extension_id}`
 - `GET /api/v1/agents`
 - `GET /api/v1/spaces`
 - `GET /api/v1/spaces/{space_id}/ui-preferences`

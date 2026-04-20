@@ -1,7 +1,13 @@
 import type {
+  ExtensionCommandContribution,
+  ExtensionDiagnostic,
+  ExtensionHookContribution,
   ExtensionLocaleContribution,
   ExtensionPageContribution,
   ExtensionPanelContribution,
+  ExtensionProviderContribution,
+  ExtensionRuntimeExtension,
+  ExtensionRuntimeSnapshot,
   ExtensionThemeContribution,
   LocalizedText,
 } from "@ennoia/ui-sdk";
@@ -10,6 +16,10 @@ import { createLogger } from "@ennoia/observability";
 
 const API_BASE = import.meta.env.VITE_ENNOIA_API_URL ?? "http://127.0.0.1:3710";
 const logger = createLogger("api-client");
+
+export function getApiBaseUrl() {
+  return API_BASE;
+}
 
 export type Overview = {
   app_name: string;
@@ -173,14 +183,6 @@ export type LogRecord = {
   run_id?: string | null;
   task_id?: string | null;
   at: string;
-};
-
-export type ExtensionRegistry = {
-  extensions: Array<{ id: string; kind: string; version: string; install_dir: string }>;
-  pages: ExtensionPageContribution[];
-  panels: ExtensionPanelContribution[];
-  themes: ExtensionThemeContribution[];
-  locales: ExtensionLocaleContribution[];
 };
 
 export type RunStageEvent = {
@@ -401,7 +403,7 @@ export type WorkspaceSnapshot = {
   artifacts: Artifact[];
   memories: Memory[];
   jobs: Job[];
-  registry: ExtensionRegistry;
+  registry: ExtensionRuntimeSnapshot;
 };
 
 export class ApiError extends Error {
@@ -482,7 +484,7 @@ export async function loadWorkspaceSnapshot(): Promise<WorkspaceSnapshot> {
     fetchJson<Artifact[]>("/api/v1/artifacts"),
     fetchJson<Memory[]>("/api/v1/memories"),
     fetchJson<Job[]>("/api/v1/jobs"),
-    fetchJson<ExtensionRegistry>("/api/v1/extensions/registry"),
+    fetchJson<ExtensionRuntimeSnapshot>("/api/v1/extensions/runtime"),
   ]);
 
   return {
@@ -771,4 +773,69 @@ export async function getConfigHistory(key: string) {
 
 export async function getConfigSnapshot() {
   return fetchJson<SystemConfig>("/api/v1/runtime/config/snapshot");
+}
+
+export async function getExtensionRuntime() {
+  return fetchJson<ExtensionRuntimeSnapshot>("/api/v1/extensions/runtime");
+}
+
+export async function listExtensionEvents(limit = 50) {
+  return fetchJson<
+    Array<{
+      event_id: string;
+      extension_id?: string | null;
+      generation: number;
+      event: string;
+      health?: string | null;
+      summary: string;
+      diagnostics: ExtensionDiagnostic[];
+      occurred_at: string;
+    }>
+  >(`/api/v1/extensions/events?limit=${limit}`);
+}
+
+export async function getExtensionDetail(extensionId: string) {
+  return fetchJson<ExtensionRuntimeExtension>(`/api/v1/extensions/${extensionId}`);
+}
+
+export async function getExtensionDiagnostics(extensionId: string) {
+  return fetchJson<ExtensionDiagnostic[]>(
+    `/api/v1/extensions/${extensionId}/diagnostics`,
+  );
+}
+
+export function getExtensionFrontendModuleUrl(extensionId: string) {
+  return `${API_BASE}/api/v1/extensions/${extensionId}/frontend/module`;
+}
+
+export async function getExtensionLogs(extensionId: string) {
+  const response = await fetch(`${API_BASE}/api/v1/extensions/${extensionId}/logs`);
+  return response.text();
+}
+
+export async function attachExtensionWorkspace(path: string) {
+  return fetchJson<ExtensionRuntimeExtension>("/api/v1/extensions/attach", {
+    method: "POST",
+    body: JSON.stringify({ path }),
+  });
+}
+
+export async function reloadExtension(extensionId: string) {
+  return fetchJson<ExtensionRuntimeExtension>(`/api/v1/extensions/${extensionId}/reload`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+export async function restartExtension(extensionId: string) {
+  return fetchJson<ExtensionRuntimeExtension>(`/api/v1/extensions/${extensionId}/restart`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
+export async function detachExtensionWorkspace(extensionId: string) {
+  return fetchJson<void>(`/api/v1/extensions/attach/${extensionId}`, {
+    method: "DELETE",
+  });
 }

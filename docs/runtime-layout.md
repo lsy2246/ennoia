@@ -22,6 +22,15 @@
 │  ├─ ui.toml
 │  ├─ agents/
 │  └─ extensions/
+├─ extensions/
+│  ├─ attached/
+│  │  └─ workspaces.toml
+│  ├─ runtimes/
+│  └─ cache/
+├─ packages/
+│  └─ extensions/
+│     └─ <extension_id>/
+│        └─ ennoia.extension.toml
 ├─ state/
 │  ├─ queue/
 │  ├─ runs/
@@ -48,6 +57,9 @@
 - direct conversation 的运行产物归属对应 agent
 - group conversation 的运行产物优先归属对应 space
 - 全局扩展与共享技能进入 `global/`
+- 扩展源码 attach 清单进入 `extensions/attached/`
+- 扩展运行时派生信息进入 `extensions/runtimes/`
+- 发布态扩展描述与构建产物进入 `packages/extensions/`
 - SQLite、调度索引和缓存进入 `state/`
 - Server、request 与 runtime audit 相关日志进入 `logs/`
 

@@ -56,7 +56,7 @@ Shell
 - runtime profile / preferences
 - conversation / lane / handoff API
 - runs / tasks / artifacts / memories / jobs API
-- extension registry 与 UI runtime snapshot
+- extension runtime snapshot / attach / reload / diagnostics API
 
 ### Shell
 
@@ -67,6 +67,40 @@ Shell
 - 工作流、任务调度、记忆、扩展、Agent、产物、日志视图
 - 会话创建/删除与基础治理操作
 - 本地缓存驱动的多语言与多主题切换
+
+## 扩展运行时
+
+当前扩展子系统已经抽象为独立的 `Extension Runtime`：
+
+```text
+Shell
+  -> Server
+    -> Extension Runtime
+      -> Workspace Registry
+      -> Watch Service
+      -> Frontend Module Resolver
+      -> Backend Runner Manager
+      -> Extension Graph Store
+    -> Kernel
+    -> Memory
+    -> Orchestrator
+    -> Scheduler
+```
+
+当前目标是：
+
+- 让 `workspace extension` 成为一等公民
+- 让开发态与发布态共享同一份扩展协议
+- 让扩展 registry 支持 generation 级原子切换
+- 让 Shell 以运行时快照感知扩展图谱变化
+
+当前仓库已经落地：
+
+- `ennoia.extension.toml` / `manifest.toml` 双入口解析
+- `ExtensionRuntimeSnapshot` 统一快照
+- `attach / detach / reload / restart / diagnostics` API 与 CLI
+- `extensions/events/stream` SSE 事件流与 Shell 自动刷新
+- 轮询式运行时刷新与 generation 递增
 
 ## 主链路
 

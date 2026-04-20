@@ -21,6 +21,7 @@ export function ExtensionsPage() {
           "Inspect installed extensions, contributed pages/panels/themes/locales and skill directories.",
         )}
         meta={[
+          `g${snapshot.registry.generation}`,
           `${snapshot.registry.extensions.length} ${t("shell.extensions.installed", "installed")}`,
           `${snapshot.registry.pages.length} ${t("shell.extensions.pages", "pages")}`,
           `${snapshot.registry.panels.length} ${t("shell.extensions.panels", "panels")}`,
@@ -40,7 +41,10 @@ export function ExtensionsPage() {
           <thead>
             <tr>
               <th>ID</th>
+              <th>Name</th>
               <th>{t("shell.extensions.kind", "Kind")}</th>
+              <th>Source</th>
+              <th>Health</th>
               <th>{t("shell.extensions.version", "Version")}</th>
               <th>{t("shell.extensions.install_dir", "Install dir")}</th>
             </tr>
@@ -49,7 +53,10 @@ export function ExtensionsPage() {
             {snapshot.registry.extensions.map((extension) => (
               <tr key={extension.id}>
                 <td><code>{extension.id}</code></td>
+                <td>{extension.name}</td>
                 <td>{extension.kind}</td>
+                <td>{extension.source_mode}</td>
+                <td>{extension.health}</td>
                 <td>{extension.version}</td>
                 <td><code>{extension.install_dir}</code></td>
               </tr>
@@ -111,6 +118,48 @@ export function ExtensionsPage() {
                   </tr>
                 );
               })}
+            </tbody>
+          </table>
+        </div>
+
+        <div>
+          <h2>Runtime</h2>
+          <table className="table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Frontend</th>
+                <th>Backend</th>
+                <th>Diagnostics</th>
+              </tr>
+            </thead>
+            <tbody>
+              {snapshot.registry.extensions.map((extension) => (
+                <tr key={`${extension.id}:runtime`}>
+                  <td><code>{extension.id}</code></td>
+                  <td>
+                    {extension.frontend ? (
+                      <>
+                        <div><code>{extension.frontend.kind}</code></div>
+                        <div className="muted">{extension.frontend.entry}</div>
+                      </>
+                    ) : (
+                      <span className="muted">none</span>
+                    )}
+                  </td>
+                  <td>
+                    {extension.backend ? (
+                      <>
+                        <div><code>{extension.backend.kind}</code> · {extension.backend.runtime}</div>
+                        <div className="muted">{extension.backend.entry}</div>
+                      </>
+                    ) : (
+                      <span className="muted">none</span>
+                    )}
+                  </td>
+                  <td>{extension.diagnostics.length}</td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>

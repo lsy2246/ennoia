@@ -90,6 +90,38 @@ impl RuntimePaths {
         self.home.join("global")
     }
 
+    pub fn extensions_dir(&self) -> PathBuf {
+        self.home.join("extensions")
+    }
+
+    pub fn attached_extensions_dir(&self) -> PathBuf {
+        self.extensions_dir().join("attached")
+    }
+
+    pub fn attached_workspaces_file(&self) -> PathBuf {
+        self.attached_extensions_dir().join("workspaces.toml")
+    }
+
+    pub fn extensions_runtime_dir(&self) -> PathBuf {
+        self.extensions_dir().join("runtimes")
+    }
+
+    pub fn extensions_cache_dir(&self) -> PathBuf {
+        self.extensions_dir().join("cache")
+    }
+
+    pub fn packages_dir(&self) -> PathBuf {
+        self.home.join("packages")
+    }
+
+    pub fn package_extensions_dir(&self) -> PathBuf {
+        self.packages_dir().join("extensions")
+    }
+
+    pub fn package_extension_dir(&self, extension_id: &str) -> PathBuf {
+        self.package_extensions_dir().join(extension_id)
+    }
+
     pub fn global_extensions_dir(&self) -> PathBuf {
         self.global_dir().join("extensions")
     }
@@ -187,12 +219,16 @@ impl RuntimePaths {
             self.agents_config_dir(),
             self.extensions_config_dir(),
             self.policies_dir(),
+            self.attached_extensions_dir(),
+            self.extensions_runtime_dir(),
+            self.extensions_cache_dir(),
             self.state_queue_dir(),
             self.state_runs_dir(),
             self.state_cache_dir(),
             self.sqlite_dir(),
             self.global_extensions_dir(),
             self.global_skills_dir(),
+            self.package_extensions_dir(),
             self.agents_dir(),
             self.spaces_dir(),
             self.server_logs_dir(),

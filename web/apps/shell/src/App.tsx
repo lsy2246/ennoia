@@ -3,7 +3,7 @@ import { useEffect } from "react";
 
 import { router } from "@/router";
 import { useRuntimeStore } from "@/stores/runtime";
-import { useUiStore } from "@/stores/ui";
+import { subscribeUiRuntime, useUiStore } from "@/stores/ui";
 
 export function App() {
   const runtimeHydrate = useRuntimeStore((state) => state.hydrate);
@@ -15,6 +15,8 @@ export function App() {
     runtimeHydrate();
     uiHydrate();
   }, [runtimeHydrate, uiHydrate]);
+
+  useEffect(() => subscribeUiRuntime(), []);
 
   if (
     runtimeStatus === "idle" ||

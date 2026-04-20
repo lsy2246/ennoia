@@ -8,6 +8,7 @@ export function AppShell() {
   const locale = useUiStore((state) => state.locale);
   const themeId = useUiStore((state) => state.themeId);
   const { resolveText, runtime, t } = useUiHelpers();
+  const dynamicPages = runtime?.registry.pages ?? [];
 
   return (
     <div className="app-shell">
@@ -60,6 +61,17 @@ export function AppShell() {
           >
             {t("shell.nav.extensions", "Extensions")}
           </Link>
+          {dynamicPages.slice(0, 4).map((page) => (
+            <Link
+              key={`${page.extension_id}:${page.page.id}`}
+              to="/ext/$extensionId/$pageId"
+              params={{ extensionId: page.extension_id, pageId: page.page.id }}
+              className="app-nav__link"
+              activeProps={{ className: "app-nav__link app-nav__link--active" }}
+            >
+              {resolveText(page.page.title)}
+            </Link>
+          ))}
           <Link
             to="/agents"
             className="app-nav__link"

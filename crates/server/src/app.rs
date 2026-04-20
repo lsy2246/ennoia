@@ -1,15 +1,13 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use ennoia_config::SqliteConfigStore;
-use ennoia_extension_host::{ExtensionRegistry, RegisteredExtension};
+use ennoia_extension_host::{ExtensionRuntime, ExtensionRuntimeConfig};
 use ennoia_kernel::{
-    AgentConfig, AppConfig, CommandContribution, ContributionSet, ExtensionKind, ExtensionManifest,
-    GatePipeline, HookContribution, LocaleContribution, LocalizedText, MemoryStore,
-    PageContribution, PanelContribution, PlatformOverview, ProviderContribution, RuntimeStore,
-    SchedulerStore, ServerConfig, SpaceSpec, StageMachine, ThemeAppearance, ThemeContribution,
-    UiConfig,
+    AgentConfig, AppConfig, GatePipeline, MemoryStore, PlatformOverview, RuntimeStore,
+    SchedulerStore, ServerConfig, SpaceSpec, StageMachine, UiConfig,
 };
 use ennoia_memory::SqliteMemoryStore;
 use ennoia_observability::{self, ObservabilityGuard};
@@ -37,7 +35,7 @@ pub struct AppState {
     pub overview: PlatformOverview,
     pub runtime_paths: Arc<RuntimePaths>,
     pub pool: SqlitePool,
-    pub extensions: ExtensionRegistry,
+    pub extensions: ExtensionRuntime,
     pub agents: Vec<AgentConfig>,
     pub spaces: Vec<SpaceSpec>,
     pub policies: Arc<PolicySet>,
@@ -53,6 +51,7 @@ pub struct AppState {
 
 pub fn default_app_state() -> AppState {
     let runtime_paths = Arc::new(RuntimePaths::new(default_home_dir()));
+    runtime_paths.ensure_layout().expect("runtime layout");
     let pool = SqlitePoolOptions::new()
         .max_connections(1)
         .connect_lazy("sqlite::memory:")
@@ -72,6 +71,8 @@ pub fn default_app_state() -> AppState {
     let orchestrator = OrchestratorService::new(stage_machine.clone(), gate_pipeline.clone());
     let config_store = Arc::new(SqliteConfigStore::new(pool.clone()));
     let system_config = SystemConfigRuntime::defaulted(config_store);
+    let extensions =
+        ExtensionRuntime::bootstrap(extension_runtime_config(&runtime_paths)).expect("runtime");
 
     AppState {
         app_config: AppConfig::default(),
@@ -80,7 +81,7 @@ pub fn default_app_state() -> AppState {
         overview: PlatformOverview::default(),
         runtime_paths: runtime_paths.clone(),
         pool,
-        extensions: fallback_extension_registry(&runtime_paths),
+        extensions,
         agents: default_agents(&runtime_paths),
         spaces: default_spaces(),
         policies,
@@ -111,7 +112,7 @@ pub async fn bootstrap_app_state(home_dir: impl AsRef<Path>) -> Result<AppState,
 
     let agents = load_agent_configs(&runtime_paths)?;
     let spaces = default_spaces();
-    let extensions = load_enabled_extensions(&runtime_paths)?;
+    let extensions = ExtensionRuntime::bootstrap(extension_runtime_config(&runtime_paths))?;
     let policies = Arc::new(PolicySet::load(runtime_paths.policies_dir())?);
 
     let database_path = runtime_paths.sqlite_db();
@@ -126,7 +127,7 @@ pub async fn bootstrap_app_state(home_dir: impl AsRef<Path>) -> Result<AppState,
     db::initialize_schema(&pool).await?;
     db::upsert_agents(&pool, &agents).await?;
     db::upsert_spaces(&pool, &spaces).await?;
-    db::upsert_extensions(&pool, &extensions).await?;
+    db::upsert_extensions_runtime(&pool, &extensions.snapshot()).await?;
 
     let memory_store: Arc<dyn MemoryStore> = Arc::new(SqliteMemoryStore::new(
         pool.clone(),
@@ -176,6 +177,27 @@ pub async fn run_server(home_dir: impl AsRef<Path>) -> Result<(), AppError> {
         worker.run_forever(cancel_rx).await;
     });
 
+    let extensions = state.extensions.clone();
+    let pool = state.pool.clone();
+    let mut extension_cancel = cancel_tx.subscribe();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(2));
+        loop {
+            tokio::select! {
+                _ = interval.tick() => {
+                    if let Ok(Some(snapshot)) = extensions.refresh_from_disk("polled runtime refresh") {
+                        let _ = db::upsert_extensions_runtime(&pool, &snapshot).await;
+                    }
+                }
+                changed = extension_cancel.changed() => {
+                    if changed.is_err() || *extension_cancel.borrow() {
+                        break;
+                    }
+                }
+            }
+        }
+    });
+
     let address = format!("{}:{}", state.server_config.host, state.server_config.port);
     let listener = TcpListener::bind(&address).await?;
     let serve_result = axum::serve(listener, build_router(state)).await;
@@ -219,49 +241,6 @@ fn load_agent_configs(paths: &RuntimePaths) -> Result<Vec<AgentConfig>, AppError
     }
 }
 
-fn load_enabled_extensions(paths: &RuntimePaths) -> Result<ExtensionRegistry, AppError> {
-    #[derive(serde::Deserialize)]
-    struct ExtensionConfigFile {
-        enabled: bool,
-        install_dir: String,
-    }
-
-    let config_dir = paths.extensions_config_dir();
-    if !config_dir.exists() {
-        return Ok(ExtensionRegistry::new(vec![sample_observatory_manifest()]));
-    }
-
-    let mut items = Vec::new();
-    for entry in fs::read_dir(config_dir)? {
-        let entry = entry?;
-        if !entry.file_type()?.is_file() {
-            continue;
-        }
-        let contents = fs::read_to_string(entry.path())?;
-        let config: ExtensionConfigFile = toml::from_str(&contents)?;
-        if !config.enabled {
-            continue;
-        }
-
-        let install_dir = paths.expand_home_token(&config.install_dir);
-        let manifest_path = install_dir.join("manifest.toml");
-        if manifest_path.exists() {
-            let manifest_contents = fs::read_to_string(manifest_path)?;
-            let manifest: ExtensionManifest = toml::from_str(&manifest_contents)?;
-            items.push(RegisteredExtension {
-                manifest,
-                install_dir: install_dir.display().to_string(),
-            });
-        }
-    }
-
-    if items.is_empty() {
-        return Ok(fallback_extension_registry(paths));
-    }
-
-    Ok(ExtensionRegistry::from_registered(items))
-}
-
 fn default_spaces() -> Vec<SpaceSpec> {
     vec![SpaceSpec {
         id: "studio".to_string(),
@@ -298,74 +277,11 @@ fn default_agents(paths: &RuntimePaths) -> Vec<AgentConfig> {
     ]
 }
 
-fn sample_observatory_manifest() -> ExtensionManifest {
-    ExtensionManifest {
-        id: "observatory".to_string(),
-        kind: ExtensionKind::SystemExtension,
-        version: "0.1.0".to_string(),
-        frontend_bundle: Some("frontend/index.js".to_string()),
-        backend_entry: Some("backend/index.js".to_string()),
-        contributes: ContributionSet {
-            pages: vec![PageContribution {
-                id: "observatory.events".to_string(),
-                title: LocalizedText::new("ext.observatory.page.events", "Observatory"),
-                route: "/observatory".to_string(),
-                mount: "observatory.events.page".to_string(),
-                icon: Some("activity".to_string()),
-            }],
-            panels: vec![PanelContribution {
-                id: "observatory.timeline".to_string(),
-                title: LocalizedText::new("ext.observatory.panel.timeline", "Event Timeline"),
-                mount: "observatory.timeline.panel".to_string(),
-                slot: "right".to_string(),
-                icon: Some("panel-right".to_string()),
-            }],
-            themes: vec![ThemeContribution {
-                id: "observatory.daybreak".to_string(),
-                label: LocalizedText::new("ext.observatory.theme.daybreak", "Daybreak"),
-                appearance: ThemeAppearance::Light,
-                tokens_entry: "frontend/themes/daybreak.css".to_string(),
-                preview_color: Some("#F4A261".to_string()),
-                extends: Some("system".to_string()),
-                category: Some("extension".to_string()),
-            }],
-            locales: vec![
-                LocaleContribution {
-                    locale: "zh-CN".to_string(),
-                    namespace: "ext.observatory".to_string(),
-                    entry: "frontend/locales/zh-CN.json".to_string(),
-                    version: "1".to_string(),
-                },
-                LocaleContribution {
-                    locale: "en-US".to_string(),
-                    namespace: "ext.observatory".to_string(),
-                    entry: "frontend/locales/en-US.json".to_string(),
-                    version: "1".to_string(),
-                },
-            ],
-            commands: vec![CommandContribution {
-                id: "observatory.open".to_string(),
-                title: LocalizedText::new("ext.observatory.command.open", "Open Observatory"),
-                action: "open-page".to_string(),
-                shortcut: Some("Ctrl+Shift+O".to_string()),
-            }],
-            providers: vec![ProviderContribution {
-                id: "observatory.feed".to_string(),
-                kind: "activity-feed".to_string(),
-                entry: Some("backend/providers/activity-feed.js".to_string()),
-            }],
-            hooks: vec![HookContribution {
-                event: "run.completed".to_string(),
-                handler: Some("backend/hooks/run-completed.js".to_string()),
-            }],
-            ..ContributionSet::default()
-        },
+fn extension_runtime_config(paths: &RuntimePaths) -> ExtensionRuntimeConfig {
+    ExtensionRuntimeConfig {
+        attached_workspaces_file: paths.attached_workspaces_file(),
+        package_extensions_dir: paths.package_extensions_dir(),
+        legacy_extensions_config_dir: paths.extensions_config_dir(),
+        logs_dir: paths.extensions_logs_dir(),
     }
-}
-
-fn fallback_extension_registry(paths: &RuntimePaths) -> ExtensionRegistry {
-    ExtensionRegistry::from_registered(vec![RegisteredExtension {
-        install_dir: paths.display_with_home_token(paths.global_extension_dir("observatory")),
-        manifest: sample_observatory_manifest(),
-    }])
 }

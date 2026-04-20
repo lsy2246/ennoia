@@ -67,6 +67,25 @@ pub mod templates {
         get("global/extensions/observatory/manifest.toml").expect("observatory manifest template")
     }
 
+    pub fn attached_workspaces() -> &'static str {
+        get("extensions/attached/workspaces.toml").expect("attached workspaces template")
+    }
+
+    pub fn observatory_package_descriptor() -> &'static str {
+        get("packages/extensions/observatory/ennoia.extension.toml")
+            .expect("observatory package descriptor")
+    }
+
+    pub fn observatory_package_frontend() -> &'static str {
+        get("packages/extensions/observatory/frontend/index.js")
+            .expect("observatory package frontend")
+    }
+
+    pub fn observatory_package_backend() -> &'static str {
+        get("packages/extensions/observatory/backend/index.js")
+            .expect("observatory package backend")
+    }
+
     pub fn memory_policy() -> &'static str {
         get("policies/memory.toml").expect("memory policy template")
     }

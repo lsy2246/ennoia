@@ -3,10 +3,10 @@
 pub mod registry;
 
 pub use registry::{
-    ExtensionRegistry, ExtensionRegistrySnapshot, RegisteredCommandContribution,
-    RegisteredExtension, RegisteredExtensionSnapshot, RegisteredHookContribution,
-    RegisteredLocaleContribution, RegisteredPageContribution, RegisteredPanelContribution,
-    RegisteredProviderContribution, RegisteredThemeContribution,
+    AttachedWorkspaceRecord, ExtensionRuntime, ExtensionRuntimeConfig, ExtensionRuntimeSnapshot,
+    RegisteredCommandContribution, RegisteredHookContribution, RegisteredLocaleContribution,
+    RegisteredPageContribution, RegisteredPanelContribution, RegisteredProviderContribution,
+    RegisteredThemeContribution, ResolvedExtensionSnapshot,
 };
 
 /// Returns the current extension host module name.
@@ -16,57 +16,36 @@ pub fn module_name() -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use ennoia_kernel::{
-        CommandContribution, ContributionSet, ExtensionKind, ExtensionManifest, HookContribution,
-        LocalizedText, PageContribution, PanelContribution, ProviderContribution,
-    };
+    use ennoia_kernel::{ExtensionHealth, ExtensionRuntimeEvent};
 
-    use crate::ExtensionRegistry;
+    use crate::ExtensionRuntimeSnapshot;
 
     #[test]
-    fn registry_exposes_items() {
-        let registry = ExtensionRegistry::new(vec![ExtensionManifest {
-            id: "observatory".to_string(),
-            kind: ExtensionKind::SystemExtension,
-            version: "0.1.0".to_string(),
-            frontend_bundle: Some("frontend/index.js".to_string()),
-            backend_entry: Some("backend/index.js".to_string()),
-            contributes: ContributionSet {
-                pages: vec![PageContribution {
-                    id: "observatory.events".to_string(),
-                    title: LocalizedText::new("ext.observatory.page.events", "Observatory"),
-                    route: "/observatory".to_string(),
-                    mount: "observatory.events.page".to_string(),
-                    icon: Some("activity".to_string()),
-                }],
-                panels: vec![PanelContribution {
-                    id: "observatory.timeline".to_string(),
-                    title: LocalizedText::new("ext.observatory.panel.timeline", "Event Timeline"),
-                    mount: "observatory.timeline.panel".to_string(),
-                    slot: "right".to_string(),
-                    icon: Some("panel-right".to_string()),
-                }],
-                commands: vec![CommandContribution {
-                    id: "observatory.open".to_string(),
-                    title: LocalizedText::new("ext.observatory.command.open", "Open Observatory"),
-                    action: "open-page".to_string(),
-                    shortcut: Some("Ctrl+Shift+O".to_string()),
-                }],
-                providers: vec![ProviderContribution {
-                    id: "observatory.feed".to_string(),
-                    kind: "activity-feed".to_string(),
-                    entry: Some("backend/providers/activity-feed.js".to_string()),
-                }],
-                hooks: vec![HookContribution {
-                    event: "run.completed".to_string(),
-                    handler: Some("backend/hooks/run-completed.js".to_string()),
-                }],
-                ..ContributionSet::default()
-            },
-        }]);
+    fn runtime_module_exports_types() {
+        let snapshot = ExtensionRuntimeSnapshot {
+            generation: 1,
+            updated_at: "1".to_string(),
+            extensions: Vec::new(),
+            pages: Vec::new(),
+            panels: Vec::new(),
+            themes: Vec::new(),
+            locales: Vec::new(),
+            commands: Vec::new(),
+            providers: Vec::new(),
+            hooks: Vec::new(),
+        };
+        let event = ExtensionRuntimeEvent {
+            event_id: "evt-1".to_string(),
+            extension_id: None,
+            generation: 1,
+            event: "extension.graph_swapped".to_string(),
+            health: Some(ExtensionHealth::Ready),
+            summary: "ok".to_string(),
+            diagnostics: Vec::new(),
+            occurred_at: "1".to_string(),
+        };
 
-        assert_eq!(registry.items().len(), 1);
-        assert_eq!(registry.pages().len(), 1);
-        assert_eq!(registry.panels().len(), 1);
+        assert_eq!(snapshot.generation, 1);
+        assert_eq!(event.event, "extension.graph_swapped");
     }
 }

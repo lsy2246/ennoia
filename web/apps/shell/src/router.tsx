@@ -10,6 +10,7 @@ import { AgentsPage } from "@/pages/AgentsPage";
 import { ArtifactsPage } from "@/pages/ArtifactsPage";
 import { ConversationDetailPage } from "@/pages/ConversationDetailPage";
 import { ConversationsPage } from "@/pages/ConversationsPage";
+import { DynamicExtensionPage } from "@/pages/DynamicExtensionPage";
 import { ExtensionsPage } from "@/pages/ExtensionsPage";
 import { JobsPage } from "@/pages/JobsPage";
 import { LogsPage } from "@/pages/LogsPage";
@@ -94,6 +95,12 @@ const extensionsRoute = createRoute({
   component: ExtensionsPage,
 });
 
+const dynamicExtensionPageRoute = createRoute({
+  getParentRoute: () => shellRoute,
+  path: "/ext/$extensionId/$pageId",
+  component: DynamicExtensionPage,
+});
+
 const agentsRoute = createRoute({
   getParentRoute: () => shellRoute,
   path: "/agents",
@@ -140,6 +147,7 @@ const routeTree = rootRoute.addChildren([
     jobsRoute,
     memoriesRoute,
     extensionsRoute,
+    dynamicExtensionPageRoute,
     agentsRoute,
     artifactsRoute,
     workflowsRoute,

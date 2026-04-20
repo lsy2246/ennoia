@@ -28,9 +28,12 @@ pub use domain::{
     RunSpec, SpaceSpec, TaskKind, TaskSpec, TaskStatus, WorkspaceProfile,
 };
 pub use extension::{
-    CommandContribution, ContributionSet, ExtensionKind, ExtensionManifest, HookContribution,
-    LocaleContribution, PageContribution, PanelContribution, ProviderContribution,
-    ThemeContribution,
+    CommandContribution, ContributionSet, ExtensionAssetsSpec, ExtensionBackendSpec,
+    ExtensionCapabilities, ExtensionDiagnostic, ExtensionFrontendSpec, ExtensionHealth,
+    ExtensionKind, ExtensionManifest, ExtensionRuntimeEvent, ExtensionSourceMode,
+    ExtensionSourceSpec, ExtensionWatchSpec, HookContribution, LocaleContribution,
+    PageContribution, PanelContribution, ProviderContribution, ResolvedBackendEntry,
+    ResolvedFrontendEntry, ThemeContribution,
 };
 pub use gate::{GateRecord, GateSeverity, GateVerdict};
 pub use memory::{

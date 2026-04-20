@@ -3,6 +3,7 @@ import { create } from "zustand";
 import {
   fetchUiMessages,
   fetchUiRuntime,
+  getApiBaseUrl,
   saveInstanceUiPreferences,
   type UiRuntime,
 } from "@ennoia/api-client";
@@ -37,6 +38,7 @@ type UiState = {
   dateStyle?: string;
   error: string | null;
   hydrate: () => Promise<void>;
+  refreshRuntime: () => Promise<void>;
   savePreferences: (payload: {
     locale?: string | null;
     theme_id?: string | null;
@@ -132,6 +134,30 @@ export const useUiStore = create<UiState>((set, get) => ({
     }
   },
 
+  async refreshRuntime() {
+    const current = get();
+    try {
+      const runtime = await fetchUiRuntime();
+      const locale = pickEffectiveLocale(runtime, current.locale);
+      const themeId = pickEffectiveTheme(runtime, current.themeId);
+      const messagesVersion =
+        locale !== current.locale || runtime.versions.registry !== current.runtime?.versions.registry
+          ? await syncLocaleMessages(locale, runtime)
+          : current.messagesVersion;
+
+      applyTheme(themeId);
+      document.documentElement.lang = locale;
+      set({
+        runtime,
+        locale,
+        themeId,
+        messagesVersion,
+      });
+    } catch (error) {
+      set({ error: String(error) });
+    }
+  },
+
   async savePreferences(payload) {
     const current = get();
     const nextLocale = payload.locale ?? current.locale;
@@ -184,6 +210,14 @@ export const useUiStore = create<UiState>((set, get) => ({
     }));
   },
 }));
+
+export function subscribeUiRuntime() {
+  const eventSource = new EventSource(`${getApiBaseUrl()}/api/v1/extensions/events/stream`);
+  eventSource.addEventListener("extension.graph_swapped", () => {
+    void useUiStore.getState().refreshRuntime();
+  });
+  return () => eventSource.close();
+}
 
 export function useUiHelpers() {
   const locale = useUiStore((s) => s.locale);

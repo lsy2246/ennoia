@@ -13,6 +13,7 @@
 
 - Rust workspace 已拆分为 `kernel / memory / orchestrator / scheduler / extension-host / server / cli`
 - 后端已经切换到 `workspace_profile / conversations / lanes / handoffs / runs / tasks / artifacts` 模型
+- 扩展系统已经切到 `ExtensionRuntime`，统一暴露 workspace/package 描述、运行时快照、诊断与 reload/attach 链路
 - 前端 `web/apps/shell` 现在提供首次引导、会话、空间、工作流、定时任务、记忆、扩展、Agent、产物、日志、设置等正式控制台视图
 - 多语言、多主题和本地偏好缓存已接入正式运行链路，主题切换和控制台导航统一走运行时配置
 - 会话已经具备创建、查看、删除的完整治理链路
@@ -56,9 +57,31 @@ docker compose up -d
 ### 本地开发
 
 ```bash
-cargo run -p ennoia-cli -- init
 cargo run -p ennoia-cli -- dev
 ```
+
+`dev` 是一键开发编排入口，会自动：
+
+- 初始化运行目录
+- 扫描并 attach `./extensions/*/ennoia.extension.toml`
+- 启动 Shell Vite dev server
+- 启动 API Server
+- 启动扩展前端 `frontend.dev_command`
+- 由 Extension Runtime 托管扩展后端 `backend.dev_command`
+- 汇总日志到 `~/.ennoia/logs/`
+- `Ctrl+C` 时统一停止子进程
+
+扩展开发常用命令：
+
+```bash
+cargo run -p ennoia-cli -- ext attach <path>
+cargo run -p ennoia-cli -- ext inspect <id>
+cargo run -p ennoia-cli -- ext reload <id>
+cargo run -p ennoia-cli -- ext logs
+cargo run -p ennoia-cli -- ext graph
+```
+
+当你从仓库根目录执行 `ennoia dev` 时，CLI 会自动扫描 `./extensions/*/ennoia.extension.toml` 并写入实例级 attach 清单。
 
 环境示例文件：
 
@@ -74,8 +97,12 @@ cargo run -p ennoia-cli -- dev
 
 ## 文档入口
 
+- [AGENTS.md](AGENTS.md)
+- [docs/development/conventions.md](docs/development/conventions.md)
 - [docs/architecture.md](docs/architecture.md)
 - [docs/data-model.md](docs/data-model.md)
 - [docs/api-surface.md](docs/api-surface.md)
+- [docs/extension-development.md](docs/extension-development.md)
+- [docs/extension-runtime-rfc.md](docs/extension-runtime-rfc.md)
 - [docs/runtime-layout.md](docs/runtime-layout.md)
 - [docs/i18n-and-theming.md](docs/i18n-and-theming.md)

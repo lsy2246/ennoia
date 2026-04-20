@@ -1,27 +1,33 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::time::Duration;
 
 use axum::{
     extract::{Path, Query, State},
+    http::header,
     http::StatusCode,
     middleware as axum_middleware,
-    routing::{get, post},
+    response::sse::{Event, Sse},
+    response::IntoResponse,
+    routing::{delete, get, post},
     Extension, Json, Router,
 };
 use chrono::Utc;
 use ennoia_contract::ApiError;
 use ennoia_extension_host::{
-    ExtensionRegistrySnapshot, RegisteredExtensionSnapshot, RegisteredLocaleContribution,
-    RegisteredPageContribution, RegisteredPanelContribution, RegisteredThemeContribution,
+    ExtensionRuntimeSnapshot, RegisteredCommandContribution, RegisteredHookContribution,
+    RegisteredLocaleContribution, RegisteredPageContribution, RegisteredPanelContribution,
+    RegisteredProviderContribution, RegisteredThemeContribution, ResolvedExtensionSnapshot,
 };
 use ennoia_kernel::{
     ArtifactKind, ArtifactSpec, AssembleRequest, BootstrapState, ConfigChangeRecord, ConfigEntry,
     ConfigStore, ContextView, ConversationSpec, ConversationTopology, EpisodeKind, EpisodeRequest,
-    HandoffSpec, JobKind, JobRecord, LaneSpec, LocalizedText, MemoryKind, MemoryRecord,
-    MemorySource, MessageRole, MessageSpec, OwnerKind, OwnerRef, RecallMode, RecallQuery,
-    RecallResult, RememberReceipt, RememberRequest, ReviewAction, ReviewActionKind, ReviewReceipt,
-    RunSpec, ScheduleKind, Stability, SystemConfig, TaskSpec, UiConfig, UiPreference,
-    UiPreferenceRecord, WorkspaceProfile, ALL_CONFIG_KEYS, CONFIG_KEY_BOOTSTRAP,
+    ExtensionDiagnostic, ExtensionRuntimeEvent, HandoffSpec, JobKind, JobRecord, LaneSpec,
+    LocalizedText, MemoryKind, MemoryRecord, MemorySource, MessageRole, MessageSpec, OwnerKind,
+    OwnerRef, RecallMode, RecallQuery, RecallResult, RememberReceipt, RememberRequest,
+    ReviewAction, ReviewActionKind, ReviewReceipt, RunSpec, ScheduleKind, Stability, SystemConfig,
+    TaskSpec, UiConfig, UiPreference, UiPreferenceRecord, WorkspaceProfile, ALL_CONFIG_KEYS,
+    CONFIG_KEY_BOOTSTRAP,
 };
 use ennoia_observability::RequestContext;
 use ennoia_orchestrator::{RunRequest, RunTrigger};
@@ -100,9 +106,44 @@ pub fn build_router(state: AppState) -> Router {
             get(space_ui_preferences).put(space_ui_preferences_put),
         )
         .route("/api/v1/extensions", get(extensions))
-        .route("/api/v1/extensions/registry", get(extension_registry))
+        .route("/api/v1/extensions/runtime", get(extensions_runtime))
+        .route("/api/v1/extensions/events", get(extension_events))
+        .route(
+            "/api/v1/extensions/events/stream",
+            get(extension_events_stream),
+        )
+        .route("/api/v1/extensions/registry", get(extensions_runtime))
         .route("/api/v1/extensions/pages", get(extension_pages))
         .route("/api/v1/extensions/panels", get(extension_panels))
+        .route("/api/v1/extensions/commands", get(extension_commands))
+        .route("/api/v1/extensions/providers", get(extension_providers))
+        .route("/api/v1/extensions/hooks", get(extension_hooks))
+        .route("/api/v1/extensions/attach", post(extension_attach))
+        .route("/api/v1/extensions/{extension_id}", get(extension_detail))
+        .route(
+            "/api/v1/extensions/{extension_id}/diagnostics",
+            get(extension_diagnostics),
+        )
+        .route(
+            "/api/v1/extensions/{extension_id}/frontend/module",
+            get(extension_frontend_module),
+        )
+        .route(
+            "/api/v1/extensions/{extension_id}/logs",
+            get(extension_logs),
+        )
+        .route(
+            "/api/v1/extensions/{extension_id}/reload",
+            post(extension_reload),
+        )
+        .route(
+            "/api/v1/extensions/{extension_id}/restart",
+            post(extension_restart),
+        )
+        .route(
+            "/api/v1/extensions/attach/{extension_id}",
+            delete(extension_detach),
+        )
         .route("/api/v1/agents", get(agents))
         .route("/api/v1/spaces", get(spaces))
         .route("/api/v1/runs", get(runs))
@@ -411,6 +452,17 @@ struct LogsQuery {
     limit: Option<u32>,
 }
 
+#[derive(Debug, Deserialize)]
+struct ExtensionEventsQuery {
+    #[serde(default)]
+    limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ExtensionAttachPayload {
+    path: String,
+}
+
 async fn health() -> Json<HealthResponse> {
     Json(HealthResponse {
         status: "ok",
@@ -419,6 +471,7 @@ async fn health() -> Json<HealthResponse> {
 }
 
 async fn overview(State(state): State<AppState>) -> Json<OverviewResponse> {
+    let extension_snapshot = state.extensions.snapshot();
     let conversation_count = db::count_rows(&state.pool, db::CountTable::Conversations)
         .await
         .unwrap_or(0);
@@ -452,7 +505,7 @@ async fn overview(State(state): State<AppState>) -> Json<OverviewResponse> {
         counts: serde_json::json!({
             "agents": state.agents.len(),
             "spaces": state.spaces.len(),
-            "extensions": state.extensions.items().len(),
+            "extensions": extension_snapshot.extensions.len(),
             "conversations": conversation_count,
             "messages": message_count,
             "runs": run_count,
@@ -531,20 +584,218 @@ async fn ui_messages(
     })
 }
 
-async fn extensions(State(state): State<AppState>) -> Json<Vec<RegisteredExtensionSnapshot>> {
+async fn extensions(State(state): State<AppState>) -> Json<Vec<ResolvedExtensionSnapshot>> {
     Json(state.extensions.snapshot().extensions)
 }
 
-async fn extension_registry(State(state): State<AppState>) -> Json<ExtensionRegistrySnapshot> {
+async fn extensions_runtime(State(state): State<AppState>) -> Json<ExtensionRuntimeSnapshot> {
     Json(state.extensions.snapshot())
 }
 
 async fn extension_pages(State(state): State<AppState>) -> Json<Vec<RegisteredPageContribution>> {
-    Json(state.extensions.pages())
+    Json(state.extensions.snapshot().pages)
 }
 
 async fn extension_panels(State(state): State<AppState>) -> Json<Vec<RegisteredPanelContribution>> {
-    Json(state.extensions.panels())
+    Json(state.extensions.snapshot().panels)
+}
+
+async fn extension_commands(
+    State(state): State<AppState>,
+) -> Json<Vec<RegisteredCommandContribution>> {
+    Json(state.extensions.snapshot().commands)
+}
+
+async fn extension_providers(
+    State(state): State<AppState>,
+) -> Json<Vec<RegisteredProviderContribution>> {
+    Json(state.extensions.snapshot().providers)
+}
+
+async fn extension_hooks(State(state): State<AppState>) -> Json<Vec<RegisteredHookContribution>> {
+    Json(state.extensions.snapshot().hooks)
+}
+
+async fn extension_events(
+    State(state): State<AppState>,
+    Query(query): Query<ExtensionEventsQuery>,
+) -> Json<Vec<ExtensionRuntimeEvent>> {
+    Json(state.extensions.events(query.limit.unwrap_or(50)))
+}
+
+async fn extension_events_stream(
+    State(state): State<AppState>,
+) -> Sse<impl futures_core::Stream<Item = Result<Event, std::convert::Infallible>>> {
+    let extensions = state.extensions.clone();
+    let stream = async_stream::stream! {
+        let mut last_generation = 0_u64;
+        loop {
+            let snapshot = extensions.snapshot();
+            if snapshot.generation > last_generation {
+                last_generation = snapshot.generation;
+                let payload = serde_json::json!({
+                    "generation": snapshot.generation,
+                    "updated_at": snapshot.updated_at,
+                    "extensions": snapshot.extensions.len(),
+                });
+                yield Ok(Event::default().event("extension.graph_swapped").data(payload.to_string()));
+            }
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+    };
+    Sse::new(stream)
+}
+
+async fn extension_detail(
+    State(state): State<AppState>,
+    Extension(request): Extension<RequestContext>,
+    Path(extension_id): Path<String>,
+) -> ApiResult<ResolvedExtensionSnapshot> {
+    state
+        .extensions
+        .get(&extension_id)
+        .map(Json)
+        .ok_or_else(|| {
+            scoped(
+                ApiError::not_found(format!("extension '{extension_id}' not found")),
+                &request,
+            )
+        })
+}
+
+async fn extension_diagnostics(
+    State(state): State<AppState>,
+    Path(extension_id): Path<String>,
+) -> Json<Vec<ExtensionDiagnostic>> {
+    Json(state.extensions.diagnostics(&extension_id))
+}
+
+async fn extension_frontend_module(
+    State(state): State<AppState>,
+    Extension(request): Extension<RequestContext>,
+    Path(extension_id): Path<String>,
+) -> Result<impl IntoResponse, ApiError> {
+    let extension = state.extensions.get(&extension_id).ok_or_else(|| {
+        scoped(
+            ApiError::not_found(format!("extension '{extension_id}' not found")),
+            &request,
+        )
+    })?;
+    let frontend = extension.frontend.ok_or_else(|| {
+        scoped(
+            ApiError::not_found(format!("extension '{extension_id}' has no frontend entry")),
+            &request,
+        )
+    })?;
+
+    let body = match frontend.kind.as_str() {
+        "url" => format!(
+            "export {{ default }} from {url:?}; export * from {url:?};",
+            url = frontend.entry
+        ),
+        "file" | "module" => fs::read_to_string(&frontend.entry)
+            .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?,
+        _ => {
+            return Err(scoped(
+                ApiError::bad_request(format!("unsupported frontend kind '{}'", frontend.kind)),
+                &request,
+            ))
+        }
+    };
+
+    Ok(([(header::CONTENT_TYPE, "application/javascript")], body))
+}
+
+async fn extension_logs(
+    State(state): State<AppState>,
+    Extension(request): Extension<RequestContext>,
+    Path(extension_id): Path<String>,
+) -> Result<impl IntoResponse, ApiError> {
+    let log_path = state
+        .runtime_paths
+        .extensions_logs_dir()
+        .join(format!("{extension_id}.log"));
+    let body = if log_path.exists() {
+        fs::read_to_string(&log_path)
+            .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?
+    } else {
+        String::new()
+    };
+    Ok(([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], body))
+}
+
+async fn extension_reload(
+    State(state): State<AppState>,
+    Extension(request): Extension<RequestContext>,
+    Path(extension_id): Path<String>,
+) -> ApiResult<ResolvedExtensionSnapshot> {
+    let item = state
+        .extensions
+        .reload_extension(&extension_id)
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?
+        .ok_or_else(|| {
+            scoped(
+                ApiError::not_found(format!("extension '{extension_id}' not found")),
+                &request,
+            )
+        })?;
+    let snapshot = state.extensions.snapshot();
+    let _ = db::upsert_extensions_runtime(&state.pool, &snapshot).await;
+    Ok(Json(item))
+}
+
+async fn extension_restart(
+    State(state): State<AppState>,
+    Extension(request): Extension<RequestContext>,
+    Path(extension_id): Path<String>,
+) -> ApiResult<ResolvedExtensionSnapshot> {
+    let item = state
+        .extensions
+        .restart_extension(&extension_id)
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?
+        .ok_or_else(|| {
+            scoped(
+                ApiError::not_found(format!("extension '{extension_id}' not found")),
+                &request,
+            )
+        })?;
+    let snapshot = state.extensions.snapshot();
+    let _ = db::upsert_extensions_runtime(&state.pool, &snapshot).await;
+    Ok(Json(item))
+}
+
+async fn extension_attach(
+    State(state): State<AppState>,
+    Extension(request): Extension<RequestContext>,
+    Json(payload): Json<ExtensionAttachPayload>,
+) -> ApiResult<ResolvedExtensionSnapshot> {
+    let item = state
+        .extensions
+        .attach_workspace(&payload.path)
+        .map_err(|error| scoped(ApiError::bad_request(error.to_string()), &request))?;
+    let snapshot = state.extensions.snapshot();
+    let _ = db::upsert_extensions_runtime(&state.pool, &snapshot).await;
+    Ok(Json(item))
+}
+
+async fn extension_detach(
+    State(state): State<AppState>,
+    Extension(request): Extension<RequestContext>,
+    Path(extension_id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    let detached = state
+        .extensions
+        .detach_workspace(&extension_id)
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?;
+    if !detached {
+        return Err(scoped(
+            ApiError::not_found(format!("extension '{extension_id}' not attached")),
+            &request,
+        ));
+    }
+    let snapshot = state.extensions.snapshot();
+    let _ = db::upsert_extensions_runtime(&state.pool, &snapshot).await;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn agents(State(state): State<AppState>) -> Json<Vec<ennoia_kernel::AgentConfig>> {

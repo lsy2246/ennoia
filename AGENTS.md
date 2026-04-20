@@ -1,6 +1,8 @@
 # AGENTS.md
 
-本文件定义 `Ennoia` 仓库内 Agent 与开发者协作时的统一执行规范。
+本文件定义 `Ennoia` 仓库内 Agent 与开发者协作时的统一执行规范，并作为开发规范总入口。
+
+详细开发约定见 [docs/development/conventions.md](docs/development/conventions.md)。
 
 ## 1. 基本原则
 
@@ -50,6 +52,7 @@
 - 新增模块时，必须同步更新 [README.md](README.md) 或 `docs/` 下对应文档。
 - 目录结构调整时，必须同步更新 [docs/runtime-layout.md](docs/runtime-layout.md)。
 - 核心概念变化时，必须同步更新 [docs/architecture.md](docs/architecture.md)。
+- 文档写作使用正向表达，描述“应该做什么、如何做、做到什么标准”。
 
 ## 7. 结果汇报要求
 
