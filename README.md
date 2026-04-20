@@ -13,8 +13,9 @@
 
 - Rust workspace 已拆分为 `kernel / memory / orchestrator / scheduler / extension-host / server / cli`
 - 后端已经切换到 `workspace_profile / conversations / lanes / handoffs / runs / tasks / artifacts` 模型
-- 前端 `web/apps/shell` 已接入首次引导、会话列表、会话详情、工作流、产物、设置页
-- 多语言、多主题和本地偏好缓存已经接入正式运行链路
+- 前端 `web/apps/shell` 现在提供首次引导、会话、空间、工作流、定时任务、记忆、扩展、Agent、产物、日志、设置等正式控制台视图
+- 多语言、多主题和本地偏好缓存已接入正式运行链路，主题切换和控制台导航统一走运行时配置
+- 会话已经具备创建、查看、删除的完整治理链路
 - 默认运行目录与 SQLite 布局固定在 `~/.ennoia/`
 
 ## 技术栈
@@ -34,7 +35,7 @@
 - `crates/extension-host`：扩展、页面、面板、主题、语言包注册
 - `crates/server`：HTTP API 与运行时装配
 - `crates/cli`：初始化、开发与启动入口
-- `web/apps/shell`：单一前端主壳
+- `web/apps/shell`：单一前端主壳与正式控制台
 - `web/packages/api-client`：前端统一 API 访问层
 
 ## 启动方式

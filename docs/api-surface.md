@@ -42,6 +42,7 @@
 - `GET /api/v1/conversations`
 - `POST /api/v1/conversations`
 - `GET /api/v1/conversations/{conversation_id}`
+- `DELETE /api/v1/conversations/{conversation_id}`
 - `GET /api/v1/conversations/{conversation_id}/messages`
 - `POST /api/v1/conversations/{conversation_id}/messages`
 - `GET /api/v1/conversations/{conversation_id}/runs`
@@ -66,6 +67,7 @@
 - `GET /api/v1/runs/{run_id}/stages`
 - `GET /api/v1/runs/{run_id}/decisions`
 - `GET /api/v1/runs/{run_id}/gates`
+- `GET /api/v1/logs`
 - `GET /api/v1/tasks`
 - `GET /api/v1/artifacts`
 

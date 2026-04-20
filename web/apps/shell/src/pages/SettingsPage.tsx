@@ -8,6 +8,7 @@ import {
   type ConfigChangeRecord,
   type SystemConfig,
 } from "@ennoia/api-client";
+import { PageHeader } from "@/components/PageHeader";
 import { useRuntimeStore } from "@/stores/runtime";
 import { useUiHelpers, useUiStore } from "@/stores/ui";
 
@@ -134,7 +135,17 @@ export function SettingsPage() {
 
   return (
     <div className="page">
-      <h1>Settings</h1>
+      <PageHeader
+        title={t("shell.page.settings.title", "Settings")}
+        description={t(
+          "shell.page.settings.description",
+          "Manage workspace preferences, theme, locale and runtime configuration.",
+        )}
+        meta={[
+          profile?.display_name ?? "Operator",
+          runtime?.registry.themes.length ? `${runtime.registry.themes.length} themes` : "builtin themes",
+        ]}
+      />
 
       <section className="settings-personal">
         <div className="settings-personal__intro">

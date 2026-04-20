@@ -1,11 +1,13 @@
 import { Link, Outlet } from "@tanstack/react-router";
 
 import { useRuntimeStore } from "@/stores/runtime";
-import { useUiHelpers } from "@/stores/ui";
+import { useUiHelpers, useUiStore } from "@/stores/ui";
 
 export function AppShell() {
   const profile = useRuntimeStore((state) => state.profile);
-  const { resolveText, runtime } = useUiHelpers();
+  const locale = useUiStore((state) => state.locale);
+  const themeId = useUiStore((state) => state.themeId);
+  const { resolveText, runtime, t } = useUiHelpers();
 
   return (
     <div className="app-shell">
@@ -16,27 +18,84 @@ export function AppShell() {
           </Link>
         </div>
         <div className="app-nav__links">
-          <Link to="/conversations" className="app-nav__link">
-            Conversations
+          <Link
+            to="/conversations"
+            className="app-nav__link"
+            activeProps={{ className: "app-nav__link app-nav__link--active" }}
+          >
+            {t("shell.nav.conversations", "Conversations")}
           </Link>
-          <Link to="/spaces" className="app-nav__link">
-            Spaces
+          <Link
+            to="/spaces"
+            className="app-nav__link"
+            activeProps={{ className: "app-nav__link app-nav__link--active" }}
+          >
+            {t("shell.nav.spaces", "Spaces")}
           </Link>
-          <Link to="/agents" className="app-nav__link">
-            Agents
+          <Link
+            to="/jobs"
+            className="app-nav__link"
+            activeProps={{ className: "app-nav__link app-nav__link--active" }}
+          >
+            {t("shell.nav.jobs", "Jobs")}
           </Link>
-          <Link to="/artifacts" className="app-nav__link">
-            Artifacts
+          <Link
+            to="/workflows"
+            className="app-nav__link"
+            activeProps={{ className: "app-nav__link app-nav__link--active" }}
+          >
+            {t("shell.nav.workflows", "Workflows")}
           </Link>
-          <Link to="/workflows" className="app-nav__link">
-            Workflows
+          <Link
+            to="/memories"
+            className="app-nav__link"
+            activeProps={{ className: "app-nav__link app-nav__link--active" }}
+          >
+            {t("shell.nav.memories", "Memories")}
           </Link>
-          <Link to="/settings" className="app-nav__link">
-            Settings
+          <Link
+            to="/extensions"
+            className="app-nav__link"
+            activeProps={{ className: "app-nav__link app-nav__link--active" }}
+          >
+            {t("shell.nav.extensions", "Extensions")}
+          </Link>
+          <Link
+            to="/agents"
+            className="app-nav__link"
+            activeProps={{ className: "app-nav__link app-nav__link--active" }}
+          >
+            {t("shell.nav.agents", "Agents")}
+          </Link>
+          <Link
+            to="/artifacts"
+            className="app-nav__link"
+            activeProps={{ className: "app-nav__link app-nav__link--active" }}
+          >
+            {t("shell.nav.artifacts", "Artifacts")}
+          </Link>
+          <Link
+            to="/logs"
+            className="app-nav__link"
+            activeProps={{ className: "app-nav__link app-nav__link--active" }}
+          >
+            {t("shell.nav.logs", "Logs")}
+          </Link>
+          <Link
+            to="/settings"
+            className="app-nav__link"
+            activeProps={{ className: "app-nav__link app-nav__link--active" }}
+          >
+            {t("shell.nav.settings", "Settings")}
           </Link>
         </div>
         <div className="app-nav__user">
-          <span className="app-nav__user-label">{profile?.display_name ?? "Operator"}</span>
+          <div className="app-nav__user-meta">
+            <span className="app-nav__user-label">{profile?.display_name ?? "Operator"}</span>
+            <span className="app-nav__meta">
+              {locale} · {themeId}
+            </span>
+          </div>
         </div>
       </nav>
       <main className="app-main">

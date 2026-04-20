@@ -1,42 +1,33 @@
 import { Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
-import { createConversation, loadWorkspaceSnapshot, type WorkspaceSnapshot } from "@ennoia/api-client";
+import { createConversation, deleteConversation } from "@ennoia/api-client";
+import { PageHeader } from "@/components/PageHeader";
+import { useWorkspaceSnapshot } from "@/hooks/useWorkspaceSnapshot";
 import { useUiHelpers } from "@/stores/ui";
 
 export function ConversationsPage() {
   const navigate = useNavigate();
-  const [snapshot, setSnapshot] = useState<WorkspaceSnapshot | null>(null);
+  const { snapshot, loading, error, refresh } = useWorkspaceSnapshot();
   const [selectedAgent, setSelectedAgent] = useState("coder");
   const [selectedSpace, setSelectedSpace] = useState("studio");
   const [selectedGroupAgents, setSelectedGroupAgents] = useState<string[]>(["coder", "planner"]);
-  const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const { formatDateTime } = useUiHelpers();
-
-  async function refresh() {
-    try {
-      setSnapshot(await loadWorkspaceSnapshot());
-    } catch (err) {
-      setError(String(err));
-    }
-  }
-
-  useEffect(() => {
-    refresh();
-  }, []);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const { t, formatDateTime } = useUiHelpers();
 
   async function handleCreateDirect() {
     setBusy("direct");
-    setError(null);
+    setActionError(null);
     try {
       const created = await createConversation({
         topology: "direct",
         agent_ids: [selectedAgent],
       });
+      await refresh();
       navigate({ to: "/conversations/$conversationId", params: { conversationId: created.conversation.id } });
     } catch (err) {
-      setError(String(err));
+      setActionError(String(err));
     } finally {
       setBusy(null);
     }
@@ -44,16 +35,33 @@ export function ConversationsPage() {
 
   async function handleCreateGroup() {
     setBusy("group");
-    setError(null);
+    setActionError(null);
     try {
       const created = await createConversation({
         topology: "group",
         space_id: selectedSpace,
         agent_ids: selectedGroupAgents,
       });
+      await refresh();
       navigate({ to: "/conversations/$conversationId", params: { conversationId: created.conversation.id } });
     } catch (err) {
-      setError(String(err));
+      setActionError(String(err));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleDeleteConversation(conversationId: string) {
+    if (!window.confirm(t("shell.conversations.confirm_delete", "Delete this conversation and its related runtime data?"))) {
+      return;
+    }
+    setBusy(conversationId);
+    setActionError(null);
+    try {
+      await deleteConversation(conversationId);
+      await refresh();
+    } catch (err) {
+      setActionError(String(err));
     } finally {
       setBusy(null);
     }
@@ -67,20 +75,37 @@ export function ConversationsPage() {
     );
   }
 
-  if (!snapshot) {
-    return <div className="page"><p>Loading conversations…</p></div>;
+  if (loading || !snapshot) {
+    return <div className="page"><p>{t("shell.loading.conversations", "Loading conversations…")}</p></div>;
   }
 
   return (
     <div className="page">
-      <h1>Conversations</h1>
-      {error && <div className="error">{error}</div>}
+      <PageHeader
+        title={t("shell.page.conversations.title", "Conversations")}
+        description={t(
+          "shell.page.conversations.description",
+          "Create, inspect and clean up direct or group conversations from the main control surface.",
+        )}
+        meta={[
+          `${snapshot.conversations.length} ${t("shell.meta.total", "total")}`,
+          `${snapshot.agents.length} ${t("shell.nav.agents", "Agents")}`,
+          `${snapshot.spaces.length} ${t("shell.nav.spaces", "Spaces")}`,
+        ]}
+        actions={
+          <button className="secondary" onClick={() => void refresh()}>
+            {t("shell.action.refresh", "Refresh")}
+          </button>
+        }
+      />
 
-      <section className="settings-grid">
-        <div className="form-stack">
-          <h3>发起一对一会话</h3>
+      {(error || actionError) && <div className="error">{actionError ?? error}</div>}
+
+      <section className="split-grid">
+        <div className="surface-card">
+          <h2>{t("shell.conversations.direct", "Direct conversation")}</h2>
           <label>
-            目标 Agent
+            {t("shell.conversations.target_agent", "Target agent")}
             <select value={selectedAgent} onChange={(event) => setSelectedAgent(event.target.value)}>
               {snapshot.agents.map((agent) => (
                 <option key={agent.id} value={agent.id}>
@@ -89,15 +114,17 @@ export function ConversationsPage() {
               ))}
             </select>
           </label>
-          <button onClick={handleCreateDirect} disabled={busy === "direct"}>
-            {busy === "direct" ? "创建中…" : "开始一对一"}
-          </button>
+          <div className="actions">
+            <button onClick={handleCreateDirect} disabled={busy === "direct"}>
+              {busy === "direct" ? t("shell.action.creating", "Creating…") : t("shell.conversations.start_direct", "Start direct")}
+            </button>
+          </div>
         </div>
 
-        <div className="form-stack">
-          <h3>发起多 Agent 会话</h3>
+        <div className="surface-card">
+          <h2>{t("shell.conversations.group", "Group conversation")}</h2>
           <label>
-            归属空间
+            {t("shell.conversations.space", "Space")}
             <select value={selectedSpace} onChange={(event) => setSelectedSpace(event.target.value)}>
               {snapshot.spaces.map((space) => (
                 <option key={space.id} value={space.id}>
@@ -108,31 +135,34 @@ export function ConversationsPage() {
           </label>
           <div className="simple-list">
             {snapshot.agents.map((agent) => (
-              <label key={agent.id}>
+              <label key={agent.id} className="check-row">
                 <input
                   type="checkbox"
                   checked={selectedGroupAgents.includes(agent.id)}
                   onChange={() => toggleGroupAgent(agent.id)}
                 />
-                {agent.display_name} ({agent.id})
+                <span>{agent.display_name} ({agent.id})</span>
               </label>
             ))}
           </div>
-          <button onClick={handleCreateGroup} disabled={busy === "group" || selectedGroupAgents.length === 0}>
-            {busy === "group" ? "创建中…" : "开始群聊"}
-          </button>
+          <div className="actions">
+            <button onClick={handleCreateGroup} disabled={busy === "group" || selectedGroupAgents.length === 0}>
+              {busy === "group" ? t("shell.action.creating", "Creating…") : t("shell.conversations.start_group", "Start group")}
+            </button>
+          </div>
         </div>
       </section>
 
       <section>
-        <h2>已有会话</h2>
+        <h2>{t("shell.conversations.existing", "Existing conversations")}</h2>
         <table className="table">
           <thead>
             <tr>
-              <th>Title</th>
-              <th>Topology</th>
-              <th>Participants</th>
-              <th>Updated</th>
+              <th>{t("shell.conversations.title", "Title")}</th>
+              <th>{t("shell.conversations.topology", "Topology")}</th>
+              <th>{t("shell.conversations.participants", "Participants")}</th>
+              <th>{t("shell.conversations.updated_at", "Updated")}</th>
+              <th>{t("shell.conversations.actions", "Actions")}</th>
             </tr>
           </thead>
           <tbody>
@@ -146,6 +176,17 @@ export function ConversationsPage() {
                 <td>{conversation.topology}</td>
                 <td>{conversation.participants.join(", ")}</td>
                 <td>{formatDateTime(conversation.updated_at)}</td>
+                <td>
+                  <div className="row-actions">
+                    <button
+                      className="danger"
+                      onClick={() => void handleDeleteConversation(conversation.id)}
+                      disabled={busy === conversation.id}
+                    >
+                      {busy === conversation.id ? t("shell.action.deleting", "Deleting…") : t("shell.action.delete", "Delete")}
+                    </button>
+                  </div>
+                </td>
               </tr>
             ))}
           </tbody>

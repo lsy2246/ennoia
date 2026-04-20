@@ -3,6 +3,7 @@ use std::fs;
 
 use axum::{
     extract::{Path, Query, State},
+    http::StatusCode,
     middleware as axum_middleware,
     routing::{get, post},
     Extension, Json, Router,
@@ -29,7 +30,7 @@ use serde_json::Value as JsonValue;
 use uuid::Uuid;
 
 use crate::app::AppState;
-use crate::db::{self, JobRow};
+use crate::db::{self, JobRow, LogRecordRow};
 use crate::middleware::{
     body_limit_middleware, cors_middleware, logging_middleware, rate_limit_middleware,
     request_context_middleware, timeout_middleware,
@@ -70,7 +71,7 @@ pub fn build_router(state: AppState) -> Router {
         )
         .route(
             "/api/v1/conversations/{conversation_id}",
-            get(conversation_detail),
+            get(conversation_detail).delete(conversation_delete),
         )
         .route(
             "/api/v1/conversations/{conversation_id}/messages",
@@ -112,6 +113,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/runs/{run_id}/gates", get(run_gates))
         .route("/api/v1/tasks", get(tasks))
         .route("/api/v1/artifacts", get(artifacts))
+        .route("/api/v1/logs", get(logs_list))
         .route("/api/v1/memories", get(memories_list).post(memories_create))
         .route("/api/v1/memories/recall", post(memories_recall))
         .route("/api/v1/memories/review", post(memories_review))
@@ -401,6 +403,12 @@ struct ConversationEnvelope {
 struct ConfigPutPayload {
     payload: JsonValue,
     updated_by: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct LogsQuery {
+    #[serde(default)]
+    limit: Option<u32>,
 }
 
 async fn health() -> Json<HealthResponse> {
@@ -820,6 +828,25 @@ async fn conversation_detail(
     }))
 }
 
+async fn conversation_delete(
+    State(state): State<AppState>,
+    Extension(request): Extension<RequestContext>,
+    Path(conversation_id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    let deleted = db::delete_conversation(&state.pool, &conversation_id)
+        .await
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?;
+
+    if !deleted {
+        return Err(scoped(
+            ApiError::not_found("conversation not found"),
+            &request,
+        ));
+    }
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
 async fn conversation_messages(
     State(state): State<AppState>,
     Path(conversation_id): Path<String>,
@@ -987,6 +1014,17 @@ async fn tasks(State(state): State<AppState>) -> Json<Vec<TaskSpec>> {
 
 async fn artifacts(State(state): State<AppState>) -> Json<Vec<ArtifactSpec>> {
     Json(db::list_artifacts(&state.pool).await.unwrap_or_default())
+}
+
+async fn logs_list(
+    State(state): State<AppState>,
+    Query(query): Query<LogsQuery>,
+) -> Json<Vec<LogRecordRow>> {
+    Json(
+        db::list_recent_logs(&state.pool, query.limit.unwrap_or(50))
+            .await
+            .unwrap_or_default(),
+    )
 }
 
 async fn memories_list(State(state): State<AppState>) -> Json<Vec<MemoryRecord>> {

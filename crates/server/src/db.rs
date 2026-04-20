@@ -36,6 +36,18 @@ pub struct JobRow {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct LogRecordRow {
+    pub id: String,
+    pub kind: String,
+    pub level: String,
+    pub title: String,
+    pub summary: String,
+    pub run_id: Option<String>,
+    pub task_id: Option<String>,
+    pub at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct UiPreferenceRow {
     pub subject_id: String,
     pub preference: UiPreference,
@@ -887,6 +899,240 @@ pub async fn list_jobs(pool: &SqlitePool) -> Result<Vec<JobRow>, sqlx::Error> {
             created_at: row.get("created_at"),
         })
         .collect())
+}
+
+pub async fn list_recent_logs(
+    pool: &SqlitePool,
+    limit: u32,
+) -> Result<Vec<LogRecordRow>, sqlx::Error> {
+    let limit = i64::from(limit.max(1));
+
+    let stage_rows = sqlx::query(
+        r#"
+        SELECT id, run_id, from_stage, to_stage, policy_rule_id, reason, at
+        FROM run_stage_events
+        ORDER BY at DESC
+        LIMIT ?
+        "#,
+    )
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+
+    let decision_rows = sqlx::query(
+        r#"
+        SELECT id, run_id, task_id, stage, next_action, policy_rule_id, at
+        FROM decisions
+        ORDER BY at DESC
+        LIMIT ?
+        "#,
+    )
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+
+    let gate_rows = sqlx::query(
+        r#"
+        SELECT id, run_id, task_id, gate_name, verdict, reason, at
+        FROM gate_verdicts
+        ORDER BY at DESC
+        LIMIT ?
+        "#,
+    )
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+
+    let mut logs = Vec::new();
+    logs.extend(stage_rows.into_iter().map(|row| {
+        let to_stage: String = row.get("to_stage");
+        let from_stage: Option<String> = row.get("from_stage");
+        let reason: Option<String> = row.get("reason");
+        let policy_rule_id: Option<String> = row.get("policy_rule_id");
+
+        LogRecordRow {
+            id: row.get("id"),
+            kind: "stage".to_string(),
+            level: "info".to_string(),
+            title: format!(
+                "{} → {}",
+                from_stage.unwrap_or_else(|| "start".to_string()),
+                to_stage
+            ),
+            summary: match (reason, policy_rule_id) {
+                (Some(reason), Some(rule)) if !reason.is_empty() => {
+                    format!("{reason} · rule {rule}")
+                }
+                (Some(reason), _) if !reason.is_empty() => reason,
+                (_, Some(rule)) => format!("rule {rule}"),
+                _ => "stage transition".to_string(),
+            },
+            run_id: row.get("run_id"),
+            task_id: None,
+            at: row.get("at"),
+        }
+    }));
+
+    logs.extend(decision_rows.into_iter().map(|row| LogRecordRow {
+        id: row.get("id"),
+        kind: "decision".to_string(),
+        level: "info".to_string(),
+        title: format!("decision @ {}", row.get::<String, _>("stage")),
+        summary: format!(
+            "{} · rule {}",
+            row.get::<String, _>("next_action"),
+            row.get::<String, _>("policy_rule_id")
+        ),
+        run_id: row.get("run_id"),
+        task_id: row.get("task_id"),
+        at: row.get("at"),
+    }));
+
+    logs.extend(gate_rows.into_iter().map(|row| {
+        let verdict: String = row.get("verdict");
+        let level = match verdict.as_str() {
+            "deny" | "failed" => "error",
+            "warn" | "pending" => "warn",
+            _ => "info",
+        };
+        let reason: Option<String> = row.get("reason");
+        LogRecordRow {
+            id: row.get("id"),
+            kind: "gate".to_string(),
+            level: level.to_string(),
+            title: format!("gate {}", row.get::<String, _>("gate_name")),
+            summary: match reason {
+                Some(reason) if !reason.is_empty() => format!("{verdict} · {reason}"),
+                _ => verdict,
+            },
+            run_id: row.get("run_id"),
+            task_id: row.get("task_id"),
+            at: row.get("at"),
+        }
+    }));
+
+    logs.sort_by(|left, right| right.at.cmp(&left.at));
+    logs.truncate(limit as usize);
+    Ok(logs)
+}
+
+pub async fn delete_conversation(
+    pool: &SqlitePool,
+    conversation_id: &str,
+) -> Result<bool, sqlx::Error> {
+    let mut transaction = pool.begin().await?;
+    let exists = sqlx::query("SELECT id FROM conversations WHERE id = ? LIMIT 1")
+        .bind(conversation_id)
+        .fetch_optional(&mut *transaction)
+        .await?
+        .is_some();
+
+    if !exists {
+        transaction.rollback().await?;
+        return Ok(false);
+    }
+
+    let lane_ids = sqlx::query("SELECT id FROM lanes WHERE conversation_id = ?")
+        .bind(conversation_id)
+        .fetch_all(&mut *transaction)
+        .await?
+        .into_iter()
+        .map(|row| row.get::<String, _>("id"))
+        .collect::<Vec<_>>();
+
+    let run_ids = sqlx::query("SELECT id FROM runs WHERE conversation_id = ?")
+        .bind(conversation_id)
+        .fetch_all(&mut *transaction)
+        .await?
+        .into_iter()
+        .map(|row| row.get::<String, _>("id"))
+        .collect::<Vec<_>>();
+
+    let task_ids = sqlx::query("SELECT id FROM tasks WHERE conversation_id = ?")
+        .bind(conversation_id)
+        .fetch_all(&mut *transaction)
+        .await?
+        .into_iter()
+        .map(|row| row.get::<String, _>("id"))
+        .collect::<Vec<_>>();
+
+    for lane_id in &lane_ids {
+        sqlx::query("DELETE FROM handoffs WHERE from_lane_id = ? OR to_lane_id = ?")
+            .bind(lane_id)
+            .bind(lane_id)
+            .execute(&mut *transaction)
+            .await?;
+        sqlx::query("DELETE FROM lane_members WHERE lane_id = ?")
+            .bind(lane_id)
+            .execute(&mut *transaction)
+            .await?;
+        sqlx::query("DELETE FROM artifacts WHERE lane_id = ?")
+            .bind(lane_id)
+            .execute(&mut *transaction)
+            .await?;
+    }
+
+    for run_id in &run_ids {
+        sqlx::query("DELETE FROM run_stage_events WHERE run_id = ?")
+            .bind(run_id)
+            .execute(&mut *transaction)
+            .await?;
+        sqlx::query("DELETE FROM decisions WHERE run_id = ?")
+            .bind(run_id)
+            .execute(&mut *transaction)
+            .await?;
+        sqlx::query("DELETE FROM gate_verdicts WHERE run_id = ?")
+            .bind(run_id)
+            .execute(&mut *transaction)
+            .await?;
+        sqlx::query("DELETE FROM artifacts WHERE run_id = ?")
+            .bind(run_id)
+            .execute(&mut *transaction)
+            .await?;
+    }
+
+    for task_id in &task_ids {
+        sqlx::query("DELETE FROM decisions WHERE task_id = ?")
+            .bind(task_id)
+            .execute(&mut *transaction)
+            .await?;
+        sqlx::query("DELETE FROM gate_verdicts WHERE task_id = ?")
+            .bind(task_id)
+            .execute(&mut *transaction)
+            .await?;
+    }
+
+    sqlx::query("DELETE FROM messages WHERE conversation_id = ?")
+        .bind(conversation_id)
+        .execute(&mut *transaction)
+        .await?;
+    sqlx::query("DELETE FROM tasks WHERE conversation_id = ?")
+        .bind(conversation_id)
+        .execute(&mut *transaction)
+        .await?;
+    sqlx::query("DELETE FROM runs WHERE conversation_id = ?")
+        .bind(conversation_id)
+        .execute(&mut *transaction)
+        .await?;
+    sqlx::query("DELETE FROM artifacts WHERE conversation_id = ?")
+        .bind(conversation_id)
+        .execute(&mut *transaction)
+        .await?;
+    sqlx::query("DELETE FROM lanes WHERE conversation_id = ?")
+        .bind(conversation_id)
+        .execute(&mut *transaction)
+        .await?;
+    sqlx::query("DELETE FROM conversation_participants WHERE conversation_id = ?")
+        .bind(conversation_id)
+        .execute(&mut *transaction)
+        .await?;
+    sqlx::query("DELETE FROM conversations WHERE id = ?")
+        .bind(conversation_id)
+        .execute(&mut *transaction)
+        .await?;
+
+    transaction.commit().await?;
+    Ok(true)
 }
 
 async fn persist_extension(

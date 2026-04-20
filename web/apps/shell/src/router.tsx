@@ -10,6 +10,10 @@ import { AgentsPage } from "@/pages/AgentsPage";
 import { ArtifactsPage } from "@/pages/ArtifactsPage";
 import { ConversationDetailPage } from "@/pages/ConversationDetailPage";
 import { ConversationsPage } from "@/pages/ConversationsPage";
+import { ExtensionsPage } from "@/pages/ExtensionsPage";
+import { JobsPage } from "@/pages/JobsPage";
+import { LogsPage } from "@/pages/LogsPage";
+import { MemoriesPage } from "@/pages/MemoriesPage";
 import { RunDetailPage } from "@/pages/RunDetailPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { SpacesPage } from "@/pages/SpacesPage";
@@ -72,6 +76,24 @@ const spacesRoute = createRoute({
   component: SpacesPage,
 });
 
+const jobsRoute = createRoute({
+  getParentRoute: () => shellRoute,
+  path: "/jobs",
+  component: JobsPage,
+});
+
+const memoriesRoute = createRoute({
+  getParentRoute: () => shellRoute,
+  path: "/memories",
+  component: MemoriesPage,
+});
+
+const extensionsRoute = createRoute({
+  getParentRoute: () => shellRoute,
+  path: "/extensions",
+  component: ExtensionsPage,
+});
+
 const agentsRoute = createRoute({
   getParentRoute: () => shellRoute,
   path: "/agents",
@@ -102,6 +124,12 @@ const settingsRoute = createRoute({
   component: SettingsPage,
 });
 
+const logsRoute = createRoute({
+  getParentRoute: () => shellRoute,
+  path: "/logs",
+  component: LogsPage,
+});
+
 const routeTree = rootRoute.addChildren([
   welcomeRoute,
   shellRoute.addChildren([
@@ -109,10 +137,14 @@ const routeTree = rootRoute.addChildren([
     conversationsRoute,
     conversationDetailRoute,
     spacesRoute,
+    jobsRoute,
+    memoriesRoute,
+    extensionsRoute,
     agentsRoute,
     artifactsRoute,
     workflowsRoute,
     workflowDetailRoute,
+    logsRoute,
     settingsRoute,
   ]),
 ]);

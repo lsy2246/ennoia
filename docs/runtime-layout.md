@@ -49,6 +49,7 @@
 - group conversation 的运行产物优先归属对应 space
 - 全局扩展与共享技能进入 `global/`
 - SQLite、调度索引和缓存进入 `state/`
+- Server、request 与 runtime audit 相关日志进入 `logs/`
 
 Run 级产物落盘路径：
 

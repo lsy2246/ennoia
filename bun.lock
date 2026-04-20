@@ -12,7 +12,9 @@
         "@ennoia/api-client": "workspace:*",
         "@ennoia/builtins": "workspace:*",
         "@ennoia/contract": "workspace:*",
+        "@ennoia/i18n": "workspace:*",
         "@ennoia/observability": "workspace:*",
+        "@ennoia/theme-runtime": "workspace:*",
         "@ennoia/ui-sdk": "workspace:*",
         "@tanstack/react-query": "^5.99.0",
         "@tanstack/react-router": "^1.168.21",
@@ -52,8 +54,19 @@
       "name": "@ennoia/contract",
       "version": "0.1.0",
     },
+    "web/packages/i18n": {
+      "name": "@ennoia/i18n",
+      "version": "0.1.0",
+      "dependencies": {
+        "@ennoia/ui-sdk": "workspace:*",
+      },
+    },
     "web/packages/observability": {
       "name": "@ennoia/observability",
+      "version": "0.1.0",
+    },
+    "web/packages/theme-runtime": {
+      "name": "@ennoia/theme-runtime",
       "version": "0.1.0",
     },
     "web/packages/ui-sdk": {
@@ -114,9 +127,13 @@
 
     "@ennoia/contract": ["@ennoia/contract@workspace:web/packages/contract"],
 
+    "@ennoia/i18n": ["@ennoia/i18n@workspace:web/packages/i18n"],
+
     "@ennoia/observability": ["@ennoia/observability@workspace:web/packages/observability"],
 
     "@ennoia/shell": ["@ennoia/shell@workspace:web/apps/shell"],
+
+    "@ennoia/theme-runtime": ["@ennoia/theme-runtime@workspace:web/packages/theme-runtime"],
 
     "@ennoia/ui-sdk": ["@ennoia/ui-sdk@workspace:web/packages/ui-sdk"],
 

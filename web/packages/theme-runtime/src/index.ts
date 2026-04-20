@@ -77,6 +77,10 @@ export const BUILTIN_THEMES: ThemeDefinition[] = [
   },
 ];
 
+const THEME_VARIABLE_KEYS = Array.from(
+  new Set(BUILTIN_THEMES.flatMap((theme) => Object.keys(theme.variables))),
+);
+
 export function readUiBootstrapCache(): UiBootstrapCache {
   if (typeof window === "undefined") {
     return {};
@@ -106,6 +110,9 @@ export function applyTheme(themeId?: string | null) {
   const root = document.documentElement;
   const theme = resolveThemeDefinition(themeId);
   root.dataset.theme = theme.id;
+  for (const key of THEME_VARIABLE_KEYS) {
+    root.style.removeProperty(key);
+  }
   const resolved =
     theme.appearance === "system"
       ? window.matchMedia("(prefers-color-scheme: dark)").matches

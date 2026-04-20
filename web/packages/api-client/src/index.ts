@@ -164,6 +164,17 @@ export type Job = {
   created_at: string;
 };
 
+export type LogRecord = {
+  id: string;
+  kind: string;
+  level: string;
+  title: string;
+  summary: string;
+  run_id?: string | null;
+  task_id?: string | null;
+  at: string;
+};
+
 export type ExtensionRegistry = {
   extensions: Array<{ id: string; kind: string; version: string; install_dir: string }>;
   pages: ExtensionPageContribution[];
@@ -598,6 +609,12 @@ export async function createConversation(payload: {
   });
 }
 
+export async function deleteConversation(conversationId: string) {
+  return fetchJson<void>(`/api/v1/conversations/${conversationId}`, {
+    method: "DELETE",
+  });
+}
+
 export async function getConversation(conversationId: string) {
   return fetchJson<ConversationDetailResponse>(`/api/v1/conversations/${conversationId}`);
 }
@@ -727,6 +744,10 @@ export async function createJob(payload: {
     method: "POST",
     body: JSON.stringify(payload),
   });
+}
+
+export async function listLogs(limit = 50) {
+  return fetchJson<LogRecord[]>(`/api/v1/logs?limit=${limit}`);
 }
 
 export async function listConfig() {
