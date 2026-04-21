@@ -1,0 +1,120 @@
+import { useEffect, useState } from "react";
+
+import {
+  listAgents,
+  listProviders,
+  type AgentProfile,
+  type ProviderConfig,
+} from "@ennoia/api-client";
+import { formatRelativePath } from "@/lib/pathDisplay";
+import { useUiHelpers } from "@/stores/ui";
+import { useWorkbenchStore } from "@/stores/workbench";
+
+export function Agents() {
+  const { t } = useUiHelpers();
+  const openView = useWorkbenchStore((state) => state.openView);
+  const [agents, setAgents] = useState<AgentProfile[]>([]);
+  const [providers, setProviders] = useState<ProviderConfig[]>([]);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    void refresh();
+  }, []);
+
+  async function refresh() {
+    setError(null);
+    try {
+      const [nextAgents, nextProviders] = await Promise.all([listAgents(), listProviders()]);
+      setAgents(nextAgents);
+      setProviders(nextProviders);
+    } catch (err) {
+      setError(String(err));
+    }
+  }
+
+  function providerLabel(providerId: string) {
+    return providers.find((item) => item.id === providerId)?.display_name ?? providerId;
+  }
+
+  return (
+    <div className="resource-layout resource-layout--single">
+      <section className="work-panel">
+        <div className="page-heading">
+          <span>{t("web.agents.eyebrow", "Agent Registry")}</span>
+          <h1>{t("web.agents.title", "Agent 是可配置的协作者档案。")}</h1>
+          <p>{t("web.agents.description", "从这里查看 Agent 清单，并把任意 Agent 作为独立工作视图打开。")}</p>
+        </div>
+        {error ? <div className="error">{error}</div> : null}
+        <div className="button-row">
+          <button
+            type="button"
+            onClick={() =>
+              openView({
+                kind: "agent",
+                entityId: `new-${Date.now()}`,
+                title: t("web.agents.new", "新建 Agent"),
+                subtitle: t("web.agents.edit", "编辑 Agent"),
+              })}
+          >
+            {t("web.agents.new", "新建 Agent")}
+          </button>
+          <button type="button" className="secondary" onClick={() => void refresh()}>
+            {t("web.action.refresh", "刷新")}
+          </button>
+        </div>
+        <div className="card-grid">
+          {agents.map((agent) => (
+            <article key={agent.id} className="resource-card">
+              <header>
+                <strong>{agent.display_name}</strong>
+                <span>{agent.enabled ? t("web.common.enabled", "启用") : t("web.common.disabled", "停用")}</span>
+              </header>
+              <p>{agent.description || t("web.common.none", "无")}</p>
+              <div className="tag-row">
+                <span>{providerLabel(agent.provider_id)}</span>
+                <span>{agent.model_id}</span>
+                <span>{agent.reasoning_effort}</span>
+                <span>{agent.skills.length} skills</span>
+              </div>
+              <p className="helper-text">
+                {t("web.agents.derived_workspace_help", "工作区根路径只在设置中配置。Agent 工作区自动派生为 workspace/agents/{agent_id}。")}
+                {" · "}
+                {formatRelativePath(agent.workspace_root)}
+              </p>
+              <div className="button-row">
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() =>
+                    openView({
+                      kind: "agent",
+                      entityId: agent.id,
+                      title: agent.display_name,
+                      subtitle: providerLabel(agent.provider_id),
+                    })}
+                >
+                  {t("web.action.open", "打开")}
+                </button>
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() =>
+                    openView({
+                      kind: "api-channel",
+                      entityId: agent.provider_id,
+                      title: providerLabel(agent.provider_id),
+                      subtitle: t("web.channels.eyebrow", "API 上游渠道"),
+                    })}
+                >
+                  {t("web.agents.open_channel", "打开渠道")}
+                </button>
+              </div>
+            </article>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+

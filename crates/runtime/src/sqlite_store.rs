@@ -1,7 +1,6 @@
+use crate::{RuntimeError, RuntimeStore};
 use async_trait::async_trait;
-use ennoia_kernel::{
-    DecisionSnapshot, GateRecord, RunStage, RunStageEvent, RuntimeError, RuntimeStore,
-};
+use ennoia_kernel::{DecisionSnapshot, GateRecord, RunStage, RunStageEvent};
 use sea_query::{Expr, Iden, Query, SqliteQueryBuilder};
 use sea_query_binder::SqlxBinder;
 use sqlx::{Row, SqlitePool};

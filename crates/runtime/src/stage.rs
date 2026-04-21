@@ -1,8 +1,7 @@
 use std::sync::Arc;
 
-use ennoia_kernel::{
-    Decision, NextAction, RunStage, Signals, StageMachine, StagePolicy, StageTransition,
-};
+use crate::StageMachine;
+use ennoia_kernel::{Decision, NextAction, RunStage, Signals, StagePolicy, StageTransition};
 
 /// PolicyStageMachine drives transitions from the declarative StagePolicy.
 #[derive(Debug, Clone)]

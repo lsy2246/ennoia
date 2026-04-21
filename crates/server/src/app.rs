@@ -3,19 +3,23 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
+use ennoia_assets::builtins;
 use ennoia_config::SqliteConfigStore;
 use ennoia_extension_host::{ExtensionRuntime, ExtensionRuntimeConfig};
 use ennoia_kernel::{
-    AgentConfig, AppConfig, GatePipeline, MemoryStore, PlatformOverview, ProviderConfig,
-    RuntimeStore, SchedulerStore, ServerConfig, SkillConfig, SpaceSpec, StageMachine, UiConfig,
+    AgentConfig, AppConfig, PlatformOverview, ProviderConfig, ServerConfig, SkillConfig,
+    SkillRegistryEntry, SkillRegistryFile, SpaceSpec, UiConfig,
 };
-use ennoia_memory::SqliteMemoryStore;
+use ennoia_memory::{MemoryStore, SqliteMemoryStore};
 use ennoia_observability::{self, ObservabilityGuard};
 use ennoia_orchestrator::OrchestratorService;
 use ennoia_paths::{default_home_dir, RuntimePaths};
 use ennoia_policy::PolicySet;
-use ennoia_runtime::{builtin_pipeline, PolicyStageMachine, SqliteRuntimeStore};
-use ennoia_scheduler::{SqliteSchedulerStore, Worker};
+use ennoia_runtime::{
+    builtin_pipeline, GatePipeline, PolicyStageMachine, RuntimeStore, SqliteRuntimeStore,
+    StageMachine,
+};
+use ennoia_scheduler::{SchedulerStore, SqliteSchedulerStore, Worker};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::SqlitePool;
 use tokio::net::TcpListener;
@@ -26,6 +30,12 @@ use crate::routes::build_router;
 use crate::system_config::SystemConfigRuntime;
 
 type AppError = Box<dyn std::error::Error + Send + Sync>;
+
+const OBSERVABILITY_TARGET: &str = "server";
+const DEFAULT_SPACE_ID: &str = "studio";
+const DEFAULT_SPACE_NAME: &str = "Studio";
+const DEFAULT_REASONING_EFFORT: &str = "high";
+const EXTENSION_REFRESH_SUMMARY: &str = "polled runtime refresh";
 
 #[derive(Clone)]
 pub struct AppState {
@@ -91,8 +101,8 @@ pub fn default_app_state() -> AppState {
         pool,
         extensions,
         agents: Vec::new(),
-        skills: default_skills(),
-        providers: default_providers(),
+        skills: builtin_skill_configs(),
+        providers: Vec::new(),
         spaces: default_spaces(),
         policies,
         memory_store,
@@ -119,7 +129,7 @@ pub async fn bootstrap_app_state(home_dir: impl AsRef<Path>) -> Result<AppState,
     let server_config: ServerConfig = read_toml_or_default(runtime_paths.server_config_file())?;
     let ui_config: UiConfig = read_toml_or_default(runtime_paths.ui_config_file())?;
     let observability_guard = Some(Arc::new(ennoia_observability::init(
-        "server",
+        OBSERVABILITY_TARGET,
         &server_config.log_level,
         runtime_paths.server_logs_dir(),
     )?));
@@ -204,7 +214,7 @@ pub async fn run_server(home_dir: impl AsRef<Path>) -> Result<(), AppError> {
         loop {
             tokio::select! {
                 _ = interval.tick() => {
-                    if let Ok(Some(snapshot)) = extensions.refresh_from_disk("polled runtime refresh") {
+                    if let Ok(Some(snapshot)) = extensions.refresh_from_disk(EXTENSION_REFRESH_SUMMARY) {
                         let _ = db::upsert_extensions_runtime(&pool, &snapshot).await;
                     }
                 }
@@ -245,19 +255,39 @@ pub fn load_agent_configs(paths: &RuntimePaths) -> Result<Vec<AgentConfig>, AppE
 }
 
 pub fn load_skill_configs(paths: &RuntimePaths) -> Result<Vec<SkillConfig>, AppError> {
-    let mut skills = load_configs_from_dir::<SkillConfig>(paths.skills_config_dir())?;
+    let mut skills = load_skill_registry(paths)?
+        .skills
+        .into_iter()
+        .filter(|entry| entry.enabled && !entry.removed)
+        .filter_map(|entry| load_skill_from_registry_entry(paths, &entry).ok())
+        .collect::<Vec<_>>();
     if skills.is_empty() {
-        skills = default_skills();
+        skills = builtin_skill_configs();
     }
     skills.sort_by(|left, right| left.id.cmp(&right.id));
     Ok(skills)
 }
 
+pub fn load_skill_registry(paths: &RuntimePaths) -> Result<SkillRegistryFile, AppError> {
+    read_toml_or_default(paths.skills_registry_file())
+}
+
+pub fn write_skill_registry(
+    paths: &RuntimePaths,
+    registry: &SkillRegistryFile,
+) -> Result<(), AppError> {
+    if let Some(parent) = paths.skills_registry_file().parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(
+        paths.skills_registry_file(),
+        toml::to_string_pretty(registry)?,
+    )?;
+    Ok(())
+}
+
 pub fn load_provider_configs(paths: &RuntimePaths) -> Result<Vec<ProviderConfig>, AppError> {
     let mut providers = load_configs_from_dir::<ProviderConfig>(paths.providers_config_dir())?;
-    if providers.is_empty() {
-        providers = default_providers();
-    }
     providers.sort_by(|left, right| left.id.cmp(&right.id));
     Ok(providers)
 }
@@ -305,8 +335,8 @@ where
 
 fn default_spaces() -> Vec<SpaceSpec> {
     vec![SpaceSpec {
-        id: "studio".to_string(),
-        display_name: "Studio".to_string(),
+        id: DEFAULT_SPACE_ID.to_string(),
+        display_name: DEFAULT_SPACE_NAME.to_string(),
         description: "默认工作台空间".to_string(),
         primary_goal: "组织单操作者与多 Agent 的日常协作".to_string(),
         mention_policy: "configured".to_string(),
@@ -314,80 +344,18 @@ fn default_spaces() -> Vec<SpaceSpec> {
     }]
 }
 
-fn default_skills() -> Vec<SkillConfig> {
-    vec![
-        SkillConfig {
-            id: "frontend-design".to_string(),
-            display_name: "Frontend Design".to_string(),
-            description: "面向界面设计、视觉系统和交互细节的技能定义。".to_string(),
-            source: "builtin".to_string(),
-            entry: "builtin://skills/frontend-design".to_string(),
-            tags: vec!["ui".to_string(), "ux".to_string(), "frontend".to_string()],
-            enabled: true,
-        },
-        SkillConfig {
-            id: "implementation".to_string(),
-            display_name: "Implementation".to_string(),
-            description: "面向代码实现、修复、重构与验证闭环的技能定义。".to_string(),
-            source: "builtin".to_string(),
-            entry: "builtin://skills/implementation".to_string(),
-            tags: vec!["code".to_string(), "delivery".to_string()],
-            enabled: true,
-        },
-        SkillConfig {
-            id: "task-planning".to_string(),
-            display_name: "Task Planning".to_string(),
-            description: "面向需求澄清、任务拆解和优先级规划的技能定义。".to_string(),
-            source: "builtin".to_string(),
-            entry: "builtin://skills/task-planning".to_string(),
-            tags: vec!["planning".to_string(), "strategy".to_string()],
-            enabled: true,
-        },
-    ]
-}
-
-fn default_providers() -> Vec<ProviderConfig> {
-    vec![ProviderConfig {
-        id: "openai".to_string(),
-        display_name: "OpenAI".to_string(),
-        kind: "openai".to_string(),
-        description: "默认 OpenAI 上游实现。".to_string(),
-        base_url: "https://api.openai.com/v1".to_string(),
-        api_key_env: "OPENAI_API_KEY".to_string(),
-        default_model: "gpt-5.4".to_string(),
-        available_models: vec![
-            "gpt-5.4".to_string(),
-            "gpt-5.3-codex".to_string(),
-            "gpt-5.2".to_string(),
-        ],
-        enabled: true,
-    }]
-}
-
 fn normalize_agent_config(paths: &RuntimePaths, agent: &mut AgentConfig) {
-    if agent.provider_id.is_empty() {
-        agent.provider_id = "openai".to_string();
+    if agent.model_id.is_empty() && !agent.default_model.is_empty() {
+        agent.model_id = agent.default_model.clone();
     }
-    if agent.model_id.is_empty() {
-        agent.model_id = if agent.default_model.is_empty() {
-            "gpt-5.4".to_string()
-        } else {
-            agent.default_model.clone()
-        };
-    }
-    if agent.default_model.is_empty() {
+    if agent.default_model.is_empty() && !agent.model_id.is_empty() {
         agent.default_model = agent.model_id.clone();
     }
     if agent.reasoning_effort.is_empty() {
-        agent.reasoning_effort = "high".to_string();
+        agent.reasoning_effort = DEFAULT_REASONING_EFFORT.to_string();
     }
     if agent.workspace_root.is_empty() {
-        let legacy = if !agent.workspace_dir.is_empty() {
-            paths.expand_home_token(&agent.workspace_dir)
-        } else {
-            paths.agent_workspace_dir(&agent.id)
-        };
-        agent.workspace_root = paths.display_for_user(legacy);
+        agent.workspace_root = paths.display_for_user(paths.agent_workspace_dir(&agent.id));
     }
     if !agent.workspace_dir.is_empty() {
         agent.workspace_dir = paths.display_for_user(paths.expand_home_token(&agent.workspace_dir));
@@ -408,9 +376,7 @@ fn normalize_agent_config(paths: &RuntimePaths, agent: &mut AgentConfig) {
 
 fn extension_runtime_config(paths: &RuntimePaths) -> ExtensionRuntimeConfig {
     ExtensionRuntimeConfig {
-        attached_workspaces_file: paths.attached_workspaces_file(),
-        package_extensions_dir: paths.package_extensions_dir(),
-        legacy_extensions_config_dir: paths.extensions_config_dir(),
+        registry_file: paths.extensions_registry_file(),
         logs_dir: paths.extensions_logs_dir(),
     }
 }
@@ -430,4 +396,91 @@ pub fn normalize_app_config(paths: &RuntimePaths, mut config: AppConfig) -> AppC
     }
 
     config
+}
+
+fn builtin_skill_configs() -> Vec<SkillConfig> {
+    let mut skills = builtins::skills()
+        .into_iter()
+        .filter(|asset| asset.logical_path.ends_with("/skill.toml"))
+        .filter_map(|asset| toml::from_str::<SkillConfig>(asset.contents).ok())
+        .collect::<Vec<_>>();
+    skills.sort_by(|left, right| left.id.cmp(&right.id));
+    skills
+}
+
+fn load_skill_from_registry_entry(
+    paths: &RuntimePaths,
+    entry: &SkillRegistryEntry,
+) -> Result<SkillConfig, AppError> {
+    let descriptor_path = resolve_skill_descriptor_path(paths, entry);
+    let mut skill = toml::from_str::<SkillConfig>(&fs::read_to_string(descriptor_path)?)?;
+    if skill.id.is_empty() {
+        skill.id = entry.id.clone();
+    }
+    skill.source = entry.source.clone();
+    skill.enabled = entry.enabled;
+    Ok(skill)
+}
+
+fn resolve_skill_descriptor_path(paths: &RuntimePaths, entry: &SkillRegistryEntry) -> PathBuf {
+    let root = paths.expand_home_token(&entry.path);
+    if root.extension().and_then(|value| value.to_str()) == Some("toml") {
+        root
+    } else {
+        root.join("skill.toml")
+    }
+}
+
+pub fn upsert_skill_package(paths: &RuntimePaths, payload: &SkillConfig) -> Result<(), AppError> {
+    let skill_dir = paths.skill_dir(&payload.id);
+    fs::create_dir_all(&skill_dir)?;
+    fs::write(
+        skill_dir.join("skill.toml"),
+        toml::to_string_pretty(payload)?,
+    )?;
+
+    let mut registry = load_skill_registry(paths)?;
+    registry.skills.retain(|item| item.id != payload.id);
+    registry.skills.push(SkillRegistryEntry {
+        id: payload.id.clone(),
+        source: payload.source.clone(),
+        enabled: payload.enabled,
+        removed: false,
+        path: paths.display_for_user(&skill_dir),
+    });
+    sort_skill_registry_entries(&mut registry.skills);
+    write_skill_registry(paths, &registry)
+}
+
+pub fn delete_skill_package(paths: &RuntimePaths, skill_id: &str) -> Result<bool, AppError> {
+    let mut registry = load_skill_registry(paths)?;
+    let Some(index) = registry.skills.iter().position(|item| item.id == skill_id) else {
+        return Ok(false);
+    };
+
+    let entry = registry.skills[index].clone();
+    let skill_root = paths.expand_home_token(&entry.path);
+    if skill_root.exists() {
+        fs::remove_dir_all(&skill_root)?;
+    }
+
+    if entry.source == "builtin" {
+        registry.skills[index].enabled = false;
+        registry.skills[index].removed = true;
+    } else {
+        registry.skills.remove(index);
+    }
+
+    sort_skill_registry_entries(&mut registry.skills);
+    write_skill_registry(paths, &registry)?;
+    Ok(true)
+}
+
+fn sort_skill_registry_entries(entries: &mut [SkillRegistryEntry]) {
+    entries.sort_by(|left, right| {
+        left.id
+            .cmp(&right.id)
+            .then_with(|| left.source.cmp(&right.source))
+            .then_with(|| left.path.cmp(&right.path))
+    });
 }

@@ -1,12 +1,12 @@
-# Ennoia 数据模型
+﻿# Ennoia 数据模型
 
-## 核心产品模型
+## 核心模型
 
-当前一等模型：
-
-- `Session`
-- `Message`
-- `Run / Task / Artifact`
+- `WorkspaceProfile`
+- `ConversationSpec`
+- `LaneSpec`
+- `MessageSpec`
+- `RunSpec / TaskSpec / ArtifactSpec`
 - `AgentConfig`
 - `SkillConfig`
 - `ProviderConfig`
@@ -14,28 +14,30 @@
 - `MemoryRecord`
 - `Job`
 - `SystemLog`
-- `WorkspaceProfile`
 
-## Session 域
+## Conversation 域
 
-### Session
+`ConversationSpec` 字段：
 
 - `id`
 - `topology`
 - `owner`
+- `space_id`
 - `title`
 - `participants`
 - `default_lane_id`
 - `created_at`
 - `updated_at`
 
-说明：
+约定：
 
-- `1 Agent = direct`
-- `2+ Agents = group`
-- 每个 Session 都有唯一 `id`
+- `agent_ids.len() == 1` 创建 `direct`。
+- `agent_ids.len() >= 2` 创建 `group`。
+- 产品文案可以称为“会话”，代码与数据库统一使用 `conversation`。
 
-### Message
+## Message 域
+
+`MessageSpec` 字段：
 
 - `id`
 - `conversation_id`
@@ -46,13 +48,9 @@
 - `mentions`
 - `created_at`
 
-补充路由字段：
-
-- `addressed_agents`
-
 ## Agent 域
 
-### AgentConfig
+`AgentConfig` 字段：
 
 - `id`
 - `display_name`
@@ -61,132 +59,25 @@
 - `provider_id`
 - `model_id`
 - `reasoning_effort`
+- `workspace_root`
 - `skills`
 - `enabled`
 
-说明：
-
-- `provider_id` 的产品语义是“API 上游渠道”
-- 不再把 `role` 作为固定职责字段
-- Session 的产物目录与临时目录不属于 Agent 字段
+`kind`、`workspace_mode`、`default_model`、`skills_dir`、`workspace_dir`、`artifacts_dir` 仍作为运行时派生/内部字段存在，前端产品模型以显式字段为主。
 
 ## Skill 域
 
-### SkillConfig
-
-- `id`
-- `display_name`
-- `description`
-- `source`
-- `entry`
-- `enabled`
-
-说明：
-
-- Skill 是能力包目录
-- Skill 与 Extension 严格分离
-- 是否启用由 Agent 自己的配置决定
+`SkillConfig` 字段：`id`、`display_name`、`description`、`source`、`entry`、`tags`、`enabled`。
 
 ## API 上游渠道域
 
-### ProviderConfig
-
-- `id`
-- `display_name`
-- `kind`
-- `description`
-- `base_url`
-- `api_key_env`
-- `default_model`
-- `available_models`
-- `enabled`
-
-说明：
-
-- 产品名称统一为“API 上游渠道”
-- `kind` 表示接口类型
+`ProviderConfig` 字段：`id`、`display_name`、`kind`、`description`、`base_url`、`api_key_env`、`default_model`、`available_models`、`enabled`。
 
 ## Extension 域
 
-### ExtensionRuntimeState
+扩展运行态以 `ExtensionRuntimeState` 为准，扩展包通过 manifest 贡献页面、面板、主题、语言、命令、Hook 和 Provider 实现。
 
-- `id`
-- `name`
-- `enabled`
-- `status`
-- `version`
-- `kind`
-- `source_mode`
-- `install_dir`
-- `source_root`
-- `diagnostics`
+## 数据库快照
 
-说明：
-
-- 扩展以扩展包为分区标准
-- 扩展可以贡献视图、面板、主题、语言、命令和 API 上游渠道实现
-
-## Memory 域
-
-### MemoryRecord
-
-- `id`
-- `owner`
-- `namespace`
-- `memory_kind`
-- `stability`
-- `status`
-- `title`
-- `content`
-- `summary`
-- `confidence`
-- `importance`
-- `sources`
-- `tags`
-- `entities`
-- `created_at`
-- `updated_at`
-
-说明：
-
-- 记忆通过数据库管理
-- Web 负责可视化、recall 与 review
-
-## 计划任务域
-
-### Job
-
-- `id`
-- `owner_kind`
-- `owner_id`
-- `job_kind`
-- `schedule_kind`
-- `schedule_value`
-- `payload_json`
-- `status`
-- `retry_count`
-- `max_retries`
-- `last_run_at`
-- `next_run_at`
-- `error`
-- `created_at`
-- `updated_at`
-
-## 日志域
-
-### SystemLog
-
-- `id`
-- `kind`
-- `source`
-- `level`
-- `title`
-- `summary`
-- `details`
-- `run_id`
-- `task_id`
-- `at`
-
-说明：
-
-- 统一日志流聚合前端、后端、扩展事件与运行摘要
+- `assets/db.sql`：新库初始化入口，完整、可执行、自包含。
+- `assets/migrations/`：数据库结构演进脚本目录；当前为空，后续结构变更时新增 migration。

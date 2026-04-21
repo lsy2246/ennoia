@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
-use ennoia_kernel::{Decision, DecisionEngine, RunStage, Signals, StageMachine, StagePolicy};
+use crate::{DecisionEngine, StageMachine};
+use ennoia_kernel::{Decision, RunStage, Signals, StagePolicy};
 
 use crate::stage::PolicyStageMachine;
 

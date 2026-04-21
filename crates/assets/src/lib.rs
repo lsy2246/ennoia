@@ -1,7 +1,7 @@
 //! Ennoia compile-time assets registry.
 //!
-//! This crate is the single source of truth for built-in templates and
-//! migrations. Runtime crates must consume assets through these APIs instead of
+//! This crate is the single source of truth for built-in templates,
+//! migrations and database snapshots. Runtime crates must consume assets through these APIs instead of
 //! referencing repository paths directly.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -11,6 +11,10 @@ pub struct TextAsset {
 }
 
 include!(concat!(env!("OUT_DIR"), "/generated_assets.rs"));
+
+pub fn db_sql() -> &'static str {
+    DB_SQL
+}
 
 fn lookup(assets: &'static [(&'static str, &'static str)], path: &str) -> Option<&'static str> {
     assets
@@ -51,24 +55,8 @@ pub mod templates {
         get("config/ui.toml").expect("ui config template")
     }
 
-    pub fn implementation_skill() -> &'static str {
-        get("config/skills/implementation.toml").expect("implementation skill template")
-    }
-
-    pub fn task_planning_skill() -> &'static str {
-        get("config/skills/task-planning.toml").expect("task planning skill template")
-    }
-
-    pub fn frontend_design_skill() -> &'static str {
-        get("config/skills/frontend-design.toml").expect("frontend design skill template")
-    }
-
     pub fn openai_provider() -> &'static str {
         get("config/providers/openai.toml").expect("openai provider template")
-    }
-
-    pub fn attached_workspaces() -> &'static str {
-        get("extensions/attached/workspaces.toml").expect("attached workspaces template")
     }
 
     pub fn memory_policy() -> &'static str {
@@ -89,5 +77,36 @@ pub mod migrations {
 
     pub fn get(path: &str) -> Option<&'static str> {
         lookup(MIGRATION_ASSETS, path)
+    }
+}
+
+pub mod builtins {
+    use super::{lookup, wrap_assets, TextAsset, BUILTIN_ASSETS};
+
+    pub fn all() -> Vec<TextAsset> {
+        wrap_assets(BUILTIN_ASSETS)
+    }
+
+    pub fn get(path: &str) -> Option<&'static str> {
+        lookup(BUILTIN_ASSETS, path)
+    }
+
+    pub fn extensions() -> Vec<TextAsset> {
+        filter_prefix("extensions/")
+    }
+
+    pub fn skills() -> Vec<TextAsset> {
+        filter_prefix("skills/")
+    }
+
+    fn filter_prefix(prefix: &str) -> Vec<TextAsset> {
+        BUILTIN_ASSETS
+            .iter()
+            .filter(|(logical_path, _)| logical_path.starts_with(prefix))
+            .map(|(logical_path, contents)| TextAsset {
+                logical_path,
+                contents,
+            })
+            .collect()
     }
 }

@@ -1,7 +1,8 @@
 use ennoia_kernel::{
-    ContextView, ConversationSpec, Decision, DecisionSnapshot, GateRecord, GateVerdict,
-    MessageSpec, OwnerRef, RunSpec, RunStageEvent, Signals, TaskSpec,
+    ConversationSpec, Decision, DecisionSnapshot, GateRecord, GateVerdict, MessageSpec, OwnerRef,
+    RunSpec, RunStageEvent, Signals, TaskSpec,
 };
+use ennoia_memory::ContextView;
 use serde::{Deserialize, Serialize};
 
 /// RunTrigger explains what started a run.

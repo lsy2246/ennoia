@@ -2,10 +2,12 @@ use std::sync::Arc;
 
 use chrono::Utc;
 use ennoia_kernel::{
-    ContextView, ConversationTopology, DecisionSnapshot, EvidenceSignals, ExecutionSignals,
-    GateContext, GatePipeline, GateRecord, GateSeverity, GateVerdict, IntentSignals, RunSpec,
-    RunStage, RunStageEvent, Signals, StageMachine, TaskKind, TaskSpec, TaskStatus,
+    ConversationTopology, DecisionSnapshot, EvidenceSignals, ExecutionSignals, GateRecord,
+    GateSeverity, GateVerdict, IntentSignals, RunSpec, RunStage, RunStageEvent, Signals, TaskKind,
+    TaskSpec, TaskStatus,
 };
+use ennoia_memory::ContextView;
+use ennoia_runtime::{GateContext, GatePipeline, StageMachine};
 use uuid::Uuid;
 
 use crate::model::{PlannedRun, RunRequest};

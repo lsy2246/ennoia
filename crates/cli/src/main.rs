@@ -9,11 +9,19 @@ use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use ennoia_assets::templates;
-use ennoia_kernel::{ExtensionManifest, ExtensionSourceMode, ServerConfig};
+use ennoia_assets::{builtins, templates};
+use ennoia_kernel::{
+    ExtensionManifest, ExtensionRegistryEntry, ExtensionRegistryFile, ExtensionSourceMode,
+    OwnerKind, OwnerRef, ServerConfig, SkillRegistryEntry, SkillRegistryFile,
+};
+use ennoia_memory::{MemoryKind, RecallMode, RecallQuery, RememberRequest, Stability};
 use ennoia_paths::RuntimePaths;
 use ennoia_server::{bootstrap_app_state, default_app_state, run_server, AppState};
 use notify::{Config as NotifyConfig, RecommendedWatcher, RecursiveMode, Watcher};
+
+const WEB_SHELL_DIR: &str = "web";
+const WEB_DEV_HOST: &str = "127.0.0.1";
+const WEB_DEV_PORT: u16 = 5173;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -33,7 +41,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             auto_attach_workspace_extensions(&paths)?;
             let server_config: ServerConfig = read_toml_or_default(&paths.server_config_file())?;
             ensure_port_available(server_config.port, "API")?;
-            ensure_port_available(5173, "Web")?;
+            ensure_port_available(WEB_DEV_PORT, "Web")?;
             run_dev_supervisor(paths, server_config).await?;
         }
         Some("start") | Some("serve") => {
@@ -141,19 +149,19 @@ async fn memory_remember(
         eprintln!("usage: ennoia memory remember <owner_kind> <owner_id> <namespace> <content>");
         std::process::exit(2);
     }
-    let owner = ennoia_kernel::OwnerRef {
+    let owner = OwnerRef {
         kind: match args[0].as_str() {
-            "agent" => ennoia_kernel::OwnerKind::Agent,
-            "space" => ennoia_kernel::OwnerKind::Space,
-            _ => ennoia_kernel::OwnerKind::Global,
+            "agent" => OwnerKind::Agent,
+            "space" => OwnerKind::Space,
+            _ => OwnerKind::Global,
         },
         id: args[1].clone(),
     };
-    let request = ennoia_kernel::RememberRequest {
+    let request = RememberRequest {
         owner,
         namespace: args[2].clone(),
-        memory_kind: ennoia_kernel::MemoryKind::Fact,
-        stability: ennoia_kernel::Stability::Working,
+        memory_kind: MemoryKind::Fact,
+        stability: Stability::Working,
         title: None,
         content: args[3..].join(" "),
         summary: None,
@@ -178,11 +186,11 @@ async fn memory_recall(
         eprintln!("usage: ennoia memory recall <owner_kind> <owner_id> [query]");
         std::process::exit(2);
     }
-    let owner = ennoia_kernel::OwnerRef {
+    let owner = OwnerRef {
         kind: match args[0].as_str() {
-            "agent" => ennoia_kernel::OwnerKind::Agent,
-            "space" => ennoia_kernel::OwnerKind::Space,
-            _ => ennoia_kernel::OwnerKind::Global,
+            "agent" => OwnerKind::Agent,
+            "space" => OwnerKind::Space,
+            _ => OwnerKind::Global,
         },
         id: args[1].clone(),
     };
@@ -192,13 +200,13 @@ async fn memory_recall(
         None
     };
     let mode = if query_text.is_some() {
-        ennoia_kernel::RecallMode::Fts
+        RecallMode::Fts
     } else {
-        ennoia_kernel::RecallMode::Namespace
+        RecallMode::Namespace
     };
-    let query = ennoia_kernel::RecallQuery {
+    let query = RecallQuery {
         owner,
-        thread_id: None,
+        conversation_id: None,
         run_id: None,
         query_text,
         namespace_prefix: None,
@@ -321,7 +329,7 @@ async fn run_dev_supervisor(
     let _watcher = start_backend_watcher(&repo_root, watch_tx)?;
 
     println!("Ennoia dev runtime starting at {}", paths.home().display());
-    println!("Web: http://127.0.0.1:5173");
+    println!("Web: http://{WEB_DEV_HOST}:{WEB_DEV_PORT}");
     println!("API: http://{}:{}", server_config.host, server_config.port);
     println!("Backend hot reload: watching crates/, assets/, Cargo.toml and Cargo.lock.");
     println!("Press Ctrl+C to stop API, Web and extension dev processes.");
@@ -568,15 +576,15 @@ impl DevProcessGroup {
         paths: &RuntimePaths,
         server_config: &ServerConfig,
     ) -> io::Result<()> {
-        let shell_dir = env::current_dir()?.join("web/apps/shell");
+        let shell_dir = env::current_dir()?.join(WEB_SHELL_DIR);
         if !shell_dir.join("package.json").exists() {
-            println!("Web dev server skipped: web/apps/shell/package.json not found");
+            println!("Web dev server skipped: {WEB_SHELL_DIR}/package.json not found");
             return Ok(());
         }
 
         let log_path = paths.server_logs_dir().join("shell-dev.log");
         let mut command = shell_command(
-            "bun run dev --host 127.0.0.1 --port 5173 --strictPort",
+            &format!("bun run dev --host {WEB_DEV_HOST} --port {WEB_DEV_PORT} --strictPort"),
             &shell_dir,
         );
         command.env(
@@ -806,26 +814,13 @@ fn ensure_port_available(port: u16, label: &str) -> io::Result<()> {
 
 fn attached_workspace_roots(paths: &RuntimePaths) -> io::Result<Vec<PathBuf>> {
     let mut roots = Vec::new();
-    if paths.attached_workspaces_file().exists() {
-        let contents = fs::read_to_string(paths.attached_workspaces_file())?;
-        let value: toml::Value = toml::from_str(&contents).map_err(io::Error::other)?;
-        if let Some(items) = value.get("workspaces").and_then(toml::Value::as_array) {
-            roots.extend(items.iter().filter_map(|item| {
-                item.get("path")
-                    .and_then(toml::Value::as_str)
-                    .map(PathBuf::from)
-            }));
-        }
-    }
-
-    let repo_extensions = env::current_dir()?.join("extensions");
-    if repo_extensions.exists() {
-        for entry in fs::read_dir(repo_extensions)? {
-            let entry = entry?;
-            if entry.file_type()?.is_dir() && entry.path().join("ennoia.extension.toml").exists() {
-                roots.push(entry.path());
-            }
-        }
+    let registry = read_extension_registry(paths)?;
+    for entry in registry
+        .extensions
+        .into_iter()
+        .filter(|item| item.source == "workspace" && item.enabled && !item.removed)
+    {
+        roots.push(PathBuf::from(entry.path));
     }
 
     roots.sort();
@@ -843,20 +838,14 @@ fn descriptor_path(root: &Path) -> Option<PathBuf> {
 }
 
 fn auto_attach_workspace_extensions(paths: &RuntimePaths) -> io::Result<()> {
-    let cwd = env::current_dir()?;
-    let extensions_dir = cwd.join("extensions");
-    if !extensions_dir.exists() {
+    let builtins_dir = env::current_dir()?.join("builtins").join("extensions");
+    if !builtins_dir.exists() {
         return Ok(());
     }
 
-    let attached_path = paths.attached_workspaces_file();
-    let mut current = if attached_path.exists() {
-        fs::read_to_string(&attached_path)?
-    } else {
-        "workspaces = []\n".to_string()
-    };
+    let mut registry = read_extension_registry(paths)?;
 
-    for entry in fs::read_dir(extensions_dir)? {
+    for entry in fs::read_dir(builtins_dir)? {
         let entry = entry?;
         if !entry.file_type()?.is_dir() {
             continue;
@@ -866,48 +855,30 @@ fn auto_attach_workspace_extensions(paths: &RuntimePaths) -> io::Result<()> {
             continue;
         }
         let normalized = root.to_string_lossy().replace('\\', "/");
-        if current.contains(&normalized) {
+        let id = entry.file_name().to_string_lossy().to_string();
+        let builtin_removed = registry
+            .extensions
+            .iter()
+            .any(|item| item.id == id && item.source == "builtin" && item.removed);
+        if builtin_removed
+            || registry
+                .extensions
+                .iter()
+                .any(|item| item.id == id && item.source == "workspace")
+        {
             continue;
         }
-
-        let block = format!(
-            "workspaces = [{{ id = \"{}\", path = \"{}\" }}]\n",
-            entry.file_name().to_string_lossy(),
-            normalized
-        );
-        if current.trim() == "workspaces = []" {
-            current = block;
-        } else {
-            let mut records: toml::Value =
-                toml::from_str(&current).unwrap_or_else(|_| toml::Value::Table(Default::default()));
-            let table = records
-                .as_table_mut()
-                .expect("attached workspaces must be table");
-            let array = table
-                .entry("workspaces")
-                .or_insert_with(|| toml::Value::Array(Vec::new()))
-                .as_array_mut()
-                .expect("workspaces should be array");
-            let item = toml::Value::Table(
-                [
-                    (
-                        "id".to_string(),
-                        toml::Value::String(entry.file_name().to_string_lossy().to_string()),
-                    ),
-                    ("path".to_string(), toml::Value::String(normalized)),
-                ]
-                .into_iter()
-                .collect(),
-            );
-            array.push(item);
-            current = toml::to_string_pretty(&records).unwrap_or(current);
-        }
+        registry.extensions.push(ExtensionRegistryEntry {
+            id,
+            source: "workspace".to_string(),
+            enabled: true,
+            removed: false,
+            path: normalized,
+        });
     }
 
-    write_if_missing(&attached_path, &current)?;
-    if attached_path.exists() {
-        fs::write(attached_path, current)?;
-    }
+    sort_extension_registry_entries(&mut registry.extensions);
+    write_extension_registry(paths, &registry)?;
     Ok(())
 }
 
@@ -918,25 +889,11 @@ fn init_home_template(paths: &RuntimePaths) -> io::Result<()> {
     write_if_missing(&paths.server_config_file(), templates::server_config())?;
     write_if_missing(&paths.ui_config_file(), templates::ui_config())?;
     write_if_missing(
-        &paths.skills_config_dir().join("implementation.toml"),
-        templates::implementation_skill(),
-    )?;
-    write_if_missing(
-        &paths.skills_config_dir().join("task-planning.toml"),
-        templates::task_planning_skill(),
-    )?;
-    write_if_missing(
-        &paths.skills_config_dir().join("frontend-design.toml"),
-        templates::frontend_design_skill(),
-    )?;
-    write_if_missing(
         &paths.providers_config_dir().join("openai.toml"),
         templates::openai_provider(),
     )?;
-    write_if_missing(
-        &paths.attached_workspaces_file(),
-        templates::attached_workspaces(),
-    )?;
+    sync_builtin_registries(paths)?;
+    materialize_builtin_packages(paths)?;
     Ok(())
 }
 
@@ -951,13 +908,194 @@ fn render_app_config(paths: &RuntimePaths) -> String {
             &format!("sqlite://{}", paths.display_for_user(paths.sqlite_db())),
         )
         .replace(
-            "~/.ennoia/config/extensions",
-            &paths.display_for_user(paths.extensions_config_dir()),
+            "~/.ennoia/extensions",
+            &paths.display_for_user(paths.extensions_dir()),
         )
         .replace(
             "~/.ennoia/config/agents",
             &paths.display_for_user(paths.agents_config_dir()),
         )
+}
+
+fn sync_builtin_registries(paths: &RuntimePaths) -> io::Result<()> {
+    let mut extension_registry = read_extension_registry(paths)?;
+    for id in builtin_extension_ids() {
+        if let Some(entry) = extension_registry
+            .extensions
+            .iter_mut()
+            .find(|item| item.id == id && item.source == "builtin")
+        {
+            entry.path = paths.display_for_user(paths.extension_dir(&id));
+            continue;
+        }
+        extension_registry.extensions.push(ExtensionRegistryEntry {
+            id: id.clone(),
+            source: "builtin".to_string(),
+            enabled: true,
+            removed: false,
+            path: paths.display_for_user(paths.extension_dir(&id)),
+        });
+    }
+    sort_extension_registry_entries(&mut extension_registry.extensions);
+    write_extension_registry(paths, &extension_registry)?;
+
+    let mut skill_registry = read_skill_registry(paths)?;
+    for id in builtin_skill_ids() {
+        if let Some(entry) = skill_registry
+            .skills
+            .iter_mut()
+            .find(|item| item.id == id && item.source == "builtin")
+        {
+            entry.path = paths.display_for_user(paths.skill_dir(&id));
+            continue;
+        }
+        skill_registry.skills.push(SkillRegistryEntry {
+            id: id.clone(),
+            source: "builtin".to_string(),
+            enabled: true,
+            removed: false,
+            path: paths.display_for_user(paths.skill_dir(&id)),
+        });
+    }
+    sort_skill_registry_entries(&mut skill_registry.skills);
+    write_skill_registry(paths, &skill_registry)
+}
+
+fn materialize_builtin_packages(paths: &RuntimePaths) -> io::Result<()> {
+    let extension_registry = read_extension_registry(paths)?;
+    let skill_registry = read_skill_registry(paths)?;
+
+    for asset in builtins::extensions() {
+        let Some(id) = builtin_package_id(asset.logical_path) else {
+            continue;
+        };
+        if is_removed_builtin_extension(&extension_registry, id) {
+            continue;
+        }
+        write_text_asset(paths.home(), asset.logical_path, asset.contents)?;
+    }
+
+    for asset in builtins::skills() {
+        let Some(id) = builtin_package_id(asset.logical_path) else {
+            continue;
+        };
+        if is_removed_builtin_skill(&skill_registry, id) {
+            continue;
+        }
+        write_text_asset(paths.home(), asset.logical_path, asset.contents)?;
+    }
+
+    Ok(())
+}
+
+fn builtin_extension_ids() -> Vec<String> {
+    builtin_package_ids_from_assets(builtins::extensions(), "ennoia.extension.toml")
+}
+
+fn builtin_skill_ids() -> Vec<String> {
+    builtin_package_ids_from_assets(builtins::skills(), "skill.toml")
+}
+
+fn builtin_package_ids_from_assets(
+    assets: Vec<ennoia_assets::TextAsset>,
+    descriptor: &str,
+) -> Vec<String> {
+    let mut ids = assets
+        .into_iter()
+        .filter(|asset| asset.logical_path.ends_with(descriptor))
+        .filter_map(|asset| builtin_package_id(asset.logical_path).map(str::to_string))
+        .collect::<Vec<_>>();
+    ids.sort();
+    ids.dedup();
+    ids
+}
+
+fn builtin_package_id(logical_path: &str) -> Option<&str> {
+    let mut parts = logical_path.split('/');
+    let _kind = parts.next()?;
+    parts.next()
+}
+
+fn is_removed_builtin_extension(registry: &ExtensionRegistryFile, id: &str) -> bool {
+    registry
+        .extensions
+        .iter()
+        .any(|entry| entry.id == id && entry.source == "builtin" && entry.removed)
+}
+
+fn is_removed_builtin_skill(registry: &SkillRegistryFile, id: &str) -> bool {
+    registry
+        .skills
+        .iter()
+        .any(|entry| entry.id == id && entry.source == "builtin" && entry.removed)
+}
+
+fn write_text_asset(root: &Path, logical_path: &str, contents: &str) -> io::Result<()> {
+    let path = root.join(logical_path);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, contents)
+}
+
+fn read_extension_registry(paths: &RuntimePaths) -> io::Result<ExtensionRegistryFile> {
+    read_toml_file_or_default(&paths.extensions_registry_file())
+}
+
+fn write_extension_registry(
+    paths: &RuntimePaths,
+    registry: &ExtensionRegistryFile,
+) -> io::Result<()> {
+    if let Some(parent) = paths.extensions_registry_file().parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(
+        paths.extensions_registry_file(),
+        toml::to_string_pretty(registry).map_err(io::Error::other)?,
+    )
+}
+
+fn read_skill_registry(paths: &RuntimePaths) -> io::Result<SkillRegistryFile> {
+    read_toml_file_or_default(&paths.skills_registry_file())
+}
+
+fn read_toml_file_or_default<T>(path: &Path) -> io::Result<T>
+where
+    T: serde::de::DeserializeOwned + Default,
+{
+    if !path.exists() {
+        return Ok(T::default());
+    }
+    let contents = fs::read_to_string(path)?;
+    toml::from_str(&contents).map_err(io::Error::other)
+}
+
+fn write_skill_registry(paths: &RuntimePaths, registry: &SkillRegistryFile) -> io::Result<()> {
+    if let Some(parent) = paths.skills_registry_file().parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(
+        paths.skills_registry_file(),
+        toml::to_string_pretty(registry).map_err(io::Error::other)?,
+    )
+}
+
+fn sort_extension_registry_entries(entries: &mut [ExtensionRegistryEntry]) {
+    entries.sort_by(|left, right| {
+        left.id
+            .cmp(&right.id)
+            .then_with(|| left.source.cmp(&right.source))
+            .then_with(|| left.path.cmp(&right.path))
+    });
+}
+
+fn sort_skill_registry_entries(entries: &mut [SkillRegistryEntry]) {
+    entries.sort_by(|left, right| {
+        left.id
+            .cmp(&right.id)
+            .then_with(|| left.source.cmp(&right.source))
+            .then_with(|| left.path.cmp(&right.path))
+    });
 }
 
 fn write_if_missing(path: &Path, contents: &str) -> io::Result<()> {

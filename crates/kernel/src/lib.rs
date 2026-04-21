@@ -1,18 +1,12 @@
-//! Kernel defines Ennoia's shared domain model, traits and policy contracts.
-//!
-//! All cross-crate contracts live here. Implementation crates (memory / runtime /
-//! scheduler / policy-loader) depend only on `ennoia-kernel`.
+//! Kernel defines Ennoia's shared cross-module domain model and shared configuration.
 
 pub mod config;
 pub mod decision;
 pub mod domain;
 pub mod extension;
 pub mod gate;
-pub mod memory;
 pub mod overview;
 pub mod policy;
-pub mod runtime;
-pub mod scheduler;
 pub mod signals;
 pub mod stage;
 pub mod system_config;
@@ -20,7 +14,10 @@ pub mod ui;
 
 // ========== Re-exports ==========
 
-pub use config::{AgentConfig, AppConfig, ProviderConfig, ServerConfig, SkillConfig, UiConfig};
+pub use config::{
+    AgentConfig, AppConfig, ExtensionRegistryEntry, ExtensionRegistryFile, ProviderConfig,
+    ServerConfig, SkillConfig, SkillRegistryEntry, SkillRegistryFile, UiConfig,
+};
 pub use decision::{Decision, DecisionSnapshot, NextAction};
 pub use domain::{
     AgentSpec, ArtifactKind, ArtifactSpec, ConversationSpec, ConversationTopology, HandoffSpec,
@@ -36,22 +33,9 @@ pub use extension::{
     ResolvedFrontendEntry, ThemeContribution,
 };
 pub use gate::{GateRecord, GateSeverity, GateVerdict};
-pub use memory::{
-    AssembleRequest, ContextFrame, ContextLayer, ContextView, EpisodeKind, EpisodeRecord,
-    EpisodeRequest, MemoryError, MemoryKind, MemoryRecord, MemorySource, MemoryStatus, MemoryStore,
-    RecallMode, RecallQuery, RecallReceipt, RecallResult, RememberReceipt, RememberRequest,
-    ReviewAction, ReviewActionKind, ReviewReceipt, Stability,
-};
 pub use overview::{core_modules, PlatformOverview};
 pub use policy::{
     GlobPattern, MemoryPolicy, RuntimeRule, RuntimeRuleCondition, RuntimeRuleTarget, StagePolicy,
-};
-pub use runtime::{
-    DecisionEngine, Gate, GateContext, GatePipeline, RuntimeError, RuntimeStore, StageMachine,
-};
-pub use scheduler::{
-    EnqueueRequest, JobHandler, JobKind, JobRecord, JobStatus, ScheduleKind, SchedulerError,
-    SchedulerStore,
 };
 pub use signals::{EvidenceSignals, ExecutionSignals, IntentSignals, Signals};
 pub use stage::{RunStage, RunStageEvent, StageTransition};

@@ -68,10 +68,10 @@
 
 ### 5.1 代码组织
 
-- 共享协议与领域模型进入 `kernel`
-- 运行时编排逻辑进入对应领域 crate，不堆在 `server`
-- `server` 负责装配、API 暴露、状态接线，不承担过多领域逻辑
-- 公共转换逻辑优先抽函数，不复制粘贴
+- `kernel` 承载跨模块共享领域模型与共享配置协议
+- `memory`、`runtime`、`scheduler` 各自承载本模块的协议、错误、存储接口与实现
+- `server` 承载装配、API 暴露、状态接线与启动流程
+- 公共转换逻辑提取为函数或模块级 helper
 
 ### 5.2 命名
 
@@ -90,9 +90,10 @@
 
 ### 6.1 主壳原则
 
-- `web/apps/shell` 是唯一正式 Web 工作台
+- `web/` 是当前唯一正式 Web 工作台
+- 路由入口组件放在 `web/src/pages/`
+- 页面内部资源视图放在 `web/src/views/<page>/`
 - 扩展页面、面板、导航注册统一通过运行时快照接入
-- 扩展入口通过运行时模型注册
 
 ### 6.2 状态与 API
 
@@ -106,7 +107,7 @@
 
 ### 7.1 必须写入 migration 的内容
 
-以下内容必须进入 `assets/migrations/`：
+后续数据库结构变更必须进入 `assets/migrations/` 下的新 migration：
 
 - `CREATE TABLE`
 - `ALTER TABLE`
@@ -115,6 +116,8 @@
 - `PRAGMA`
 - FTS、虚拟表、约束、默认值变更
 - 任何影响持久化结构的内容
+
+`assets/db.sql` 是新库初始化入口，保持完整、可执行、自包含。`assets/migrations/` 承载后续数据库结构变更。初始化执行 `db.sql`，已有库在存在新增 migration 时执行迁移，二者按生命周期各自工作。
 
 ### 7.2 运行时查询规范
 
@@ -148,7 +151,7 @@
 - 表结构定义在 migration
 - 运行时 CRUD 在 Rust 结构化查询层
 - 业务代码采用统一的结构化查询表达
-- `db.rs` 保持为运行时数据访问层和 migration 执行入口
+- `db/` 模块承载运行时数据访问层与初始化 / 迁移执行入口
 
 ## 8. 配置与路径约定
 
@@ -174,8 +177,8 @@
 cargo fmt --all
 cargo check --workspace
 cargo test --workspace
-bun run --cwd web/apps/shell typecheck
-bun run --cwd web/apps/shell build
+bun run --cwd web typecheck
+bun run --cwd web build
 ```
 
 ### 10.2 验证策略

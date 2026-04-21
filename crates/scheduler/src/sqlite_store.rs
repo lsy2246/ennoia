@@ -1,9 +1,9 @@
+use crate::{
+    EnqueueRequest, JobKind, JobRecord, JobStatus, ScheduleKind, SchedulerError, SchedulerStore,
+};
 use async_trait::async_trait;
 use chrono::Utc;
-use ennoia_kernel::{
-    EnqueueRequest, JobKind, JobRecord, JobStatus, OwnerKind, OwnerRef, ScheduleKind,
-    SchedulerError, SchedulerStore,
-};
+use ennoia_kernel::{OwnerKind, OwnerRef};
 use sea_query::{Expr, Iden, Query, SqliteQueryBuilder};
 use sea_query_binder::SqlxBinder;
 use sqlx::{Row, SqlitePool};

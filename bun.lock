@@ -5,8 +5,8 @@
     "": {
       "name": "ennoia",
     },
-    "web/apps/shell": {
-      "name": "@ennoia/shell",
+    "web": {
+      "name": "@ennoia/web",
       "version": "0.1.0",
       "dependencies": {
         "@ennoia/api-client": "workspace:*",
@@ -131,11 +131,11 @@
 
     "@ennoia/observability": ["@ennoia/observability@workspace:web/packages/observability"],
 
-    "@ennoia/shell": ["@ennoia/shell@workspace:web/apps/shell"],
-
     "@ennoia/theme-runtime": ["@ennoia/theme-runtime@workspace:web/packages/theme-runtime"],
 
     "@ennoia/ui-sdk": ["@ennoia/ui-sdk@workspace:web/packages/ui-sdk"],
+
+    "@ennoia/web": ["@ennoia/web@workspace:web"],
 
     "@esbuild/aix-ppc64": ["@esbuild/aix-ppc64@0.27.7", "", { "os": "aix", "cpu": "ppc64" }, "sha512-EKX3Qwmhz1eMdEJokhALr0YiD0lhQNwDqkPYyPhiSwKrh7/4KRjQc04sZ8db+5DVVnZ1LmbNDI1uAMPEUBnQPg=="],
 

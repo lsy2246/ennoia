@@ -5,18 +5,18 @@
   "description": "Ennoia source workspace",
   "type": "module",
   "workspaces": [
-    "web/apps/*",
+    "web",
     "web/packages/*"
   ],
   "scripts": {
     "bootstrap": "node ./scripts/bootstrap.mjs",
     "setup": "bun run bootstrap",
-    "build": "bun run --cwd web/apps/shell build",
-    "typecheck": "bun run --cwd web/apps/shell typecheck",
+    "build": "bun run --cwd web build",
+    "typecheck": "bun run --cwd web typecheck",
     "package:npm": "node ./scripts/package-npm.mjs",
     "docker:up": "docker compose up --build",
     "docker:down": "docker compose down",
-    "test:web": "bun run --cwd web/apps/shell test:smoke",
+    "test:web": "bun run --cwd web test:smoke",
     "test:integration": "bun ./tests/integration/runtime-smoke.mjs",
     "test:e2e": "bun ./tests/e2e/platform-smoke.mjs"
   }

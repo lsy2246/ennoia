@@ -1,7 +1,9 @@
-//! SqliteMemoryStore: the canonical MemoryStore implementation backed by sqlx + sqlite.
+//! Memory module owns its domain model, store contract and sqlite implementation.
 
+pub mod model;
 pub mod sqlite;
 
+pub use model::*;
 pub use sqlite::SqliteMemoryStore;
 
 pub fn module_name() -> &'static str {

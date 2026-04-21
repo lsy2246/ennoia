@@ -9,11 +9,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use ennoia_kernel::{
     CommandContribution, ExtensionCapabilities, ExtensionDiagnostic, ExtensionFrontendSpec,
-    ExtensionHealth, ExtensionKind, ExtensionManifest, ExtensionRuntimeEvent, ExtensionSourceMode,
-    HookContribution, LocaleContribution, PageContribution, PanelContribution,
-    ProviderContribution, ResolvedBackendEntry, ResolvedFrontendEntry, ThemeContribution,
+    ExtensionHealth, ExtensionKind, ExtensionManifest, ExtensionRegistryEntry,
+    ExtensionRegistryFile, ExtensionRuntimeEvent, ExtensionSourceMode, HookContribution,
+    LocaleContribution, PageContribution, PanelContribution, ProviderContribution,
+    ResolvedBackendEntry, ResolvedFrontendEntry, ThemeContribution,
 };
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ResolvedExtensionSnapshot {
@@ -125,22 +126,8 @@ pub struct ExtensionRuntimeSnapshot {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExtensionRuntimeConfig {
-    pub attached_workspaces_file: PathBuf,
-    pub package_extensions_dir: PathBuf,
-    pub legacy_extensions_config_dir: PathBuf,
+    pub registry_file: PathBuf,
     pub logs_dir: PathBuf,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AttachedWorkspaceRecord {
-    pub id: String,
-    pub path: String,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-struct AttachedWorkspacesFile {
-    #[serde(default)]
-    workspaces: Vec<AttachedWorkspaceRecord>,
 }
 
 #[derive(Debug, Clone)]
@@ -168,21 +155,12 @@ struct RunnerProcess {
     child: Child,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct LegacyExtensionConfigFile {
-    #[serde(default)]
-    enabled: bool,
-    install_dir: String,
-}
-
 impl ExtensionRuntime {
     pub fn bootstrap(config: ExtensionRuntimeConfig) -> io::Result<Self> {
-        ensure_parent_dir(&config.attached_workspaces_file)?;
-        if !config.attached_workspaces_file.exists() {
-            fs::write(&config.attached_workspaces_file, "workspaces = []\n")?;
+        ensure_parent_dir(&config.registry_file)?;
+        if !config.registry_file.exists() {
+            write_registry_file(&config.registry_file, &ExtensionRegistryFile::default())?;
         }
-        fs::create_dir_all(&config.package_extensions_dir)?;
-        fs::create_dir_all(&config.legacy_extensions_config_dir)?;
 
         let mut state = ExtensionRuntimeState {
             snapshot: empty_snapshot(),
@@ -263,20 +241,19 @@ impl ExtensionRuntime {
     ) -> io::Result<ResolvedExtensionSnapshot> {
         let path = canonicalize_or_original(path.as_ref());
         let manifest = read_manifest_from_root(&path)?;
-        let attached = read_attached_workspaces(&self.config.attached_workspaces_file)?;
-        let mut workspaces = attached
-            .workspaces
-            .into_iter()
-            .filter(|item| item.id != manifest.id)
-            .collect::<Vec<_>>();
-        workspaces.push(AttachedWorkspaceRecord {
+        let mut registry = read_registry_file(&self.config.registry_file)?;
+        registry
+            .extensions
+            .retain(|item| !(item.id == manifest.id && item.source == "workspace"));
+        registry.extensions.push(ExtensionRegistryEntry {
             id: manifest.id.clone(),
+            source: "workspace".to_string(),
+            enabled: true,
+            removed: false,
             path: normalize_display_path(&path),
         });
-        write_attached_workspaces(
-            &self.config.attached_workspaces_file,
-            &AttachedWorkspacesFile { workspaces },
-        )?;
+        sort_registry_entries(&mut registry.extensions);
+        write_registry_file(&self.config.registry_file, &registry)?;
 
         self.refresh_from_disk(&format!("workspace {} attached", manifest.id))?;
         self.get(&manifest.id).ok_or_else(|| {
@@ -288,50 +265,44 @@ impl ExtensionRuntime {
     }
 
     pub fn detach_workspace(&self, extension_id: &str) -> io::Result<bool> {
-        let attached = read_attached_workspaces(&self.config.attached_workspaces_file)?;
-        let original_len = attached.workspaces.len();
-        let workspaces = attached
-            .workspaces
-            .into_iter()
-            .filter(|item| item.id != extension_id)
-            .collect::<Vec<_>>();
-        if workspaces.len() == original_len {
+        let mut registry = read_registry_file(&self.config.registry_file)?;
+        let original_len = registry.extensions.len();
+        registry
+            .extensions
+            .retain(|item| !(item.id == extension_id && item.source == "workspace"));
+        if registry.extensions.len() == original_len {
             return Ok(false);
         }
 
-        write_attached_workspaces(
-            &self.config.attached_workspaces_file,
-            &AttachedWorkspacesFile { workspaces },
-        )?;
+        sort_registry_entries(&mut registry.extensions);
+        write_registry_file(&self.config.registry_file, &registry)?;
         let _ = self.refresh_from_disk(&format!("workspace {extension_id} detached"))?;
         Ok(true)
     }
 
-    pub fn set_legacy_extension_enabled(
-        &self,
-        extension_id: &str,
-        install_dir: &str,
-        enabled: bool,
-    ) -> io::Result<Option<ResolvedExtensionSnapshot>> {
-        let config_path = self
-            .config
-            .legacy_extensions_config_dir
-            .join(format!("{extension_id}.toml"));
-        let payload = LegacyExtensionConfigFile {
-            enabled,
-            install_dir: install_dir.to_string(),
-        };
-        fs::write(
-            config_path,
-            toml::to_string_pretty(&payload).map_err(io::Error::other)?,
-        )?;
+    pub fn set_extension_enabled(&self, extension_id: &str, enabled: bool) -> io::Result<bool> {
+        let mut registry = read_registry_file(&self.config.registry_file)?;
+        let mut updated = false;
+        for entry in registry
+            .extensions
+            .iter_mut()
+            .filter(|item| item.id == extension_id && !item.removed)
+        {
+            entry.enabled = enabled;
+            updated = true;
+        }
+        if !updated {
+            return Ok(false);
+        }
+        sort_registry_entries(&mut registry.extensions);
+        write_registry_file(&self.config.registry_file, &registry)?;
         let summary = if enabled {
             format!("extension {extension_id} enabled")
         } else {
             format!("extension {extension_id} disabled")
         };
         let _ = self.refresh_from_disk(&summary)?;
-        Ok(self.get(extension_id))
+        Ok(true)
     }
 }
 
@@ -683,64 +654,20 @@ fn source_priority(extension: &ResolvedExtensionSnapshot) -> u8 {
 fn discover_sources(config: &ExtensionRuntimeConfig) -> io::Result<Vec<RuntimeSource>> {
     let mut ordered = BTreeMap::<String, RuntimeSource>::new();
 
-    let attached = read_attached_workspaces(&config.attached_workspaces_file)?;
-    for workspace in attached.workspaces {
-        let root = PathBuf::from(&workspace.path);
+    let registry = read_registry_file(&config.registry_file)?;
+    for item in registry
+        .extensions
+        .into_iter()
+        .filter(|entry| entry.enabled && !entry.removed)
+    {
+        let root = PathBuf::from(&item.path);
         ordered.insert(
             normalize_display_path(&root),
             RuntimeSource {
                 root,
-                source_mode: ExtensionSourceMode::Workspace,
+                source_mode: registry_source_mode(&item),
             },
         );
-    }
-
-    if config.package_extensions_dir.exists() {
-        for entry in fs::read_dir(&config.package_extensions_dir)? {
-            let entry = entry?;
-            if !entry.file_type()?.is_dir() {
-                continue;
-            }
-            let root = entry.path();
-            ordered.insert(
-                normalize_display_path(&root),
-                RuntimeSource {
-                    root,
-                    source_mode: ExtensionSourceMode::Package,
-                },
-            );
-        }
-    }
-
-    if config.legacy_extensions_config_dir.exists() {
-        for entry in fs::read_dir(&config.legacy_extensions_config_dir)? {
-            let entry = entry?;
-            if !entry.file_type()?.is_file() {
-                continue;
-            }
-            let contents = fs::read_to_string(entry.path())?;
-            let item: LegacyExtensionConfigFile =
-                toml::from_str(&contents).map_err(io::Error::other)?;
-            if !item.enabled {
-                continue;
-            }
-            let root = PathBuf::from(item.install_dir.replace("~/.ennoia", ""));
-            let root = if root.is_absolute() {
-                root
-            } else {
-                config
-                    .legacy_extensions_config_dir
-                    .parent()
-                    .and_then(Path::parent)
-                    .unwrap_or_else(|| Path::new("."))
-                    .join(root)
-            };
-            let normalized = normalize_display_path(&root);
-            ordered.entry(normalized).or_insert(RuntimeSource {
-                root,
-                source_mode: ExtensionSourceMode::Package,
-            });
-        }
     }
 
     Ok(ordered.into_values().collect())
@@ -1000,20 +927,36 @@ fn descriptor_path(root: &Path) -> Option<PathBuf> {
     .find(|path| path.exists())
 }
 
-fn read_attached_workspaces(path: &Path) -> io::Result<AttachedWorkspacesFile> {
+pub fn read_registry_file(path: &Path) -> io::Result<ExtensionRegistryFile> {
     if !path.exists() {
-        return Ok(AttachedWorkspacesFile::default());
+        return Ok(ExtensionRegistryFile::default());
     }
     let contents = fs::read_to_string(path)?;
     toml::from_str(&contents).map_err(io::Error::other)
 }
 
-fn write_attached_workspaces(path: &Path, file: &AttachedWorkspacesFile) -> io::Result<()> {
+pub fn write_registry_file(path: &Path, file: &ExtensionRegistryFile) -> io::Result<()> {
     ensure_parent_dir(path)?;
     fs::write(
         path,
         toml::to_string_pretty(file).map_err(io::Error::other)?,
     )
+}
+
+fn registry_source_mode(entry: &ExtensionRegistryEntry) -> ExtensionSourceMode {
+    match entry.source.as_str() {
+        "workspace" => ExtensionSourceMode::Workspace,
+        _ => ExtensionSourceMode::Package,
+    }
+}
+
+fn sort_registry_entries(entries: &mut [ExtensionRegistryEntry]) {
+    entries.sort_by(|left, right| {
+        left.id
+            .cmp(&right.id)
+            .then_with(|| left.source.cmp(&right.source))
+            .then_with(|| left.path.cmp(&right.path))
+    });
 }
 
 fn equivalent_snapshots(
@@ -1109,27 +1052,22 @@ mod tests {
             .expect("write descriptor");
 
         let config = ExtensionRuntimeConfig {
-            attached_workspaces_file: root.join("attached/workspaces.toml"),
-            package_extensions_dir: root.join("packages"),
-            legacy_extensions_config_dir: root.join("legacy"),
+            registry_file: root.join("config/extensions.toml"),
             logs_dir: root.join("logs"),
         };
-        fs::create_dir_all(&config.package_extensions_dir).expect("create packages");
-        fs::create_dir_all(
-            config
-                .attached_workspaces_file
-                .parent()
-                .expect("attached parent"),
+        write_registry_file(
+            &config.registry_file,
+            &ExtensionRegistryFile {
+                extensions: vec![ExtensionRegistryEntry {
+                    id: "observatory".to_string(),
+                    source: "workspace".to_string(),
+                    enabled: true,
+                    removed: false,
+                    path: normalize_display_path(&ext_dir),
+                }],
+            },
         )
-        .expect("create attached parent");
-        fs::write(
-            &config.attached_workspaces_file,
-            format!(
-                "workspaces = [{{ id = \"observatory\", path = \"{}\" }}]\n",
-                normalize_display_path(&ext_dir)
-            ),
-        )
-        .expect("write attached");
+        .expect("write registry");
 
         let runtime = ExtensionRuntime::bootstrap(config).expect("bootstrap runtime");
         let snapshot = runtime.snapshot();
@@ -1157,9 +1095,7 @@ mod tests {
         .expect("write descriptor");
 
         let config = ExtensionRuntimeConfig {
-            attached_workspaces_file: root.join("attached/workspaces.toml"),
-            package_extensions_dir: root.join("packages"),
-            legacy_extensions_config_dir: root.join("legacy"),
+            registry_file: root.join("config/extensions.toml"),
             logs_dir: root.join("logs"),
         };
         let runtime = ExtensionRuntime::bootstrap(config).expect("bootstrap runtime");

@@ -1,4 +1,4 @@
-# Ennoia API 边界
+﻿# Ennoia API 边界
 
 ## 系统与引导
 
@@ -21,7 +21,7 @@
 - `PUT /api/v1/runtime/config/{key}`
 - `GET /api/v1/runtime/config/{key}/history`
 
-## Session
+## Conversation
 
 - `GET /api/v1/conversations`
 - `POST /api/v1/conversations`
@@ -34,7 +34,7 @@
 - `GET /api/v1/lanes/{lane_id}/handoffs`
 - `POST /api/v1/lanes/{lane_id}/handoffs`
 
-### Session 约定
+### Conversation 约定
 
 - `agent_ids.len() == 1` 时创建 `direct`
 - `agent_ids.len() >= 2` 时创建 `group`

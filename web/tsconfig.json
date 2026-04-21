@@ -1,0 +1,41 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "useDefineForClassFields": true,
+    "lib": ["DOM", "DOM.Iterable", "ES2022"],
+    "allowJs": false,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "strict": true,
+    "forceConsistentCasingInFileNames": true,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "types": ["vite/client"],
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"],
+      "@ennoia/api-client": ["./packages/api-client/src/index.ts"],
+      "@ennoia/builtins": ["./packages/builtins/src/index.ts"],
+      "@ennoia/contract": ["./packages/contract/src/index.ts"],
+      "@ennoia/i18n": ["./packages/i18n/src/index.ts"],
+      "@ennoia/observability": ["./packages/observability/src/index.ts"],
+      "@ennoia/theme-runtime": ["./packages/theme-runtime/src/index.ts"],
+      "@ennoia/ui-sdk": ["./packages/ui-sdk/src/index.ts"]
+    },
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "react-jsx"
+  },
+  "include": [
+    "src",
+    "./packages/api-client/src",
+    "./packages/builtins/src",
+    "./packages/contract/src",
+    "./packages/i18n/src",
+    "./packages/observability/src",
+    "./packages/theme-runtime/src",
+    "./packages/ui-sdk/src"
+  ]
+}

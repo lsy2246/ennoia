@@ -103,7 +103,10 @@ impl MemoryPolicy {
                 GlobPattern::new("work/**"),
             ],
             require_sources_for_long_term: true,
-            forbidden_namespaces: vec![GlobPattern::new("session/**"), GlobPattern::new("tmp/**")],
+            forbidden_namespaces: vec![
+                GlobPattern::new("conversation/**"),
+                GlobPattern::new("tmp/**"),
+            ],
             assemble_budget_chars: 4000,
         }
     }
@@ -302,7 +305,7 @@ mod tests {
     fn builtin_memory_policy_recognizes_user_truth() {
         let policy = MemoryPolicy::builtin();
         assert!(policy.is_truth_namespace("user/profile"));
-        assert!(!policy.is_truth_namespace("session/scratch"));
+        assert!(!policy.is_truth_namespace("conversation/scratch"));
     }
 
     #[test]

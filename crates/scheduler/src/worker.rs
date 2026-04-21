@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::{JobHandler, SchedulerStore};
 use chrono::Utc;
-use ennoia_kernel::{JobHandler, SchedulerStore};
 use tokio::sync::watch;
 
 /// Worker polls the scheduler store and runs due jobs through registered handlers.

@@ -412,6 +412,7 @@ version = "0.1.0"
 dependencies = [
  "ennoia-assets",
  "ennoia-kernel",
+ "ennoia-memory",
  "ennoia-paths",
  "ennoia-server",
  "notify",
@@ -496,6 +497,8 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "ennoia-kernel",
+ "ennoia-memory",
+ "ennoia-runtime",
  "serde",
  "serde_json",
  "uuid",
@@ -524,6 +527,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "ennoia-kernel",
+ "ennoia-memory",
  "sea-query",
  "sea-query-binder",
  "serde",

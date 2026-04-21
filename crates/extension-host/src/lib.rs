@@ -3,10 +3,10 @@
 pub mod registry;
 
 pub use registry::{
-    AttachedWorkspaceRecord, ExtensionRuntime, ExtensionRuntimeConfig, ExtensionRuntimeSnapshot,
-    RegisteredCommandContribution, RegisteredHookContribution, RegisteredLocaleContribution,
-    RegisteredPageContribution, RegisteredPanelContribution, RegisteredProviderContribution,
-    RegisteredThemeContribution, ResolvedExtensionSnapshot,
+    read_registry_file, write_registry_file, ExtensionRuntime, ExtensionRuntimeConfig,
+    ExtensionRuntimeSnapshot, RegisteredCommandContribution, RegisteredHookContribution,
+    RegisteredLocaleContribution, RegisteredPageContribution, RegisteredPanelContribution,
+    RegisteredProviderContribution, RegisteredThemeContribution, ResolvedExtensionSnapshot,
 };
 
 /// Returns the current extension host module name.

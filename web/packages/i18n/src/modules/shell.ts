@@ -1,4 +1,4 @@
-import { defineMessages } from "../catalog";
+﻿import { defineMessages } from "../catalog";
 
 export const shellMessages = defineMessages("shell", {
   "zh-CN": {
@@ -227,7 +227,7 @@ export const shellMessages = defineMessages("shell", {
     "shell.chat.start_group": "发起群聊",
     "shell.chat.group_agents": "参与 Agent",
     "shell.chat.create_group": "创建群聊",
-    "shell.chat.thread_list": "聊天列表",
+    "shell.chat.conversation_list": "聊天列表",
     "shell.chat.kind.direct": "私聊",
     "shell.chat.kind.group": "群聊",
     "shell.chat.empty": "还没有聊天线程。",
@@ -241,7 +241,7 @@ export const shellMessages = defineMessages("shell", {
     "shell.chat.toggle_tools": "显示工具与输出",
     "shell.chat.execution": "执行过程",
     "shell.chat.logs": "运行日志",
-    "shell.chat.thread_kind": "类型",
+    "shell.chat.conversation_kind": "类型",
     "shell.chat.updated_at": "更新时间",
     "shell.chat.event.thinking": "思考过程",
     "shell.chat.event.output": "输出产物",
@@ -491,17 +491,17 @@ export const shellMessages = defineMessages("shell", {
     "shell.logs.scope": "Scope",
     "shell.logs.at": "At",
     "shell.chat.title": "Chat",
-    "shell.chat.description": "Unify direct chats and group chats as threads. The main view is a chat box, while execution, sub-agents, tools and outputs stay attached to the message flow.",
+    "shell.chat.description": "Unify direct chats and group chats as conversations. The main view is a chat box, while execution, sub-agents, tools and outputs stay attached to the message flow.",
     "shell.chat.start_direct": "Start direct chat",
     "shell.chat.select_agent": "Select agent",
     "shell.chat.create_direct": "Create direct chat",
     "shell.chat.start_group": "Start group chat",
     "shell.chat.group_agents": "Participating agents",
     "shell.chat.create_group": "Create group chat",
-    "shell.chat.thread_list": "Chat threads",
+    "shell.chat.conversation_list": "Chat conversations",
     "shell.chat.kind.direct": "Direct",
     "shell.chat.kind.group": "Group",
-    "shell.chat.empty": "No chat threads yet.",
+    "shell.chat.empty": "No chat conversations yet.",
     "shell.chat.delete_confirm": "Delete this chat and its execution records?",
     "shell.chat.goal": "Goal",
     "shell.chat.message": "Message",
@@ -512,7 +512,7 @@ export const shellMessages = defineMessages("shell", {
     "shell.chat.toggle_tools": "Show tools and outputs",
     "shell.chat.execution": "Execution",
     "shell.chat.logs": "Run logs",
-    "shell.chat.thread_kind": "Kind",
+    "shell.chat.conversation_kind": "Kind",
     "shell.chat.updated_at": "Updated",
     "shell.chat.event.thinking": "Thinking",
     "shell.chat.event.output": "Output",

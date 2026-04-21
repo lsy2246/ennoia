@@ -26,7 +26,7 @@ impl Default for AppConfig {
             workspace_root: "~/.ennoia/workspace".to_string(),
             database_mode: "sqlite".to_string(),
             database_url: "sqlite://~/.ennoia/data/sqlite/ennoia.db".to_string(),
-            extensions_scan_dir: "~/.ennoia/config/extensions".to_string(),
+            extensions_scan_dir: "~/.ennoia/extensions".to_string(),
             agents_scan_dir: "~/.ennoia/config/agents".to_string(),
             scheduler_tick_ms: 1_000,
             default_mention_mode: "configured".to_string(),
@@ -93,9 +93,9 @@ pub struct AgentConfig {
     pub description: String,
     #[serde(default)]
     pub system_prompt: String,
-    #[serde(default = "default_provider_id")]
+    #[serde(default)]
     pub provider_id: String,
-    #[serde(default = "default_model_id")]
+    #[serde(default)]
     pub model_id: String,
     #[serde(default = "default_reasoning_effort")]
     pub reasoning_effort: String,
@@ -109,7 +109,7 @@ pub struct AgentConfig {
     pub kind: String,
     #[serde(default = "default_workspace_mode")]
     pub workspace_mode: String,
-    #[serde(default = "default_model_id")]
+    #[serde(default)]
     pub default_model: String,
     #[serde(default)]
     pub skills_dir: String,
@@ -119,7 +119,7 @@ pub struct AgentConfig {
     pub artifacts_dir: String,
 }
 
-/// SkillConfig represents one file under `config/skills/*.toml`.
+/// SkillConfig represents one skill descriptor under a registered skill package.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SkillConfig {
     pub id: String,
@@ -136,12 +136,52 @@ pub struct SkillConfig {
     pub enabled: bool,
 }
 
+/// ExtensionRegistryFile stores extension package registration records under `config/extensions.toml`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ExtensionRegistryFile {
+    #[serde(default)]
+    pub extensions: Vec<ExtensionRegistryEntry>,
+}
+
+/// ExtensionRegistryEntry records one extension source and the user's lifecycle intent.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ExtensionRegistryEntry {
+    pub id: String,
+    #[serde(default = "default_registry_source")]
+    pub source: String,
+    #[serde(default = "default_agent_enabled")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub removed: bool,
+    pub path: String,
+}
+
+/// SkillRegistryFile stores skill package registration records under `config/skills.toml`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SkillRegistryFile {
+    #[serde(default)]
+    pub skills: Vec<SkillRegistryEntry>,
+}
+
+/// SkillRegistryEntry records one skill package source and the user's lifecycle intent.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SkillRegistryEntry {
+    pub id: String,
+    #[serde(default = "default_registry_source")]
+    pub source: String,
+    #[serde(default = "default_agent_enabled")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub removed: bool,
+    pub path: String,
+}
+
 /// ProviderConfig represents one file under `config/providers/*.toml`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProviderConfig {
     pub id: String,
     pub display_name: String,
-    #[serde(default = "default_provider_kind")]
+    #[serde(default)]
     pub kind: String,
     #[serde(default)]
     pub description: String,
@@ -149,7 +189,7 @@ pub struct ProviderConfig {
     pub base_url: String,
     #[serde(default)]
     pub api_key_env: String,
-    #[serde(default = "default_model_id")]
+    #[serde(default)]
     pub default_model: String,
     #[serde(default)]
     pub available_models: Vec<String>,
@@ -165,20 +205,8 @@ fn default_workspace_mode() -> String {
     "private".to_string()
 }
 
-fn default_provider_id() -> String {
-    "openai".to_string()
-}
-
-fn default_provider_kind() -> String {
-    "openai".to_string()
-}
-
 fn default_workspace_root() -> String {
     "~/.ennoia/workspace".to_string()
-}
-
-fn default_model_id() -> String {
-    "gpt-5.4".to_string()
 }
 
 fn default_reasoning_effort() -> String {
@@ -186,6 +214,10 @@ fn default_reasoning_effort() -> String {
 }
 
 fn default_skill_source() -> String {
+    "builtin".to_string()
+}
+
+fn default_registry_source() -> String {
     "builtin".to_string()
 }
 

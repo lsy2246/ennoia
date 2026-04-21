@@ -27,8 +27,10 @@ try {
 
   assertExists(join(runtimeDir, "config", "ennoia.toml"), "app config");
   assertExists(join(runtimeDir, "config", "server.toml"), "server config");
+  assertExists(join(runtimeDir, "config", "extensions.toml"), "extensions registry");
+  assertExists(join(runtimeDir, "config", "skills.toml"), "skills registry");
   assertExists(
-    join(runtimeDir, "global", "extensions", "observatory", "manifest.toml"),
+    join(runtimeDir, "extensions", "observatory", "ennoia.extension.toml"),
     "observatory manifest",
   );
 

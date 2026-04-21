@@ -57,12 +57,12 @@ impl RuntimePaths {
         self.config_dir().join("agents")
     }
 
-    pub fn extensions_config_dir(&self) -> PathBuf {
-        self.config_dir().join("extensions")
+    pub fn extensions_registry_file(&self) -> PathBuf {
+        self.config_dir().join("extensions.toml")
     }
 
-    pub fn skills_config_dir(&self) -> PathBuf {
-        self.config_dir().join("skills")
+    pub fn skills_registry_file(&self) -> PathBuf {
+        self.config_dir().join("skills.toml")
     }
 
     pub fn providers_config_dir(&self) -> PathBuf {
@@ -117,44 +117,16 @@ impl RuntimePaths {
         self.home.join("extensions")
     }
 
-    pub fn attached_extensions_dir(&self) -> PathBuf {
-        self.extensions_dir().join("attached")
+    pub fn extension_dir(&self, extension_id: &str) -> PathBuf {
+        self.extensions_dir().join(extension_id)
     }
 
-    pub fn attached_workspaces_file(&self) -> PathBuf {
-        self.attached_extensions_dir().join("workspaces.toml")
+    pub fn skills_dir(&self) -> PathBuf {
+        self.home.join("skills")
     }
 
-    pub fn extensions_runtime_dir(&self) -> PathBuf {
-        self.extensions_dir().join("runtimes")
-    }
-
-    pub fn extensions_cache_dir(&self) -> PathBuf {
-        self.extensions_dir().join("cache")
-    }
-
-    pub fn packages_dir(&self) -> PathBuf {
-        self.home.join("packages")
-    }
-
-    pub fn package_extensions_dir(&self) -> PathBuf {
-        self.packages_dir().join("extensions")
-    }
-
-    pub fn package_extension_dir(&self, extension_id: &str) -> PathBuf {
-        self.package_extensions_dir().join(extension_id)
-    }
-
-    pub fn global_extensions_dir(&self) -> PathBuf {
-        self.global_dir().join("extensions")
-    }
-
-    pub fn global_skills_dir(&self) -> PathBuf {
-        self.global_dir().join("skills")
-    }
-
-    pub fn global_extension_dir(&self, extension_id: &str) -> PathBuf {
-        self.global_extensions_dir().join(extension_id)
+    pub fn skill_dir(&self, skill_id: &str) -> PathBuf {
+        self.skills_dir().join(skill_id)
     }
 
     pub fn agents_dir(&self) -> PathBuf {
@@ -229,7 +201,7 @@ impl RuntimePaths {
             OwnerKind::Space => self
                 .space_artifacts_dir(&owner.id)
                 .join(format!("runs/{run_id}")),
-            OwnerKind::Global => self.global_extensions_dir().join(run_id),
+            OwnerKind::Global => self.home.join("global").join("runs").join(run_id),
         }
     }
 
@@ -237,24 +209,20 @@ impl RuntimePaths {
         match owner.kind {
             OwnerKind::Agent => format!("agents/{}/artifacts/runs/{run_id}/summary.json", owner.id),
             OwnerKind::Space => format!("spaces/{}/artifacts/runs/{run_id}/summary.json", owner.id),
-            OwnerKind::Global => format!("global/extensions/{run_id}/summary.json"),
+            OwnerKind::Global => format!("global/runs/{run_id}/summary.json"),
         }
     }
 
     pub fn ensure_layout(&self) -> io::Result<()> {
         for dir in [
             self.agents_config_dir(),
-            self.extensions_config_dir(),
-            self.skills_config_dir(),
             self.providers_config_dir(),
-            self.attached_extensions_dir(),
-            self.extensions_runtime_dir(),
-            self.extensions_cache_dir(),
+            self.extensions_dir(),
+            self.skills_dir(),
             self.state_queue_dir(),
             self.state_runs_dir(),
             self.state_cache_dir(),
             self.sqlite_dir(),
-            self.package_extensions_dir(),
             self.agents_dir(),
             self.server_logs_dir(),
             self.scheduler_logs_dir(),

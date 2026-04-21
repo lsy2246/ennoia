@@ -1,5 +1,5 @@
+use crate::{JobHandler, JobRecord};
 use async_trait::async_trait;
-use ennoia_kernel::{JobHandler, JobRecord};
 
 /// RetireExpiredHandler is a placeholder no-op that succeeds.
 ///

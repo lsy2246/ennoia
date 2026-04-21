@@ -1,14 +1,15 @@
 use std::sync::Arc;
 
+use crate::{
+    AssembleRequest, ContextFrame, ContextLayer, ContextView, EpisodeKind, EpisodeRecord,
+    EpisodeRequest, MemoryError, MemoryKind, MemoryRecord, MemorySource, MemoryStatus, MemoryStore,
+    RecallMode, RecallQuery, RecallResult, RememberReceipt, RememberRequest, ReviewAction,
+    ReviewActionKind, ReviewReceipt, Stability,
+};
 use async_trait::async_trait;
 use chrono::Utc;
-use ennoia_kernel::{
-    AssembleRequest, ContextFrame, ContextLayer, ContextView, EpisodeKind, EpisodeRecord,
-    EpisodeRequest, MemoryError, MemoryKind, MemoryPolicy, MemoryRecord, MemorySource,
-    MemoryStatus, MemoryStore, OwnerKind, OwnerRef, RecallMode, RecallQuery, RecallResult,
-    RememberReceipt, RememberRequest, ReviewAction, ReviewActionKind, ReviewReceipt, Stability,
-};
-use sea_query::{Expr, Iden, OnConflict, Query, SqliteQueryBuilder};
+use ennoia_kernel::{MemoryPolicy, OwnerKind, OwnerRef};
+use sea_query::{Alias, Expr, Iden, JoinType, OnConflict, Order, Query, SqliteQueryBuilder};
 use sea_query_binder::SqlxBinder;
 use sqlx::{Row, SqlitePool};
 use uuid::Uuid;
@@ -20,7 +21,7 @@ enum Episodes {
     OwnerKind,
     OwnerId,
     Namespace,
-    ThreadId,
+    ConversationId,
     RunId,
     EpisodeKind,
     Role,
@@ -98,7 +99,7 @@ enum RecallReceipts {
     Id,
     OwnerKind,
     OwnerId,
-    ThreadId,
+    ConversationId,
     RunId,
     QueryText,
     Mode,
@@ -224,13 +225,38 @@ fn memory_columns_all() -> Vec<Memories> {
     ]
 }
 
+fn memory_columns_with_alias() -> Vec<(Memories, &'static str)> {
+    vec![
+        (Memories::Id, "id"),
+        (Memories::OwnerKind, "owner_kind"),
+        (Memories::OwnerId, "owner_id"),
+        (Memories::Namespace, "namespace"),
+        (Memories::MemoryKind, "memory_kind"),
+        (Memories::Stability, "stability"),
+        (Memories::Status, "status"),
+        (Memories::SupersededBy, "superseded_by"),
+        (Memories::Title, "title"),
+        (Memories::Content, "content"),
+        (Memories::Summary, "summary"),
+        (Memories::Confidence, "confidence"),
+        (Memories::Importance, "importance"),
+        (Memories::ValidFrom, "valid_from"),
+        (Memories::ValidTo, "valid_to"),
+        (Memories::SourcesJson, "sources_json"),
+        (Memories::TagsJson, "tags_json"),
+        (Memories::EntitiesJson, "entities_json"),
+        (Memories::CreatedAt, "created_at"),
+        (Memories::UpdatedAt, "updated_at"),
+    ]
+}
+
 fn episode_columns_all() -> Vec<Episodes> {
     vec![
         Episodes::Id,
         Episodes::OwnerKind,
         Episodes::OwnerId,
         Episodes::Namespace,
-        Episodes::ThreadId,
+        Episodes::ConversationId,
         Episodes::RunId,
         Episodes::EpisodeKind,
         Episodes::Role,
@@ -254,7 +280,7 @@ impl MemoryStore for SqliteMemoryStore {
             id: format!("epi-{}", Uuid::new_v4()),
             owner: req.owner.clone(),
             namespace: req.namespace.clone(),
-            thread_id: req.thread_id.clone(),
+            conversation_id: req.conversation_id.clone(),
             run_id: req.run_id.clone(),
             episode_kind: req.episode_kind,
             role: req.role.clone(),
@@ -282,7 +308,7 @@ impl MemoryStore for SqliteMemoryStore {
                 owner_kind_str(&record.owner.kind).to_string().into(),
                 record.owner.id.clone().into(),
                 record.namespace.clone().into(),
-                record.thread_id.clone().into(),
+                record.conversation_id.clone().into(),
                 record.run_id.clone().into(),
                 record.episode_kind.as_str().to_string().into(),
                 record.role.clone().into(),
@@ -414,7 +440,7 @@ impl MemoryStore for SqliteMemoryStore {
                 RecallReceipts::Id,
                 RecallReceipts::OwnerKind,
                 RecallReceipts::OwnerId,
-                RecallReceipts::ThreadId,
+                RecallReceipts::ConversationId,
                 RecallReceipts::RunId,
                 RecallReceipts::QueryText,
                 RecallReceipts::Mode,
@@ -427,7 +453,7 @@ impl MemoryStore for SqliteMemoryStore {
                 receipt_id.clone().into(),
                 owner_kind_str(&query.owner.kind).to_string().into(),
                 query.owner.id.clone().into(),
-                query.thread_id.clone().into(),
+                query.conversation_id.clone().into(),
                 query.run_id.clone().into(),
                 query.query_text.clone().into(),
                 query.mode.as_str().to_string().into(),
@@ -751,7 +777,6 @@ async fn recall_by_namespace(
     rows.into_iter().map(row_to_memory).collect()
 }
 
-/// FTS5 MATCH is not supported by sea-query's builder; keep this query raw.
 async fn recall_by_fts(
     pool: &SqlitePool,
     query: &RecallQuery,
@@ -760,23 +785,46 @@ async fn recall_by_fts(
         return recall_by_namespace(pool, query).await;
     };
 
-    let rows = sqlx::query(
-        "SELECT m.id, m.owner_kind, m.owner_id, m.namespace, m.memory_kind, m.stability, m.status, m.superseded_by, \
-         m.title, m.content, m.summary, m.confidence, m.importance, m.valid_from, m.valid_to, \
-         m.sources_json, m.tags_json, m.entities_json, m.created_at, m.updated_at \
-         FROM memories_fts \
-         JOIN memories m ON m.rowid = memories_fts.rowid \
-         WHERE memories_fts MATCH ? \
-         AND m.owner_kind = ? AND m.owner_id = ? AND m.status = 'active' \
-         ORDER BY rank LIMIT ?",
-    )
-    .bind(query_text)
-    .bind(owner_kind_str(&query.owner.kind))
-    .bind(&query.owner.id)
-    .bind(query.limit as i64)
-    .fetch_all(pool)
-    .await
-    .mem_backend()?;
+    let memories_alias = Alias::new("m");
+    let fts_table = Alias::new("memories_fts");
+    let rowid = Alias::new("rowid");
+    let rank = Alias::new("rank");
+    let mut builder = Query::select();
+    for (column, alias) in memory_columns_with_alias() {
+        builder.expr_as(
+            Expr::col((memories_alias.clone(), column)),
+            Alias::new(alias),
+        );
+    }
+    builder
+        .from(fts_table.clone())
+        .join_as(
+            JoinType::Join,
+            Memories::Table,
+            memories_alias.clone(),
+            Expr::col((memories_alias.clone(), rowid.clone()))
+                .equals((fts_table.clone(), rowid.clone())),
+        )
+        .and_where(Expr::cust_with_values(
+            "memories_fts MATCH ?",
+            [query_text.to_string()],
+        ))
+        .and_where(
+            Expr::col((memories_alias.clone(), Memories::OwnerKind))
+                .eq(owner_kind_str(&query.owner.kind).to_string()),
+        )
+        .and_where(
+            Expr::col((memories_alias.clone(), Memories::OwnerId)).eq(query.owner.id.clone()),
+        )
+        .and_where(Expr::col((memories_alias.clone(), Memories::Status)).eq("active"))
+        .order_by((fts_table.clone(), rank), Order::Asc)
+        .limit(query.limit as u64);
+
+    let (sql, values) = builder.build_sqlx(SqliteQueryBuilder);
+    let rows = sqlx::query_with(&sql, values)
+        .fetch_all(pool)
+        .await
+        .mem_backend()?;
 
     rows.into_iter().map(row_to_memory).collect()
 }
@@ -823,7 +871,7 @@ fn row_to_episode(row: sqlx::sqlite::SqliteRow) -> Result<EpisodeRecord, MemoryE
             id: row.get("owner_id"),
         },
         namespace: row.get("namespace"),
-        thread_id: row.get("thread_id"),
+        conversation_id: row.get("conversation_id"),
         run_id: row.get("run_id"),
         episode_kind: EpisodeKind::from_str(&row.get::<String, _>("episode_kind")),
         role: row.get("role"),
