@@ -54,18 +54,6 @@ pub mod templates {
     pub fn ui_config() -> &'static str {
         get("config/ui.toml").expect("ui config template")
     }
-
-    pub fn openai_provider() -> &'static str {
-        get("config/providers/openai.toml").expect("openai provider template")
-    }
-
-    pub fn memory_policy() -> &'static str {
-        get("policies/memory.toml").expect("memory policy template")
-    }
-
-    pub fn stage_policy() -> &'static str {
-        get("policies/stage.toml").expect("stage policy template")
-    }
 }
 
 pub mod migrations {

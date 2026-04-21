@@ -210,6 +210,10 @@ function resolveBaseTheme(theme: ThemeDefinition): ThemeDefinition {
   return resolveThemeDefinition(theme.extends);
 }
 
+export function resolveAppliedThemeDefinition(themeId?: string | null) {
+  return resolveBaseTheme(resolveThemeDefinition(themeId));
+}
+
 export function applyTheme(themeId?: string | null) {
   if (typeof document === "undefined" || typeof window === "undefined") {
     return;
@@ -218,7 +222,7 @@ export function applyTheme(themeId?: string | null) {
 
   const root = document.documentElement;
   const theme = resolveThemeDefinition(themeId);
-  const baseTheme = resolveBaseTheme(theme);
+  const baseTheme = resolveAppliedThemeDefinition(themeId);
 
   root.dataset.theme = theme.id;
   for (const key of themeVariableKeys()) {

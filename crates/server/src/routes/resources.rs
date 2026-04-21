@@ -156,18 +156,7 @@ pub(super) async fn provider_models(
         .find(|item| item.id == provider_id)
         .ok_or_else(|| ApiError::not_found(format!("provider '{provider_id}' not found")))?;
 
-    let contribution = state
-        .extensions
-        .snapshot()
-        .providers
-        .into_iter()
-        .find(|item| {
-            item.provider.kind == provider.kind
-                && (provider.extension_id.is_empty()
-                    || item.extension_id == provider.extension_id
-                    || item.provider.extension_id.as_deref()
-                        == Some(provider.extension_id.as_str()))
-        });
+    let contribution = resolve_provider_contribution(&state, &provider.kind)?;
 
     let mut models = provider.available_models.clone();
     let mut recommended_model = None;
@@ -177,9 +166,11 @@ pub(super) async fn provider_models(
         "configured".to_string()
     };
     let mut manual_allowed = provider.model_discovery.manual_allowed;
+    let mut generation_options = Vec::new();
 
     if let Some(contribution) = contribution {
         manual_allowed = contribution.provider.manual_model;
+        generation_options = contribution.provider.generation_options.clone();
         if recommended_model.is_none() {
             recommended_model = contribution.provider.recommended_model.clone();
         }
@@ -206,6 +197,7 @@ pub(super) async fn provider_models(
         models,
         recommended_model,
         manual_allowed,
+        generation_options,
     }))
 }
 
@@ -213,7 +205,7 @@ pub(super) async fn provider_create(
     State(state): State<AppState>,
     Json(payload): Json<ProviderConfig>,
 ) -> Result<Json<ProviderConfig>, ApiError> {
-    validate_provider_payload(&payload)?;
+    validate_provider_payload(&state, &payload)?;
     write_config_to_dir(
         state.runtime_paths.providers_config_dir(),
         &payload.id,
@@ -235,7 +227,7 @@ pub(super) async fn provider_update(
     Json(mut payload): Json<ProviderConfig>,
 ) -> Result<Json<ProviderConfig>, ApiError> {
     payload.id = provider_id.clone();
-    validate_provider_payload(&payload)?;
+    validate_provider_payload(&state, &payload)?;
     write_config_to_dir(
         state.runtime_paths.providers_config_dir(),
         &provider_id,
@@ -270,11 +262,35 @@ pub(super) async fn spaces(State(state): State<AppState>) -> Json<Vec<ennoia_ker
     Json(state.spaces)
 }
 
-fn validate_provider_payload(payload: &ProviderConfig) -> Result<(), ApiError> {
+fn validate_provider_payload(state: &AppState, payload: &ProviderConfig) -> Result<(), ApiError> {
+    let _ = resolve_provider_contribution(state, &payload.kind)?;
     if payload.enabled && payload.default_model.trim().is_empty() {
         return Err(ApiError::bad_request(
             "启用上游渠道前必须配置默认模型；无法发现模型时使用手动输入。",
         ));
     }
     Ok(())
+}
+
+fn resolve_provider_contribution(
+    state: &AppState,
+    kind: &str,
+) -> Result<Option<ennoia_extension_host::RegisteredProviderContribution>, ApiError> {
+    let matches = state
+        .extensions
+        .snapshot()
+        .providers
+        .into_iter()
+        .filter(|item| item.provider.kind == kind)
+        .collect::<Vec<_>>();
+
+    match matches.len() {
+        0 => Err(ApiError::bad_request(format!(
+            "接口类型 '{kind}' 当前没有可用实现扩展。"
+        ))),
+        1 => Ok(matches.into_iter().next()),
+        _ => Err(ApiError::bad_request(format!(
+            "接口类型 '{kind}' 对应多个实现扩展，当前不允许创建渠道。"
+        ))),
+    }
 }

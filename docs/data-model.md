@@ -58,7 +58,7 @@
 - `system_prompt`
 - `provider_id`
 - `model_id`
-- `reasoning_effort`
+- `generation_options`
 - `skills`
 - `enabled`
 
@@ -70,9 +70,9 @@
 
 ## API 上游渠道域
 
-`ProviderConfig` 字段：`id`、`display_name`、`extension_id`、`kind`、`description`、`base_url`、`api_key_env`、`default_model`、`available_models`、`model_discovery`、`enabled`。
+`ProviderConfig` 字段：`id`、`display_name`、`kind`、`description`、`base_url`、`api_key_env`、`default_model`、`available_models`、`model_discovery`、`enabled`。
 
-`extension_id` 指向贡献上游实现的扩展。`kind` 表示接口类型；当前内置 OpenAI 渠道统一使用 `openai`。`default_model` 是用户确认后的稳定配置；扩展可以通过 `model_discovery` 和 provider contribution 提供模型建议，用户仍可手动输入模型。
+`kind` 表示接口类型，也是系统解析实现扩展的唯一键；当前内置 OpenAI 渠道统一使用 `openai`。`default_model` 是用户确认后的稳定配置；扩展可以通过 `model_discovery` 和 provider contribution 提供模型建议，用户仍可手动输入模型。
 
 ## Extension 域
 

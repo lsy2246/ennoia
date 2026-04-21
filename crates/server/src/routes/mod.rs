@@ -593,6 +593,7 @@ struct ProviderModelsResponse {
     models: Vec<String>,
     recommended_model: Option<String>,
     manual_allowed: bool,
+    generation_options: Vec<ennoia_kernel::ProviderGenerationOption>,
 }
 
 async fn health() -> Json<HealthResponse> {

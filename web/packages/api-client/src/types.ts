@@ -104,7 +104,7 @@ export type AgentProfile = {
   system_prompt: string;
   provider_id: string;
   model_id: string;
-  reasoning_effort: string;
+  generation_options: Record<string, string>;
   skills: string[];
   enabled: boolean;
   kind?: string;
@@ -127,7 +127,6 @@ export type SkillConfig = {
 export type ProviderConfig = {
   id: string;
   display_name: string;
-  extension_id: string;
   kind: string;
   description: string;
   base_url: string;
@@ -147,6 +146,7 @@ export type ProviderModelsResponse = {
   models: string[];
   recommended_model?: string | null;
   manual_allowed: boolean;
+  generation_options: ExtensionProviderContribution["provider"]["generation_options"];
 };
 
 export type MemorySource = {

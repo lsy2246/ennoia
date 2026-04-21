@@ -34,7 +34,6 @@ type AppError = Box<dyn std::error::Error + Send + Sync>;
 const OBSERVABILITY_TARGET: &str = "server";
 const DEFAULT_SPACE_ID: &str = "studio";
 const DEFAULT_SPACE_NAME: &str = "Studio";
-const DEFAULT_REASONING_EFFORT: &str = "high";
 const EXTENSION_REFRESH_SUMMARY: &str = "polled runtime refresh";
 
 #[derive(Clone)]
@@ -346,9 +345,6 @@ fn normalize_agent_config(paths: &RuntimePaths, agent: &mut AgentConfig) {
     }
     if agent.default_model.is_empty() && !agent.model_id.is_empty() {
         agent.default_model = agent.model_id.clone();
-    }
-    if agent.reasoning_effort.is_empty() {
-        agent.reasoning_effort = DEFAULT_REASONING_EFFORT.to_string();
     }
     if !agent.working_dir.is_empty() {
         agent.working_dir = paths.display_for_user(paths.expand_home_token(&agent.working_dir));

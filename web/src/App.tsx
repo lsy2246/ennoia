@@ -1,10 +1,9 @@
 import { Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { DockviewDefaultTab, DockviewReact, type IDockviewPanelProps } from "dockview";
 
 import { getApiBaseUrl } from "@ennoia/api-client";
 import { builtinExtensionPanels } from "@ennoia/builtins";
-import { WORKBENCH_PALETTES, applyWorkbenchPalette, readWorkbenchPalette } from "@/lib/palette";
 import { Memory } from "@/pages/memory";
 import { useRuntimeStore } from "@/stores/runtime";
 import { useUiHelpers, useUiStore } from "@/stores/ui";
@@ -174,9 +173,8 @@ function WorkbenchTab(props: any) {
 
 export function App() {
   const navigate = useNavigate();
-  const { availableLocales, availableThemes, resolveText, runtime, t } = useUiHelpers();
+  const { availableLocales, availableThemes, describeAppliedTheme, resolveText, runtime, t } = useUiHelpers();
   const uiState = useUiStore();
-  const [palette, setPalette] = useState(readWorkbenchPalette);
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const registerApi = useWorkbenchStore((state) => state.registerApi);
   const resetLayout = useWorkbenchStore((state) => state.resetLayout);
@@ -186,7 +184,9 @@ export function App() {
   const focusView = useWorkbenchStore((state) => state.focusView);
   const openView = useWorkbenchStore((state) => state.openView);
   const restoreView = useWorkbenchStore((state) => state.restoreView);
-  const dockThemeClass = palette === "paper" ? "dockview-theme-light" : "dockview-theme-dark";
+  const dockThemeClass = describeAppliedTheme(uiState.themeId).appearance === "light"
+    ? "dockview-theme-light"
+    : "dockview-theme-dark";
 
   const navItems = useMemo<NavItem[]>(() => {
     const builtins = BUILTIN_NAV.map((item) => ({
@@ -230,10 +230,6 @@ export function App() {
     }),
     [],
   );
-
-  useEffect(() => {
-    setPalette(applyWorkbenchPalette(palette, { clearRuntimeTheme: false }));
-  }, [palette]);
 
   async function changeLocale(locale: string) {
     await uiState.savePreferences({
@@ -386,19 +382,6 @@ export function App() {
             </div>
           </article>
 
-          <article className="sidebar-card sidebar-card--fixed">
-            <strong>{t("web.palette.title", "工作台配色")}</strong>
-            <label>
-              {t("web.palette.label", "配色方案")}
-              <select value={palette} onChange={(event) => setPalette(event.target.value)}>
-                {WORKBENCH_PALETTES.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {t(`web.palette.${item.id}.label`, item.label)}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </article>
         </div>
       </aside>
 
@@ -434,7 +417,7 @@ export function App() {
       <footer className="status-bar">
         <span>Ennoia Web</span>
         <span>{active?.label}</span>
-        <span>{t("web.status.palette", "配色")}: {palette}</span>
+        <span>{t("web.settings.theme", "主题")}: {uiState.themeId}</span>
       </footer>
     </div>
   );

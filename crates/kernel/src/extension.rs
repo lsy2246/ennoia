@@ -61,6 +61,20 @@ pub struct CommandContribution {
     pub shortcut: Option<String>,
 }
 
+/// ProviderGenerationOption declares optional request controls owned by a provider implementation.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProviderGenerationOption {
+    pub id: String,
+    pub label: LocalizedText,
+    pub value_type: String,
+    #[serde(default)]
+    pub required: bool,
+    #[serde(default)]
+    pub default_value: Option<String>,
+    #[serde(default)]
+    pub allowed_values: Vec<String>,
+}
+
 /// ProviderContribution describes a backend or frontend provider entry.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProviderContribution {
@@ -77,6 +91,8 @@ pub struct ProviderContribution {
     pub recommended_model: Option<String>,
     #[serde(default = "default_manual_model")]
     pub manual_model: bool,
+    #[serde(default)]
+    pub generation_options: Vec<ProviderGenerationOption>,
 }
 
 fn default_manual_model() -> bool {

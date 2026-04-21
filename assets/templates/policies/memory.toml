@@ -1,4 +1,0 @@
-﻿truth_namespaces = ["user/**", "agents/**", "interaction/**", "work/**"]
-require_sources_for_long_term = true
-forbidden_namespaces = ["conversation/**", "tmp/**"]
-assemble_budget_chars = 4000

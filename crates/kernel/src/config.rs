@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 use crate::system_config::default_local_dev_origins;
@@ -90,11 +92,11 @@ pub struct AgentConfig {
     pub provider_id: String,
     #[serde(default)]
     pub model_id: String,
-    #[serde(default = "default_reasoning_effort")]
-    pub reasoning_effort: String,
+    #[serde(default)]
+    pub generation_options: BTreeMap<String, String>,
     #[serde(default)]
     pub skills: Vec<String>,
-    #[serde(default = "default_agent_enabled")]
+    #[serde(default = "default_enabled")]
     pub enabled: bool,
     #[serde(default = "default_agent_kind")]
     pub kind: String,
@@ -121,7 +123,7 @@ pub struct SkillConfig {
     pub entry: String,
     #[serde(default)]
     pub tags: Vec<String>,
-    #[serde(default = "default_agent_enabled")]
+    #[serde(default = "default_enabled")]
     pub enabled: bool,
 }
 
@@ -138,7 +140,7 @@ pub struct ExtensionRegistryEntry {
     pub id: String,
     #[serde(default = "default_registry_source")]
     pub source: String,
-    #[serde(default = "default_agent_enabled")]
+    #[serde(default = "default_enabled")]
     pub enabled: bool,
     #[serde(default)]
     pub removed: bool,
@@ -158,7 +160,7 @@ pub struct SkillRegistryEntry {
     pub id: String,
     #[serde(default = "default_registry_source")]
     pub source: String,
-    #[serde(default = "default_agent_enabled")]
+    #[serde(default = "default_enabled")]
     pub enabled: bool,
     #[serde(default)]
     pub removed: bool,
@@ -170,8 +172,6 @@ pub struct SkillRegistryEntry {
 pub struct ProviderConfig {
     pub id: String,
     pub display_name: String,
-    #[serde(default)]
-    pub extension_id: String,
     #[serde(default)]
     pub kind: String,
     #[serde(default)]
@@ -186,7 +186,7 @@ pub struct ProviderConfig {
     pub available_models: Vec<String>,
     #[serde(default)]
     pub model_discovery: ProviderModelDiscoveryConfig,
-    #[serde(default = "default_agent_enabled")]
+    #[serde(default = "default_enabled")]
     pub enabled: bool,
 }
 
@@ -194,7 +194,7 @@ pub struct ProviderConfig {
 pub struct ProviderModelDiscoveryConfig {
     #[serde(default = "default_model_discovery_mode")]
     pub mode: String,
-    #[serde(default = "default_agent_enabled")]
+    #[serde(default = "default_enabled")]
     pub manual_allowed: bool,
 }
 
@@ -211,10 +211,6 @@ fn default_agent_kind() -> String {
     "agent".to_string()
 }
 
-fn default_reasoning_effort() -> String {
-    "high".to_string()
-}
-
 fn default_skill_source() -> String {
     "builtin".to_string()
 }
@@ -227,6 +223,6 @@ fn default_model_discovery_mode() -> String {
     "manual".to_string()
 }
 
-fn default_agent_enabled() -> bool {
+fn default_enabled() -> bool {
     true
 }

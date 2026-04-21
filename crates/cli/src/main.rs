@@ -888,12 +888,9 @@ fn init_home_template(paths: &RuntimePaths) -> io::Result<()> {
     write_if_missing(&paths.app_config_file(), &render_app_config(paths))?;
     write_if_missing(&paths.server_config_file(), templates::server_config())?;
     write_if_missing(&paths.ui_config_file(), templates::ui_config())?;
-    write_if_missing(
-        &paths.providers_config_dir().join("openai.toml"),
-        templates::openai_provider(),
-    )?;
     sync_builtin_registries(paths)?;
     materialize_builtin_packages(paths)?;
+    sync_builtin_provider_presets(paths)?;
     Ok(())
 }
 
@@ -970,6 +967,34 @@ fn materialize_builtin_packages(paths: &RuntimePaths) -> io::Result<()> {
             continue;
         }
         write_text_asset(paths.home(), asset.logical_path, asset.contents)?;
+    }
+
+    Ok(())
+}
+
+fn sync_builtin_provider_presets(paths: &RuntimePaths) -> io::Result<()> {
+    let extension_registry = read_extension_registry(paths)?;
+
+    for entry in extension_registry
+        .extensions
+        .iter()
+        .filter(|item| item.source == "builtin" && item.enabled && !item.removed)
+    {
+        let root = paths.expand_home_token(&entry.path);
+        let presets_dir = root.join("provider-presets");
+        if !presets_dir.exists() {
+            continue;
+        }
+
+        for preset in fs::read_dir(presets_dir)? {
+            let preset = preset?;
+            if !preset.file_type()?.is_file() {
+                continue;
+            }
+            let destination = paths.providers_config_dir().join(preset.file_name());
+            let contents = fs::read_to_string(preset.path())?;
+            write_if_missing(&destination, &contents)?;
+        }
     }
 
     Ok(())

@@ -111,6 +111,14 @@ export type ExtensionProviderContribution = {
     model_discovery: boolean;
     recommended_model?: string | null;
     manual_model: boolean;
+    generation_options: {
+      id: string;
+      label: LocalizedText;
+      value_type: string;
+      required: boolean;
+      default_value?: string | null;
+      allowed_values: string[];
+    }[];
   };
 };
 

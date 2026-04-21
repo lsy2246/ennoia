@@ -13,7 +13,6 @@ import { useUiHelpers } from "@/stores/ui";
 const EMPTY_CHANNEL: ProviderConfig = {
   id: "",
   display_name: "",
-  extension_id: "",
   kind: "",
   description: "",
   base_url: "",
@@ -57,7 +56,7 @@ export function ApiChannelEditorView({ channelId }: { channelId: string }) {
     return (runtime?.registry.providers ?? [])
       .map((contribution) => {
         const kind = contribution.provider.kind || contribution.provider.id;
-        return kind ? [kind, contribution.extension_id === "openai" ? "OpenAI" : kind] : null;
+        return kind ? [kind, kind] : null;
       })
       .filter((item): item is [string, string] => item !== null)
       .sort(([left], [right]) => left.localeCompare(right));
@@ -177,7 +176,6 @@ export function ApiChannelEditorView({ channelId }: { channelId: string }) {
     setForm((current) => ({
       ...(options?.resetIdentity ? EMPTY_CHANNEL : current),
       kind,
-      extension_id: contribution?.extension_id ?? contribution?.provider.extension_id ?? current.extension_id,
       default_model: normalized.defaultModel || current.default_model,
       available_models: normalized.models.length > 0 ? normalized.models : current.available_models,
       model_discovery: modelDiscovery,
@@ -329,13 +327,6 @@ export function ApiChannelEditorView({ channelId }: { channelId: string }) {
         <input
           value={form.base_url}
           onChange={(event) => setForm({ ...form, base_url: event.target.value })}
-        />
-      </label>
-      <label>
-        {t("web.channels.extension_id", "实现扩展")}
-        <input
-          value={form.extension_id}
-          onChange={(event) => setForm({ ...form, extension_id: event.target.value })}
         />
       </label>
       <label>

@@ -9,7 +9,6 @@ import {
   type AppConfig,
   type SystemConfig,
 } from "@ennoia/api-client";
-import { WORKBENCH_PALETTES, applyWorkbenchPalette, readWorkbenchPalette } from "@/lib/palette";
 import { buildTimeZoneOptionGroups } from "@/lib/timeZones";
 import { useRuntimeStore } from "@/stores/runtime";
 import { useUiHelpers } from "@/stores/ui";
@@ -201,7 +200,6 @@ export function Settings() {
   const [appConfig, setAppConfig] = useState<AppConfig | null>(null);
   const [profileName, setProfileName] = useState(profile?.display_name ?? "Operator");
   const [timeZone, setTimeZone] = useState(profile?.time_zone ?? "Asia/Shanghai");
-  const [palette, setPalette] = useState(readWorkbenchPalette);
   const [corsOrigins, setCorsOrigins] = useState<StringEntry[]>([]);
   const [timeoutOverrides, setTimeoutOverrides] = useState<NumberMapEntry[]>([]);
   const [bodyLimitOverrides, setBodyLimitOverrides] = useState<NumberMapEntry[]>([]);
@@ -324,31 +322,6 @@ export function Settings() {
         </label>
         <button type="submit">{t("web.settings.save_personal", "保存个人设置")}</button>
       </form>
-
-      <section className="work-panel editor-form">
-        <div className="panel-title">{t("web.settings.appearance", "外观与配色")}</div>
-        <p className="helper-text">
-          {t(
-            "web.settings.appearance_moved",
-            "语言和主题已经移动到左侧导航，作为全局界面开关即时生效。",
-          )}
-        </p>
-        <div className="palette-grid">
-          {WORKBENCH_PALETTES.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              className={palette === item.id ? "palette-card palette-card--active" : "palette-card"}
-              onClick={() => {
-                setPalette(applyWorkbenchPalette(item.id));
-              }}
-            >
-              <strong>{t(`web.palette.${item.id}.label`, item.label)}</strong>
-              <span>{t(`web.palette.${item.id}.description`, item.description)}</span>
-            </button>
-          ))}
-        </div>
-      </section>
 
       <section className="work-panel editor-form settings-wide">
         <div className="page-heading">

@@ -11,6 +11,7 @@ import {
   type ProviderConfig,
   type SkillConfig,
 } from "@ennoia/api-client";
+import type { ExtensionProviderContribution } from "@ennoia/ui-sdk";
 import { formatRelativePath } from "@/lib/pathDisplay";
 import { useUiHelpers } from "@/stores/ui";
 
@@ -21,7 +22,7 @@ const EMPTY_AGENT: AgentProfile = {
   system_prompt: "",
   provider_id: "",
   model_id: "",
-  reasoning_effort: "high",
+  generation_options: {},
   skills: [],
   enabled: true,
 };
@@ -34,7 +35,7 @@ export function AgentEditorView({
   agentId: string;
   onOpenApiChannel: (channelId: string) => void;
 }) {
-  const { t } = useUiHelpers();
+  const { resolveText, runtime, t } = useUiHelpers();
   const [agents, setAgents] = useState<AgentProfile[]>([]);
   const [skills, setSkills] = useState<SkillConfig[]>([]);
   const [providers, setProviders] = useState<ProviderConfig[]>([]);
@@ -51,6 +52,11 @@ export function AgentEditorView({
     () => providers.find((provider) => provider.id === form.provider_id) ?? providers[0] ?? null,
     [form.provider_id, providers],
   );
+  const selectedProviderContribution = useMemo(
+    () => findProviderContribution(runtime?.registry.providers ?? [], selectedProvider),
+    [runtime?.registry.providers, selectedProvider],
+  );
+  const generationOptions = selectedProviderContribution?.provider.generation_options ?? [];
 
   async function hydrate() {
     setError(null);
@@ -68,12 +74,19 @@ export function AgentEditorView({
           ...EMPTY_AGENT,
           provider_id: nextProviders[0]?.id ?? "",
           model_id: nextProviders[0]?.default_model ?? "",
+          generation_options: defaultGenerationOptions(
+            findProviderContribution(runtime?.registry.providers ?? [], nextProviders[0] ?? null),
+          ),
         });
         return;
       }
       const current = nextAgents.find((item) => item.id === agentId);
       if (current) {
-        setForm({ ...current, skills: [...current.skills] });
+        setForm({
+          ...current,
+          skills: [...current.skills],
+          generation_options: { ...(current.generation_options ?? {}) },
+        });
       }
     } catch (err) {
       setError(String(err));
@@ -94,10 +107,11 @@ export function AgentEditorView({
     setBusy(true);
     setError(null);
     try {
+      const payload = normalizeAgentPayload(form, generationOptions);
       if (isNew) {
-        await createAgent(form);
+        await createAgent(payload);
       } else {
-        await updateAgent(agentId, form);
+        await updateAgent(agentId, payload);
       }
       await hydrate();
     } catch (err) {
@@ -158,10 +172,12 @@ export function AgentEditorView({
             value={form.provider_id}
             onChange={(event) => {
               const provider = providers.find((item) => item.id === event.target.value);
+              const contribution = findProviderContribution(runtime?.registry.providers ?? [], provider ?? null);
               setForm({
                 ...form,
                 provider_id: event.target.value,
                 model_id: provider?.default_model ?? form.model_id,
+                generation_options: defaultGenerationOptions(contribution),
               });
             }}
           >
@@ -186,18 +202,6 @@ export function AgentEditorView({
             ))}
           </datalist>
         </label>
-        <label>
-          {t("web.agents.reasoning", "思考等级")}
-          <select
-            value={form.reasoning_effort}
-            onChange={(event) => setForm({ ...form, reasoning_effort: event.target.value })}
-          >
-            <option value="low">low</option>
-            <option value="medium">medium</option>
-            <option value="high">high</option>
-            <option value="max">max</option>
-          </select>
-        </label>
         <label className="check-row">
           <input
             type="checkbox"
@@ -207,6 +211,58 @@ export function AgentEditorView({
           {t("web.common.enabled", "启用")}
         </label>
       </div>
+      {generationOptions.length > 0 ? (
+        <div className="details-panel">
+          <div className="panel-title">{t("web.agents.generation_options", "生成参数")}</div>
+          <p className="helper-text">
+            {t("web.agents.generation_options_help", "这些参数由当前上游扩展声明；未声明的上游不会显示。")}
+          </p>
+          <div className="form-grid">
+            {generationOptions.map((option: ExtensionProviderContribution["provider"]["generation_options"][number]) => {
+              const value = form.generation_options?.[option.id] ?? option.default_value ?? "";
+              return (
+                <label key={option.id}>
+                  {resolveText(option.label)}
+                  {option.value_type === "select" && option.allowed_values.length > 0 ? (
+                    <select
+                      value={value}
+                      required={option.required}
+                      onChange={(event) =>
+                        setForm({
+                          ...form,
+                          generation_options: {
+                            ...(form.generation_options ?? {}),
+                            [option.id]: event.target.value,
+                          },
+                        })}
+                    >
+                      {!option.required ? <option value="">{t("web.common.none", "无")}</option> : null}
+                      {option.allowed_values.map((item: string) => (
+                        <option key={item} value={item}>
+                          {item}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      value={value}
+                      required={option.required}
+                      onChange={(event) =>
+                        setForm({
+                          ...form,
+                          generation_options: {
+                            ...(form.generation_options ?? {}),
+                            [option.id]: event.target.value,
+                          },
+                        })}
+                    />
+                  )}
+                </label>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
       <label>
         {t("web.agents.description_field", "描述")}
         <textarea
@@ -263,4 +319,44 @@ export function AgentEditorView({
       </div>
     </form>
   );
+}
+
+function findProviderContribution(
+  contributions: ExtensionProviderContribution[],
+  provider: ProviderConfig | null,
+) {
+  if (!provider) {
+    return null;
+  }
+
+  const matches = contributions.filter((item) => item.provider.kind === provider.kind);
+  return matches.length === 1 ? matches[0] : null;
+}
+
+function defaultGenerationOptions(contribution: ExtensionProviderContribution | null) {
+  return Object.fromEntries(
+    (contribution?.provider.generation_options ?? [])
+      .filter((option: ExtensionProviderContribution["provider"]["generation_options"][number]) => option.default_value)
+      .map((option: ExtensionProviderContribution["provider"]["generation_options"][number]) => [option.id, option.default_value!]),
+  );
+}
+
+function normalizeAgentPayload(
+  form: AgentProfile,
+  options: ExtensionProviderContribution["provider"]["generation_options"],
+) {
+  const generation_options = Object.fromEntries(
+    options.flatMap((option: ExtensionProviderContribution["provider"]["generation_options"][number]) => {
+      const value = form.generation_options?.[option.id] ?? option.default_value ?? "";
+      if (!value.trim()) {
+        return [];
+      }
+      return [[option.id, value]];
+    }),
+  );
+
+  return {
+    ...form,
+    generation_options,
+  };
 }

@@ -27,6 +27,7 @@ import {
   bootstrapTheme,
   registerRuntimeThemes,
   readUiBootstrapCache,
+  resolveAppliedThemeDefinition,
   resolveThemeDefinition,
   writeUiBootstrapCache,
 } from "@ennoia/theme-runtime";
@@ -322,5 +323,6 @@ export function useUiHelpers() {
     formatDate: (value: string | number | Date) => formatDate(value, locale, timeZone),
     formatTime: (value: string | number | Date) => formatTime(value, locale, timeZone),
     describeTheme: (themeId: string) => resolveThemeDefinition(themeId),
+    describeAppliedTheme: (themeId: string) => resolveAppliedThemeDefinition(themeId),
   };
 }

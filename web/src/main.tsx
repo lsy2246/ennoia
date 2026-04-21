@@ -6,14 +6,12 @@ import { useEffect } from "react";
 
 import { bootstrapTheme } from "@ennoia/theme-runtime";
 import { reportFrontendLog } from "@ennoia/api-client";
-import { applyWorkbenchPalette, readWorkbenchPalette } from "@/lib/palette";
 import { router } from "@/router";
 import { useRuntimeStore } from "@/stores/runtime";
 import { useUiHelpers, useUiStore } from "@/stores/ui";
 import "./styles.css";
 
 bootstrapTheme();
-applyWorkbenchPalette(readWorkbenchPalette());
 
 function reportRuntimeError(title: string, error: unknown) {
   void reportFrontendLog({

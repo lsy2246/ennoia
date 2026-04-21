@@ -1,6 +1,5 @@
 id = "openai"
 display_name = "OpenAI"
-extension_id = "openai"
 kind = "openai"
 description = "默认 OpenAI 上游渠道实例。"
 base_url = "https://api.openai.com/v1"

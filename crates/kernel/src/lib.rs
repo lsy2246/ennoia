@@ -30,8 +30,8 @@ pub use extension::{
     ExtensionCapabilities, ExtensionDiagnostic, ExtensionFrontendSpec, ExtensionHealth,
     ExtensionKind, ExtensionManifest, ExtensionRuntimeEvent, ExtensionSourceMode,
     ExtensionSourceSpec, ExtensionWatchSpec, HookContribution, LocaleContribution,
-    PageContribution, PanelContribution, ProviderContribution, ResolvedBackendEntry,
-    ResolvedFrontendEntry, ThemeContribution,
+    PageContribution, PanelContribution, ProviderContribution, ProviderGenerationOption,
+    ResolvedBackendEntry, ResolvedFrontendEntry, ThemeContribution,
 };
 pub use gate::{GateRecord, GateSeverity, GateVerdict};
 pub use overview::{core_modules, PlatformOverview};

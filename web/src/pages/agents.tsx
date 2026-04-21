@@ -73,7 +73,6 @@ export function Agents() {
               <div className="tag-row">
                 <span>{providerLabel(agent.provider_id)}</span>
                 <span>{agent.model_id}</span>
-                <span>{agent.reasoning_effort}</span>
                 <span>{agent.skills.length} skills</span>
               </div>
               <p className="helper-text">

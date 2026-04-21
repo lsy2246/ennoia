@@ -34,13 +34,14 @@ Extension 是系统插件包，Skill 是 Agent 可引用的能力包。两者目
 - `providers[]`
 - `hooks[]`
 
-Provider 贡献用于声明上游接口实现。实现扩展声明 `kind`、`interfaces`、`model_discovery`、`recommended_model` 和 `manual_model`，渠道实例在 `config/providers/*.toml` 中保存用户确认后的 `default_model`。
+Provider 贡献用于声明上游接口实现。实现扩展声明 `kind`、`interfaces`、`model_discovery`、`recommended_model` 和 `manual_model`，渠道实例在 `config/providers/*.toml` 中保存用户确认后的 `default_model`。若扩展希望初始化时提供默认渠道实例，可在扩展包内放置 `provider-presets/*.toml`，由 CLI 通用扫描并写入 `config/providers/`。
 
 ## 推荐目录
 
 ```text
 <extension_id>/
 ├─ ennoia.extension.toml
+├─ provider-presets/
 ├─ src/
 │  ├─ frontend/
 │  ├─ backend/
@@ -62,11 +63,12 @@ Skill 目录独立：
 
 1. `cargo run -p ennoia-cli -- dev` 初始化运行目录。
 2. CLI 把内置扩展同步到 `<ENNOIA_HOME>/extensions/<extension_id>/`，并更新 `config/extensions.toml`。
-3. CLI 把仓库内 `builtins/extensions/*` 追加为开发来源，供开发模式覆盖安装目录。
-4. CLI 启动 Web dev server 和扩展前端 dev command。
-5. Extension Host 托管扩展后端 dev command。
-6. Server 暴露 runtime snapshot、事件流、诊断、日志和资源贡献接口。
-7. Web Shell 根据 runtime snapshot 挂载页面、面板、主题、语言和命令。
+3. CLI 扫描内置扩展中的 `provider-presets/*.toml`，把默认渠道实例写入 `config/providers/`。
+4. CLI 把仓库内 `builtins/extensions/*` 追加为开发来源，供开发模式覆盖安装目录。
+5. CLI 启动 Web dev server 和扩展前端 dev command。
+6. Extension Host 托管扩展后端 dev command。
+7. Server 暴露 runtime snapshot、事件流、诊断、日志和资源贡献接口。
+8. Web Shell 根据 runtime snapshot 挂载页面、面板、主题、语言和命令。
 
 ## 安装与扫描目录
 
