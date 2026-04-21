@@ -78,12 +78,12 @@ Ennoia 对外统一使用 `Extension` 作为扩展总称，当前内部区分：
 
 1. 开发时只执行 `ennoia dev`
 2. CLI 自动扫描 `./extensions/*/ennoia.extension.toml` 并写入 `~/.ennoia/extensions/attached/workspaces.toml`
-3. CLI 自动启动 Shell dev server 与每个扩展的 `frontend.dev_command`
+3. CLI 自动启动 Web dev server 与每个扩展的 `frontend.dev_command`
 4. Extension Runtime 托管每个扩展的 `backend.dev_command`
 5. Server 启动后构建 `ExtensionRuntimeSnapshot`
 6. 运行中通过轮询刷新磁盘上的 descriptor 变化
 7. Server 通过 `/api/v1/extensions/runtime`、`/api/v1/extensions/events`、`/api/v1/extensions/events/stream`、`/api/v1/extensions/{id}` 和 `/api/v1/extensions/{id}/diagnostics` 暴露运行时协议
-8. Shell 通过事件流自动刷新 runtime snapshot 与 UI runtime
+8. Web 通过事件流自动刷新 runtime snapshot 与 UI runtime
 
 当前开发原则：
 
@@ -91,7 +91,7 @@ Ennoia 对外统一使用 `Extension` 作为扩展总称，当前内部区分：
 - `skill` 负责能力调用
 - Theme 作为 UI contribution 提供
 - 页面、面板、命令与主题文案统一通过 `LocalizedText` 表达
-- 页面、面板、命令和 Provider 优先通过稳定的 `mount` / `entry` 协议接入
+- 页面、面板、命令和上游实现优先通过稳定的 `mount` / `entry` 协议接入
 
 ## 7. 当前统一描述协议
 
@@ -112,4 +112,4 @@ Ennoia 对外统一使用 `Extension` 作为扩展总称，当前内部区分：
 - 前端是 dev URL、模块入口还是 bundle 文件
 - 前端 dev server 如何通过 `frontend.dev_command` 一键启动
 - 后端的开发命令、健康检查和构建入口
-- 当前有哪些页面、面板、主题、语言包、命令、Provider、Hook
+- 当前有哪些页面、面板、主题、语言包、命令、上游实现、Hook

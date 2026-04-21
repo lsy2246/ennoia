@@ -2,16 +2,12 @@
 
 ## 职责
 
-- 维护仓库根文档与开发入口说明
-- 让技术方案和实际实现保持一致
+- 维护根文档、架构文档、运行目录文档与 API 边界文档
+- 让产品模型、目录结构和 API 设计与代码实现保持一致
 
 ## 行为规范
 
-- `README.md` 反映当前数据库与前端样式方案
-- 根目录 `package.json` 提供 `bun run bootstrap`
-- 架构与配置文档需要和运行模板保持一致
-
-## 依赖关系
-
-- 依赖根目录 `package.json`
-- 依赖 `docs/architecture.md`、`docs/config-model.md`、`docs/roadmap.md`
+- `README.md` 必须反映当前一级导航、Web 术语和产品模型
+- `docs/architecture.md` 必须反映 Agent / Skill / Provider / Extension 边界与工作区根路径模型
+- `docs/runtime-layout.md` 必须反映 `config/skills`、`config/providers`、`workspace_root` 派生规则与平台路径展示
+- `docs/api-surface.md` 必须反映 Agent / Skill / Provider CRUD 与前端日志写入接口

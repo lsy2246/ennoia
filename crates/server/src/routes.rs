@@ -21,14 +21,14 @@ use ennoia_extension_host::{
     RegisteredProviderContribution, RegisteredThemeContribution, ResolvedExtensionSnapshot,
 };
 use ennoia_kernel::{
-    ArtifactKind, ArtifactSpec, AssembleRequest, BootstrapState, ConfigChangeRecord, ConfigEntry,
-    ConfigStore, ContextView, ConversationSpec, ConversationTopology, EpisodeKind, EpisodeRequest,
-    ExtensionDiagnostic, ExtensionRuntimeEvent, HandoffSpec, JobKind, JobRecord, LaneSpec,
-    LocalizedText, MemoryKind, MemoryRecord, MemorySource, MessageRole, MessageSpec, OwnerKind,
-    OwnerRef, RecallMode, RecallQuery, RecallResult, RememberReceipt, RememberRequest,
-    ReviewAction, ReviewActionKind, ReviewReceipt, RunSpec, ScheduleKind, Stability, SystemConfig,
-    TaskSpec, UiConfig, UiPreference, UiPreferenceRecord, WorkspaceProfile, ALL_CONFIG_KEYS,
-    CONFIG_KEY_BOOTSTRAP,
+    AgentConfig, AppConfig, ArtifactKind, ArtifactSpec, AssembleRequest, BootstrapState,
+    ConfigChangeRecord, ConfigEntry, ConfigStore, ContextView, ConversationSpec,
+    ConversationTopology, EpisodeKind, EpisodeRequest, ExtensionDiagnostic, ExtensionRuntimeEvent,
+    HandoffSpec, JobKind, JobRecord, LaneSpec, LocalizedText, MemoryKind, MemoryRecord,
+    MemorySource, MessageRole, MessageSpec, OwnerKind, OwnerRef, ProviderConfig, RecallMode,
+    RecallQuery, RecallResult, RememberReceipt, RememberRequest, ReviewAction, ReviewActionKind,
+    ReviewReceipt, RunSpec, ScheduleKind, SkillConfig, Stability, SystemConfig, TaskSpec, UiConfig,
+    UiPreference, UiPreferenceRecord, WorkspaceProfile, ALL_CONFIG_KEYS, CONFIG_KEY_BOOTSTRAP,
 };
 use ennoia_observability::RequestContext;
 use ennoia_orchestrator::{RunRequest, RunTrigger};
@@ -36,7 +36,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use uuid::Uuid;
 
-use crate::app::AppState;
+use crate::app::{
+    delete_config_from_dir, load_agent_configs, load_provider_configs, load_skill_configs,
+    normalize_app_config, write_config_to_dir, AppState,
+};
 use crate::db::{self, JobDetailRow, JobRow, LogRecordRow};
 use crate::middleware::{
     body_limit_middleware, cors_middleware, logging_middleware, rate_limit_middleware,
@@ -64,6 +67,10 @@ pub fn build_router(state: AppState) -> Router {
             get(runtime_preferences).put(runtime_preferences_put),
         )
         .route("/api/v1/runtime/config", get(config_list))
+        .route(
+            "/api/v1/runtime/app-config",
+            get(runtime_app_config).put(runtime_app_config_put),
+        )
         .route("/api/v1/runtime/config/snapshot", get(config_snapshot))
         .route(
             "/api/v1/runtime/config/{key}",
@@ -153,7 +160,23 @@ pub fn build_router(state: AppState) -> Router {
             "/api/v1/extensions/attach/{extension_id}",
             delete(extension_detach),
         )
-        .route("/api/v1/agents", get(agents))
+        .route("/api/v1/agents", get(agents).post(agent_create))
+        .route(
+            "/api/v1/agents/{agent_id}",
+            get(agent_detail).put(agent_update).delete(agent_delete),
+        )
+        .route("/api/v1/skills", get(skills).post(skill_create))
+        .route(
+            "/api/v1/skills/{skill_id}",
+            get(skill_detail).put(skill_update).delete(skill_delete),
+        )
+        .route("/api/v1/providers", get(providers).post(provider_create))
+        .route(
+            "/api/v1/providers/{provider_id}",
+            get(provider_detail)
+                .put(provider_update)
+                .delete(provider_delete),
+        )
         .route("/api/v1/spaces", get(spaces))
         .route("/api/v1/runs", get(runs))
         .route("/api/v1/runs/{run_id}/tasks", get(run_tasks))
@@ -164,6 +187,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/tasks", get(tasks))
         .route("/api/v1/artifacts", get(artifacts))
         .route("/api/v1/logs", get(logs_list))
+        .route("/api/v1/logs/frontend", post(frontend_log_create))
         .route("/api/v1/memories", get(memories_list).post(memories_create))
         .route("/api/v1/memories/recall", post(memories_recall))
         .route("/api/v1/memories/review", post(memories_review))
@@ -211,7 +235,7 @@ struct HealthResponse {
 #[derive(Debug, Serialize)]
 struct OverviewResponse {
     app_name: String,
-    shell_title: LocalizedText,
+    web_title: LocalizedText,
     default_theme: String,
     modules: Vec<String>,
     counts: JsonValue,
@@ -223,6 +247,7 @@ struct UiRuntimeRegistryResponse {
     panels: Vec<RegisteredPanelContribution>,
     themes: Vec<RegisteredThemeContribution>,
     locales: Vec<RegisteredLocaleContribution>,
+    providers: Vec<RegisteredProviderContribution>,
 }
 
 #[derive(Debug, Serialize)]
@@ -508,6 +533,25 @@ struct ConfigPutPayload {
 struct LogsQuery {
     #[serde(default)]
     limit: Option<u32>,
+    #[serde(default)]
+    q: Option<String>,
+    #[serde(default)]
+    level: Option<String>,
+    #[serde(default)]
+    source: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct FrontendLogPayload {
+    level: String,
+    title: String,
+    summary: String,
+    #[serde(default)]
+    source: Option<String>,
+    #[serde(default)]
+    details: Option<String>,
+    #[serde(default)]
+    at: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -530,6 +574,9 @@ async fn health() -> Json<HealthResponse> {
 
 async fn overview(State(state): State<AppState>) -> Json<OverviewResponse> {
     let extension_snapshot = state.extensions.snapshot();
+    let agent_count = load_agent_configs(&state.runtime_paths)
+        .map(|items| items.len())
+        .unwrap_or(state.agents.len());
     let conversation_count = db::count_rows(&state.pool, db::CountTable::Conversations)
         .await
         .unwrap_or(0);
@@ -557,11 +604,11 @@ async fn overview(State(state): State<AppState>) -> Json<OverviewResponse> {
 
     Json(OverviewResponse {
         app_name: state.overview.app_name,
-        shell_title: state.ui_config.shell_title.clone(),
+        web_title: state.ui_config.web_title.clone(),
         default_theme: state.ui_config.default_theme.clone(),
         modules: state.overview.modules,
         counts: serde_json::json!({
-            "agents": state.agents.len(),
+            "agents": agent_count,
             "spaces": state.spaces.len(),
             "extensions": extension_snapshot.extensions.len(),
             "conversations": conversation_count,
@@ -592,7 +639,8 @@ async fn ui_runtime(State(state): State<AppState>) -> Json<UiRuntimeResponse> {
     let registry_version = (snapshot.pages.len()
         + snapshot.panels.len()
         + snapshot.themes.len()
-        + snapshot.locales.len()) as u64;
+        + snapshot.locales.len()
+        + snapshot.providers.len()) as u64;
     let preference_version = db::max_ui_preference_version(&state.pool)
         .await
         .unwrap_or(0);
@@ -604,6 +652,7 @@ async fn ui_runtime(State(state): State<AppState>) -> Json<UiRuntimeResponse> {
             panels: snapshot.panels,
             themes: snapshot.themes,
             locales: snapshot.locales,
+            providers: snapshot.providers,
         },
         instance_preference,
         space_preferences,
@@ -936,8 +985,208 @@ async fn extension_enabled_put(
     Ok(Json(updated))
 }
 
-async fn agents(State(state): State<AppState>) -> Json<Vec<ennoia_kernel::AgentConfig>> {
-    Json(state.agents)
+async fn agents(State(state): State<AppState>) -> Json<Vec<AgentConfig>> {
+    Json(load_agent_configs(&state.runtime_paths).unwrap_or_default())
+}
+
+async fn agent_detail(
+    State(state): State<AppState>,
+    Path(agent_id): Path<String>,
+) -> Result<Json<AgentConfig>, ApiError> {
+    let agents = load_agent_configs(&state.runtime_paths)
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+    agents
+        .into_iter()
+        .find(|agent| agent.id == agent_id)
+        .map(Json)
+        .ok_or_else(|| ApiError::not_found(format!("agent '{agent_id}' not found")))
+}
+
+async fn agent_create(
+    State(state): State<AppState>,
+    Json(payload): Json<AgentConfig>,
+) -> Result<Json<AgentConfig>, ApiError> {
+    write_config_to_dir(
+        state.runtime_paths.agents_config_dir(),
+        &payload.id,
+        &payload,
+    )
+    .map_err(|error| ApiError::internal(error.to_string()))?;
+    let agents = load_agent_configs(&state.runtime_paths)
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+    agents
+        .into_iter()
+        .find(|agent| agent.id == payload.id)
+        .map(Json)
+        .ok_or_else(|| ApiError::internal("failed to reload created agent"))
+}
+
+async fn agent_update(
+    State(state): State<AppState>,
+    Path(agent_id): Path<String>,
+    Json(mut payload): Json<AgentConfig>,
+) -> Result<Json<AgentConfig>, ApiError> {
+    payload.id = agent_id.clone();
+    write_config_to_dir(state.runtime_paths.agents_config_dir(), &agent_id, &payload)
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+    let agents = load_agent_configs(&state.runtime_paths)
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+    agents
+        .into_iter()
+        .find(|agent| agent.id == agent_id)
+        .map(Json)
+        .ok_or_else(|| ApiError::internal("failed to reload updated agent"))
+}
+
+async fn agent_delete(
+    State(state): State<AppState>,
+    Path(agent_id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    let deleted = delete_config_from_dir(state.runtime_paths.agents_config_dir(), &agent_id)
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+    if deleted {
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err(ApiError::not_found(format!("agent '{agent_id}' not found")))
+    }
+}
+
+async fn skills(State(state): State<AppState>) -> Json<Vec<SkillConfig>> {
+    Json(load_skill_configs(&state.runtime_paths).unwrap_or_default())
+}
+
+async fn skill_detail(
+    State(state): State<AppState>,
+    Path(skill_id): Path<String>,
+) -> Result<Json<SkillConfig>, ApiError> {
+    let skills = load_skill_configs(&state.runtime_paths)
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+    skills
+        .into_iter()
+        .find(|skill| skill.id == skill_id)
+        .map(Json)
+        .ok_or_else(|| ApiError::not_found(format!("skill '{skill_id}' not found")))
+}
+
+async fn skill_create(
+    State(state): State<AppState>,
+    Json(payload): Json<SkillConfig>,
+) -> Result<Json<SkillConfig>, ApiError> {
+    write_config_to_dir(
+        state.runtime_paths.skills_config_dir(),
+        &payload.id,
+        &payload,
+    )
+    .map_err(|error| ApiError::internal(error.to_string()))?;
+    let skills = load_skill_configs(&state.runtime_paths)
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+    skills
+        .into_iter()
+        .find(|skill| skill.id == payload.id)
+        .map(Json)
+        .ok_or_else(|| ApiError::internal("failed to reload created skill"))
+}
+
+async fn skill_update(
+    State(state): State<AppState>,
+    Path(skill_id): Path<String>,
+    Json(mut payload): Json<SkillConfig>,
+) -> Result<Json<SkillConfig>, ApiError> {
+    payload.id = skill_id.clone();
+    write_config_to_dir(state.runtime_paths.skills_config_dir(), &skill_id, &payload)
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+    let skills = load_skill_configs(&state.runtime_paths)
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+    skills
+        .into_iter()
+        .find(|skill| skill.id == skill_id)
+        .map(Json)
+        .ok_or_else(|| ApiError::internal("failed to reload updated skill"))
+}
+
+async fn skill_delete(
+    State(state): State<AppState>,
+    Path(skill_id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    let deleted = delete_config_from_dir(state.runtime_paths.skills_config_dir(), &skill_id)
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+    if deleted {
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err(ApiError::not_found(format!("skill '{skill_id}' not found")))
+    }
+}
+
+async fn providers(State(state): State<AppState>) -> Json<Vec<ProviderConfig>> {
+    Json(load_provider_configs(&state.runtime_paths).unwrap_or_default())
+}
+
+async fn provider_detail(
+    State(state): State<AppState>,
+    Path(provider_id): Path<String>,
+) -> Result<Json<ProviderConfig>, ApiError> {
+    let providers = load_provider_configs(&state.runtime_paths)
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+    providers
+        .into_iter()
+        .find(|provider| provider.id == provider_id)
+        .map(Json)
+        .ok_or_else(|| ApiError::not_found(format!("provider '{provider_id}' not found")))
+}
+
+async fn provider_create(
+    State(state): State<AppState>,
+    Json(payload): Json<ProviderConfig>,
+) -> Result<Json<ProviderConfig>, ApiError> {
+    write_config_to_dir(
+        state.runtime_paths.providers_config_dir(),
+        &payload.id,
+        &payload,
+    )
+    .map_err(|error| ApiError::internal(error.to_string()))?;
+    let providers = load_provider_configs(&state.runtime_paths)
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+    providers
+        .into_iter()
+        .find(|provider| provider.id == payload.id)
+        .map(Json)
+        .ok_or_else(|| ApiError::internal("failed to reload created provider"))
+}
+
+async fn provider_update(
+    State(state): State<AppState>,
+    Path(provider_id): Path<String>,
+    Json(mut payload): Json<ProviderConfig>,
+) -> Result<Json<ProviderConfig>, ApiError> {
+    payload.id = provider_id.clone();
+    write_config_to_dir(
+        state.runtime_paths.providers_config_dir(),
+        &provider_id,
+        &payload,
+    )
+    .map_err(|error| ApiError::internal(error.to_string()))?;
+    let providers = load_provider_configs(&state.runtime_paths)
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+    providers
+        .into_iter()
+        .find(|provider| provider.id == provider_id)
+        .map(Json)
+        .ok_or_else(|| ApiError::internal("failed to reload updated provider"))
+}
+
+async fn provider_delete(
+    State(state): State<AppState>,
+    Path(provider_id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    let deleted = delete_config_from_dir(state.runtime_paths.providers_config_dir(), &provider_id)
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+    if deleted {
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err(ApiError::not_found(format!(
+            "provider '{provider_id}' not found"
+        )))
+    }
 }
 
 async fn spaces(State(state): State<AppState>) -> Json<Vec<ennoia_kernel::SpaceSpec>> {
@@ -1109,6 +1358,49 @@ async fn runtime_preferences_put(
     Ok(Json(to_preference_record(saved)))
 }
 
+async fn runtime_app_config(State(state): State<AppState>) -> Json<AppConfig> {
+    Json(
+        read_app_config_from_disk(&state)
+            .map(|config| normalize_app_config(&state.runtime_paths, config))
+            .unwrap_or_else(|| state.app_config.clone()),
+    )
+}
+
+async fn runtime_app_config_put(
+    State(state): State<AppState>,
+    Extension(request): Extension<RequestContext>,
+    Json(payload): Json<AppConfig>,
+) -> ApiResult<AppConfig> {
+    let normalized = normalize_app_config(&state.runtime_paths, payload);
+    let workspace_root = state
+        .runtime_paths
+        .expand_home_token(&normalized.workspace_root);
+    fs::create_dir_all(&workspace_root)
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?;
+    fs::create_dir_all(
+        state
+            .runtime_paths
+            .expand_home_token(&normalized.extensions_scan_dir),
+    )
+    .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?;
+    fs::create_dir_all(
+        state
+            .runtime_paths
+            .expand_home_token(&normalized.agents_scan_dir),
+    )
+    .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?;
+    let contents = toml::to_string_pretty(&normalized)
+        .map_err(|error| scoped(ApiError::bad_request(error.to_string()), &request))?;
+    fs::write(state.runtime_paths.app_config_file(), contents)
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?;
+    Ok(Json(normalized))
+}
+
+fn read_app_config_from_disk(state: &AppState) -> Option<AppConfig> {
+    let contents = fs::read_to_string(state.runtime_paths.app_config_file()).ok()?;
+    toml::from_str(&contents).ok()
+}
+
 async fn space_ui_preferences(
     State(state): State<AppState>,
     Extension(request): Extension<RequestContext>,
@@ -1150,25 +1442,21 @@ async fn conversations_create(
     Extension(request): Extension<RequestContext>,
     Json(payload): Json<CreateConversationPayload>,
 ) -> ApiResult<ConversationCreateResponse> {
-    let topology = conversation_topology_from_value(&payload.topology).ok_or_else(|| {
-        scoped(
-            ApiError::bad_request("invalid conversation topology"),
-            &request,
-        )
-    })?;
-    let agent_ids = normalize_agent_ids(&state, &payload.agent_ids);
+    let requested_topology =
+        conversation_topology_from_value(&payload.topology).ok_or_else(|| {
+            scoped(
+                ApiError::bad_request("invalid conversation topology"),
+                &request,
+            )
+        })?;
+    let agent_ids = normalize_agent_ids(&state.runtime_paths, &payload.agent_ids);
     if agent_ids.is_empty() {
         return Err(scoped(
             ApiError::bad_request("at least one agent is required"),
             &request,
         ));
     }
-    if matches!(topology, ConversationTopology::Direct) && agent_ids.len() != 1 {
-        return Err(scoped(
-            ApiError::bad_request("direct conversation must target exactly one agent"),
-            &request,
-        ));
-    }
+    let topology = infer_topology_from_agent_count(requested_topology, &agent_ids);
 
     let now = now_iso();
     let participants = build_participants(&agent_ids);
@@ -1182,7 +1470,7 @@ async fn conversations_create(
         space_id: payload.space_id.clone(),
         title: payload
             .title
-            .unwrap_or_else(|| default_conversation_title(&state, topology, &agent_ids)),
+            .unwrap_or_else(|| default_conversation_title(&state.runtime_paths, &agent_ids)),
         participants: participants.clone(),
         default_lane_id: Some(lane_id.clone()),
         created_at: now.clone(),
@@ -1192,12 +1480,14 @@ async fn conversations_create(
         id: lane_id,
         conversation_id: conversation_id,
         space_id: payload.space_id,
-        name: payload.lane_name.unwrap_or_else(|| "主线".to_string()),
+        name: payload
+            .lane_name
+            .unwrap_or_else(|| build_default_lane_name(&agent_ids)),
         lane_type: payload.lane_type.unwrap_or_else(|| "primary".to_string()),
         status: "active".to_string(),
         goal: payload
             .lane_goal
-            .unwrap_or_else(|| "围绕当前会话持续推进".to_string()),
+            .unwrap_or_else(|| build_default_lane_goal(&agent_ids)),
         participants,
         created_at: now.clone(),
         updated_at: now,
@@ -1427,10 +1717,50 @@ async fn logs_list(
     Query(query): Query<LogsQuery>,
 ) -> Json<Vec<LogRecordRow>> {
     Json(
-        db::list_recent_logs(&state.pool, query.limit.unwrap_or(50))
-            .await
-            .unwrap_or_default(),
+        db::list_recent_logs(
+            &state.pool,
+            query.limit.unwrap_or(50),
+            query.q.as_deref(),
+            query.level.as_deref(),
+            query.source.as_deref(),
+        )
+        .await
+        .unwrap_or_default(),
     )
+}
+
+async fn frontend_log_create(
+    State(state): State<AppState>,
+    Extension(request): Extension<RequestContext>,
+    Json(payload): Json<FrontendLogPayload>,
+) -> Result<StatusCode, ApiError> {
+    let id = format!("flog-{}", Uuid::new_v4());
+    let at = payload.at.unwrap_or_else(now_iso);
+    let source = payload
+        .source
+        .unwrap_or_else(|| "frontend".to_string())
+        .trim()
+        .to_string();
+    let source = if source.is_empty() {
+        "frontend".to_string()
+    } else {
+        source
+    };
+
+    db::insert_frontend_log(
+        &state.pool,
+        &id,
+        &payload.level,
+        &source,
+        &payload.title,
+        &payload.summary,
+        payload.details.as_deref(),
+        &at,
+    )
+    .await
+    .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?;
+
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn memories_list(State(state): State<AppState>) -> Json<Vec<MemoryRecord>> {
@@ -1822,7 +2152,11 @@ async fn drive_run(
         .await
         .map_err(|error| error.to_string())?;
 
-    let available_agents: Vec<String> = state.agents.iter().map(|agent| agent.id.clone()).collect();
+    let available_agents: Vec<String> = load_agent_configs(&state.runtime_paths)
+        .unwrap_or_else(|_| state.agents.clone())
+        .into_iter()
+        .map(|agent| agent.id)
+        .collect();
     let request = RunRequest {
         owner: conversation.owner.clone(),
         conversation: conversation.clone(),
@@ -2210,33 +2544,80 @@ fn build_participants(agent_ids: &[String]) -> Vec<String> {
     participants
 }
 
-fn default_conversation_title(
-    state: &AppState,
-    topology: ConversationTopology,
-    agent_ids: &[String],
-) -> String {
-    match topology {
-        ConversationTopology::Direct => {
-            let agent_id = &agent_ids[0];
-            let label = state
-                .agents
+fn default_conversation_title(paths: &ennoia_paths::RuntimePaths, agent_ids: &[String]) -> String {
+    let known_agents = load_agent_configs(paths).unwrap_or_default();
+    if agent_ids.len() == 1 {
+        let agent_id = &agent_ids[0];
+        let label = known_agents
+            .into_iter()
+            .find(|agent| agent.id == *agent_id)
+            .map(|agent| agent.display_name)
+            .unwrap_or_else(|| agent_id.clone());
+        return format!("与 {label} 的会话");
+    }
+
+    let labels = agent_ids
+        .iter()
+        .take(3)
+        .map(|agent_id| {
+            known_agents
                 .iter()
                 .find(|agent| agent.id == *agent_id)
                 .map(|agent| agent.display_name.clone())
-                .unwrap_or_else(|| agent_id.clone());
-            format!("与 {label} 的会话")
-        }
-        ConversationTopology::Group => "多 Agent 协作会话".to_string(),
+                .unwrap_or_else(|| agent_id.clone())
+        })
+        .collect::<Vec<_>>();
+    if labels.is_empty() {
+        "多 Agent 协作会话".to_string()
+    } else if agent_ids.len() > 3 {
+        format!("{} 等 {} 个 Agent", labels.join("、"), agent_ids.len())
+    } else {
+        format!("{} 协作会话", labels.join("、"))
     }
 }
 
-fn normalize_agent_ids(state: &AppState, requested: &[String]) -> Vec<String> {
-    let known: HashSet<String> = state.agents.iter().map(|agent| agent.id.clone()).collect();
+fn normalize_agent_ids(paths: &ennoia_paths::RuntimePaths, requested: &[String]) -> Vec<String> {
+    let known: HashSet<String> = load_agent_configs(paths)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|agent| agent.id)
+        .collect();
     requested
         .iter()
         .filter(|agent_id| known.contains(agent_id.as_str()))
         .cloned()
         .collect()
+}
+
+fn infer_topology_from_agent_count(
+    topology: ConversationTopology,
+    agent_ids: &[String],
+) -> ConversationTopology {
+    if agent_ids.len() <= 1 {
+        ConversationTopology::Direct
+    } else {
+        match topology {
+            ConversationTopology::Direct | ConversationTopology::Group => {
+                ConversationTopology::Group
+            }
+        }
+    }
+}
+
+fn build_default_lane_name(agent_ids: &[String]) -> String {
+    if agent_ids.len() <= 1 {
+        "私聊".to_string()
+    } else {
+        "群聊".to_string()
+    }
+}
+
+fn build_default_lane_goal(agent_ids: &[String]) -> String {
+    if agent_ids.len() <= 1 {
+        "与目标 Agent 持续推进当前问题".to_string()
+    } else {
+        "在多 Agent 协作中持续推进当前问题".to_string()
+    }
 }
 
 fn select_lane<'a>(lanes: &'a [LaneSpec], lane_id: Option<&str>) -> Option<LaneSpec> {

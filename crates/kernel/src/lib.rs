@@ -20,7 +20,7 @@ pub mod ui;
 
 // ========== Re-exports ==========
 
-pub use config::{AgentConfig, AppConfig, ServerConfig, UiConfig};
+pub use config::{AgentConfig, AppConfig, ProviderConfig, ServerConfig, SkillConfig, UiConfig};
 pub use decision::{Decision, DecisionSnapshot, NextAction};
 pub use domain::{
     AgentSpec, ArtifactKind, ArtifactSpec, ConversationSpec, ConversationTopology, HandoffSpec,

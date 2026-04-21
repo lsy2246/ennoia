@@ -8,6 +8,8 @@ use crate::ui::LocalizedText;
 pub struct AppConfig {
     pub app_name: String,
     pub mode: String,
+    #[serde(default = "default_workspace_root")]
+    pub workspace_root: String,
     pub database_mode: String,
     pub database_url: String,
     pub extensions_scan_dir: String,
@@ -21,8 +23,9 @@ impl Default for AppConfig {
         Self {
             app_name: "ennoia".to_string(),
             mode: "development".to_string(),
+            workspace_root: "~/.ennoia/workspace".to_string(),
             database_mode: "sqlite".to_string(),
-            database_url: "sqlite://~/.ennoia/state/sqlite/ennoia.db".to_string(),
+            database_url: "sqlite://~/.ennoia/data/sqlite/ennoia.db".to_string(),
             extensions_scan_dir: "~/.ennoia/config/extensions".to_string(),
             agents_scan_dir: "~/.ennoia/config/agents".to_string(),
             scheduler_tick_ms: 1_000,
@@ -53,10 +56,10 @@ impl Default for ServerConfig {
     }
 }
 
-/// UiConfig stores shell-specific settings loaded from `config/ui.toml`.
+/// UiConfig stores Web workbench settings loaded from `config/ui.toml`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct UiConfig {
-    pub shell_title: LocalizedText,
+    pub web_title: LocalizedText,
     pub default_theme: String,
     pub default_locale: String,
     pub fallback_locale: String,
@@ -69,7 +72,7 @@ pub struct UiConfig {
 impl Default for UiConfig {
     fn default() -> Self {
         Self {
-            shell_title: LocalizedText::new("shell.title", "Ennoia"),
+            web_title: LocalizedText::new("web.title", "Ennoia"),
             default_theme: "system".to_string(),
             default_locale: "zh-CN".to_string(),
             fallback_locale: "en-US".to_string(),
@@ -86,10 +89,106 @@ impl Default for UiConfig {
 pub struct AgentConfig {
     pub id: String,
     pub display_name: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub system_prompt: String,
+    #[serde(default = "default_provider_id")]
+    pub provider_id: String,
+    #[serde(default = "default_model_id")]
+    pub model_id: String,
+    #[serde(default = "default_reasoning_effort")]
+    pub reasoning_effort: String,
+    #[serde(default)]
+    pub workspace_root: String,
+    #[serde(default)]
+    pub skills: Vec<String>,
+    #[serde(default = "default_agent_enabled")]
+    pub enabled: bool,
+    #[serde(default = "default_agent_kind")]
     pub kind: String,
+    #[serde(default = "default_workspace_mode")]
     pub workspace_mode: String,
+    #[serde(default = "default_model_id")]
     pub default_model: String,
+    #[serde(default)]
     pub skills_dir: String,
+    #[serde(default)]
     pub workspace_dir: String,
+    #[serde(default)]
     pub artifacts_dir: String,
+}
+
+/// SkillConfig represents one file under `config/skills/*.toml`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SkillConfig {
+    pub id: String,
+    pub display_name: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default = "default_skill_source")]
+    pub source: String,
+    #[serde(default)]
+    pub entry: String,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default = "default_agent_enabled")]
+    pub enabled: bool,
+}
+
+/// ProviderConfig represents one file under `config/providers/*.toml`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProviderConfig {
+    pub id: String,
+    pub display_name: String,
+    #[serde(default = "default_provider_kind")]
+    pub kind: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub base_url: String,
+    #[serde(default)]
+    pub api_key_env: String,
+    #[serde(default = "default_model_id")]
+    pub default_model: String,
+    #[serde(default)]
+    pub available_models: Vec<String>,
+    #[serde(default = "default_agent_enabled")]
+    pub enabled: bool,
+}
+
+fn default_agent_kind() -> String {
+    "agent".to_string()
+}
+
+fn default_workspace_mode() -> String {
+    "private".to_string()
+}
+
+fn default_provider_id() -> String {
+    "openai".to_string()
+}
+
+fn default_provider_kind() -> String {
+    "openai".to_string()
+}
+
+fn default_workspace_root() -> String {
+    "~/.ennoia/workspace".to_string()
+}
+
+fn default_model_id() -> String {
+    "gpt-5.4".to_string()
+}
+
+fn default_reasoning_effort() -> String {
+    "high".to_string()
+}
+
+fn default_skill_source() -> String {
+    "builtin".to_string()
+}
+
+fn default_agent_enabled() -> bool {
+    true
 }

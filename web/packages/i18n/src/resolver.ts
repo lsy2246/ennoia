@@ -39,23 +39,88 @@ export function translate(
 }
 
 export function formatDateTime(value: string | number | Date, locale: string, timeZone?: string) {
-  return new Intl.DateTimeFormat(locale, {
-    dateStyle: "medium",
-    timeStyle: "short",
-    timeZone,
-  }).format(new Date(value));
+  const date = normalizeDateValue(value);
+  if (!date) {
+    return "—";
+  }
+  return formatWithFallback(
+    locale,
+    {
+      dateStyle: "medium",
+      timeStyle: "short",
+      timeZone,
+    },
+    date,
+  );
 }
 
 export function formatDate(value: string | number | Date, locale: string, timeZone?: string) {
-  return new Intl.DateTimeFormat(locale, {
-    dateStyle: "medium",
-    timeZone,
-  }).format(new Date(value));
+  const date = normalizeDateValue(value);
+  if (!date) {
+    return "—";
+  }
+  return formatWithFallback(
+    locale,
+    {
+      dateStyle: "medium",
+      timeZone,
+    },
+    date,
+  );
 }
 
 export function formatTime(value: string | number | Date, locale: string, timeZone?: string) {
-  return new Intl.DateTimeFormat(locale, {
-    timeStyle: "short",
-    timeZone,
-  }).format(new Date(value));
+  const date = normalizeDateValue(value);
+  if (!date) {
+    return "—";
+  }
+  return formatWithFallback(
+    locale,
+    {
+      timeStyle: "short",
+      timeZone,
+    },
+    date,
+  );
+}
+
+function formatWithFallback(
+  locale: string,
+  options: Intl.DateTimeFormatOptions,
+  date: Date,
+) {
+  try {
+    return new Intl.DateTimeFormat(locale, options).format(date);
+  } catch {
+    const { timeZone: _ignoredTimeZone, ...fallbackOptions } = options;
+    return new Intl.DateTimeFormat(locale, fallbackOptions).format(date);
+  }
+}
+
+function normalizeDateValue(value: string | number | Date) {
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value;
+  }
+
+  if (typeof value === "number") {
+    const normalized = value < 10_000_000_000 ? value * 1000 : value;
+    const date = new Date(normalized);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  if (/^\d+$/.test(trimmed)) {
+    const numeric = Number(trimmed);
+    if (!Number.isFinite(numeric)) {
+      return null;
+    }
+    return normalizeDateValue(numeric);
+  }
+
+  const date = new Date(trimmed);
+  return Number.isNaN(date.getTime()) ? null : date;
 }

@@ -15,11 +15,15 @@ export { formatDate, formatDateTime, formatTime, resolveLocalizedText, translate
 
 import type { MessageModule, TranslationBundle } from "./types";
 import { createI18nRegistry } from "./registry";
-import { observatoryMessages } from "./modules/observatory";
 import { settingsMessages } from "./modules/settings";
 import { shellMessages } from "./modules/shell";
+import { webMessages } from "./modules/web";
 
-const BUILTIN_MODULES: MessageModule[] = [shellMessages, settingsMessages, observatoryMessages];
+const BUILTIN_MODULES: MessageModule[] = [
+  shellMessages,
+  settingsMessages,
+  webMessages,
+];
 export const builtinI18nRegistry = createI18nRegistry(BUILTIN_MODULES);
 
 export function getBuiltinModules(): MessageModule[] {

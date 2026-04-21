@@ -1,0 +1,9 @@
+id = "openai"
+display_name = "OpenAI"
+kind = "openai"
+description = "默认 OpenAI 上游实现。"
+base_url = "https://api.openai.com/v1"
+api_key_env = "OPENAI_API_KEY"
+default_model = "gpt-5.4"
+available_models = ["gpt-5.4", "gpt-5.3-codex", "gpt-5.2"]
+enabled = true

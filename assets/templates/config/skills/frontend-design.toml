@@ -1,0 +1,7 @@
+id = "frontend-design"
+display_name = "Frontend Design"
+description = "面向前端界面设计、视觉系统和交互细节的技能定义。"
+source = "builtin"
+entry = "builtin://skills/frontend-design"
+tags = ["ui", "ux", "frontend"]
+enabled = true

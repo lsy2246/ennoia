@@ -1,4 +1,4 @@
-shell_title = { key = "shell.title", fallback = "Ennoia" }
+web_title = { key = "web.title", fallback = "Ennoia" }
 default_theme = "system"
 default_locale = "zh-CN"
 fallback_locale = "en-US"

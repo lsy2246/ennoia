@@ -312,7 +312,7 @@ pub struct ExtensionDiagnostic {
     pub at: String,
 }
 
-/// ExtensionRuntimeEvent records one runtime event visible to API/CLI/Shell.
+/// ExtensionRuntimeEvent records one runtime event visible to API, CLI and Web.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ExtensionRuntimeEvent {
     pub event_id: String,

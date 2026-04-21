@@ -15,6 +15,7 @@ pub const ENNOIA_HOME_ENV: &str = "ENNOIA_HOME";
 #[derive(Debug, Clone)]
 pub struct RuntimePaths {
     home: PathBuf,
+    workspace_root: PathBuf,
 }
 
 impl RuntimePaths {
@@ -23,11 +24,25 @@ impl RuntimePaths {
             .map(PathBuf::from)
             .or_else(|| env::var_os(ENNOIA_HOME_ENV).map(PathBuf::from))
             .unwrap_or_else(default_home_dir);
-        Self { home }
+        let workspace_root = home.join("workspace");
+        Self {
+            home,
+            workspace_root,
+        }
     }
 
     pub fn new(home: impl Into<PathBuf>) -> Self {
-        Self { home: home.into() }
+        let home = home.into();
+        let workspace_root = home.join("workspace");
+        Self {
+            home,
+            workspace_root,
+        }
+    }
+
+    pub fn with_workspace_root(mut self, value: impl AsRef<str>) -> Self {
+        self.workspace_root = self.expand_home_token(value.as_ref());
+        self
     }
 
     pub fn home(&self) -> &Path {
@@ -44,6 +59,14 @@ impl RuntimePaths {
 
     pub fn extensions_config_dir(&self) -> PathBuf {
         self.config_dir().join("extensions")
+    }
+
+    pub fn skills_config_dir(&self) -> PathBuf {
+        self.config_dir().join("skills")
+    }
+
+    pub fn providers_config_dir(&self) -> PathBuf {
+        self.config_dir().join("providers")
     }
 
     pub fn app_config_file(&self) -> PathBuf {
@@ -63,7 +86,7 @@ impl RuntimePaths {
     }
 
     pub fn state_dir(&self) -> PathBuf {
-        self.home.join("state")
+        self.home.join("data")
     }
 
     pub fn state_queue_dir(&self) -> PathBuf {
@@ -138,6 +161,10 @@ impl RuntimePaths {
         self.home.join("agents")
     }
 
+    pub fn workspace_root_dir(&self) -> PathBuf {
+        self.workspace_root.clone()
+    }
+
     pub fn agent_dir(&self, agent_id: &str) -> PathBuf {
         self.agents_dir().join(agent_id)
     }
@@ -147,7 +174,7 @@ impl RuntimePaths {
     }
 
     pub fn agent_workspace_dir(&self, agent_id: &str) -> PathBuf {
-        self.agent_dir(agent_id).join("workspace")
+        self.workspace_root_dir().join("agents").join(agent_id)
     }
 
     pub fn agent_artifacts_dir(&self, agent_id: &str) -> PathBuf {
@@ -163,7 +190,7 @@ impl RuntimePaths {
     }
 
     pub fn space_workspace_dir(&self, space_id: &str) -> PathBuf {
-        self.space_dir(space_id).join("workspace")
+        self.workspace_root_dir().join("spaces").join(space_id)
     }
 
     pub fn space_artifacts_dir(&self, space_id: &str) -> PathBuf {
@@ -218,7 +245,8 @@ impl RuntimePaths {
         for dir in [
             self.agents_config_dir(),
             self.extensions_config_dir(),
-            self.policies_dir(),
+            self.skills_config_dir(),
+            self.providers_config_dir(),
             self.attached_extensions_dir(),
             self.extensions_runtime_dir(),
             self.extensions_cache_dir(),
@@ -226,11 +254,8 @@ impl RuntimePaths {
             self.state_runs_dir(),
             self.state_cache_dir(),
             self.sqlite_dir(),
-            self.global_extensions_dir(),
-            self.global_skills_dir(),
             self.package_extensions_dir(),
             self.agents_dir(),
-            self.spaces_dir(),
             self.server_logs_dir(),
             self.scheduler_logs_dir(),
             self.agents_logs_dir(),
@@ -245,7 +270,7 @@ impl RuntimePaths {
 
     pub fn expand_home_token(&self, value: &str) -> PathBuf {
         if let Some(rest) = value.strip_prefix("~/.ennoia") {
-            return self.home.join(rest.trim_start_matches('/'));
+            return self.home.join(rest.trim_start_matches(['/', '\\']));
         }
         PathBuf::from(value)
     }
@@ -262,6 +287,10 @@ impl RuntimePaths {
         } else {
             path.to_string_lossy().replace('\\', "/")
         }
+    }
+
+    pub fn display_for_user(&self, path: impl AsRef<Path>) -> String {
+        path.as_ref().to_string_lossy().replace('\\', "/")
     }
 }
 

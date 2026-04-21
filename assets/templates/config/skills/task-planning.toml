@@ -1,0 +1,7 @@
+id = "task-planning"
+display_name = "Task Planning"
+description = "面向需求澄清、任务拆解、优先级排序与执行规划的技能定义。"
+source = "builtin"
+entry = "builtin://skills/task-planning"
+tags = ["planning", "decomposition", "strategy"]
+enabled = true

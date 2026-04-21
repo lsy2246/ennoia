@@ -33,7 +33,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             auto_attach_workspace_extensions(&paths)?;
             let server_config: ServerConfig = read_toml_or_default(&paths.server_config_file())?;
             ensure_port_available(server_config.port, "API")?;
-            ensure_port_available(5173, "Shell")?;
+            ensure_port_available(5173, "Web")?;
             run_dev_supervisor(paths, server_config).await?;
         }
         Some("start") | Some("serve") => {
@@ -321,10 +321,10 @@ async fn run_dev_supervisor(
     let _watcher = start_backend_watcher(&repo_root, watch_tx)?;
 
     println!("Ennoia dev runtime starting at {}", paths.home().display());
-    println!("Shell: http://127.0.0.1:5173");
+    println!("Web: http://127.0.0.1:5173");
     println!("API: http://{}:{}", server_config.host, server_config.port);
     println!("Backend hot reload: watching crates/, assets/, Cargo.toml and Cargo.lock.");
-    println!("Press Ctrl+C to stop API, Shell and extension dev processes.");
+    println!("Press Ctrl+C to stop API, Web and extension dev processes.");
 
     let mut ticker = tokio::time::interval(WATCH_POLL_INTERVAL);
     let mut pending_backend_change: Option<Instant> = None;
@@ -570,7 +570,7 @@ impl DevProcessGroup {
     ) -> io::Result<()> {
         let shell_dir = env::current_dir()?.join("web/apps/shell");
         if !shell_dir.join("package.json").exists() {
-            println!("Shell dev server skipped: web/apps/shell/package.json not found");
+            println!("Web dev server skipped: web/apps/shell/package.json not found");
             return Ok(());
         }
 
@@ -913,66 +913,51 @@ fn auto_attach_workspace_extensions(paths: &RuntimePaths) -> io::Result<()> {
 
 fn init_home_template(paths: &RuntimePaths) -> io::Result<()> {
     paths.ensure_layout()?;
-    fs::create_dir_all(paths.global_extension_dir("observatory"))?;
-    fs::create_dir_all(paths.package_extension_dir("observatory"))?;
-    fs::create_dir_all(paths.package_extension_dir("observatory").join("frontend"))?;
-    fs::create_dir_all(paths.package_extension_dir("observatory").join("backend"))?;
 
-    write_if_missing(&paths.app_config_file(), templates::app_config())?;
+    write_if_missing(&paths.app_config_file(), &render_app_config(paths))?;
     write_if_missing(&paths.server_config_file(), templates::server_config())?;
     write_if_missing(&paths.ui_config_file(), templates::ui_config())?;
     write_if_missing(
-        &paths.agents_config_dir().join("coder.toml"),
-        templates::coder_agent(),
+        &paths.skills_config_dir().join("implementation.toml"),
+        templates::implementation_skill(),
     )?;
     write_if_missing(
-        &paths.agents_config_dir().join("planner.toml"),
-        templates::planner_agent(),
+        &paths.skills_config_dir().join("task-planning.toml"),
+        templates::task_planning_skill(),
     )?;
     write_if_missing(
-        &paths.extensions_config_dir().join("observatory.toml"),
-        templates::observatory_extension_config(),
+        &paths.skills_config_dir().join("frontend-design.toml"),
+        templates::frontend_design_skill(),
     )?;
     write_if_missing(
-        &paths
-            .global_extension_dir("observatory")
-            .join("manifest.toml"),
-        templates::observatory_manifest(),
-    )?;
-    write_if_missing(
-        &paths
-            .package_extension_dir("observatory")
-            .join("ennoia.extension.toml"),
-        templates::observatory_package_descriptor(),
-    )?;
-    write_if_missing(
-        &paths
-            .package_extension_dir("observatory")
-            .join("frontend")
-            .join("index.js"),
-        templates::observatory_package_frontend(),
-    )?;
-    write_if_missing(
-        &paths
-            .package_extension_dir("observatory")
-            .join("backend")
-            .join("index.js"),
-        templates::observatory_package_backend(),
+        &paths.providers_config_dir().join("openai.toml"),
+        templates::openai_provider(),
     )?;
     write_if_missing(
         &paths.attached_workspaces_file(),
         templates::attached_workspaces(),
     )?;
-    write_if_missing(
-        &paths.policies_dir().join("memory.toml"),
-        templates::memory_policy(),
-    )?;
-    write_if_missing(
-        &paths.policies_dir().join("stage.toml"),
-        templates::stage_policy(),
-    )?;
-
     Ok(())
+}
+
+fn render_app_config(paths: &RuntimePaths) -> String {
+    templates::app_config()
+        .replace(
+            "~/.ennoia/workspace",
+            &paths.display_for_user(paths.workspace_root_dir()),
+        )
+        .replace(
+            "sqlite://~/.ennoia/data/sqlite/ennoia.db",
+            &format!("sqlite://{}", paths.display_for_user(paths.sqlite_db())),
+        )
+        .replace(
+            "~/.ennoia/config/extensions",
+            &paths.display_for_user(paths.extensions_config_dir()),
+        )
+        .replace(
+            "~/.ennoia/config/agents",
+            &paths.display_for_user(paths.agents_config_dir()),
+        )
 }
 
 fn write_if_missing(path: &Path, contents: &str) -> io::Result<()> {

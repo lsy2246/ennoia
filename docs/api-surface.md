@@ -21,12 +21,46 @@
 - `PUT /api/v1/runtime/config/{key}`
 - `GET /api/v1/runtime/config/{key}/history`
 
-`GET /api/v1/ui/messages` 支持：
+## Session
 
-- `locale`
-- `namespaces`
+- `GET /api/v1/conversations`
+- `POST /api/v1/conversations`
+- `GET /api/v1/conversations/{conversation_id}`
+- `DELETE /api/v1/conversations/{conversation_id}`
+- `GET /api/v1/conversations/{conversation_id}/messages`
+- `POST /api/v1/conversations/{conversation_id}/messages`
+- `GET /api/v1/conversations/{conversation_id}/runs`
+- `GET /api/v1/conversations/{conversation_id}/lanes`
+- `GET /api/v1/lanes/{lane_id}/handoffs`
+- `POST /api/v1/lanes/{lane_id}/handoffs`
 
-## 目录与扩展
+### Session 约定
+
+- `agent_ids.len() == 1` 时创建 `direct`
+- `agent_ids.len() >= 2` 时创建 `group`
+- 消息可附带 `addressed_agents`
+
+## Agent / Skill / API 上游渠道
+
+- `GET /api/v1/agents`
+- `POST /api/v1/agents`
+- `GET /api/v1/agents/{agent_id}`
+- `PUT /api/v1/agents/{agent_id}`
+- `DELETE /api/v1/agents/{agent_id}`
+
+- `GET /api/v1/skills`
+- `POST /api/v1/skills`
+- `GET /api/v1/skills/{skill_id}`
+- `PUT /api/v1/skills/{skill_id}`
+- `DELETE /api/v1/skills/{skill_id}`
+
+- `GET /api/v1/providers`
+- `POST /api/v1/providers`
+- `GET /api/v1/providers/{provider_id}`
+- `PUT /api/v1/providers/{provider_id}`
+- `DELETE /api/v1/providers/{provider_id}`
+
+## Extension
 
 - `GET /api/v1/extensions`
 - `GET /api/v1/extensions/runtime`
@@ -41,39 +75,22 @@
 - `GET /api/v1/extensions/{extension_id}`
 - `GET /api/v1/extensions/{extension_id}/diagnostics`
 - `GET /api/v1/extensions/{extension_id}/frontend/module`
+- `GET /api/v1/extensions/{extension_id}/themes/{theme_id}/stylesheet`
 - `GET /api/v1/extensions/{extension_id}/logs`
+- `PUT /api/v1/extensions/{extension_id}/enabled`
 - `POST /api/v1/extensions/{extension_id}/reload`
 - `POST /api/v1/extensions/{extension_id}/restart`
 - `POST /api/v1/extensions/attach`
 - `DELETE /api/v1/extensions/attach/{extension_id}`
-- `GET /api/v1/agents`
-- `GET /api/v1/spaces`
-- `GET /api/v1/spaces/{space_id}/ui-preferences`
-- `PUT /api/v1/spaces/{space_id}/ui-preferences`
 
-## 会话
+## Memory
 
-- `GET /api/v1/conversations`
-- `POST /api/v1/conversations`
-- `GET /api/v1/conversations/{conversation_id}`
-- `DELETE /api/v1/conversations/{conversation_id}`
-- `GET /api/v1/conversations/{conversation_id}/messages`
-- `POST /api/v1/conversations/{conversation_id}/messages`
-- `GET /api/v1/conversations/{conversation_id}/runs`
-- `GET /api/v1/conversations/{conversation_id}/lanes`
-- `GET /api/v1/lanes/{lane_id}/handoffs`
-- `POST /api/v1/lanes/{lane_id}/handoffs`
+- `GET /api/v1/memories`
+- `POST /api/v1/memories`
+- `POST /api/v1/memories/recall`
+- `POST /api/v1/memories/review`
 
-会话消息写入返回统一 envelope：
-
-- `conversation`
-- `lane`
-- `message`
-- `run`
-- `tasks`
-- `artifacts`
-
-## 执行面
+## 执行与调度
 
 - `GET /api/v1/runs`
 - `GET /api/v1/runs/{run_id}/tasks`
@@ -81,15 +98,27 @@
 - `GET /api/v1/runs/{run_id}/stages`
 - `GET /api/v1/runs/{run_id}/decisions`
 - `GET /api/v1/runs/{run_id}/gates`
-- `GET /api/v1/logs`
 - `GET /api/v1/tasks`
 - `GET /api/v1/artifacts`
-
-## 记忆与作业
-
-- `GET /api/v1/memories`
-- `POST /api/v1/memories`
-- `POST /api/v1/memories/recall`
-- `POST /api/v1/memories/review`
 - `GET /api/v1/jobs`
 - `POST /api/v1/jobs`
+- `GET /api/v1/jobs/{job_id}`
+- `PUT /api/v1/jobs/{job_id}`
+- `DELETE /api/v1/jobs/{job_id}`
+- `POST /api/v1/jobs/{job_id}/run`
+- `POST /api/v1/jobs/{job_id}/enable`
+- `POST /api/v1/jobs/{job_id}/disable`
+
+## 日志
+
+- `GET /api/v1/logs`
+- `POST /api/v1/logs/frontend`
+
+### 日志筛选参数
+
+`GET /api/v1/logs` 支持：
+
+- `limit`
+- `q`
+- `level`
+- `source`

@@ -6,8 +6,8 @@ use std::time::Duration;
 use ennoia_config::SqliteConfigStore;
 use ennoia_extension_host::{ExtensionRuntime, ExtensionRuntimeConfig};
 use ennoia_kernel::{
-    AgentConfig, AppConfig, GatePipeline, MemoryStore, PlatformOverview, RuntimeStore,
-    SchedulerStore, ServerConfig, SpaceSpec, StageMachine, UiConfig,
+    AgentConfig, AppConfig, GatePipeline, MemoryStore, PlatformOverview, ProviderConfig,
+    RuntimeStore, SchedulerStore, ServerConfig, SkillConfig, SpaceSpec, StageMachine, UiConfig,
 };
 use ennoia_memory::SqliteMemoryStore;
 use ennoia_observability::{self, ObservabilityGuard};
@@ -37,6 +37,8 @@ pub struct AppState {
     pub pool: SqlitePool,
     pub extensions: ExtensionRuntime,
     pub agents: Vec<AgentConfig>,
+    pub skills: Vec<SkillConfig>,
+    pub providers: Vec<ProviderConfig>,
     pub spaces: Vec<SpaceSpec>,
     pub policies: Arc<PolicySet>,
     pub memory_store: Arc<dyn MemoryStore>,
@@ -50,7 +52,13 @@ pub struct AppState {
 }
 
 pub fn default_app_state() -> AppState {
-    let runtime_paths = Arc::new(RuntimePaths::new(default_home_dir()));
+    let bootstrap_paths = RuntimePaths::new(default_home_dir());
+    let app_config = normalize_app_config(&bootstrap_paths, AppConfig::default());
+    let runtime_paths = Arc::new(
+        bootstrap_paths
+            .clone()
+            .with_workspace_root(&app_config.workspace_root),
+    );
     runtime_paths.ensure_layout().expect("runtime layout");
     let pool = SqlitePoolOptions::new()
         .max_connections(1)
@@ -75,14 +83,16 @@ pub fn default_app_state() -> AppState {
         ExtensionRuntime::bootstrap(extension_runtime_config(&runtime_paths)).expect("runtime");
 
     AppState {
-        app_config: AppConfig::default(),
+        app_config,
         server_config: ServerConfig::default(),
         ui_config: UiConfig::default(),
         overview: PlatformOverview::default(),
         runtime_paths: runtime_paths.clone(),
         pool,
         extensions,
-        agents: default_agents(&runtime_paths),
+        agents: Vec::new(),
+        skills: default_skills(),
+        providers: default_providers(),
         spaces: default_spaces(),
         policies,
         memory_store,
@@ -97,10 +107,15 @@ pub fn default_app_state() -> AppState {
 }
 
 pub async fn bootstrap_app_state(home_dir: impl AsRef<Path>) -> Result<AppState, AppError> {
-    let runtime_paths = Arc::new(RuntimePaths::new(home_dir.as_ref().to_path_buf()));
-    runtime_paths.ensure_layout()?;
+    let bootstrap_paths = RuntimePaths::new(home_dir.as_ref().to_path_buf());
+    bootstrap_paths.ensure_layout()?;
 
-    let app_config: AppConfig = read_toml_or_default(runtime_paths.app_config_file())?;
+    let app_config = normalize_app_config(
+        &bootstrap_paths,
+        read_toml_or_default(bootstrap_paths.app_config_file())?,
+    );
+    let runtime_paths = Arc::new(bootstrap_paths.with_workspace_root(&app_config.workspace_root));
+    runtime_paths.ensure_layout()?;
     let server_config: ServerConfig = read_toml_or_default(runtime_paths.server_config_file())?;
     let ui_config: UiConfig = read_toml_or_default(runtime_paths.ui_config_file())?;
     let observability_guard = Some(Arc::new(ennoia_observability::init(
@@ -111,6 +126,8 @@ pub async fn bootstrap_app_state(home_dir: impl AsRef<Path>) -> Result<AppState,
     info!(home = %runtime_paths.home().display(), "bootstrapping app state");
 
     let agents = load_agent_configs(&runtime_paths)?;
+    let skills = load_skill_configs(&runtime_paths)?;
+    let providers = load_provider_configs(&runtime_paths)?;
     let spaces = default_spaces();
     let extensions = ExtensionRuntime::bootstrap(extension_runtime_config(&runtime_paths))?;
     let policies = Arc::new(PolicySet::load(runtime_paths.policies_dir())?);
@@ -153,6 +170,8 @@ pub async fn bootstrap_app_state(home_dir: impl AsRef<Path>) -> Result<AppState,
         pool,
         extensions,
         agents,
+        skills,
+        providers,
         spaces,
         policies,
         memory_store,
@@ -217,28 +236,71 @@ where
     Ok(toml::from_str(&contents)?)
 }
 
-fn load_agent_configs(paths: &RuntimePaths) -> Result<Vec<AgentConfig>, AppError> {
-    let config_dir = paths.agents_config_dir();
-    if !config_dir.exists() {
-        return Ok(default_agents(paths));
+pub fn load_agent_configs(paths: &RuntimePaths) -> Result<Vec<AgentConfig>, AppError> {
+    let mut agents = load_configs_from_dir::<AgentConfig>(paths.agents_config_dir())?;
+    for agent in &mut agents {
+        normalize_agent_config(paths, agent);
+    }
+    Ok(agents)
+}
+
+pub fn load_skill_configs(paths: &RuntimePaths) -> Result<Vec<SkillConfig>, AppError> {
+    let mut skills = load_configs_from_dir::<SkillConfig>(paths.skills_config_dir())?;
+    if skills.is_empty() {
+        skills = default_skills();
+    }
+    skills.sort_by(|left, right| left.id.cmp(&right.id));
+    Ok(skills)
+}
+
+pub fn load_provider_configs(paths: &RuntimePaths) -> Result<Vec<ProviderConfig>, AppError> {
+    let mut providers = load_configs_from_dir::<ProviderConfig>(paths.providers_config_dir())?;
+    if providers.is_empty() {
+        providers = default_providers();
+    }
+    providers.sort_by(|left, right| left.id.cmp(&right.id));
+    Ok(providers)
+}
+
+pub fn write_config_to_dir<T: serde::Serialize>(
+    dir: PathBuf,
+    id: &str,
+    value: &T,
+) -> Result<(), AppError> {
+    fs::create_dir_all(&dir)?;
+    let path = dir.join(format!("{id}.toml"));
+    fs::write(path, toml::to_string_pretty(value)?)?;
+    Ok(())
+}
+
+pub fn delete_config_from_dir(dir: PathBuf, id: &str) -> Result<bool, AppError> {
+    let path = dir.join(format!("{id}.toml"));
+    if !path.exists() {
+        return Ok(false);
+    }
+    fs::remove_file(path)?;
+    Ok(true)
+}
+
+fn load_configs_from_dir<T>(dir: PathBuf) -> Result<Vec<T>, AppError>
+where
+    T: serde::de::DeserializeOwned,
+{
+    if !dir.exists() {
+        return Ok(Vec::new());
     }
 
-    let mut agents = Vec::new();
-    for entry in fs::read_dir(config_dir)? {
+    let mut items = Vec::new();
+    for entry in fs::read_dir(dir)? {
         let entry = entry?;
         if !entry.file_type()?.is_file() {
             continue;
         }
         let contents = fs::read_to_string(entry.path())?;
-        let config: AgentConfig = toml::from_str(&contents)?;
-        agents.push(config);
+        let item: T = toml::from_str(&contents)?;
+        items.push(item);
     }
-
-    if agents.is_empty() {
-        Ok(default_agents(paths))
-    } else {
-        Ok(agents)
-    }
+    Ok(items)
 }
 
 fn default_spaces() -> Vec<SpaceSpec> {
@@ -248,33 +310,100 @@ fn default_spaces() -> Vec<SpaceSpec> {
         description: "默认工作台空间".to_string(),
         primary_goal: "组织单操作者与多 Agent 的日常协作".to_string(),
         mention_policy: "configured".to_string(),
-        default_agents: vec!["coder".to_string(), "planner".to_string()],
+        default_agents: Vec::new(),
     }]
 }
 
-fn default_agents(paths: &RuntimePaths) -> Vec<AgentConfig> {
+fn default_skills() -> Vec<SkillConfig> {
     vec![
-        AgentConfig {
-            id: "coder".to_string(),
-            display_name: "Coder".to_string(),
-            kind: "agent".to_string(),
-            workspace_mode: "private".to_string(),
-            default_model: "gpt-5.4".to_string(),
-            skills_dir: paths.display_with_home_token(paths.agent_skills_dir("coder")),
-            workspace_dir: paths.display_with_home_token(paths.agent_workspace_dir("coder")),
-            artifacts_dir: paths.display_with_home_token(paths.agent_artifacts_dir("coder")),
+        SkillConfig {
+            id: "frontend-design".to_string(),
+            display_name: "Frontend Design".to_string(),
+            description: "面向界面设计、视觉系统和交互细节的技能定义。".to_string(),
+            source: "builtin".to_string(),
+            entry: "builtin://skills/frontend-design".to_string(),
+            tags: vec!["ui".to_string(), "ux".to_string(), "frontend".to_string()],
+            enabled: true,
         },
-        AgentConfig {
-            id: "planner".to_string(),
-            display_name: "Planner".to_string(),
-            kind: "agent".to_string(),
-            workspace_mode: "private".to_string(),
-            default_model: "gpt-5.4".to_string(),
-            skills_dir: paths.display_with_home_token(paths.agent_skills_dir("planner")),
-            workspace_dir: paths.display_with_home_token(paths.agent_workspace_dir("planner")),
-            artifacts_dir: paths.display_with_home_token(paths.agent_artifacts_dir("planner")),
+        SkillConfig {
+            id: "implementation".to_string(),
+            display_name: "Implementation".to_string(),
+            description: "面向代码实现、修复、重构与验证闭环的技能定义。".to_string(),
+            source: "builtin".to_string(),
+            entry: "builtin://skills/implementation".to_string(),
+            tags: vec!["code".to_string(), "delivery".to_string()],
+            enabled: true,
+        },
+        SkillConfig {
+            id: "task-planning".to_string(),
+            display_name: "Task Planning".to_string(),
+            description: "面向需求澄清、任务拆解和优先级规划的技能定义。".to_string(),
+            source: "builtin".to_string(),
+            entry: "builtin://skills/task-planning".to_string(),
+            tags: vec!["planning".to_string(), "strategy".to_string()],
+            enabled: true,
         },
     ]
+}
+
+fn default_providers() -> Vec<ProviderConfig> {
+    vec![ProviderConfig {
+        id: "openai".to_string(),
+        display_name: "OpenAI".to_string(),
+        kind: "openai".to_string(),
+        description: "默认 OpenAI 上游实现。".to_string(),
+        base_url: "https://api.openai.com/v1".to_string(),
+        api_key_env: "OPENAI_API_KEY".to_string(),
+        default_model: "gpt-5.4".to_string(),
+        available_models: vec![
+            "gpt-5.4".to_string(),
+            "gpt-5.3-codex".to_string(),
+            "gpt-5.2".to_string(),
+        ],
+        enabled: true,
+    }]
+}
+
+fn normalize_agent_config(paths: &RuntimePaths, agent: &mut AgentConfig) {
+    if agent.provider_id.is_empty() {
+        agent.provider_id = "openai".to_string();
+    }
+    if agent.model_id.is_empty() {
+        agent.model_id = if agent.default_model.is_empty() {
+            "gpt-5.4".to_string()
+        } else {
+            agent.default_model.clone()
+        };
+    }
+    if agent.default_model.is_empty() {
+        agent.default_model = agent.model_id.clone();
+    }
+    if agent.reasoning_effort.is_empty() {
+        agent.reasoning_effort = "high".to_string();
+    }
+    if agent.workspace_root.is_empty() {
+        let legacy = if !agent.workspace_dir.is_empty() {
+            paths.expand_home_token(&agent.workspace_dir)
+        } else {
+            paths.agent_workspace_dir(&agent.id)
+        };
+        agent.workspace_root = paths.display_for_user(legacy);
+    }
+    if !agent.workspace_dir.is_empty() {
+        agent.workspace_dir = paths.display_for_user(paths.expand_home_token(&agent.workspace_dir));
+    } else {
+        agent.workspace_dir = agent.workspace_root.clone();
+    }
+    if !agent.skills_dir.is_empty() {
+        agent.skills_dir = paths.display_for_user(paths.expand_home_token(&agent.skills_dir));
+    } else {
+        agent.skills_dir = paths.display_for_user(paths.agent_skills_dir(&agent.id));
+    }
+    if !agent.artifacts_dir.is_empty() {
+        agent.artifacts_dir = paths.display_for_user(paths.expand_home_token(&agent.artifacts_dir));
+    } else {
+        agent.artifacts_dir = paths.display_for_user(paths.agent_artifacts_dir(&agent.id));
+    }
 }
 
 fn extension_runtime_config(paths: &RuntimePaths) -> ExtensionRuntimeConfig {
@@ -284,4 +413,21 @@ fn extension_runtime_config(paths: &RuntimePaths) -> ExtensionRuntimeConfig {
         legacy_extensions_config_dir: paths.extensions_config_dir(),
         logs_dir: paths.extensions_logs_dir(),
     }
+}
+
+pub fn normalize_app_config(paths: &RuntimePaths, mut config: AppConfig) -> AppConfig {
+    config.workspace_root = paths.display_for_user(paths.expand_home_token(&config.workspace_root));
+    config.extensions_scan_dir =
+        paths.display_for_user(paths.expand_home_token(&config.extensions_scan_dir));
+    config.agents_scan_dir =
+        paths.display_for_user(paths.expand_home_token(&config.agents_scan_dir));
+
+    if let Some(database_path) = config.database_url.strip_prefix("sqlite://") {
+        config.database_url = format!(
+            "sqlite://{}",
+            paths.display_for_user(paths.expand_home_token(database_path)),
+        );
+    }
+
+    config
 }

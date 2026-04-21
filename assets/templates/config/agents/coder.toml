@@ -1,8 +1,0 @@
-id = "coder"
-display_name = "Coder"
-kind = "agent"
-workspace_mode = "private"
-default_model = "gpt-5.4"
-skills_dir = "~/.ennoia/agents/coder/skills"
-workspace_dir = "~/.ennoia/agents/coder/workspace"
-artifacts_dir = "~/.ennoia/agents/coder/artifacts"

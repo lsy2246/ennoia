@@ -2,19 +2,24 @@
 
 ## 目标
 
-`Ennoia` 的当前目标是一套单操作者、多 Agent 的本地工作台。
+`Ennoia` 是一套单操作者、多 Agent 的本地 AI Web 工作台。
 
-系统关键约束已经固定：
+当前产品模型约束为：
 
-- 只有一个本地操作者
-- 通过欢迎引导建立实例级 `workspace_profile`
-- 会话分为 `direct` 与 `group`
-- `Space` 负责承载项目上下文与长期协作容器
+- `Session` 是一等协作实体
+- 会话拓扑只有两种：`direct` / `group`
+- `1 Agent = direct`
+- `2+ Agents = group`
+- `Agent` 是可长期配置的协作者档案
+- `API 上游渠道` 是 Agent 访问模型能力的具体渠道实例
+- `Skill` 与 `Extension` 严格分离
+- `Memory` 通过数据库和可视化界面管理
+- Web 工作台采用单导航 + Dockview 多实例视图
 
 ## 分层
 
 ```text
-Shell
+Web
   -> Server
     -> Kernel
     -> Memory
@@ -23,111 +28,135 @@ Shell
     -> Extension Host
 ```
 
-### Kernel
+## Web
 
-负责定义共享领域模型：
+Web 是 VS Code 风格的多实例工作台：
+
+- 单一导航体系
+- Dockview 资源视图
+- Session / Agent / API 上游渠道 / Memory / Extension 等资源可多开
+- 根容器 `WorkbenchHost` 不可删除
+- 资源视图可在标签页、右侧、下方同时打开
+
+Web 当前一等导航：
+
+- `工作台`
+- `Agents`
+- `技能`
+- `API 上游渠道`
+- `扩展`
+- `日志`
+- `记忆`
+- `任务`
+- `设置`
+
+## Kernel
+
+Kernel 定义共享领域模型，当前关键模型包括：
 
 - `WorkspaceProfile`
 - `ConversationSpec`
 - `LaneSpec`
-- `HandoffSpec`
+- `MessageSpec`
 - `RunSpec / TaskSpec / ArtifactSpec`
+- `AgentConfig`
+- `SkillConfig`
+- `ProviderConfig`
+- `MemoryRecord`
 
-### Memory
+## Server
 
-负责记忆和上下文组装。
+Server 负责提供：
 
-当前实现保留原始记录，并围绕 owner、conversation 和 run 组装上下文视图。
+- bootstrap 与实例偏好
+- Session API
+- Agent / Skill / API 上游渠道 API
+- Extension Runtime 状态与控制
+- Logs / Memory / Jobs / Runtime Config API
 
-### Orchestrator
+## Session 模型
 
-负责把一条会话消息转换为：
+### Session
 
-- 一个 `run`
-- 若干个 `task`
-- 一次阶段流转
-- 一组 gate verdict
+- `direct`：只对应一个 Agent
+- `group`：对应两个及以上 Agent
 
-### Server
+### 消息流
 
-负责提供：
+一条消息至少包含：
 
-- bootstrap 引导
-- runtime profile / preferences
-- conversation / lane / handoff API
-- runs / tasks / artifacts / memories / jobs API
-- extension runtime snapshot / attach / reload / diagnostics API
+- `conversation_id`
+- `lane_id`
+- `sender`
+- `role`
+- `body`
+- `mentions`
 
-### Shell
+多 Agent 路由通过两层决定：
 
-负责提供：
+- 输入框里的 `@agent_id`
+- 请求里的 `addressed_agents`
 
-- 首次欢迎引导
-- direct/group 会话工作台
-- 工作流、任务调度、记忆、扩展、Agent、产物、日志视图
-- 会话创建/删除与基础治理操作
-- 本地缓存驱动的多语言与多主题切换
+## Agent / Skill / API 上游渠道 / Extension 边界
 
-## 扩展运行时
+### Agent
 
-当前扩展子系统已经抽象为独立的 `Extension Runtime`：
+Agent 只表达协作者身份，不承载 Session 产物目录语义。
 
-```text
-Shell
-  -> Server
-    -> Extension Runtime
-      -> Workspace Registry
-      -> Watch Service
-      -> Frontend Module Resolver
-      -> Backend Runner Manager
-      -> Extension Graph Store
-    -> Kernel
-    -> Memory
-    -> Orchestrator
-    -> Scheduler
-```
+关键字段：
 
-当前目标是：
+- `id`
+- `display_name`
+- `description`
+- `system_prompt`
+- `provider_id`
+- `model_id`
+- `reasoning_effort`
+- `skills`
+- `enabled`
 
-- 让 `workspace extension` 成为一等公民
-- 让开发态与发布态共享同一份扩展协议
-- 让扩展 registry 支持 generation 级原子切换
-- 让 Shell 以运行时快照感知扩展图谱变化
+### Skill
 
-当前仓库已经落地：
+Skill 是能力包目录：
 
-- `ennoia.extension.toml` / `manifest.toml` 双入口解析
-- `ExtensionRuntimeSnapshot` 统一快照
-- `attach / detach / reload / restart / diagnostics` API 与 CLI
-- `extensions/events/stream` SSE 事件流与 Shell 自动刷新
-- 轮询式运行时刷新与 generation 递增
+- 可以是全局技能
+- 也可以是 Agent 私有技能
+- “可发现”与“被某个 Agent 启用”是两层语义
 
-## 主链路
+### API 上游渠道
 
-### 首次启动
+API 上游渠道是具体渠道实例：
 
-1. Shell 读取 `/api/v1/bootstrap/status`
-2. 若未初始化，进入欢迎页
-3. 提交 `workspace_profile + instance_ui_preferences`
-4. Server 落盘并把 bootstrap 标记为已完成
+- Agent 绑定实例，不绑定实现类型字符串
+- 创建渠道时选择接口类型
+- 扩展可以贡献新的接口类型实现
 
-### 一对一会话
+### Extension
 
-1. 创建 `conversation(topology=direct)`
-2. 自动创建默认 `lane`
-3. 操作者发送消息
-4. Orchestrator 创建单 Agent run 与 response task
-5. 结果写入 artifact、memory 和 runtime audit
+Extension 是系统插件包：
 
-### 多 Agent 会话
+- 可以贡献导航入口
+- 可以贡献资源视图
+- 可以贡献面板、主题、语言、命令
+- 可以贡献 API 上游渠道接口实现
 
-1. 创建 `conversation(topology=group)`
-2. 一个会话下可有多条 `lane`
-3. 每条消息按 lane 参与者生成协作 task 集
-4. 跨线信息通过 `handoff` 传递
+## 日志与记忆
 
-## 偏好与缓存
+### 日志
 
-- 浏览器缓存负责首屏无闪烁启动
-- 服务端 `instance_ui_preferences` 负责实例级同步
-- `space_ui_preferences` 负责项目级覆盖
+统一日志流聚合：
+
+- 前端日志
+- 后端日志
+- 扩展事件
+- 运行摘要
+
+### 记忆
+
+Memory 系统通过数据库与可视化界面管理：
+
+- list
+- recall
+- review
+
+不预先设计记忆文件目录结构。

@@ -2,21 +2,24 @@
 
 ## 职责
 
-- 提供 `Ennoia` 正式控制台主壳、导航与核心管理页面
-- 承载会话、空间、工作流、定时任务、记忆、扩展、Agent、产物、日志、设置等控制台视图
-- 通过 `Panda CSS` 维护样式 token 与布局规则
-- 生成 `styled-system` 供前端代码复用
+- 提供 VSCode 风格的 Web 工作台与多面板布局
+- 提供工作台、Agent、技能、上游、扩展、任务、日志、设置页面
+- 统一承载 direct/group 会话创建与消息流展示
+- 通过 registry 合并内建视图与扩展视图，并用 `dockview` 提供拖拽停靠布局
+- Observatory 已作为正式 Web 视图接入真实运行数据
+- 承接前端运行时日志上报
 
 ## 行为规范
 
+- 路由入口位于 `web/apps/shell/src/router.tsx`
+- 主壳位于 `web/apps/shell/src/shell/AppShell.tsx`
+- 工作台页位于 `web/apps/shell/src/pages/WorkspacePage.tsx`
 - 样式入口位于 `web/apps/shell/src/styles.css`
-- 路由入口位于 `web/apps/shell/src/router.tsx`，导航壳层位于 `web/apps/shell/src/shell/AppShell.tsx`
-- 共享 API 访问通过 `web/packages/api-client`，页面快照加载通过 `useWorkspaceSnapshot` 统一收口
-- 多语言与主题切换依赖 `web/packages/i18n` 与 `web/packages/theme-runtime`
-- `package.json` 通过 `panda:codegen`、`prepare` 保证样式代码生成
+- 共享 API 访问统一收口到 `web/packages/api-client/src/index.ts`
+- 工作台支持 `@agent` 消息路由，不再使用“目标”输入框
 
 ## 依赖关系
 
 - 依赖 React / Vite / Bun
-- 依赖 `@pandacss/dev` 与 `postcss`
-- 依赖 `@ennoia/api-client`、`@ennoia/i18n`、`@ennoia/theme-runtime`、`@ennoia/builtins`
+- 依赖 `@ennoia/api-client`
+- 依赖 `@ennoia/i18n`、`@ennoia/theme-runtime`

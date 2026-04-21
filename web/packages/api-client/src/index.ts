@@ -3,6 +3,7 @@ import type {
   ExtensionLocaleContribution,
   ExtensionPageContribution,
   ExtensionPanelContribution,
+  ExtensionProviderContribution,
   ExtensionThemeContribution,
   LocalizedText,
 } from "@ennoia/ui-sdk";
@@ -38,7 +39,7 @@ export type UiPreferenceRecord = {
 };
 
 export type UiConfig = {
-  shell_title: LocalizedText;
+  web_title: LocalizedText;
   default_theme: string;
   default_locale: string;
   fallback_locale: string;
@@ -55,6 +56,7 @@ export type UiRuntime = {
     panels: ExtensionPanelContribution[];
     themes: ExtensionThemeContribution[];
     locales: ExtensionLocaleContribution[];
+    providers: ExtensionProviderContribution[];
   };
   instance_preference?: UiPreferenceRecord | null;
   space_preferences: UiPreferenceRecord[];
@@ -89,6 +91,18 @@ export type WorkspaceProfile = {
   updated_at: string;
 };
 
+export type AppConfig = {
+  app_name: string;
+  mode: string;
+  workspace_root: string;
+  database_mode: string;
+  database_url: string;
+  extensions_scan_dir: string;
+  agents_scan_dir: string;
+  scheduler_tick_ms: number;
+  default_mention_mode: string;
+};
+
 export type BootstrapSetupResponse = {
   bootstrap: BootstrapState;
   profile: WorkspaceProfile;
@@ -98,18 +112,93 @@ export type BootstrapSetupResponse = {
 export type AgentProfile = {
   id: string;
   display_name: string;
+  description: string;
+  system_prompt: string;
+  provider_id: string;
+  model_id: string;
+  reasoning_effort: string;
+  workspace_root: string;
+  skills: string[];
+  enabled: boolean;
+  kind?: string;
+  workspace_mode?: string;
+  default_model?: string;
+  skills_dir?: string;
+  workspace_dir?: string;
+  artifacts_dir?: string;
+};
+
+export type SkillConfig = {
+  id: string;
+  display_name: string;
+  description: string;
+  source: string;
+  entry: string;
+  tags: string[];
+  enabled: boolean;
+};
+
+export type ProviderConfig = {
+  id: string;
+  display_name: string;
   kind: string;
-  workspace_mode: string;
+  description: string;
+  base_url: string;
+  api_key_env: string;
   default_model: string;
-  skills_dir: string;
-  workspace_dir: string;
-  artifacts_dir: string;
+  available_models: string[];
+  enabled: boolean;
+};
+
+export type MemorySource = {
+  kind: string;
+  reference: string;
+};
+
+export type MemoryRecord = {
+  id: string;
+  owner: { kind: string; id: string };
+  namespace: string;
+  memory_kind: string;
+  stability: string;
+  status: string;
+  superseded_by?: string | null;
+  title?: string | null;
+  content: string;
+  summary?: string | null;
+  confidence: number;
+  importance: number;
+  valid_from?: string | null;
+  valid_to?: string | null;
+  sources: MemorySource[];
+  tags: string[];
+  entities: string[];
+  created_at: string;
+  updated_at: string;
+};
+
+export type RecallResult = {
+  memories: MemoryRecord[];
+  receipt_id: string;
+  mode: string;
+  total_chars: number;
+};
+
+export type ReviewReceipt = {
+  receipt_id: string;
+  target_memory_id: string;
+  action: string;
+  old_status?: string | null;
+  new_status: string;
+  reviewer: string;
+  created_at: string;
 };
 
 export type ChatThread = {
   id: string;
   topology: "direct" | "group";
   owner: { kind: string; id: string };
+  space_id?: string | null;
   title: string;
   participants: string[];
   default_lane_id?: string | null;
@@ -120,6 +209,7 @@ export type ChatThread = {
 export type ChatLane = {
   id: string;
   conversation_id: string;
+  space_id?: string | null;
   name: string;
   lane_type: string;
   status: string;
@@ -176,24 +266,6 @@ export type RunOutput = {
   created_at: string;
 };
 
-export type DelegationThread = {
-  id: string;
-  parent_message_id: string;
-  title: string;
-  summary: string;
-  status: string;
-  participants: string[];
-  created_at: string;
-};
-
-export type DelegationMessage = {
-  id: string;
-  sender: string;
-  role: "system" | "agent" | "tool";
-  body: string;
-  created_at: string;
-};
-
 export type ChatThreadDetail = {
   thread: ChatThread;
   lanes: ChatLane[];
@@ -201,7 +273,6 @@ export type ChatThreadDetail = {
   runs: ExecutionRun[];
   tasks: ExecutionStep[];
   outputs: RunOutput[];
-  delegations: DelegationThread[];
 };
 
 export type ChatSendResponse = {
@@ -213,7 +284,7 @@ export type ChatSendResponse = {
   artifacts: RunOutput[];
 };
 
-export type Schedule = {
+export type TaskJob = {
   id: string;
   owner_kind: string;
   owner_id: string;
@@ -225,7 +296,7 @@ export type Schedule = {
   created_at: string;
 };
 
-export type ScheduleDetail = {
+export type TaskJobDetail = {
   id: string;
   owner_kind: string;
   owner_id: string;
@@ -254,6 +325,17 @@ export type ExtensionRuntimeState = {
   install_dir: string;
   source_root: string;
   diagnostics: ExtensionDiagnostic[];
+};
+
+export type ExtensionRuntimeEvent = {
+  event_id: string;
+  extension_id?: string | null;
+  generation: number;
+  event: string;
+  health?: string | null;
+  summary: string;
+  diagnostics: ExtensionDiagnostic[];
+  occurred_at: string;
 };
 
 export type ExtensionDetail = {
@@ -286,9 +368,11 @@ export type ExtensionDetail = {
 export type SystemLog = {
   id: string;
   kind: string;
+  source: string;
   level: string;
   title: string;
   summary: string;
+  details?: string | null;
   run_id?: string | null;
   task_id?: string | null;
   at: string;
@@ -313,20 +397,37 @@ export type ConfigChangeRecord = {
 };
 
 export type SystemConfig = {
-  rate_limit: unknown;
-  cors: unknown;
-  timeout: unknown;
-  logging: unknown;
-  body_limit: unknown;
+  rate_limit: {
+    enabled: boolean;
+    per_ip_rpm: number;
+    per_user_rpm: number;
+    burst: number;
+    exempt_paths: string[];
+  };
+  cors: {
+    enabled: boolean;
+    origins: string[];
+    methods: string[];
+    credentials: boolean;
+    max_age_seconds: number;
+  };
+  timeout: {
+    enabled: boolean;
+    default_ms: number;
+    per_path_ms: Record<string, number>;
+  };
+  logging: {
+    enabled: boolean;
+    level: string;
+    sample_rate: number;
+    redact_headers: string[];
+  };
+  body_limit: {
+    enabled: boolean;
+    max_bytes: number;
+    per_path_max: Record<string, number>;
+  };
   bootstrap: BootstrapState;
-};
-
-export type WorkspaceSnapshot = {
-  chats: ChatThread[];
-  agents: AgentProfile[];
-  schedules: Schedule[];
-  extensions: ExtensionRuntimeState[];
-  logs: SystemLog[];
 };
 
 export class ApiError extends Error {
@@ -410,15 +511,16 @@ function shouldAttachJsonContentType(
   return true;
 }
 
-export async function loadWorkspaceSnapshot(): Promise<WorkspaceSnapshot> {
-  const [chats, agents, schedules, extensions, logs] = await Promise.all([
-    listChats(),
-    listAgents(),
-    listSchedules(),
-    listExtensions(),
-    listLogs(),
-  ]);
-  return { chats, agents, schedules, extensions, logs };
+function toQueryString(input: Record<string, string | number | null | undefined>) {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(input)) {
+    if (value === undefined || value === null || value === "") {
+      continue;
+    }
+    params.set(key, String(value));
+  }
+  const qs = params.toString();
+  return qs ? `?${qs}` : "";
 }
 
 export async function fetchBootstrapStatus() {
@@ -487,8 +589,85 @@ export async function saveInstanceUiPreferences(payload: {
   });
 }
 
+export async function fetchAppConfig() {
+  return fetchJson<AppConfig>("/api/v1/runtime/app-config");
+}
+
+export async function saveAppConfig(payload: AppConfig) {
+  return fetchJson<AppConfig>("/api/v1/runtime/app-config", {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function listAgents() {
   return fetchJson<AgentProfile[]>("/api/v1/agents");
+}
+
+export async function getAgent(agentId: string) {
+  return fetchJson<AgentProfile>(`/api/v1/agents/${agentId}`);
+}
+
+export async function createAgent(payload: AgentProfile) {
+  return fetchJson<AgentProfile>("/api/v1/agents", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateAgent(agentId: string, payload: AgentProfile) {
+  return fetchJson<AgentProfile>(`/api/v1/agents/${agentId}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteAgent(agentId: string) {
+  return fetchJson<void>(`/api/v1/agents/${agentId}`, { method: "DELETE" });
+}
+
+export async function listSkills() {
+  return fetchJson<SkillConfig[]>("/api/v1/skills");
+}
+
+export async function createSkill(payload: SkillConfig) {
+  return fetchJson<SkillConfig>("/api/v1/skills", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateSkill(skillId: string, payload: SkillConfig) {
+  return fetchJson<SkillConfig>(`/api/v1/skills/${skillId}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteSkill(skillId: string) {
+  return fetchJson<void>(`/api/v1/skills/${skillId}`, { method: "DELETE" });
+}
+
+export async function listProviders() {
+  return fetchJson<ProviderConfig[]>("/api/v1/providers");
+}
+
+export async function createProvider(payload: ProviderConfig) {
+  return fetchJson<ProviderConfig>("/api/v1/providers", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateProvider(providerId: string, payload: ProviderConfig) {
+  return fetchJson<ProviderConfig>(`/api/v1/providers/${providerId}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteProvider(providerId: string) {
+  return fetchJson<void>(`/api/v1/providers/${providerId}`, { method: "DELETE" });
 }
 
 export async function listChats() {
@@ -510,9 +689,7 @@ export async function createChat(payload: {
 }
 
 export async function deleteChat(chatId: string) {
-  return fetchJson<void>(`/api/v1/conversations/${chatId}`, {
-    method: "DELETE",
-  });
+  return fetchJson<void>(`/api/v1/conversations/${chatId}`, { method: "DELETE" });
 }
 
 export async function getChat(chatId: string): Promise<ChatThreadDetail> {
@@ -534,7 +711,6 @@ export async function getChat(chatId: string): Promise<ChatThreadDetail> {
     runs,
     tasks: taskBuckets.flat(),
     outputs: outputBuckets.flat(),
-    delegations: buildMockDelegations(detail.conversation, runs),
   };
 }
 
@@ -553,41 +729,19 @@ export async function sendChatMessage(
   });
 }
 
-export async function getDelegation(
-  chatId: string,
-  delegationId: string,
-): Promise<{ thread: DelegationThread; messages: DelegationMessage[] }> {
-  const chat = await getChat(chatId);
-  const thread = chat.delegations.find((item) => item.id === delegationId);
-  if (!thread) {
-    throw new ApiError(404, "NOT_FOUND", "delegation not found");
-  }
-  return {
-    thread,
-    messages: [
-      {
-        id: `${delegationId}:system`,
-        sender: "system",
-        role: "system",
-        body: `子 Agent 上下文已从主聊天 ${chat.thread.title} 派生。`,
-        created_at: thread.created_at,
-      },
-      {
-        id: `${delegationId}:agent`,
-        sender: thread.participants[0] ?? "agent",
-        role: "agent",
-        body: thread.summary,
-        created_at: thread.created_at,
-      },
-    ],
-  };
+export async function listTaskJobs() {
+  return fetchJson<TaskJob[]>("/api/v1/jobs");
 }
 
-export async function listSchedules() {
-  return fetchJson<Schedule[]>("/api/v1/jobs");
+export async function listRuns() {
+  return fetchJson<ExecutionRun[]>("/api/v1/runs");
 }
 
-export async function createSchedule(payload: {
+export async function getTaskJob(jobId: string) {
+  return fetchJson<TaskJobDetail>(`/api/v1/jobs/${jobId}`);
+}
+
+export async function createTaskJob(payload: {
   owner_kind: string;
   owner_id: string;
   job_kind?: string;
@@ -597,18 +751,14 @@ export async function createSchedule(payload: {
   max_retries?: number;
   run_at?: string;
 }) {
-  return fetchJson<ScheduleDetail>("/api/v1/jobs", {
+  return fetchJson<TaskJobDetail>("/api/v1/jobs", {
     method: "POST",
     body: JSON.stringify(payload),
   });
 }
 
-export async function getSchedule(scheduleId: string) {
-  return fetchJson<ScheduleDetail>(`/api/v1/jobs/${scheduleId}`);
-}
-
-export async function updateSchedule(
-  scheduleId: string,
+export async function updateTaskJob(
+  jobId: string,
   payload: {
     job_kind?: string;
     schedule_kind?: string;
@@ -618,34 +768,32 @@ export async function updateSchedule(
     run_at?: string;
   },
 ) {
-  return fetchJson<ScheduleDetail>(`/api/v1/jobs/${scheduleId}`, {
+  return fetchJson<TaskJobDetail>(`/api/v1/jobs/${jobId}`, {
     method: "PUT",
     body: JSON.stringify(payload),
   });
 }
 
-export async function deleteSchedule(scheduleId: string) {
-  return fetchJson<void>(`/api/v1/jobs/${scheduleId}`, {
-    method: "DELETE",
-  });
+export async function deleteTaskJob(jobId: string) {
+  return fetchJson<void>(`/api/v1/jobs/${jobId}`, { method: "DELETE" });
 }
 
-export async function runScheduleNow(scheduleId: string) {
-  return fetchJson<ScheduleDetail>(`/api/v1/jobs/${scheduleId}/run`, {
+export async function runTaskJobNow(jobId: string) {
+  return fetchJson<TaskJobDetail>(`/api/v1/jobs/${jobId}/run`, {
     method: "POST",
     body: JSON.stringify({}),
   });
 }
 
-export async function enableSchedule(scheduleId: string) {
-  return fetchJson<ScheduleDetail>(`/api/v1/jobs/${scheduleId}/enable`, {
+export async function enableTaskJob(jobId: string) {
+  return fetchJson<TaskJobDetail>(`/api/v1/jobs/${jobId}/enable`, {
     method: "POST",
     body: JSON.stringify({}),
   });
 }
 
-export async function disableSchedule(scheduleId: string) {
-  return fetchJson<ScheduleDetail>(`/api/v1/jobs/${scheduleId}/disable`, {
+export async function disableTaskJob(jobId: string) {
+  return fetchJson<TaskJobDetail>(`/api/v1/jobs/${jobId}/disable`, {
     method: "POST",
     body: JSON.stringify({}),
   });
@@ -670,13 +818,6 @@ export async function setExtensionEnabled(extensionId: string, enabled: boolean)
   });
 }
 
-export async function attachExtensionWorkspace(path: string) {
-  return fetchJson<ExtensionDetail>("/api/v1/extensions/attach", {
-    method: "POST",
-    body: JSON.stringify({ path }),
-  });
-}
-
 export async function reloadExtension(extensionId: string) {
   return fetchJson<ExtensionDetail>(`/api/v1/extensions/${extensionId}/reload`, {
     method: "POST",
@@ -691,19 +832,88 @@ export async function restartExtension(extensionId: string) {
   });
 }
 
-export async function detachExtensionWorkspace(extensionId: string) {
-  return fetchJson<void>(`/api/v1/extensions/attach/${extensionId}`, {
-    method: "DELETE",
-  });
-}
-
 export async function getExtensionLogs(extensionId: string) {
   const response = await fetch(`${API_BASE}/api/v1/extensions/${extensionId}/logs`);
   return response.text();
 }
 
-export async function listLogs(limit = 50) {
-  return fetchJson<SystemLog[]>(`/api/v1/logs?limit=${limit}`);
+export async function listExtensionEvents(limit = 100) {
+  return fetchJson<ExtensionRuntimeEvent[]>(
+    `/api/v1/extensions/events${toQueryString({ limit })}`,
+  );
+}
+
+export function getExtensionFrontendModuleUrl(extensionId: string) {
+  return `${API_BASE}/api/v1/extensions/${extensionId}/frontend/module`;
+}
+
+export function getExtensionThemeStylesheetUrl(extensionId: string, themeId: string) {
+  return `${API_BASE}/api/v1/extensions/${extensionId}/themes/${encodeURIComponent(themeId)}/stylesheet`;
+}
+
+export async function listLogs(
+  limit = 100,
+  filters?: {
+    q?: string;
+    level?: string;
+    source?: string;
+  },
+) {
+  return fetchJson<SystemLog[]>(
+    `/api/v1/logs${toQueryString({
+      limit,
+      q: filters?.q,
+      level: filters?.level,
+      source: filters?.source,
+    })}`,
+  );
+}
+
+export async function reportFrontendLog(payload: {
+  level: string;
+  title: string;
+  summary: string;
+  source?: string;
+  details?: string;
+  at?: string;
+}) {
+  return fetchJson<void>("/api/v1/logs/frontend", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function listMemories() {
+  return fetchJson<MemoryRecord[]>("/api/v1/memories");
+}
+
+export async function recallMemories(payload: {
+  owner_kind: string;
+  owner_id: string;
+  query_text?: string;
+  namespace_prefix?: string;
+  memory_kind?: string;
+  mode?: string;
+  limit?: number;
+  thread_id?: string;
+  run_id?: string;
+}) {
+  return fetchJson<RecallResult>("/api/v1/memories/recall", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function reviewMemory(payload: {
+  target_memory_id: string;
+  reviewer: string;
+  action: string;
+  notes?: string;
+}) {
+  return fetchJson<ReviewReceipt>("/api/v1/memories/review", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
 }
 
 export async function listConfig() {
@@ -727,24 +937,4 @@ export async function getConfigHistory(key: string) {
 
 export async function getConfigSnapshot() {
   return fetchJson<SystemConfig>("/api/v1/runtime/config/snapshot");
-}
-
-export function getExtensionFrontendModuleUrl(extensionId: string) {
-  return `${API_BASE}/api/v1/extensions/${extensionId}/frontend/module`;
-}
-
-export function getExtensionThemeStylesheetUrl(extensionId: string, themeId: string) {
-  return `${API_BASE}/api/v1/extensions/${extensionId}/themes/${encodeURIComponent(themeId)}/stylesheet`;
-}
-
-function buildMockDelegations(chat: ChatThread, runs: ExecutionRun[]): DelegationThread[] {
-  return runs.slice(0, 3).map((run, index) => ({
-    id: `delegation-${run.id}`,
-    parent_message_id: `message-${run.id}`,
-    title: `${chat.title} / 子 Agent ${index + 1}`,
-    summary: `${run.goal || "围绕当前消息"} 的子任务分派与回传记录。`,
-    status: index === 0 ? "running" : "completed",
-    participants: [run.owner.id],
-    created_at: run.created_at,
-  }));
 }

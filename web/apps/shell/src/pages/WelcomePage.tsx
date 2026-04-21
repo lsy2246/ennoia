@@ -32,7 +32,7 @@ export function WelcomePage() {
 
   useEffect(() => {
     if (bootstrap?.is_initialized) {
-      navigate({ to: "/chat" });
+      navigate({ to: "/workspace" });
     }
   }, [bootstrap, navigate]);
 
@@ -67,7 +67,7 @@ export function WelcomePage() {
         theme_id: themeId,
       });
       await Promise.all([hydrateRuntime(), hydrateUi()]);
-      navigate({ to: "/chat" });
+      navigate({ to: "/workspace" });
     } catch (err) {
       setError(String(err));
     } finally {

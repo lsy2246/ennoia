@@ -1,23 +1,16 @@
-import {
-  createRootRoute,
-  createRoute,
-  createRouter,
-  Outlet,
-  redirect,
-} from "@tanstack/react-router";
+import { createRootRoute, createRoute, createRouter, Outlet, redirect } from "@tanstack/react-router";
 
-import { AgentDetailPage } from "@/pages/AgentDetailPage";
 import { AgentsPage } from "@/pages/AgentsPage";
-import { ChatDetailPage } from "@/pages/ChatDetailPage";
-import { ChatPage } from "@/pages/ChatPage";
-import { DelegationDetailPage } from "@/pages/DelegationDetailPage";
-import { ExtensionDetailPage } from "@/pages/ExtensionDetailPage";
 import { ExtensionsPage } from "@/pages/ExtensionsPage";
+import { ExtensionPageView } from "@/pages/ExtensionPageView";
 import { LogsPage } from "@/pages/LogsPage";
-import { ScheduleDetailPage } from "@/pages/ScheduleDetailPage";
-import { SchedulesPage } from "@/pages/SchedulesPage";
+import { MemoryPage } from "@/pages/MemoryPage";
+import { ProvidersPage } from "@/pages/ProvidersPage";
 import { SettingsPage } from "@/pages/SettingsPage";
+import { SkillsPage } from "@/pages/SkillsPage";
+import { TasksPage } from "@/pages/TasksPage";
 import { WelcomePage } from "@/pages/WelcomePage";
+import { WorkspacePage } from "@/pages/WorkspacePage";
 import { AppShell } from "@/shell/AppShell";
 import { useRuntimeStore } from "@/stores/runtime";
 
@@ -31,7 +24,7 @@ function requireInitialized() {
 function redirectToWorkspace() {
   const { bootstrap } = useRuntimeStore.getState();
   if (bootstrap?.is_initialized) {
-    throw redirect({ to: "/chat" });
+    throw redirect({ to: "/workspace" });
   }
 }
 
@@ -55,38 +48,14 @@ const homeRoute = createRoute({
   getParentRoute: () => shellRoute,
   path: "/",
   beforeLoad: () => {
-    throw redirect({ to: "/chat" });
+    throw redirect({ to: "/workspace" });
   },
 });
 
-const chatRoute = createRoute({
+const workspaceRoute = createRoute({
   getParentRoute: () => shellRoute,
-  path: "/chat",
-  component: ChatPage,
-});
-
-const chatDetailRoute = createRoute({
-  getParentRoute: () => shellRoute,
-  path: "/chat/$chatId",
-  component: ChatDetailPage,
-});
-
-const delegationDetailRoute = createRoute({
-  getParentRoute: () => shellRoute,
-  path: "/chat/$chatId/delegations/$delegationId",
-  component: DelegationDetailPage,
-});
-
-const schedulesRoute = createRoute({
-  getParentRoute: () => shellRoute,
-  path: "/schedules",
-  component: SchedulesPage,
-});
-
-const scheduleDetailRoute = createRoute({
-  getParentRoute: () => shellRoute,
-  path: "/schedules/$scheduleId",
-  component: ScheduleDetailPage,
+  path: "/workspace",
+  component: WorkspacePage,
 });
 
 const agentsRoute = createRoute({
@@ -95,10 +64,22 @@ const agentsRoute = createRoute({
   component: AgentsPage,
 });
 
-const agentDetailRoute = createRoute({
+const skillsRoute = createRoute({
   getParentRoute: () => shellRoute,
-  path: "/agents/$agentId",
-  component: AgentDetailPage,
+  path: "/skills",
+  component: SkillsPage,
+});
+
+const providersRoute = createRoute({
+  getParentRoute: () => shellRoute,
+  path: "/upstreams",
+  component: ProvidersPage,
+});
+
+const extensionPageRoute = createRoute({
+  getParentRoute: () => shellRoute,
+  path: "/extension-pages/$pageId",
+  component: ExtensionPageView,
 });
 
 const extensionsRoute = createRoute({
@@ -107,16 +88,22 @@ const extensionsRoute = createRoute({
   component: ExtensionsPage,
 });
 
-const extensionDetailRoute = createRoute({
+const tasksRoute = createRoute({
   getParentRoute: () => shellRoute,
-  path: "/extensions/$extensionId",
-  component: ExtensionDetailPage,
+  path: "/tasks",
+  component: TasksPage,
 });
 
 const logsRoute = createRoute({
   getParentRoute: () => shellRoute,
   path: "/logs",
   component: LogsPage,
+});
+
+const memoryRoute = createRoute({
+  getParentRoute: () => shellRoute,
+  path: "/memory",
+  component: MemoryPage,
 });
 
 const settingsRoute = createRoute({
@@ -129,15 +116,14 @@ const routeTree = rootRoute.addChildren([
   welcomeRoute,
   shellRoute.addChildren([
     homeRoute,
-    chatRoute,
-    chatDetailRoute,
-    delegationDetailRoute,
-    schedulesRoute,
-    scheduleDetailRoute,
+    workspaceRoute,
     agentsRoute,
-    agentDetailRoute,
+    skillsRoute,
+    providersRoute,
+    extensionPageRoute,
     extensionsRoute,
-    extensionDetailRoute,
+    memoryRoute,
+    tasksRoute,
     logsRoute,
     settingsRoute,
   ]),

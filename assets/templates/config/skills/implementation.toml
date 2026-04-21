@@ -1,0 +1,7 @@
+id = "implementation"
+display_name = "Implementation"
+description = "面向代码实现、修复、重构与验证闭环的技能定义。"
+source = "builtin"
+entry = "builtin://skills/implementation"
+tags = ["code", "delivery", "verification"]
+enabled = true

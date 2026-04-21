@@ -51,39 +51,24 @@ pub mod templates {
         get("config/ui.toml").expect("ui config template")
     }
 
-    pub fn coder_agent() -> &'static str {
-        get("config/agents/coder.toml").expect("coder template")
+    pub fn implementation_skill() -> &'static str {
+        get("config/skills/implementation.toml").expect("implementation skill template")
     }
 
-    pub fn planner_agent() -> &'static str {
-        get("config/agents/planner.toml").expect("planner template")
+    pub fn task_planning_skill() -> &'static str {
+        get("config/skills/task-planning.toml").expect("task planning skill template")
     }
 
-    pub fn observatory_extension_config() -> &'static str {
-        get("config/extensions/observatory.toml").expect("observatory extension template")
+    pub fn frontend_design_skill() -> &'static str {
+        get("config/skills/frontend-design.toml").expect("frontend design skill template")
     }
 
-    pub fn observatory_manifest() -> &'static str {
-        get("global/extensions/observatory/manifest.toml").expect("observatory manifest template")
+    pub fn openai_provider() -> &'static str {
+        get("config/providers/openai.toml").expect("openai provider template")
     }
 
     pub fn attached_workspaces() -> &'static str {
         get("extensions/attached/workspaces.toml").expect("attached workspaces template")
-    }
-
-    pub fn observatory_package_descriptor() -> &'static str {
-        get("packages/extensions/observatory/ennoia.extension.toml")
-            .expect("observatory package descriptor")
-    }
-
-    pub fn observatory_package_frontend() -> &'static str {
-        get("packages/extensions/observatory/frontend/index.js")
-            .expect("observatory package frontend")
-    }
-
-    pub fn observatory_package_backend() -> &'static str {
-        get("packages/extensions/observatory/backend/index.js")
-            .expect("observatory package backend")
     }
 
     pub fn memory_policy() -> &'static str {
