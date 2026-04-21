@@ -201,6 +201,10 @@ pub fn build_router(state: AppState) -> Router {
                 .put(provider_update)
                 .delete(provider_delete),
         )
+        .route(
+            "/api/v1/providers/{provider_id}/models",
+            get(provider_models),
+        )
         .route("/api/v1/spaces", get(spaces))
         .route("/api/v1/runs", get(runs))
         .route("/api/v1/runs/{run_id}/tasks", get(run_tasks))
@@ -580,6 +584,15 @@ struct ExtensionEventsQuery {
 #[derive(Debug, Deserialize)]
 struct ExtensionAttachPayload {
     path: String,
+}
+
+#[derive(Debug, Serialize)]
+struct ProviderModelsResponse {
+    provider_id: String,
+    source: String,
+    models: Vec<String>,
+    recommended_model: Option<String>,
+    manual_allowed: bool,
 }
 
 async fn health() -> Json<HealthResponse> {

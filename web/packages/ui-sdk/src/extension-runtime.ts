@@ -106,6 +106,11 @@ export type ExtensionProviderContribution = {
     id: string;
     kind: string;
     entry?: string | null;
+    extension_id?: string | null;
+    interfaces: string[];
+    model_discovery: boolean;
+    recommended_model?: string | null;
+    manual_model: boolean;
   };
 };
 

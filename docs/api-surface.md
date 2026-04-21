@@ -57,6 +57,7 @@
 - `GET /api/v1/providers`
 - `POST /api/v1/providers`
 - `GET /api/v1/providers/{provider_id}`
+- `GET /api/v1/providers/{provider_id}/models`
 - `PUT /api/v1/providers/{provider_id}`
 - `DELETE /api/v1/providers/{provider_id}`
 

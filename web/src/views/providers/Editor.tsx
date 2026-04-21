@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import {
   createProvider,
   deleteProvider,
+  getProviderModels,
   listProviders,
   updateProvider,
   type ProviderConfig,
@@ -12,65 +13,120 @@ import { useUiHelpers } from "@/stores/ui";
 const EMPTY_CHANNEL: ProviderConfig = {
   id: "",
   display_name: "",
+  extension_id: "",
   kind: "",
   description: "",
   base_url: "",
   api_key_env: "",
   default_model: "",
   available_models: [],
+  model_discovery: {
+    mode: "manual",
+    manual_allowed: true,
+  },
   enabled: true,
 };
 
+type ModelEntry = {
+  key: string;
+  value: string;
+};
+
+let modelSequence = 0;
+
+function createModelEntry(value = ""): ModelEntry {
+  modelSequence += 1;
+  return { key: `model-${modelSequence}`, value };
+}
+
+function normalizeModels(models: string[]) {
+  return Array.from(new Set(models.map((item) => item.trim()).filter(Boolean)));
+}
+
 export function ApiChannelEditorView({ channelId }: { channelId: string }) {
   const { runtime, t } = useUiHelpers();
-  const [channels, setChannels] = useState<ProviderConfig[]>([]);
   const [form, setForm] = useState<ProviderConfig>(EMPTY_CHANNEL);
-  const [modelsText, setModelsText] = useState("");
+  const [modelEntries, setModelEntries] = useState<ModelEntry[]>([]);
+  const [defaultModelKey, setDefaultModelKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [modelsBusy, setModelsBusy] = useState(false);
   const isNew = channelId.startsWith("new-");
 
   const interfaceTypes = useMemo(() => {
-    const kinds = new Set<string>();
-    for (const channel of channels) {
-      if (channel.kind) {
-        kinds.add(channel.kind);
-      }
-    }
-    for (const contribution of runtime?.registry.providers ?? []) {
-      const kind = contribution.provider.kind || contribution.provider.id;
-      if (kind) {
-        kinds.add(kind);
-      }
-    }
-    return [...kinds].sort();
-  }, [channels, runtime?.registry.providers]);
+    return (runtime?.registry.providers ?? [])
+      .map((contribution) => {
+        const kind = contribution.provider.kind || contribution.provider.id;
+        return kind ? [kind, contribution.extension_id === "openai" ? "OpenAI" : kind] : null;
+      })
+      .filter((item): item is [string, string] => item !== null)
+      .sort(([left], [right]) => left.localeCompare(right));
+  }, [runtime?.registry.providers]);
+
+  const providerContributions = useMemo(
+    () => runtime?.registry.providers ?? [],
+    [runtime?.registry.providers],
+  );
 
   useEffect(() => {
     void hydrate();
   }, [channelId]);
 
+  function applyModelState(models: string[], preferredDefault?: string) {
+    const normalizedModels = normalizeModels(models);
+    const entries = normalizedModels.map((item) => createModelEntry(item));
+    const defaultModel =
+      preferredDefault && normalizedModels.includes(preferredDefault)
+        ? preferredDefault
+        : normalizedModels[0] ?? "";
+    const defaultEntry = entries.find((entry) => entry.value === defaultModel) ?? entries[0] ?? null;
+
+    setModelEntries(entries);
+    setDefaultModelKey(defaultEntry?.key ?? null);
+    return { models: normalizedModels, defaultModel };
+  }
+
+  function syncFormModels(entries: ModelEntry[], nextDefaultKey: string | null) {
+    const normalizedModels = normalizeModels(entries.map((entry) => entry.value));
+    const defaultEntry = entries.find((entry) => entry.key === nextDefaultKey);
+    const preferredDefault = defaultEntry?.value.trim() ?? "";
+    const defaultModel =
+      preferredDefault && normalizedModels.includes(preferredDefault)
+        ? preferredDefault
+        : normalizedModels[0] ?? "";
+
+    setForm((current) => ({
+      ...current,
+      available_models: normalizedModels,
+      default_model: defaultModel,
+    }));
+  }
+
   async function hydrate() {
     setError(null);
     try {
       const next = await listProviders();
-      setChannels(next);
 
       if (isNew) {
         const defaultKind =
-          next.find((item) => item.kind)?.kind ??
           runtime?.registry.providers[0]?.provider.kind ??
           runtime?.registry.providers[0]?.provider.id ??
           "";
-        setForm({ ...EMPTY_CHANNEL, kind: defaultKind });
-        setModelsText("");
+        applyInterfaceDefaults(defaultKind, { resetIdentity: true });
         return;
       }
 
       const current = next.find((item) => item.id === channelId);
       if (current) {
-        setForm({ ...current, available_models: [...current.available_models] });
-        setModelsText(current.available_models.join(", "));
+        const normalized = applyModelState(
+          [...current.available_models, current.default_model],
+          current.default_model,
+        );
+        setForm({
+          ...current,
+          available_models: normalized.models,
+          default_model: normalized.defaultModel,
+        });
       }
     } catch (err) {
       setError(String(err));
@@ -84,11 +140,14 @@ export function ApiChannelEditorView({ channelId }: { channelId: string }) {
 
     const payload = {
       ...form,
-      available_models: modelsText
-        .split(",")
-        .map((item) => item.trim())
-        .filter(Boolean),
+      available_models: normalizeModels(modelEntries.map((entry) => entry.value)),
     };
+    payload.default_model =
+      payload.available_models.find(
+        (model) => modelEntries.find((entry) => entry.key === defaultModelKey)?.value.trim() === model,
+      ) ??
+      payload.available_models[0] ??
+      "";
 
     try {
       if (isNew) {
@@ -104,6 +163,27 @@ export function ApiChannelEditorView({ channelId }: { channelId: string }) {
     }
   }
 
+  function applyInterfaceDefaults(kind: string, options?: { resetIdentity?: boolean }) {
+    const contribution = providerContributions.find(
+      (item) => item.provider.kind === kind || item.provider.id === kind,
+    );
+    const recommendedModel = contribution?.provider.recommended_model ?? "";
+    const nextModels = recommendedModel ? [recommendedModel] : [];
+    const modelDiscovery = contribution?.provider.model_discovery
+      ? { mode: "extension", manual_allowed: contribution.provider.manual_model }
+      : { mode: "manual", manual_allowed: true };
+    const normalized = applyModelState(nextModels, recommendedModel);
+
+    setForm((current) => ({
+      ...(options?.resetIdentity ? EMPTY_CHANNEL : current),
+      kind,
+      extension_id: contribution?.extension_id ?? contribution?.provider.extension_id ?? current.extension_id,
+      default_model: normalized.defaultModel || current.default_model,
+      available_models: normalized.models.length > 0 ? normalized.models : current.available_models,
+      model_discovery: modelDiscovery,
+    }));
+  }
+
   async function handleDelete() {
     if (isNew || !form.id) {
       return;
@@ -113,13 +193,72 @@ export function ApiChannelEditorView({ channelId }: { channelId: string }) {
     try {
       await deleteProvider(form.id);
       setForm(EMPTY_CHANNEL);
-      setModelsText("");
+      setModelEntries([]);
+      setDefaultModelKey(null);
       await hydrate();
     } catch (err) {
       setError(String(err));
     } finally {
       setBusy(false);
     }
+  }
+
+  async function handleLoadModels() {
+    if (isNew || !form.id) {
+      return;
+    }
+
+    setModelsBusy(true);
+    setError(null);
+    try {
+      const response = await getProviderModels(form.id);
+      const nextDefault = response.recommended_model ?? form.default_model;
+      const nextModels =
+        response.models.length > 0
+          ? response.models
+          : nextDefault
+            ? [nextDefault]
+            : form.available_models;
+      const normalized = applyModelState(nextModels, nextDefault);
+      setForm((current) => ({
+        ...current,
+        available_models: normalized.models,
+        default_model: normalized.defaultModel,
+      }));
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setModelsBusy(false);
+    }
+  }
+
+  function handleModelChange(key: string, value: string) {
+    const nextEntries = modelEntries.map((entry) => (entry.key === key ? { ...entry, value } : entry));
+    setModelEntries(nextEntries);
+    syncFormModels(nextEntries, defaultModelKey);
+  }
+
+  function handleModelAdd() {
+    const nextEntry = createModelEntry();
+    const nextEntries = [...modelEntries, nextEntry];
+    const nextDefaultKey = defaultModelKey ?? nextEntry.key;
+    setModelEntries(nextEntries);
+    setDefaultModelKey(nextDefaultKey);
+    syncFormModels(nextEntries, nextDefaultKey);
+  }
+
+  function handleModelRemove(key: string) {
+    const nextEntries = modelEntries.filter((entry) => entry.key !== key);
+    const nextDefaultKey =
+      defaultModelKey === key ? (nextEntries[0]?.key ?? null) : defaultModelKey;
+    setModelEntries(nextEntries);
+    setDefaultModelKey(nextDefaultKey);
+    syncFormModels(nextEntries, nextDefaultKey);
+  }
+
+  function handleDefaultModelSelect(key: string) {
+    setDefaultModelKey(key);
+    syncFormModels(modelEntries, key);
   }
 
   return (
@@ -160,12 +299,12 @@ export function ApiChannelEditorView({ channelId }: { channelId: string }) {
           {t("web.channels.interface_type", "接口类型")}
           <select
             value={form.kind}
-            onChange={(event) => setForm({ ...form, kind: event.target.value })}
+            onChange={(event) => applyInterfaceDefaults(event.target.value)}
             disabled={!isNew}
           >
-            {interfaceTypes.map((kind) => (
+            {interfaceTypes.map(([kind, label]) => (
               <option key={kind} value={kind}>
-                {kind}
+                {label}
               </option>
             ))}
           </select>
@@ -193,6 +332,13 @@ export function ApiChannelEditorView({ channelId }: { channelId: string }) {
         />
       </label>
       <label>
+        {t("web.channels.extension_id", "实现扩展")}
+        <input
+          value={form.extension_id}
+          onChange={(event) => setForm({ ...form, extension_id: event.target.value })}
+        />
+      </label>
+      <label>
         {t("web.channels.api_key_env", "API Key 环境变量")}
         <input
           value={form.api_key_env}
@@ -204,13 +350,74 @@ export function ApiChannelEditorView({ channelId }: { channelId: string }) {
           {t("web.channels.default_model", "默认模型")}
           <input
             value={form.default_model}
-            onChange={(event) => setForm({ ...form, default_model: event.target.value })}
+            required={form.enabled}
+            readOnly
           />
+          <p className="helper-text">
+            {form.model_discovery.mode === "extension"
+              ? t("web.channels.model_discovery_extension", "当前接口实现会提供模型建议；保存时仍以这里的默认模型为准。")
+              : t("web.channels.model_discovery_manual", "当前接口没有模型发现能力，请手动输入默认模型。")}
+          </p>
         </label>
-        <label>
-          {t("web.channels.models", "可选模型")}
-          <input value={modelsText} onChange={(event) => setModelsText(event.target.value)} />
-        </label>
+        <div className="stack">
+          <div className="model-toolbar">
+            <div>
+              <div className="panel-title">{t("web.channels.models", "模型列表")}</div>
+              <p className="helper-text">
+                {t(
+                  "web.channels.models_help",
+                  "每行一个模型，从列表中选一个作为默认模型；保存前会自动去重并清理空项。",
+                )}
+              </p>
+            </div>
+            {!isNew ? (
+              <button
+                type="button"
+                className="secondary"
+                disabled={modelsBusy || busy}
+                onClick={() => void handleLoadModels()}
+              >
+                {t("web.channels.refresh_models", "刷新建议模型")}
+              </button>
+            ) : null}
+          </div>
+          <div className="model-list">
+            {modelEntries.length > 0 ? (
+              modelEntries.map((entry) => (
+                <div key={entry.key} className="model-row">
+                  <input
+                    value={entry.value}
+                    placeholder={t("web.channels.model_placeholder", "模型 ID，例如 gpt-5.4")}
+                    onChange={(event) => handleModelChange(entry.key, event.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className={defaultModelKey === entry.key ? "secondary" : ""}
+                    onClick={() => handleDefaultModelSelect(entry.key)}
+                  >
+                    {defaultModelKey === entry.key
+                      ? t("web.channels.model_is_default", "默认模型")
+                      : t("web.channels.model_set_default", "设为默认")}
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() => handleModelRemove(entry.key)}
+                  >
+                    {t("web.action.delete", "删除")}
+                  </button>
+                </div>
+              ))
+            ) : (
+              <div className="empty-card">
+                {t("web.channels.models_empty", "还没有模型。先新增一项，或在已保存渠道上刷新建议模型。")}
+              </div>
+            )}
+            <button type="button" className="secondary" onClick={handleModelAdd}>
+              {t("web.channels.model_add", "新增模型")}
+            </button>
+          </div>
+        </div>
       </div>
       <label>
         {t("web.channels.description_field", "描述")}

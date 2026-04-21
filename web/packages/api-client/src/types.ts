@@ -132,13 +132,26 @@ export type SkillConfig = {
 export type ProviderConfig = {
   id: string;
   display_name: string;
+  extension_id: string;
   kind: string;
   description: string;
   base_url: string;
   api_key_env: string;
   default_model: string;
   available_models: string[];
+  model_discovery: {
+    mode: string;
+    manual_allowed: boolean;
+  };
   enabled: boolean;
+};
+
+export type ProviderModelsResponse = {
+  provider_id: string;
+  source: string;
+  models: string[];
+  recommended_model?: string | null;
+  manual_allowed: boolean;
 };
 
 export type MemorySource = {

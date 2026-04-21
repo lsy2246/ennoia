@@ -182,6 +182,8 @@ pub struct ProviderConfig {
     pub id: String,
     pub display_name: String,
     #[serde(default)]
+    pub extension_id: String,
+    #[serde(default)]
     pub kind: String,
     #[serde(default)]
     pub description: String,
@@ -193,8 +195,27 @@ pub struct ProviderConfig {
     pub default_model: String,
     #[serde(default)]
     pub available_models: Vec<String>,
+    #[serde(default)]
+    pub model_discovery: ProviderModelDiscoveryConfig,
     #[serde(default = "default_agent_enabled")]
     pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProviderModelDiscoveryConfig {
+    #[serde(default = "default_model_discovery_mode")]
+    pub mode: String,
+    #[serde(default = "default_agent_enabled")]
+    pub manual_allowed: bool,
+}
+
+impl Default for ProviderModelDiscoveryConfig {
+    fn default() -> Self {
+        Self {
+            mode: default_model_discovery_mode(),
+            manual_allowed: true,
+        }
+    }
 }
 
 fn default_agent_kind() -> String {
@@ -219,6 +240,10 @@ fn default_skill_source() -> String {
 
 fn default_registry_source() -> String {
     "builtin".to_string()
+}
+
+fn default_model_discovery_mode() -> String {
+    "manual".to_string()
 }
 
 fn default_agent_enabled() -> bool {

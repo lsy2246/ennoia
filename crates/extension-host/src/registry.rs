@@ -715,7 +715,7 @@ fn resolve_manifest(
         .ok()
         .flatten();
 
-    if frontend.is_none() && backend.is_none() {
+    if frontend.is_none() && backend.is_none() && capabilities == ExtensionCapabilities::default() {
         diagnostics.push(diagnostic(
             "warn",
             "extension has no resolved frontend or backend entry",

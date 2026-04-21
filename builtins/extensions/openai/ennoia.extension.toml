@@ -1,0 +1,17 @@
+id = "openai"
+name = "OpenAI Upstream"
+kind = "extension"
+version = "0.1.0"
+
+[source]
+mode = "package"
+root = "."
+workspace = false
+
+[capabilities]
+providers = true
+
+[contributes]
+providers = [
+  { id = "openai", kind = "openai", extension_id = "openai", entry = "backend/provider.js", interfaces = ["responses", "chat"], model_discovery = true, recommended_model = "gpt-5.4", manual_model = true },
+]

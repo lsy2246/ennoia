@@ -67,6 +67,20 @@ pub struct ProviderContribution {
     pub id: String,
     pub kind: String,
     pub entry: Option<String>,
+    #[serde(default)]
+    pub extension_id: Option<String>,
+    #[serde(default)]
+    pub interfaces: Vec<String>,
+    #[serde(default)]
+    pub model_discovery: bool,
+    #[serde(default)]
+    pub recommended_model: Option<String>,
+    #[serde(default = "default_manual_model")]
+    pub manual_model: bool,
+}
+
+fn default_manual_model() -> bool {
+    true
 }
 
 /// HookContribution describes one event name exported by an extension.

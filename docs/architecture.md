@@ -39,7 +39,7 @@ Web
 
 - `Agent` 是长期协作者档案，只表达身份、上游、模型、技能和启用状态。
 - `Skill` 是 Agent 可引用的能力包，不承担插件挂载。
-- `Provider` 是 API 上游渠道实例，`kind` 表示接口类型。
+- `Provider` 是 API 上游渠道实例，`extension_id` 指向实现扩展，`kind` 表示接口类型；当前 OpenAI 生成 / 对话能力统一收敛为单一 `openai` 接口，`default_model` 表示用户确认后的默认模型。
 - `Extension` 是系统插件包，可贡献页面、面板、主题、语言、命令、Hook 和 Provider 实现。
 - 扩展与技能的安装登记统一放在 `config/extensions.toml` 与 `config/skills.toml`，真实包内容放在 `extensions/*` 与 `skills/*`。
 

@@ -145,10 +145,75 @@ pub(super) async fn provider_detail(
         .ok_or_else(|| ApiError::not_found(format!("provider '{provider_id}' not found")))
 }
 
+pub(super) async fn provider_models(
+    State(state): State<AppState>,
+    Path(provider_id): Path<String>,
+) -> Result<Json<ProviderModelsResponse>, ApiError> {
+    let providers = load_provider_configs(&state.runtime_paths)
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+    let provider = providers
+        .into_iter()
+        .find(|item| item.id == provider_id)
+        .ok_or_else(|| ApiError::not_found(format!("provider '{provider_id}' not found")))?;
+
+    let contribution = state
+        .extensions
+        .snapshot()
+        .providers
+        .into_iter()
+        .find(|item| {
+            item.provider.kind == provider.kind
+                && (provider.extension_id.is_empty()
+                    || item.extension_id == provider.extension_id
+                    || item.provider.extension_id.as_deref()
+                        == Some(provider.extension_id.as_str()))
+        });
+
+    let mut models = provider.available_models.clone();
+    let mut recommended_model = None;
+    let mut source = if models.is_empty() {
+        "manual".to_string()
+    } else {
+        "configured".to_string()
+    };
+    let mut manual_allowed = provider.model_discovery.manual_allowed;
+
+    if let Some(contribution) = contribution {
+        manual_allowed = contribution.provider.manual_model;
+        if recommended_model.is_none() {
+            recommended_model = contribution.provider.recommended_model.clone();
+        }
+        if models.is_empty() {
+            if let Some(model) = contribution.provider.recommended_model {
+                models.push(model.clone());
+                recommended_model = Some(model);
+            }
+            source = if contribution.provider.model_discovery {
+                "extension".to_string()
+            } else {
+                "extension-recommendation".to_string()
+            };
+        }
+    }
+
+    if recommended_model.is_none() && !provider.default_model.is_empty() {
+        recommended_model = Some(provider.default_model.clone());
+    }
+
+    Ok(Json(ProviderModelsResponse {
+        provider_id: provider.id,
+        source,
+        models,
+        recommended_model,
+        manual_allowed,
+    }))
+}
+
 pub(super) async fn provider_create(
     State(state): State<AppState>,
     Json(payload): Json<ProviderConfig>,
 ) -> Result<Json<ProviderConfig>, ApiError> {
+    validate_provider_payload(&payload)?;
     write_config_to_dir(
         state.runtime_paths.providers_config_dir(),
         &payload.id,
@@ -170,6 +235,7 @@ pub(super) async fn provider_update(
     Json(mut payload): Json<ProviderConfig>,
 ) -> Result<Json<ProviderConfig>, ApiError> {
     payload.id = provider_id.clone();
+    validate_provider_payload(&payload)?;
     write_config_to_dir(
         state.runtime_paths.providers_config_dir(),
         &provider_id,
@@ -202,4 +268,13 @@ pub(super) async fn provider_delete(
 
 pub(super) async fn spaces(State(state): State<AppState>) -> Json<Vec<ennoia_kernel::SpaceSpec>> {
     Json(state.spaces)
+}
+
+fn validate_provider_payload(payload: &ProviderConfig) -> Result<(), ApiError> {
+    if payload.enabled && payload.default_model.trim().is_empty() {
+        return Err(ApiError::bad_request(
+            "启用上游渠道前必须配置默认模型；无法发现模型时使用手动输入。",
+        ));
+    }
+    Ok(())
 }

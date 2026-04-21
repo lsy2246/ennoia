@@ -742,6 +742,35 @@ label {
   line-height: 1.6;
 }
 
+.model-toolbar,
+.model-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.model-toolbar {
+  justify-content: space-between;
+}
+
+.model-toolbar > :first-child {
+  flex: 1;
+}
+
+.model-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.model-row input {
+  flex: 1;
+}
+
+.model-row button {
+  white-space: nowrap;
+}
+
 .details-panel {
   border: 1px solid var(--line);
   border-radius: var(--radius-md);

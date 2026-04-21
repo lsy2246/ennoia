@@ -34,6 +34,8 @@ Extension 是系统插件包，Skill 是 Agent 可引用的能力包。两者目
 - `providers[]`
 - `hooks[]`
 
+Provider 贡献用于声明上游接口实现。实现扩展声明 `kind`、`interfaces`、`model_discovery`、`recommended_model` 和 `manual_model`，渠道实例在 `config/providers/*.toml` 中保存用户确认后的 `default_model`。
+
 ## 推荐目录
 
 ```text

@@ -16,7 +16,8 @@ pub mod ui;
 
 pub use config::{
     AgentConfig, AppConfig, ExtensionRegistryEntry, ExtensionRegistryFile, ProviderConfig,
-    ServerConfig, SkillConfig, SkillRegistryEntry, SkillRegistryFile, UiConfig,
+    ProviderModelDiscoveryConfig, ServerConfig, SkillConfig, SkillRegistryEntry, SkillRegistryFile,
+    UiConfig,
 };
 pub use decision::{Decision, DecisionSnapshot, NextAction};
 pub use domain::{

@@ -1,5 +1,5 @@
 ﻿import { fetchJson } from "./core";
-import type { AgentProfile, ProviderConfig, SkillConfig } from "./types";
+import type { AgentProfile, ProviderConfig, ProviderModelsResponse, SkillConfig } from "./types";
 
 export async function listAgents() {
   return fetchJson<AgentProfile[]>("/api/v1/agents");
@@ -69,5 +69,9 @@ export async function updateProvider(providerId: string, payload: ProviderConfig
 
 export async function deleteProvider(providerId: string) {
   return fetchJson<void>(`/api/v1/providers/${providerId}`, { method: "DELETE" });
+}
+
+export async function getProviderModels(providerId: string) {
+  return fetchJson<ProviderModelsResponse>(`/api/v1/providers/${providerId}/models`);
 }
 
