@@ -77,9 +77,9 @@ export function Agents() {
                 <span>{agent.skills.length} skills</span>
               </div>
               <p className="helper-text">
-                {t("web.agents.derived_workspace_help", "工作区根路径只在设置中配置。Agent 工作区自动派生为 workspace/agents/{agent_id}。")}
+                {t("web.agents.derived_workspace_help", "Agent 工作目录自动派生到 agents/{agent_id}/workspace，无需单独配置。")}
                 {" · "}
-                {formatRelativePath(agent.workspace_root)}
+                {formatRelativePath(agent.workspace_dir || "")}
               </p>
               <div className="button-row">
                 <button

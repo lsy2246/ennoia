@@ -1,14 +1,12 @@
 import { useEffect, useState } from "react";
 
 import {
-  fetchAppConfig,
   getExtension,
   getExtensionLogs,
   listExtensions,
   reloadExtension,
   restartExtension,
   setExtensionEnabled,
-  type AppConfig,
   type ExtensionDetail,
   type ExtensionRuntimeState,
 } from "@ennoia/api-client";
@@ -18,7 +16,6 @@ import { useUiHelpers } from "@/stores/ui";
 export function Extensions() {
   const { t } = useUiHelpers();
   const [extensions, setExtensions] = useState<ExtensionRuntimeState[]>([]);
-  const [appConfig, setAppConfig] = useState<AppConfig | null>(null);
   const [selected, setSelected] = useState<ExtensionRuntimeState | null>(null);
   const [detail, setDetail] = useState<ExtensionDetail | null>(null);
   const [logs, setLogs] = useState("");
@@ -30,9 +27,8 @@ export function Extensions() {
 
   async function refresh() {
     setError(null);
-    const [next, nextAppConfig] = await Promise.all([listExtensions(), fetchAppConfig()]);
+    const next = await listExtensions();
     setExtensions(next);
-    setAppConfig(nextAppConfig);
     const nextSelected = next.find((item) => item.id === selected?.id) ?? next[0] ?? null;
     setSelected(nextSelected);
     setDetail(nextSelected ? await getExtension(nextSelected.id).catch(() => null) : null);
@@ -103,8 +99,8 @@ export function Extensions() {
             <div className="kv-list">
               <span>ID</span><strong>{selected.id}</strong>
               <span>{t("web.common.status", "状态")}</span><strong>{selected.status}</strong>
-              <span>{t("web.extensions.install_dir", "扩展包目录")}</span><strong>{formatRelativePath(selected.install_dir, appConfig?.workspace_root)}</strong>
-              <span>{t("web.extensions.source_root", "来源目录")}</span><strong>{formatRelativePath(selected.source_root, appConfig?.workspace_root)}</strong>
+              <span>{t("web.extensions.install_dir", "扩展包目录")}</span><strong>{formatRelativePath(selected.install_dir)}</strong>
+              <span>{t("web.extensions.source_root", "来源目录")}</span><strong>{formatRelativePath(selected.source_root)}</strong>
               <span>{t("web.extensions.diagnostics", "诊断")}</span><strong>{selected.diagnostics.length}</strong>
             </div>
             <div className="extension-summary-grid">

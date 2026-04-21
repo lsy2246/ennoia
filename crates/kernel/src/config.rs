@@ -8,12 +8,8 @@ use crate::ui::LocalizedText;
 pub struct AppConfig {
     pub app_name: String,
     pub mode: String,
-    #[serde(default = "default_workspace_root")]
-    pub workspace_root: String,
     pub database_mode: String,
     pub database_url: String,
-    pub extensions_scan_dir: String,
-    pub agents_scan_dir: String,
     pub scheduler_tick_ms: u64,
     pub default_mention_mode: String,
 }
@@ -23,11 +19,8 @@ impl Default for AppConfig {
         Self {
             app_name: "ennoia".to_string(),
             mode: "development".to_string(),
-            workspace_root: "~/.ennoia/workspace".to_string(),
             database_mode: "sqlite".to_string(),
             database_url: "sqlite://~/.ennoia/data/sqlite/ennoia.db".to_string(),
-            extensions_scan_dir: "~/.ennoia/extensions".to_string(),
-            agents_scan_dir: "~/.ennoia/config/agents".to_string(),
             scheduler_tick_ms: 1_000,
             default_mention_mode: "configured".to_string(),
         }
@@ -99,8 +92,6 @@ pub struct AgentConfig {
     pub model_id: String,
     #[serde(default = "default_reasoning_effort")]
     pub reasoning_effort: String,
-    #[serde(default)]
-    pub workspace_root: String,
     #[serde(default)]
     pub skills: Vec<String>,
     #[serde(default = "default_agent_enabled")]
@@ -224,10 +215,6 @@ fn default_agent_kind() -> String {
 
 fn default_workspace_mode() -> String {
     "private".to_string()
-}
-
-fn default_workspace_root() -> String {
-    "~/.ennoia/workspace".to_string()
 }
 
 fn default_reasoning_effort() -> String {

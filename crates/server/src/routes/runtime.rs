@@ -183,23 +183,17 @@ pub(super) async fn runtime_app_config_put(
     Json(payload): Json<AppConfig>,
 ) -> ApiResult<AppConfig> {
     let normalized = normalize_app_config(&state.runtime_paths, payload);
-    let workspace_root = state
-        .runtime_paths
-        .expand_home_token(&normalized.workspace_root);
-    fs::create_dir_all(&workspace_root)
-        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?;
-    fs::create_dir_all(
-        state
+    if let Some(database_path) = normalized.database_url.strip_prefix("sqlite://") {
+        if let Some(parent) = state
             .runtime_paths
-            .expand_home_token(&normalized.extensions_scan_dir),
-    )
-    .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?;
-    fs::create_dir_all(
-        state
-            .runtime_paths
-            .expand_home_token(&normalized.agents_scan_dir),
-    )
-    .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?;
+            .expand_home_token(database_path)
+            .parent()
+            .map(|path| path.to_path_buf())
+        {
+            fs::create_dir_all(parent)
+                .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?;
+        }
+    }
     let contents = toml::to_string_pretty(&normalized)
         .map_err(|error| scoped(ApiError::bad_request(error.to_string()), &request))?;
     fs::write(state.runtime_paths.app_config_file(), contents)

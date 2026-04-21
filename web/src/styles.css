@@ -771,6 +771,30 @@ label {
   white-space: nowrap;
 }
 
+.editor-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.editor-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.editor-row--split input:first-child {
+  flex: 1.4;
+}
+
+.editor-row input {
+  flex: 1;
+}
+
+.editor-row button {
+  white-space: nowrap;
+}
+
 .details-panel {
   border: 1px solid var(--line);
   border-radius: var(--radius-md);

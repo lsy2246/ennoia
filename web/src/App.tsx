@@ -174,7 +174,8 @@ function WorkbenchTab(props: any) {
 
 export function App() {
   const navigate = useNavigate();
-  const { resolveText, runtime, t } = useUiHelpers();
+  const { availableLocales, availableThemes, resolveText, runtime, t } = useUiHelpers();
+  const uiState = useUiStore();
   const [palette, setPalette] = useState(readWorkbenchPalette);
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const registerApi = useWorkbenchStore((state) => state.registerApi);
@@ -234,6 +235,24 @@ export function App() {
     setPalette(applyWorkbenchPalette(palette, { clearRuntimeTheme: false }));
   }, [palette]);
 
+  async function changeLocale(locale: string) {
+    await uiState.savePreferences({
+      locale,
+      theme_id: uiState.themeId,
+      time_zone: uiState.timeZone,
+      date_style: uiState.dateStyle,
+    });
+  }
+
+  async function changeTheme(themeId: string) {
+    await uiState.savePreferences({
+      locale: uiState.locale,
+      theme_id: themeId,
+      time_zone: uiState.timeZone,
+      date_style: uiState.dateStyle,
+    });
+  }
+
   const visibleViews = openViews;
 
   return (
@@ -272,6 +291,38 @@ export function App() {
           <article className="sidebar-card sidebar-card--fixed">
             <strong>{active?.label}</strong>
             <p className="helper-text">{active?.hint}</p>
+          </article>
+
+          <article className="sidebar-card sidebar-card--fixed">
+            <strong>{t("web.nav.global_preferences", "全局界面")}</strong>
+            <div className="stack">
+              <label>
+                {t("web.settings.language", "语言")}
+                <select
+                  value={uiState.locale}
+                  onChange={(event) => void changeLocale(event.target.value)}
+                >
+                  {availableLocales.map((locale) => (
+                    <option key={locale} value={locale}>
+                      {locale}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                {t("web.settings.theme", "主题")}
+                <select
+                  value={uiState.themeId}
+                  onChange={(event) => void changeTheme(event.target.value)}
+                >
+                  {availableThemes.map((theme) => (
+                    <option key={theme.id} value={theme.id}>
+                      {theme.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
           </article>
 
           <article className="sidebar-card sidebar-card--fixed">

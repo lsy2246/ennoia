@@ -85,11 +85,8 @@ export type WorkspaceProfile = {
 export type AppConfig = {
   app_name: string;
   mode: string;
-  workspace_root: string;
   database_mode: string;
   database_url: string;
-  extensions_scan_dir: string;
-  agents_scan_dir: string;
   scheduler_tick_ms: number;
   default_mention_mode: string;
 };
@@ -108,7 +105,6 @@ export type AgentProfile = {
   provider_id: string;
   model_id: string;
   reasoning_effort: string;
-  workspace_root: string;
   skills: string[];
   enabled: boolean;
   kind?: string;

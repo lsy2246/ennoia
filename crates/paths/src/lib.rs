@@ -15,7 +15,6 @@ pub const ENNOIA_HOME_ENV: &str = "ENNOIA_HOME";
 #[derive(Debug, Clone)]
 pub struct RuntimePaths {
     home: PathBuf,
-    workspace_root: PathBuf,
 }
 
 impl RuntimePaths {
@@ -24,25 +23,12 @@ impl RuntimePaths {
             .map(PathBuf::from)
             .or_else(|| env::var_os(ENNOIA_HOME_ENV).map(PathBuf::from))
             .unwrap_or_else(default_home_dir);
-        let workspace_root = home.join("workspace");
-        Self {
-            home,
-            workspace_root,
-        }
+        Self { home }
     }
 
     pub fn new(home: impl Into<PathBuf>) -> Self {
         let home = home.into();
-        let workspace_root = home.join("workspace");
-        Self {
-            home,
-            workspace_root,
-        }
-    }
-
-    pub fn with_workspace_root(mut self, value: impl AsRef<str>) -> Self {
-        self.workspace_root = self.expand_home_token(value.as_ref());
-        self
+        Self { home }
     }
 
     pub fn home(&self) -> &Path {
@@ -133,10 +119,6 @@ impl RuntimePaths {
         self.home.join("agents")
     }
 
-    pub fn workspace_root_dir(&self) -> PathBuf {
-        self.workspace_root.clone()
-    }
-
     pub fn agent_dir(&self, agent_id: &str) -> PathBuf {
         self.agents_dir().join(agent_id)
     }
@@ -146,7 +128,7 @@ impl RuntimePaths {
     }
 
     pub fn agent_workspace_dir(&self, agent_id: &str) -> PathBuf {
-        self.workspace_root_dir().join("agents").join(agent_id)
+        self.agent_dir(agent_id).join("workspace")
     }
 
     pub fn agent_artifacts_dir(&self, agent_id: &str) -> PathBuf {
@@ -162,7 +144,7 @@ impl RuntimePaths {
     }
 
     pub fn space_workspace_dir(&self, space_id: &str) -> PathBuf {
-        self.workspace_root_dir().join("spaces").join(space_id)
+        self.space_dir(space_id).join("workspace")
     }
 
     pub fn space_artifacts_dir(&self, space_id: &str) -> PathBuf {

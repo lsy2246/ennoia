@@ -59,11 +59,10 @@
 - `provider_id`
 - `model_id`
 - `reasoning_effort`
-- `workspace_root`
 - `skills`
 - `enabled`
 
-`kind`、`workspace_mode`、`default_model`、`skills_dir`、`workspace_dir`、`artifacts_dir` 仍作为运行时派生/内部字段存在，前端产品模型以显式字段为主。
+`kind`、`workspace_mode`、`default_model`、`skills_dir`、`workspace_dir`、`artifacts_dir` 仍作为运行时派生/内部字段存在，前端产品模型以显式字段为主。Agent 工作目录按 `agents/<agent_id>/workspace` 自动派生，不再依赖单独的工作区根路径配置。
 
 ## Skill 域
 

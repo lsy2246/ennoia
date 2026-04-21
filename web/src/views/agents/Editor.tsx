@@ -22,7 +22,6 @@ const EMPTY_AGENT: AgentProfile = {
   provider_id: "",
   model_id: "",
   reasoning_effort: "high",
-  workspace_root: "",
   skills: [],
   enabled: true,
 };
@@ -243,11 +242,11 @@ export function AgentEditorView({
         <div className="panel-title">{t("web.agents.derived_workspace", "派生工作区")}</div>
         <div className="kv-list">
           <span>{t("web.agents.derived_workspace", "派生工作区")}</span>
-          <strong>{formatRelativePath(form.workspace_root || form.workspace_dir || "")}</strong>
+          <strong>{formatRelativePath(form.workspace_dir || "")}</strong>
           <span>{t("web.agents.skills", "技能")}</span>
           <strong>{formatRelativePath(form.skills_dir || "")}</strong>
         </div>
-        <p className="helper-text">{t("web.agents.derived_workspace_help", "工作区根路径只在设置中配置。Agent 工作区自动派生为 workspace/agents/{agent_id}。")}</p>
+        <p className="helper-text">{t("web.agents.derived_workspace_help", "Agent 工作目录自动派生到 agents/{agent_id}/workspace，无需单独配置。")}</p>
       </div>
       <div className="button-row">
         <button type="submit" disabled={busy}>

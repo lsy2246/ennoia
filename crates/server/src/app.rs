@@ -64,11 +64,7 @@ pub struct AppState {
 pub fn default_app_state() -> AppState {
     let bootstrap_paths = RuntimePaths::new(default_home_dir());
     let app_config = normalize_app_config(&bootstrap_paths, AppConfig::default());
-    let runtime_paths = Arc::new(
-        bootstrap_paths
-            .clone()
-            .with_workspace_root(&app_config.workspace_root),
-    );
+    let runtime_paths = Arc::new(bootstrap_paths.clone());
     runtime_paths.ensure_layout().expect("runtime layout");
     let pool = SqlitePoolOptions::new()
         .max_connections(1)
@@ -124,7 +120,7 @@ pub async fn bootstrap_app_state(home_dir: impl AsRef<Path>) -> Result<AppState,
         &bootstrap_paths,
         read_toml_or_default(bootstrap_paths.app_config_file())?,
     );
-    let runtime_paths = Arc::new(bootstrap_paths.with_workspace_root(&app_config.workspace_root));
+    let runtime_paths = Arc::new(bootstrap_paths);
     runtime_paths.ensure_layout()?;
     let server_config: ServerConfig = read_toml_or_default(runtime_paths.server_config_file())?;
     let ui_config: UiConfig = read_toml_or_default(runtime_paths.ui_config_file())?;
@@ -354,13 +350,10 @@ fn normalize_agent_config(paths: &RuntimePaths, agent: &mut AgentConfig) {
     if agent.reasoning_effort.is_empty() {
         agent.reasoning_effort = DEFAULT_REASONING_EFFORT.to_string();
     }
-    if agent.workspace_root.is_empty() {
-        agent.workspace_root = paths.display_for_user(paths.agent_workspace_dir(&agent.id));
-    }
     if !agent.workspace_dir.is_empty() {
         agent.workspace_dir = paths.display_for_user(paths.expand_home_token(&agent.workspace_dir));
     } else {
-        agent.workspace_dir = agent.workspace_root.clone();
+        agent.workspace_dir = paths.display_for_user(paths.agent_workspace_dir(&agent.id));
     }
     if !agent.skills_dir.is_empty() {
         agent.skills_dir = paths.display_for_user(paths.expand_home_token(&agent.skills_dir));
@@ -382,12 +375,6 @@ fn extension_runtime_config(paths: &RuntimePaths) -> ExtensionRuntimeConfig {
 }
 
 pub fn normalize_app_config(paths: &RuntimePaths, mut config: AppConfig) -> AppConfig {
-    config.workspace_root = paths.display_for_user(paths.expand_home_token(&config.workspace_root));
-    config.extensions_scan_dir =
-        paths.display_for_user(paths.expand_home_token(&config.extensions_scan_dir));
-    config.agents_scan_dir =
-        paths.display_for_user(paths.expand_home_token(&config.agents_scan_dir));
-
     if let Some(database_path) = config.database_url.strip_prefix("sqlite://") {
         config.database_url = format!(
             "sqlite://{}",

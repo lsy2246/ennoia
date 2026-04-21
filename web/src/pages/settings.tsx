@@ -12,29 +12,200 @@ import {
 import { WORKBENCH_PALETTES, applyWorkbenchPalette, readWorkbenchPalette } from "@/lib/palette";
 import { buildTimeZoneOptionGroups } from "@/lib/timeZones";
 import { useRuntimeStore } from "@/stores/runtime";
-import { useUiHelpers, useUiStore } from "@/stores/ui";
+import { useUiHelpers } from "@/stores/ui";
 
-function splitText(value: string) {
-  return value
-    .split(/\r?\n|,/)
-    .map((item) => item.trim())
-    .filter(Boolean);
+type StringEntry = {
+  key: string;
+  value: string;
+};
+
+type NumberMapEntry = {
+  key: string;
+  path: string;
+  value: string;
+};
+
+let entrySequence = 0;
+
+function createStringEntry(value = ""): StringEntry {
+  entrySequence += 1;
+  return { key: `string-entry-${entrySequence}`, value };
+}
+
+function createNumberMapEntry(path = "", value = ""): NumberMapEntry {
+  entrySequence += 1;
+  return { key: `map-entry-${entrySequence}`, path, value };
+}
+
+function normalizeTextList(values: string[]) {
+  return Array.from(new Set(values.map((item) => item.trim()).filter(Boolean)));
+}
+
+function toStringEntries(values: string[]) {
+  return normalizeTextList(values).map((item) => createStringEntry(item));
+}
+
+function toMapEntries(values: Record<string, number>) {
+  return Object.entries(values).map(([path, value]) => createNumberMapEntry(path, String(value)));
+}
+
+function collectStringEntries(entries: StringEntry[]) {
+  return normalizeTextList(entries.map((entry) => entry.value));
+}
+
+function collectMapEntries(entries: NumberMapEntry[]) {
+  return Object.fromEntries(
+    entries
+      .map((entry) => ({
+        path: entry.path.trim(),
+        value: Number(entry.value),
+      }))
+      .filter((entry) => entry.path && Number.isFinite(entry.value))
+      .map((entry) => [entry.path, entry.value] as const),
+  );
+}
+
+function StringListEditor({
+  title,
+  helper,
+  entries,
+  emptyText,
+  placeholder,
+  addLabel,
+  deleteLabel,
+  onChange,
+}: {
+  title: string;
+  helper?: string;
+  entries: StringEntry[];
+  emptyText: string;
+  placeholder: string;
+  addLabel: string;
+  deleteLabel: string;
+  onChange: (entries: StringEntry[]) => void;
+}) {
+  function updateValue(key: string, value: string) {
+    onChange(entries.map((entry) => (entry.key === key ? { ...entry, value } : entry)));
+  }
+
+  function removeValue(key: string) {
+    onChange(entries.filter((entry) => entry.key !== key));
+  }
+
+  function addValue() {
+    onChange([...entries, createStringEntry()]);
+  }
+
+  return (
+    <div className="stack">
+      <div className="panel-title">{title}</div>
+      {helper ? <p className="helper-text">{helper}</p> : null}
+      <div className="editor-list">
+        {entries.length === 0 ? (
+          <div className="empty-card">{emptyText}</div>
+        ) : (
+          entries.map((entry) => (
+            <div key={entry.key} className="editor-row">
+              <input
+                value={entry.value}
+                placeholder={placeholder}
+                onChange={(event) => updateValue(entry.key, event.target.value)}
+              />
+              <button type="button" className="secondary" onClick={() => removeValue(entry.key)}>
+                {deleteLabel}
+              </button>
+            </div>
+          ))
+        )}
+        <button type="button" className="secondary" onClick={addValue}>
+          {addLabel}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function NumberMapEditor({
+  title,
+  helper,
+  entries,
+  emptyText,
+  pathPlaceholder,
+  valuePlaceholder,
+  addLabel,
+  deleteLabel,
+  onChange,
+}: {
+  title: string;
+  helper?: string;
+  entries: NumberMapEntry[];
+  emptyText: string;
+  pathPlaceholder: string;
+  valuePlaceholder: string;
+  addLabel: string;
+  deleteLabel: string;
+  onChange: (entries: NumberMapEntry[]) => void;
+}) {
+  function updateEntry(key: string, patch: Partial<NumberMapEntry>) {
+    onChange(entries.map((entry) => (entry.key === key ? { ...entry, ...patch } : entry)));
+  }
+
+  function removeEntry(key: string) {
+    onChange(entries.filter((entry) => entry.key !== key));
+  }
+
+  function addEntry() {
+    onChange([...entries, createNumberMapEntry()]);
+  }
+
+  return (
+    <div className="stack">
+      <div className="panel-title">{title}</div>
+      {helper ? <p className="helper-text">{helper}</p> : null}
+      <div className="editor-list">
+        {entries.length === 0 ? (
+          <div className="empty-card">{emptyText}</div>
+        ) : (
+          entries.map((entry) => (
+            <div key={entry.key} className="editor-row editor-row--split">
+              <input
+                value={entry.path}
+                placeholder={pathPlaceholder}
+                onChange={(event) => updateEntry(entry.key, { path: event.target.value })}
+              />
+              <input
+                value={entry.value}
+                inputMode="numeric"
+                placeholder={valuePlaceholder}
+                onChange={(event) => updateEntry(entry.key, { value: event.target.value })}
+              />
+              <button type="button" className="secondary" onClick={() => removeEntry(entry.key)}>
+                {deleteLabel}
+              </button>
+            </div>
+          ))
+        )}
+        <button type="button" className="secondary" onClick={addEntry}>
+          {addLabel}
+        </button>
+      </div>
+    </div>
+  );
 }
 
 export function Settings() {
   const profile = useRuntimeStore((state) => state.profile);
   const hydrateRuntime = useRuntimeStore((state) => state.hydrate);
-  const uiState = useUiStore();
-  const { availableLocales, availableThemes, t } = useUiHelpers();
+  const { t } = useUiHelpers();
   const [config, setConfig] = useState<SystemConfig | null>(null);
   const [appConfig, setAppConfig] = useState<AppConfig | null>(null);
   const [profileName, setProfileName] = useState(profile?.display_name ?? "Operator");
   const [timeZone, setTimeZone] = useState(profile?.time_zone ?? "Asia/Shanghai");
   const [palette, setPalette] = useState(readWorkbenchPalette);
-  const [corsOrigins, setCorsOrigins] = useState("");
-  const [timeoutOverrides, setTimeoutOverrides] = useState("");
-  const [bodyLimitOverrides, setBodyLimitOverrides] = useState("");
-  const [redactHeaders, setRedactHeaders] = useState("");
+  const [corsOrigins, setCorsOrigins] = useState<StringEntry[]>([]);
+  const [timeoutOverrides, setTimeoutOverrides] = useState<NumberMapEntry[]>([]);
+  const [bodyLimitOverrides, setBodyLimitOverrides] = useState<NumberMapEntry[]>([]);
+  const [redactHeaders, setRedactHeaders] = useState<StringEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -53,31 +224,10 @@ export function Settings() {
     const [snapshot, nextAppConfig] = await Promise.all([getConfigSnapshot(), fetchAppConfig()]);
     setConfig(snapshot);
     setAppConfig(nextAppConfig);
-    setCorsOrigins(snapshot.cors.origins.join("\n"));
-    setTimeoutOverrides(
-      Object.entries(snapshot.timeout.per_path_ms)
-        .map(([key, value]) => `${key}=${value}`)
-        .join("\n"),
-    );
-    setBodyLimitOverrides(
-      Object.entries(snapshot.body_limit.per_path_max)
-        .map(([key, value]) => `${key}=${value}`)
-        .join("\n"),
-    );
-    setRedactHeaders(snapshot.logging.redact_headers.join(", "));
-  }
-
-  function parseMap(text: string) {
-    return Object.fromEntries(
-      text
-        .split(/\r?\n/)
-        .map((line) => line.trim())
-        .filter(Boolean)
-        .map((line) => {
-          const [key, value] = line.split("=");
-          return [key.trim(), Number(value)];
-        }),
-    );
+    setCorsOrigins(toStringEntries(snapshot.cors.origins));
+    setTimeoutOverrides(toMapEntries(snapshot.timeout.per_path_ms));
+    setBodyLimitOverrides(toMapEntries(snapshot.body_limit.per_path_max));
+    setRedactHeaders(toStringEntries(snapshot.logging.redact_headers));
   }
 
   async function saveProfile(event: FormEvent<HTMLFormElement>) {
@@ -91,50 +241,6 @@ export function Settings() {
       });
       await hydrateRuntime();
       setMessage(t("web.settings.profile_saved", "个人设置已保存。"));
-    } catch (err) {
-      setError(String(err));
-    }
-  }
-
-  async function savePreferences(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError(null);
-    setMessage(null);
-    try {
-      await uiState.savePreferences({
-        locale: uiState.locale,
-        theme_id: uiState.themeId,
-        time_zone: timeZone,
-      });
-      setMessage(t("web.settings.preferences_saved", "界面偏好已保存。"));
-    } catch (err) {
-      setError(String(err));
-    }
-  }
-
-  async function changeLocale(locale: string) {
-    setError(null);
-    setMessage(null);
-    try {
-      await uiState.savePreferences({
-        locale,
-        theme_id: uiState.themeId,
-        time_zone: timeZone,
-      });
-    } catch (err) {
-      setError(String(err));
-    }
-  }
-
-  async function changeTheme(themeId: string) {
-    setError(null);
-    setMessage(null);
-    try {
-      await uiState.savePreferences({
-        locale: uiState.locale,
-        theme_id: themeId,
-        time_zone: timeZone,
-      });
     } catch (err) {
       setError(String(err));
     }
@@ -154,7 +260,7 @@ export function Settings() {
           "cors",
           {
             ...config.cors,
-            origins: splitText(corsOrigins),
+            origins: collectStringEntries(corsOrigins),
           },
           "shell",
         ),
@@ -162,7 +268,7 @@ export function Settings() {
           "timeout",
           {
             ...config.timeout,
-            per_path_ms: parseMap(timeoutOverrides),
+            per_path_ms: collectMapEntries(timeoutOverrides),
           },
           "shell",
         ),
@@ -170,7 +276,7 @@ export function Settings() {
           "logging",
           {
             ...config.logging,
-            redact_headers: splitText(redactHeaders),
+            redact_headers: collectStringEntries(redactHeaders),
           },
           "shell",
         ),
@@ -178,7 +284,7 @@ export function Settings() {
           "body_limit",
           {
             ...config.body_limit,
-            per_path_max: parseMap(bodyLimitOverrides),
+            per_path_max: collectMapEntries(bodyLimitOverrides),
           },
           "shell",
         ),
@@ -190,18 +296,27 @@ export function Settings() {
     }
   }
 
+  const deleteLabel = t("web.action.delete", "删除");
+  const addItemLabel = t("web.settings.list_add", "新增一项");
+  const addRuleLabel = t("web.settings.map_add", "新增规则");
+
   return (
     <div className="settings-grid">
       <form className="work-panel editor-form" onSubmit={saveProfile}>
         <div className="panel-title">{t("web.settings.personal", "个人设置")}</div>
-        <label>{t("web.settings.operator_name", "操作者名称")}<input value={profileName} onChange={(event) => setProfileName(event.target.value)} /></label>
+        <label>
+          {t("web.settings.operator_name", "操作者名称")}
+          <input value={profileName} onChange={(event) => setProfileName(event.target.value)} />
+        </label>
         <label>
           {t("web.settings.time_zone", "时区")}
           <select value={timeZone} onChange={(event) => setTimeZone(event.target.value)}>
             {buildTimeZoneOptionGroups(t, false).map((group) => (
               <optgroup key={group.label} label={group.label}>
                 {group.options.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
                 ))}
               </optgroup>
             ))}
@@ -210,24 +325,14 @@ export function Settings() {
         <button type="submit">{t("web.settings.save_personal", "保存个人设置")}</button>
       </form>
 
-      <form className="work-panel editor-form" onSubmit={savePreferences}>
+      <section className="work-panel editor-form">
         <div className="panel-title">{t("web.settings.appearance", "外观与配色")}</div>
-        <label>
-          {t("web.settings.language", "语言")}
-          <select value={uiState.locale} onChange={(event) => void changeLocale(event.target.value)}>
-            {availableLocales.map((locale) => (
-              <option key={locale} value={locale}>{locale}</option>
-            ))}
-          </select>
-        </label>
-        <label>
-          {t("web.settings.theme", "主题")}
-          <select value={uiState.themeId} onChange={(event) => void changeTheme(event.target.value)}>
-            {availableThemes.map((theme) => (
-              <option key={theme.id} value={theme.id}>{theme.label}</option>
-            ))}
-          </select>
-        </label>
+        <p className="helper-text">
+          {t(
+            "web.settings.appearance_moved",
+            "语言和主题已经移动到左侧导航，作为全局界面开关即时生效。",
+          )}
+        </p>
         <div className="palette-grid">
           {WORKBENCH_PALETTES.map((item) => (
             <button
@@ -243,14 +348,18 @@ export function Settings() {
             </button>
           ))}
         </div>
-        <button type="submit">{t("web.settings.save_appearance", "保存外观设置")}</button>
-      </form>
+      </section>
 
       <section className="work-panel editor-form settings-wide">
         <div className="page-heading">
           <span>{t("web.settings.runtime_eyebrow", "Runtime Config")}</span>
           <h1>{t("web.settings.runtime_title", "运行时配置改成表单，不再暴露 JSON 编辑器。")}</h1>
-          <p>{t("web.settings.runtime_description", "覆盖工作区、API 上游渠道扫描、调度节拍、中间件开关、跨域、超时、日志脱敏与请求体大小。")}</p>
+          <p>
+            {t(
+              "web.settings.runtime_description",
+              "覆盖数据库、调度节拍、中间件开关、跨域、超时、日志脱敏与请求体大小。",
+            )}
+          </p>
         </div>
         {error ? <div className="error">{error}</div> : null}
         {message ? <div className="success">{message}</div> : null}
@@ -258,56 +367,299 @@ export function Settings() {
           <>
             <div className="config-sections">
               <div className="mini-card">
-                <div className="panel-title">{t("web.settings.app_config", "应用与工作区")}</div>
-                <label>{t("web.settings.workspace_root", "工作区根路径")}<input value={appConfig.workspace_root} onChange={(event) => setAppConfig({ ...appConfig, workspace_root: event.target.value })} /><p className="helper-text">{t("web.settings.workspace_root_help", "唯一工作区入口。Conversation 工作区、产物和临时目录都基于它派生。")}</p></label>
+                <div className="panel-title">{t("web.settings.app_config", "应用与调度")}</div>
                 <div className="form-grid">
-                  <label>{t("web.settings.extensions_scan", "扩展扫描目录")}<input value={appConfig.extensions_scan_dir} onChange={(event) => setAppConfig({ ...appConfig, extensions_scan_dir: event.target.value })} /></label>
-                  <label>{t("web.settings.agents_scan", "Agent 配置目录")}<input value={appConfig.agents_scan_dir} onChange={(event) => setAppConfig({ ...appConfig, agents_scan_dir: event.target.value })} /></label>
-                  <label>{t("web.settings.scheduler_tick", "调度器轮询毫秒")}<input value={appConfig.scheduler_tick_ms} onChange={(event) => setAppConfig({ ...appConfig, scheduler_tick_ms: Number(event.target.value) })} /></label>
-                  <label>{t("web.settings.default_mentions", "默认提及策略")}<input value={appConfig.default_mention_mode} onChange={(event) => setAppConfig({ ...appConfig, default_mention_mode: event.target.value })} /></label>
+                  <label>
+                    {t("web.settings.database_url", "数据库地址")}
+                    <input
+                      value={appConfig.database_url}
+                      onChange={(event) =>
+                        setAppConfig({ ...appConfig, database_url: event.target.value })
+                      }
+                    />
+                  </label>
+                  <label>
+                    {t("web.settings.scheduler_tick", "调度器轮询毫秒")}
+                    <input
+                      value={appConfig.scheduler_tick_ms}
+                      onChange={(event) =>
+                        setAppConfig({
+                          ...appConfig,
+                          scheduler_tick_ms: Number(event.target.value),
+                        })
+                      }
+                    />
+                  </label>
+                  <label>
+                    {t("web.settings.default_mentions", "默认提及策略")}
+                    <input
+                      value={appConfig.default_mention_mode}
+                      onChange={(event) =>
+                        setAppConfig({
+                          ...appConfig,
+                          default_mention_mode: event.target.value,
+                        })
+                      }
+                    />
+                  </label>
                 </div>
               </div>
 
               <div className="mini-card">
                 <div className="panel-title">{t("web.settings.rate_limit", "Rate Limit")}</div>
-                <label className="check-row"><input type="checkbox" checked={config.rate_limit.enabled} onChange={(event) => setConfig({ ...config, rate_limit: { ...config.rate_limit, enabled: event.target.checked } })} />{t("web.common.enabled", "启用")}</label>
+                <label className="check-row">
+                  <input
+                    type="checkbox"
+                    checked={config.rate_limit.enabled}
+                    onChange={(event) =>
+                      setConfig({
+                        ...config,
+                        rate_limit: { ...config.rate_limit, enabled: event.target.checked },
+                      })
+                    }
+                  />
+                  {t("web.common.enabled", "启用")}
+                </label>
                 <div className="form-grid">
-                  <label>IP RPM<input value={config.rate_limit.per_ip_rpm} onChange={(event) => setConfig({ ...config, rate_limit: { ...config.rate_limit, per_ip_rpm: Number(event.target.value) } })} /></label>
-                  <label>User RPM<input value={config.rate_limit.per_user_rpm} onChange={(event) => setConfig({ ...config, rate_limit: { ...config.rate_limit, per_user_rpm: Number(event.target.value) } })} /></label>
-                  <label>Burst<input value={config.rate_limit.burst} onChange={(event) => setConfig({ ...config, rate_limit: { ...config.rate_limit, burst: Number(event.target.value) } })} /></label>
+                  <label>
+                    IP RPM
+                    <input
+                      value={config.rate_limit.per_ip_rpm}
+                      onChange={(event) =>
+                        setConfig({
+                          ...config,
+                          rate_limit: {
+                            ...config.rate_limit,
+                            per_ip_rpm: Number(event.target.value),
+                          },
+                        })
+                      }
+                    />
+                  </label>
+                  <label>
+                    User RPM
+                    <input
+                      value={config.rate_limit.per_user_rpm}
+                      onChange={(event) =>
+                        setConfig({
+                          ...config,
+                          rate_limit: {
+                            ...config.rate_limit,
+                            per_user_rpm: Number(event.target.value),
+                          },
+                        })
+                      }
+                    />
+                  </label>
+                  <label>
+                    Burst
+                    <input
+                      value={config.rate_limit.burst}
+                      onChange={(event) =>
+                        setConfig({
+                          ...config,
+                          rate_limit: { ...config.rate_limit, burst: Number(event.target.value) },
+                        })
+                      }
+                    />
+                  </label>
                 </div>
               </div>
 
               <div className="mini-card">
                 <div className="panel-title">{t("web.settings.cors", "CORS")}</div>
-                <label className="check-row"><input type="checkbox" checked={config.cors.enabled} onChange={(event) => setConfig({ ...config, cors: { ...config.cors, enabled: event.target.checked } })} />{t("web.common.enabled", "启用")}</label>
-                <label className="check-row"><input type="checkbox" checked={config.cors.credentials} onChange={(event) => setConfig({ ...config, cors: { ...config.cors, credentials: event.target.checked } })} />允许凭证</label>
-                <label>{t("web.settings.origins", "Origins")}<textarea rows={5} value={corsOrigins} onChange={(event) => setCorsOrigins(event.target.value)} /></label>
+                <label className="check-row">
+                  <input
+                    type="checkbox"
+                    checked={config.cors.enabled}
+                    onChange={(event) =>
+                      setConfig({
+                        ...config,
+                        cors: { ...config.cors, enabled: event.target.checked },
+                      })
+                    }
+                  />
+                  {t("web.common.enabled", "启用")}
+                </label>
+                <label className="check-row">
+                  <input
+                    type="checkbox"
+                    checked={config.cors.credentials}
+                    onChange={(event) =>
+                      setConfig({
+                        ...config,
+                        cors: { ...config.cors, credentials: event.target.checked },
+                      })
+                    }
+                  />
+                  {t("web.settings.credentials", "允许凭证")}
+                </label>
+                <StringListEditor
+                  title={t("web.settings.origins", "Origins")}
+                  helper={t("web.settings.origins_help", "每项填写一个允许的来源地址。")}
+                  entries={corsOrigins}
+                  emptyText={t("web.settings.origins_empty", "还没有允许来源。")}
+                  placeholder={t(
+                    "web.settings.origin_placeholder",
+                    "例如 http://127.0.0.1:5173",
+                  )}
+                  addLabel={addItemLabel}
+                  deleteLabel={deleteLabel}
+                  onChange={setCorsOrigins}
+                />
               </div>
 
               <div className="mini-card">
                 <div className="panel-title">{t("web.settings.timeout", "Timeout")}</div>
-                <label className="check-row"><input type="checkbox" checked={config.timeout.enabled} onChange={(event) => setConfig({ ...config, timeout: { ...config.timeout, enabled: event.target.checked } })} />{t("web.common.enabled", "启用")}</label>
-                <label>{t("web.settings.default_ms", "默认毫秒")}<input value={config.timeout.default_ms} onChange={(event) => setConfig({ ...config, timeout: { ...config.timeout, default_ms: Number(event.target.value) } })} /></label>
-                <label>{t("web.settings.path_ms", "路径覆盖（/path=ms）")}<textarea rows={5} value={timeoutOverrides} onChange={(event) => setTimeoutOverrides(event.target.value)} /></label>
+                <label className="check-row">
+                  <input
+                    type="checkbox"
+                    checked={config.timeout.enabled}
+                    onChange={(event) =>
+                      setConfig({
+                        ...config,
+                        timeout: { ...config.timeout, enabled: event.target.checked },
+                      })
+                    }
+                  />
+                  {t("web.common.enabled", "启用")}
+                </label>
+                <label>
+                  {t("web.settings.default_ms", "默认毫秒")}
+                  <input
+                    value={config.timeout.default_ms}
+                    onChange={(event) =>
+                      setConfig({
+                        ...config,
+                        timeout: { ...config.timeout, default_ms: Number(event.target.value) },
+                      })
+                    }
+                  />
+                </label>
+                <NumberMapEditor
+                  title={t("web.settings.path_ms", "路径覆盖（/path=ms）")}
+                  helper={t("web.settings.path_overrides_help", "逐项填写路径和超时毫秒值。")}
+                  entries={timeoutOverrides}
+                  emptyText={t("web.settings.path_overrides_empty", "还没有路径覆盖规则。")}
+                  pathPlaceholder={t("web.settings.path_placeholder", "例如 /api/v1/logs")}
+                  valuePlaceholder={t("web.settings.ms_placeholder", "毫秒")}
+                  addLabel={addRuleLabel}
+                  deleteLabel={deleteLabel}
+                  onChange={setTimeoutOverrides}
+                />
               </div>
 
               <div className="mini-card">
                 <div className="panel-title">{t("web.settings.logging", "Logging")}</div>
-                <label className="check-row"><input type="checkbox" checked={config.logging.enabled} onChange={(event) => setConfig({ ...config, logging: { ...config.logging, enabled: event.target.checked } })} />{t("web.common.enabled", "启用")}</label>
-                <label>{t("web.settings.level", "级别")}<select value={config.logging.level} onChange={(event) => setConfig({ ...config, logging: { ...config.logging, level: event.target.value } })}><option value="debug">debug</option><option value="info">info</option><option value="warn">warn</option><option value="error">error</option></select></label>
-                <label>{t("web.settings.sample_rate", "采样率")}<input value={config.logging.sample_rate} onChange={(event) => setConfig({ ...config, logging: { ...config.logging, sample_rate: Number(event.target.value) } })} /></label>
-                <label>{t("web.settings.redact_headers", "脱敏请求头")}<textarea rows={4} value={redactHeaders} onChange={(event) => setRedactHeaders(event.target.value)} /></label>
+                <label className="check-row">
+                  <input
+                    type="checkbox"
+                    checked={config.logging.enabled}
+                    onChange={(event) =>
+                      setConfig({
+                        ...config,
+                        logging: { ...config.logging, enabled: event.target.checked },
+                      })
+                    }
+                  />
+                  {t("web.common.enabled", "启用")}
+                </label>
+                <label>
+                  {t("web.settings.level", "级别")}
+                  <select
+                    value={config.logging.level}
+                    onChange={(event) =>
+                      setConfig({
+                        ...config,
+                        logging: { ...config.logging, level: event.target.value },
+                      })
+                    }
+                  >
+                    <option value="debug">debug</option>
+                    <option value="info">info</option>
+                    <option value="warn">warn</option>
+                    <option value="error">error</option>
+                  </select>
+                </label>
+                <label>
+                  {t("web.settings.sample_rate", "采样率")}
+                  <input
+                    value={config.logging.sample_rate}
+                    onChange={(event) =>
+                      setConfig({
+                        ...config,
+                        logging: {
+                          ...config.logging,
+                          sample_rate: Number(event.target.value),
+                        },
+                      })
+                    }
+                  />
+                </label>
+                <StringListEditor
+                  title={t("web.settings.redact_headers", "脱敏请求头")}
+                  helper={t(
+                    "web.settings.redact_headers_help",
+                    "每项填写一个需要脱敏的请求头名称。",
+                  )}
+                  entries={redactHeaders}
+                  emptyText={t("web.settings.redact_headers_empty", "还没有脱敏请求头。")}
+                  placeholder={t("web.settings.header_placeholder", "例如 authorization")}
+                  addLabel={addItemLabel}
+                  deleteLabel={deleteLabel}
+                  onChange={setRedactHeaders}
+                />
               </div>
 
               <div className="mini-card">
                 <div className="panel-title">{t("web.settings.body_limit", "Body Limit")}</div>
-                <label className="check-row"><input type="checkbox" checked={config.body_limit.enabled} onChange={(event) => setConfig({ ...config, body_limit: { ...config.body_limit, enabled: event.target.checked } })} />{t("web.common.enabled", "启用")}</label>
-                <label>{t("web.settings.default_bytes", "默认字节数")}<input value={config.body_limit.max_bytes} onChange={(event) => setConfig({ ...config, body_limit: { ...config.body_limit, max_bytes: Number(event.target.value) } })} /></label>
-                <label>{t("web.settings.path_bytes", "路径覆盖（/path=bytes）")}<textarea rows={5} value={bodyLimitOverrides} onChange={(event) => setBodyLimitOverrides(event.target.value)} /></label>
+                <label className="check-row">
+                  <input
+                    type="checkbox"
+                    checked={config.body_limit.enabled}
+                    onChange={(event) =>
+                      setConfig({
+                        ...config,
+                        body_limit: { ...config.body_limit, enabled: event.target.checked },
+                      })
+                    }
+                  />
+                  {t("web.common.enabled", "启用")}
+                </label>
+                <label>
+                  {t("web.settings.default_bytes", "默认字节数")}
+                  <input
+                    value={config.body_limit.max_bytes}
+                    onChange={(event) =>
+                      setConfig({
+                        ...config,
+                        body_limit: {
+                          ...config.body_limit,
+                          max_bytes: Number(event.target.value),
+                        },
+                      })
+                    }
+                  />
+                </label>
+                <NumberMapEditor
+                  title={t("web.settings.path_bytes", "路径覆盖（/path=bytes）")}
+                  helper={t(
+                    "web.settings.path_size_overrides_help",
+                    "逐项填写路径和最大字节数。",
+                  )}
+                  entries={bodyLimitOverrides}
+                  emptyText={t("web.settings.path_overrides_empty", "还没有路径覆盖规则。")}
+                  pathPlaceholder={t("web.settings.path_placeholder", "例如 /api/v1/messages")}
+                  valuePlaceholder={t("web.settings.bytes_placeholder", "字节数")}
+                  addLabel={addRuleLabel}
+                  deleteLabel={deleteLabel}
+                  onChange={setBodyLimitOverrides}
+                />
               </div>
             </div>
-            <button type="button" onClick={() => void saveRuntimeConfig()}>{t("web.settings.save_runtime", "保存运行时配置")}</button>
+            <button type="button" onClick={() => void saveRuntimeConfig()}>
+              {t("web.settings.save_runtime", "保存运行时配置")}
+            </button>
           </>
         ) : (
           <div className="empty-card">{t("web.common.loading", "加载中…")}</div>
@@ -316,4 +668,3 @@ export function Settings() {
     </div>
   );
 }
-

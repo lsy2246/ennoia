@@ -898,23 +898,10 @@ fn init_home_template(paths: &RuntimePaths) -> io::Result<()> {
 }
 
 fn render_app_config(paths: &RuntimePaths) -> String {
-    templates::app_config()
-        .replace(
-            "~/.ennoia/workspace",
-            &paths.display_for_user(paths.workspace_root_dir()),
-        )
-        .replace(
-            "sqlite://~/.ennoia/data/sqlite/ennoia.db",
-            &format!("sqlite://{}", paths.display_for_user(paths.sqlite_db())),
-        )
-        .replace(
-            "~/.ennoia/extensions",
-            &paths.display_for_user(paths.extensions_dir()),
-        )
-        .replace(
-            "~/.ennoia/config/agents",
-            &paths.display_for_user(paths.agents_config_dir()),
-        )
+    templates::app_config().replace(
+        "sqlite://~/.ennoia/data/sqlite/ennoia.db",
+        &format!("sqlite://{}", paths.display_for_user(paths.sqlite_db())),
+    )
 }
 
 fn sync_builtin_registries(paths: &RuntimePaths) -> io::Result<()> {
