@@ -62,7 +62,7 @@ Skill 目录独立：
 
 1. `cargo run -p ennoia-cli -- dev` 初始化运行目录。
 2. CLI 把内置扩展同步到 `<ENNOIA_HOME>/extensions/<extension_id>/`，并更新 `config/extensions.toml`。
-3. CLI 把仓库内 `builtins/extensions/*` 追加为 workspace 来源，供开发模式覆盖安装目录。
+3. CLI 把仓库内 `builtins/extensions/*` 追加为开发来源，供开发模式覆盖安装目录。
 4. CLI 启动 Web dev server 和扩展前端 dev command。
 5. Extension Host 托管扩展后端 dev command。
 6. Server 暴露 runtime snapshot、事件流、诊断、日志和资源贡献接口。

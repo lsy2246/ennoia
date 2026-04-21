@@ -10,8 +10,8 @@ pub use logs::{insert_frontend_log, list_recent_logs};
 use ennoia_extension_host::{ExtensionRuntimeSnapshot, ResolvedExtensionSnapshot};
 use ennoia_kernel::{
     AgentConfig, ArtifactKind, ArtifactSpec, ConversationSpec, ConversationTopology, HandoffSpec,
-    LaneSpec, MessageRole, MessageSpec, OwnerKind, OwnerRef, RunSpec, RunStage, SpaceSpec,
-    TaskKind, TaskSpec, TaskStatus, UiPreference, WorkspaceProfile,
+    LaneSpec, MessageRole, MessageSpec, OwnerKind, OwnerRef, RunSpec, RunStage, RuntimeProfile,
+    SpaceSpec, TaskKind, TaskSpec, TaskStatus, UiPreference,
 };
 use sea_query::{Asterisk, Expr, Func, Iden, OnConflict, Query, SqliteQueryBuilder};
 use sea_query_binder::SqlxBinder;
@@ -25,10 +25,9 @@ enum Agents {
     Id,
     DisplayName,
     Kind,
-    WorkspaceMode,
     DefaultModel,
     SkillsDir,
-    WorkspaceDir,
+    WorkingDir,
     ArtifactsDir,
     CreatedAt,
     UpdatedAt,
@@ -48,8 +47,8 @@ enum Spaces {
 }
 
 #[derive(Iden)]
-enum WorkspaceProfileTbl {
-    #[iden = "workspace_profile"]
+enum RuntimeProfileTbl {
+    #[iden = "runtime_profile"]
     Table,
     Id,
     DisplayName,
@@ -363,10 +362,9 @@ pub async fn upsert_agents(pool: &SqlitePool, agents: &[AgentConfig]) -> Result<
                 Agents::Id,
                 Agents::DisplayName,
                 Agents::Kind,
-                Agents::WorkspaceMode,
                 Agents::DefaultModel,
                 Agents::SkillsDir,
-                Agents::WorkspaceDir,
+                Agents::WorkingDir,
                 Agents::ArtifactsDir,
                 Agents::CreatedAt,
                 Agents::UpdatedAt,
@@ -375,10 +373,9 @@ pub async fn upsert_agents(pool: &SqlitePool, agents: &[AgentConfig]) -> Result<
                 agent.id.clone().into(),
                 agent.display_name.clone().into(),
                 agent.kind.clone().into(),
-                agent.workspace_mode.clone().into(),
                 agent.default_model.clone().into(),
                 agent.skills_dir.clone().into(),
-                agent.workspace_dir.clone().into(),
+                agent.working_dir.clone().into(),
                 agent.artifacts_dir.clone().into(),
                 now.clone().into(),
                 now.clone().into(),
@@ -388,10 +385,9 @@ pub async fn upsert_agents(pool: &SqlitePool, agents: &[AgentConfig]) -> Result<
                     .update_columns([
                         Agents::DisplayName,
                         Agents::Kind,
-                        Agents::WorkspaceMode,
                         Agents::DefaultModel,
                         Agents::SkillsDir,
-                        Agents::WorkspaceDir,
+                        Agents::WorkingDir,
                         Agents::ArtifactsDir,
                         Agents::UpdatedAt,
                     ])
@@ -460,42 +456,40 @@ pub async fn upsert_extensions_runtime(
     Ok(())
 }
 
-pub async fn ensure_workspace_profile(
+pub async fn ensure_runtime_profile(
     pool: &SqlitePool,
-    profile: &WorkspaceProfile,
-) -> Result<WorkspaceProfile, sqlx::Error> {
-    if let Some(existing) = get_workspace_profile(pool).await? {
+    profile: &RuntimeProfile,
+) -> Result<RuntimeProfile, sqlx::Error> {
+    if let Some(existing) = get_runtime_profile(pool).await? {
         return Ok(existing);
     }
-    update_workspace_profile(pool, profile).await
+    update_runtime_profile(pool, profile).await
 }
 
-pub async fn get_workspace_profile(
-    pool: &SqlitePool,
-) -> Result<Option<WorkspaceProfile>, sqlx::Error> {
+pub async fn get_runtime_profile(pool: &SqlitePool) -> Result<Option<RuntimeProfile>, sqlx::Error> {
     let (sql, values) = Query::select()
         .columns([
-            WorkspaceProfileTbl::Id,
-            WorkspaceProfileTbl::DisplayName,
-            WorkspaceProfileTbl::Locale,
-            WorkspaceProfileTbl::TimeZone,
-            WorkspaceProfileTbl::DefaultSpaceId,
-            WorkspaceProfileTbl::CreatedAt,
-            WorkspaceProfileTbl::UpdatedAt,
+            RuntimeProfileTbl::Id,
+            RuntimeProfileTbl::DisplayName,
+            RuntimeProfileTbl::Locale,
+            RuntimeProfileTbl::TimeZone,
+            RuntimeProfileTbl::DefaultSpaceId,
+            RuntimeProfileTbl::CreatedAt,
+            RuntimeProfileTbl::UpdatedAt,
         ])
-        .from(WorkspaceProfileTbl::Table)
+        .from(RuntimeProfileTbl::Table)
         .limit(1)
         .build_sqlx(SqliteQueryBuilder);
 
     let row = sqlx::query_with(&sql, values).fetch_optional(pool).await?;
 
-    Ok(row.map(map_workspace_profile))
+    Ok(row.map(map_runtime_profile))
 }
 
-pub async fn update_workspace_profile(
+pub async fn update_runtime_profile(
     pool: &SqlitePool,
-    profile: &WorkspaceProfile,
-) -> Result<WorkspaceProfile, sqlx::Error> {
+    profile: &RuntimeProfile,
+) -> Result<RuntimeProfile, sqlx::Error> {
     let created_at = if profile.created_at.is_empty() {
         now_iso()
     } else {
@@ -508,15 +502,15 @@ pub async fn update_workspace_profile(
     };
 
     let (sql, values) = Query::insert()
-        .into_table(WorkspaceProfileTbl::Table)
+        .into_table(RuntimeProfileTbl::Table)
         .columns([
-            WorkspaceProfileTbl::Id,
-            WorkspaceProfileTbl::DisplayName,
-            WorkspaceProfileTbl::Locale,
-            WorkspaceProfileTbl::TimeZone,
-            WorkspaceProfileTbl::DefaultSpaceId,
-            WorkspaceProfileTbl::CreatedAt,
-            WorkspaceProfileTbl::UpdatedAt,
+            RuntimeProfileTbl::Id,
+            RuntimeProfileTbl::DisplayName,
+            RuntimeProfileTbl::Locale,
+            RuntimeProfileTbl::TimeZone,
+            RuntimeProfileTbl::DefaultSpaceId,
+            RuntimeProfileTbl::CreatedAt,
+            RuntimeProfileTbl::UpdatedAt,
         ])
         .values_panic([
             profile.id.clone().into(),
@@ -528,13 +522,13 @@ pub async fn update_workspace_profile(
             updated_at.clone().into(),
         ])
         .on_conflict(
-            OnConflict::column(WorkspaceProfileTbl::Id)
+            OnConflict::column(RuntimeProfileTbl::Id)
                 .update_columns([
-                    WorkspaceProfileTbl::DisplayName,
-                    WorkspaceProfileTbl::Locale,
-                    WorkspaceProfileTbl::TimeZone,
-                    WorkspaceProfileTbl::DefaultSpaceId,
-                    WorkspaceProfileTbl::UpdatedAt,
+                    RuntimeProfileTbl::DisplayName,
+                    RuntimeProfileTbl::Locale,
+                    RuntimeProfileTbl::TimeZone,
+                    RuntimeProfileTbl::DefaultSpaceId,
+                    RuntimeProfileTbl::UpdatedAt,
                 ])
                 .to_owned(),
         )
@@ -542,7 +536,7 @@ pub async fn update_workspace_profile(
 
     sqlx::query_with(&sql, values).execute(pool).await?;
 
-    Ok(WorkspaceProfile {
+    Ok(RuntimeProfile {
         created_at,
         updated_at,
         ..profile.clone()
@@ -1750,8 +1744,8 @@ async fn map_lane(
     })
 }
 
-fn map_workspace_profile(row: sqlx::sqlite::SqliteRow) -> WorkspaceProfile {
-    WorkspaceProfile {
+fn map_runtime_profile(row: sqlx::sqlite::SqliteRow) -> RuntimeProfile {
+    RuntimeProfile {
         id: row.get("id"),
         display_name: row.get("display_name"),
         locale: row.get("locale"),

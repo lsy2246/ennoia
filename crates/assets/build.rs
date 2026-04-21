@@ -4,12 +4,12 @@ use std::path::{Path, PathBuf};
 
 fn main() {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("manifest dir"));
-    let workspace_root = manifest_dir
+    let repo_root = manifest_dir
         .parent()
         .and_then(Path::parent)
-        .expect("workspace root");
-    let assets_root = workspace_root.join("assets");
-    let builtins_root = workspace_root.join("builtins");
+        .expect("repo root");
+    let assets_root = repo_root.join("assets");
+    let builtins_root = repo_root.join("builtins");
     let db_sql = assets_root.join("db.sql");
     let templates_root = assets_root.join("templates");
     let migrations_root = assets_root.join("migrations");

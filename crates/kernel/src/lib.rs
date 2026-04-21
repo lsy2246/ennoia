@@ -23,7 +23,7 @@ pub use decision::{Decision, DecisionSnapshot, NextAction};
 pub use domain::{
     AgentSpec, ArtifactKind, ArtifactSpec, ConversationSpec, ConversationTopology, HandoffSpec,
     LaneSpec, MessageRole, MessageSpec, OwnerKind, OwnerRef, ParticipantRef, ParticipantType,
-    RunSpec, SpaceSpec, TaskKind, TaskSpec, TaskStatus, WorkspaceProfile,
+    RunSpec, RuntimeProfile, SpaceSpec, TaskKind, TaskSpec, TaskStatus,
 };
 pub use extension::{
     CommandContribution, ContributionSet, ExtensionAssetsSpec, ExtensionBackendSpec,

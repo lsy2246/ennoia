@@ -4,7 +4,7 @@ import {
   fetchBootstrapStatus,
   fetchRuntimeProfile,
   type BootstrapState,
-  type WorkspaceProfile,
+  type RuntimeProfile,
 } from "@ennoia/api-client";
 
 type RuntimeStatus = "idle" | "checking" | "ready" | "error";
@@ -12,7 +12,7 @@ type RuntimeStatus = "idle" | "checking" | "ready" | "error";
 type RuntimeState = {
   status: RuntimeStatus;
   bootstrap: BootstrapState | null;
-  profile: WorkspaceProfile | null;
+  profile: RuntimeProfile | null;
   error: string | null;
   hydrate: () => Promise<void>;
 };

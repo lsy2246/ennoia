@@ -2,7 +2,7 @@
 
 ## 核心模型
 
-- `WorkspaceProfile`
+- `RuntimeProfile`
 - `ConversationSpec`
 - `LaneSpec`
 - `MessageSpec`
@@ -62,7 +62,7 @@
 - `skills`
 - `enabled`
 
-`kind`、`workspace_mode`、`default_model`、`skills_dir`、`workspace_dir`、`artifacts_dir` 仍作为运行时派生/内部字段存在，前端产品模型以显式字段为主。Agent 工作目录按 `agents/<agent_id>/workspace` 自动派生，不再依赖单独的工作区根路径配置。
+`kind`、`default_model`、`skills_dir`、`working_dir`、`artifacts_dir` 作为运行时派生/内部字段存在，前端产品模型以显式字段为主。Agent 工作目录按 `agents/<agent_id>/work` 自动派生。
 
 ## Skill 域
 
@@ -80,5 +80,5 @@
 
 ## 数据库快照
 
-- `assets/db.sql`：新库初始化入口，完整、可执行、自包含。
-- `assets/migrations/`：数据库结构演进脚本目录；当前为空，后续结构变更时新增 migration。
+- `assets/db.sql`：新库初始化入口，记录当前完整结构，完整、可执行、自包含。
+- `assets/migrations/`：已有库结构演进脚本目录；当前为空，后续结构变更时新增 migration。

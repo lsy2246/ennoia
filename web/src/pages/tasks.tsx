@@ -21,7 +21,7 @@ export function Tasks() {
   const [agents, setAgents] = useState<AgentProfile[]>([]);
   const [chats, setChats] = useState<ChatThread[]>([]);
   const [taskType, setTaskType] = useState<"ai_prompt" | "command">("ai_prompt");
-  const [ownerId, setOwnerId] = useState("workspace");
+  const [ownerId, setOwnerId] = useState("global");
   const [scheduleKind, setScheduleKind] = useState("once");
   const [scheduleValue, setScheduleValue] = useState("now");
   const [runAt, setRunAt] = useState("");
@@ -33,7 +33,7 @@ export function Tasks() {
   const [error, setError] = useState<string | null>(null);
 
   const ownerOptions = useMemo(
-    () => [{ id: "workspace", label: t("web.tasks.workspace_runner", "全局工作台") }, ...agents.map((agent) => ({ id: agent.id, label: agent.display_name }))],
+    () => [{ id: "global", label: t("web.tasks.global_runner", "全局运行器") }, ...agents.map((agent) => ({ id: agent.id, label: agent.display_name }))],
     [agents, t],
   );
 
@@ -71,7 +71,7 @@ export function Tasks() {
     setError(null);
     try {
       await createTaskJob({
-        owner_kind: ownerId === "workspace" ? "global" : "agent",
+        owner_kind: ownerId === "global" ? "global" : "agent",
         owner_id: ownerId,
         job_kind: taskType,
         schedule_kind: scheduleKind,

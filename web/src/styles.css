@@ -507,7 +507,7 @@ label {
   color: var(--text-muted);
 }
 
-.workspace-grid {
+.conversation-grid {
   display: grid;
   grid-template-columns: 280px minmax(0, 1fr) 300px;
   grid-template-rows: minmax(0, 1fr) 160px;
@@ -515,7 +515,7 @@ label {
   min-height: min(900px, calc(100vh - 120px));
 }
 
-.workspace-grid--catalog {
+.conversation-grid--catalog {
   grid-template-columns: minmax(320px, 0.9fr) minmax(0, 1.1fr);
   grid-template-rows: minmax(0, 1fr);
 }
@@ -1040,7 +1040,7 @@ label {
     border-bottom: 1px solid var(--line);
   }
 
-  .workspace-grid,
+  .conversation-grid,
   .resource-layout,
   .settings-grid,
   .extension-view,

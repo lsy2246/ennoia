@@ -9,10 +9,9 @@ CREATE TABLE IF NOT EXISTS agents (
   id TEXT PRIMARY KEY,
   display_name TEXT NOT NULL,
   kind TEXT NOT NULL,
-  workspace_mode TEXT NOT NULL,
   default_model TEXT NOT NULL,
   skills_dir TEXT NOT NULL,
-  workspace_dir TEXT NOT NULL,
+  working_dir TEXT NOT NULL,
   artifacts_dir TEXT NOT NULL,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
@@ -29,7 +28,7 @@ CREATE TABLE IF NOT EXISTS spaces (
   updated_at TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS workspace_profile (
+CREATE TABLE IF NOT EXISTS runtime_profile (
   id TEXT PRIMARY KEY,
   display_name TEXT NOT NULL,
   locale TEXT NOT NULL,

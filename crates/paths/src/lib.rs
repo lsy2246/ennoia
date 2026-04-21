@@ -127,8 +127,8 @@ impl RuntimePaths {
         self.agent_dir(agent_id).join("skills")
     }
 
-    pub fn agent_workspace_dir(&self, agent_id: &str) -> PathBuf {
-        self.agent_dir(agent_id).join("workspace")
+    pub fn agent_working_dir(&self, agent_id: &str) -> PathBuf {
+        self.agent_dir(agent_id).join("work")
     }
 
     pub fn agent_artifacts_dir(&self, agent_id: &str) -> PathBuf {
@@ -143,8 +143,8 @@ impl RuntimePaths {
         self.spaces_dir().join(space_id)
     }
 
-    pub fn space_workspace_dir(&self, space_id: &str) -> PathBuf {
-        self.space_dir(space_id).join("workspace")
+    pub fn space_working_dir(&self, space_id: &str) -> PathBuf {
+        self.space_dir(space_id).join("work")
     }
 
     pub fn space_artifacts_dir(&self, space_id: &str) -> PathBuf {

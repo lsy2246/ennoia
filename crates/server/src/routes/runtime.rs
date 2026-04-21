@@ -32,8 +32,8 @@ pub(super) async fn bootstrap_setup(
             .theme_id
             .unwrap_or_else(|| state.ui_config.default_theme.clone()),
     )?;
-    let profile = WorkspaceProfile {
-        id: "workspace".to_string(),
+    let profile = RuntimeProfile {
+        id: "runtime".to_string(),
         display_name: payload
             .display_name
             .unwrap_or_else(|| "Operator".to_string()),
@@ -47,7 +47,7 @@ pub(super) async fn bootstrap_setup(
         created_at: now.clone(),
         updated_at: now.clone(),
     };
-    let saved_profile = db::update_workspace_profile(&state.pool, &profile)
+    let saved_profile = db::update_runtime_profile(&state.pool, &profile)
         .await
         .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?;
 
@@ -86,11 +86,9 @@ pub(super) async fn bootstrap_setup(
     }))
 }
 
-pub(super) async fn runtime_profile(
-    State(state): State<AppState>,
-) -> Json<Option<WorkspaceProfile>> {
+pub(super) async fn runtime_profile(State(state): State<AppState>) -> Json<Option<RuntimeProfile>> {
     Json(
-        db::get_workspace_profile(&state.pool)
+        db::get_runtime_profile(&state.pool)
             .await
             .unwrap_or_default(),
     )
@@ -99,9 +97,9 @@ pub(super) async fn runtime_profile(
 pub(super) async fn runtime_profile_put(
     State(state): State<AppState>,
     Extension(request): Extension<RequestContext>,
-    Json(payload): Json<WorkspaceProfilePayload>,
-) -> ApiResult<WorkspaceProfile> {
-    let current = db::get_workspace_profile(&state.pool)
+    Json(payload): Json<RuntimeProfilePayload>,
+) -> ApiResult<RuntimeProfile> {
+    let current = db::get_runtime_profile(&state.pool)
         .await
         .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?;
     let now = now_iso();
@@ -109,11 +107,11 @@ pub(super) async fn runtime_profile_put(
         .locale
         .map(|locale| ensure_supported_locale(&state, &request, locale))
         .transpose()?;
-    let profile = WorkspaceProfile {
+    let profile = RuntimeProfile {
         id: current
             .as_ref()
             .map(|profile| profile.id.clone())
-            .unwrap_or_else(|| "workspace".to_string()),
+            .unwrap_or_else(|| "runtime".to_string()),
         display_name: payload
             .display_name
             .or_else(|| current.as_ref().map(|profile| profile.display_name.clone()))
@@ -136,7 +134,7 @@ pub(super) async fn runtime_profile_put(
             .unwrap_or_else(|| now.clone()),
         updated_at: now,
     };
-    let saved = db::update_workspace_profile(&state.pool, &profile)
+    let saved = db::update_runtime_profile(&state.pool, &profile)
         .await
         .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?;
     Ok(Json(saved))

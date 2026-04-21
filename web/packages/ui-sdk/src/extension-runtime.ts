@@ -7,7 +7,7 @@ export type ExtensionPageContribution = {
   extension_id: string;
   extension_kind: string;
   extension_version: string;
-  source_mode: "workspace" | "package";
+  source_mode: "dev" | "package";
   install_dir: string;
   page: {
     id: string;
@@ -22,7 +22,7 @@ export type ExtensionPanelContribution = {
   extension_id: string;
   extension_kind: string;
   extension_version: string;
-  source_mode: "workspace" | "package";
+  source_mode: "dev" | "package";
   install_dir: string;
   panel: {
     id: string;
@@ -39,7 +39,7 @@ export type ExtensionThemeContribution = {
   extension_id: string;
   extension_kind: string;
   extension_version: string;
-  source_mode: "workspace" | "package";
+  source_mode: "dev" | "package";
   install_dir: string;
   theme: {
     id: string;
@@ -56,7 +56,7 @@ export type ExtensionLocaleContribution = {
   extension_id: string;
   extension_kind: string;
   extension_version: string;
-  source_mode: "workspace" | "package";
+  source_mode: "dev" | "package";
   install_dir: string;
   locale: {
     locale: string;
@@ -86,7 +86,7 @@ export type ExtensionCommandContribution = {
   extension_id: string;
   extension_kind: string;
   extension_version: string;
-  source_mode: "workspace" | "package";
+  source_mode: "dev" | "package";
   install_dir: string;
   command: {
     id: string;
@@ -100,7 +100,7 @@ export type ExtensionProviderContribution = {
   extension_id: string;
   extension_kind: string;
   extension_version: string;
-  source_mode: "workspace" | "package";
+  source_mode: "dev" | "package";
   install_dir: string;
   provider: {
     id: string;
@@ -118,7 +118,7 @@ export type ExtensionHookContribution = {
   extension_id: string;
   extension_kind: string;
   extension_version: string;
-  source_mode: "workspace" | "package";
+  source_mode: "dev" | "package";
   install_dir: string;
   hook: {
     event: string;
@@ -154,7 +154,7 @@ export type ExtensionRuntimeExtension = {
   name: string;
   kind: string;
   version: string;
-  source_mode: "workspace" | "package";
+  source_mode: "dev" | "package";
   source_root: string;
   install_dir: string;
   generation: number;

@@ -6,7 +6,7 @@ version = "0.1.0"
 [source]
 mode = "package"
 root = "."
-workspace = false
+dev = false
 
 [frontend]
 runtime = "browser-esm"

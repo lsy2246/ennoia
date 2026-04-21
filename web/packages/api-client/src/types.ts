@@ -72,7 +72,7 @@ export type UiMessagesResponse = {
   bundles: UiMessageBundle[];
 };
 
-export type WorkspaceProfile = {
+export type RuntimeProfile = {
   id: string;
   display_name: string;
   locale: string;
@@ -93,7 +93,7 @@ export type AppConfig = {
 
 export type BootstrapSetupResponse = {
   bootstrap: BootstrapState;
-  profile: WorkspaceProfile;
+  profile: RuntimeProfile;
   preference: UiPreferenceRecord;
 };
 
@@ -108,10 +108,9 @@ export type AgentProfile = {
   skills: string[];
   enabled: boolean;
   kind?: string;
-  workspace_mode?: string;
   default_model?: string;
   skills_dir?: string;
-  workspace_dir?: string;
+  working_dir?: string;
   artifacts_dir?: string;
 };
 

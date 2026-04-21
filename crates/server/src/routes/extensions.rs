@@ -229,7 +229,7 @@ pub(super) async fn extension_attach(
 ) -> ApiResult<ResolvedExtensionSnapshot> {
     let item = state
         .extensions
-        .attach_workspace(&payload.path)
+        .attach_dev_source(&payload.path)
         .map_err(|error| scoped(ApiError::bad_request(error.to_string()), &request))?;
     let snapshot = state.extensions.snapshot();
     let _ = db::upsert_extensions_runtime(&state.pool, &snapshot).await;
@@ -243,7 +243,7 @@ pub(super) async fn extension_detach(
 ) -> Result<StatusCode, ApiError> {
     let detached = state
         .extensions
-        .detach_workspace(&extension_id)
+        .detach_dev_source(&extension_id)
         .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?;
     if !detached {
         return Err(scoped(

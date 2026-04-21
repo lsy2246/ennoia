@@ -38,7 +38,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         Some("dev") => {
             let paths = RuntimePaths::resolve(args.get(2).map(String::as_str));
             init_home_template(&paths)?;
-            auto_attach_workspace_extensions(&paths)?;
+            auto_attach_dev_extensions(&paths)?;
             let server_config: ServerConfig = read_toml_or_default(&paths.server_config_file())?;
             ensure_port_available(server_config.port, "API")?;
             ensure_port_available(WEB_DEV_PORT, "Web")?;
@@ -47,7 +47,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         Some("start") | Some("serve") => {
             let paths = RuntimePaths::resolve(args.get(2).map(String::as_str));
             init_home_template(&paths)?;
-            auto_attach_workspace_extensions(&paths)?;
+            auto_attach_dev_extensions(&paths)?;
             run_server(paths.home()).await?;
         }
         Some("ext") => {
@@ -111,7 +111,7 @@ fn print_default_config() -> Result<(), Box<dyn std::error::Error + Send + Sync>
 async fn memory_command(args: &[String]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let paths = RuntimePaths::resolve(None);
     init_home_template(&paths)?;
-    auto_attach_workspace_extensions(&paths)?;
+    auto_attach_dev_extensions(&paths)?;
     let state = bootstrap_app_state(paths.home()).await?;
 
     let sub = args.first().map(String::as_str).unwrap_or("list");
@@ -258,12 +258,12 @@ async fn extension_command(
         }
         "attach" => {
             let path = args.get(1).ok_or("usage: ennoia ext attach <path>")?;
-            let attached = state.extensions.attach_workspace(path)?;
+            let attached = state.extensions.attach_dev_source(path)?;
             println!("{}", serde_json::to_string_pretty(&attached)?);
         }
         "detach" => {
             let id = args.get(1).ok_or("usage: ennoia ext detach <id>")?;
-            let detached = state.extensions.detach_workspace(id)?;
+            let detached = state.extensions.detach_dev_source(id)?;
             println!("{}", if detached { "detached" } else { "not-found" });
         }
         "reload" => {
@@ -595,14 +595,14 @@ impl DevProcessGroup {
     }
 
     fn start_extension_frontends(&mut self, paths: &RuntimePaths) -> io::Result<()> {
-        for workspace in attached_workspace_roots(paths)? {
-            let Some(descriptor_path) = descriptor_path(&workspace) else {
+        for source_root in attached_dev_source_roots(paths)? {
+            let Some(descriptor_path) = descriptor_path(&source_root) else {
                 continue;
             };
             let contents = fs::read_to_string(descriptor_path)?;
             let manifest: ExtensionManifest =
                 toml::from_str(&contents).map_err(io::Error::other)?;
-            if manifest.source.mode != ExtensionSourceMode::Workspace {
+            if manifest.source.mode != ExtensionSourceMode::Dev {
                 continue;
             }
             let Some(dev_command) = manifest.frontend.dev_command.clone() else {
@@ -618,7 +618,7 @@ impl DevProcessGroup {
             let log_path = paths
                 .extensions_logs_dir()
                 .join(format!("{}.frontend.log", manifest.id));
-            let command = shell_command(&dev_command, &workspace);
+            let command = shell_command(&dev_command, &source_root);
             self.spawn(&format!("{} frontend", manifest.id), command, &log_path)?;
         }
         Ok(())
@@ -812,13 +812,13 @@ fn ensure_port_available(port: u16, label: &str) -> io::Result<()> {
         })
 }
 
-fn attached_workspace_roots(paths: &RuntimePaths) -> io::Result<Vec<PathBuf>> {
+fn attached_dev_source_roots(paths: &RuntimePaths) -> io::Result<Vec<PathBuf>> {
     let mut roots = Vec::new();
     let registry = read_extension_registry(paths)?;
     for entry in registry
         .extensions
         .into_iter()
-        .filter(|item| item.source == "workspace" && item.enabled && !item.removed)
+        .filter(|item| item.source == "dev" && item.enabled && !item.removed)
     {
         roots.push(PathBuf::from(entry.path));
     }
@@ -837,7 +837,7 @@ fn descriptor_path(root: &Path) -> Option<PathBuf> {
     .find(|path| path.exists())
 }
 
-fn auto_attach_workspace_extensions(paths: &RuntimePaths) -> io::Result<()> {
+fn auto_attach_dev_extensions(paths: &RuntimePaths) -> io::Result<()> {
     let builtins_dir = env::current_dir()?.join("builtins").join("extensions");
     if !builtins_dir.exists() {
         return Ok(());
@@ -864,13 +864,13 @@ fn auto_attach_workspace_extensions(paths: &RuntimePaths) -> io::Result<()> {
             || registry
                 .extensions
                 .iter()
-                .any(|item| item.id == id && item.source == "workspace")
+                .any(|item| item.id == id && item.source == "dev")
         {
             continue;
         }
         registry.extensions.push(ExtensionRegistryEntry {
             id,
-            source: "workspace".to_string(),
+            source: "dev".to_string(),
             enabled: true,
             removed: false,
             path: normalized,

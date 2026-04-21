@@ -70,7 +70,7 @@ export function Extensions() {
         <div className="page-heading">
           <span>{t("web.extensions.eyebrow", "Extensions")}</span>
           <h1>{t("web.extensions.title", "扩展包是系统插件，不是技能。")}</h1>
-          <p>{t("web.extensions.description", "这里按扩展包查看状态、贡献能力、重载和日志。来源目录只显示相对工作区路径。")}</p>
+          <p>{t("web.extensions.description", "这里按扩展包查看状态、贡献能力、重载和日志。来源目录只显示相对实例路径。")}</p>
         </div>
         {error ? <div className="error">{error}</div> : null}
         <button type="button" className="secondary" onClick={() => void refresh()}>{t("web.action.rescan", "重新扫描")}</button>

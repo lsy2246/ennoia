@@ -350,10 +350,10 @@ fn normalize_agent_config(paths: &RuntimePaths, agent: &mut AgentConfig) {
     if agent.reasoning_effort.is_empty() {
         agent.reasoning_effort = DEFAULT_REASONING_EFFORT.to_string();
     }
-    if !agent.workspace_dir.is_empty() {
-        agent.workspace_dir = paths.display_for_user(paths.expand_home_token(&agent.workspace_dir));
+    if !agent.working_dir.is_empty() {
+        agent.working_dir = paths.display_for_user(paths.expand_home_token(&agent.working_dir));
     } else {
-        agent.workspace_dir = paths.display_for_user(paths.agent_workspace_dir(&agent.id));
+        agent.working_dir = paths.display_for_user(paths.agent_working_dir(&agent.id));
     }
     if !agent.skills_dir.is_empty() {
         agent.skills_dir = paths.display_for_user(paths.expand_home_token(&agent.skills_dir));

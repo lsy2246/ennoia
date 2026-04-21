@@ -10,7 +10,7 @@ import { useRuntimeStore } from "@/stores/runtime";
 import { useUiHelpers, useUiStore } from "@/stores/ui";
 import { AgentEditorView } from "@/views/agents/Editor";
 import { ApiChannelEditorView } from "@/views/providers/Editor";
-import { SessionView } from "@/views/workspace/Session";
+import { SessionView } from "@/views/conversations/Session";
 import { useWorkbenchStore, type WorkbenchViewDescriptor } from "@/stores/workbench";
 
 type NavItem = {
@@ -27,7 +27,7 @@ type ResourcePanelParams = {
 };
 
 const BUILTIN_NAV = [
-  { id: "workspace", href: "/workspace", icon: "⌘", labelKey: "web.nav.workspace", fallback: "会话", hintKey: "web.nav.workspace_hint", hint: "统一发起 direct 和 group session" },
+  { id: "conversations", href: "/conversations", icon: "⌘", labelKey: "web.nav.conversations", fallback: "会话", hintKey: "web.nav.conversations_hint", hint: "统一发起 direct 和 group session" },
   { id: "agents", href: "/agents", icon: "A", labelKey: "web.nav.agents", fallback: "Agents", hintKey: "web.nav.agents_hint", hint: "多开 Agent 编辑视图" },
   { id: "skills", href: "/skills", icon: "S", labelKey: "web.nav.skills", fallback: "技能", hintKey: "web.nav.skills_hint", hint: "发现并分配技能给 Agent" },
   { id: "channels", href: "/upstreams", icon: "C", labelKey: "web.nav.channels", fallback: "API 上游渠道", hintKey: "web.nav.channels_hint", hint: "管理渠道实例与接口类型" },
@@ -262,7 +262,7 @@ export function App() {
           type="button"
           className="activity-brand"
           title="Ennoia Web"
-          onClick={() => void navigate({ to: "/workspace" })}
+          onClick={() => void navigate({ to: "/conversations" })}
         >
           E
         </button>

@@ -37,9 +37,9 @@ impl OwnerRef {
     }
 }
 
-/// WorkspaceProfile is the single local operator profile for this runtime instance.
+/// RuntimeProfile is the single local operator profile for this runtime instance.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct WorkspaceProfile {
+pub struct RuntimeProfile {
     pub id: String,
     pub display_name: String,
     pub locale: String,

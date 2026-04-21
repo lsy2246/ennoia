@@ -235,7 +235,7 @@ impl ExtensionRuntime {
         Ok(self.get(extension_id))
     }
 
-    pub fn attach_workspace(
+    pub fn attach_dev_source(
         &self,
         path: impl AsRef<Path>,
     ) -> io::Result<ResolvedExtensionSnapshot> {
@@ -244,10 +244,10 @@ impl ExtensionRuntime {
         let mut registry = read_registry_file(&self.config.registry_file)?;
         registry
             .extensions
-            .retain(|item| !(item.id == manifest.id && item.source == "workspace"));
+            .retain(|item| !(item.id == manifest.id && item.source == "dev"));
         registry.extensions.push(ExtensionRegistryEntry {
             id: manifest.id.clone(),
-            source: "workspace".to_string(),
+            source: "dev".to_string(),
             enabled: true,
             removed: false,
             path: normalize_display_path(&path),
@@ -255,7 +255,7 @@ impl ExtensionRuntime {
         sort_registry_entries(&mut registry.extensions);
         write_registry_file(&self.config.registry_file, &registry)?;
 
-        self.refresh_from_disk(&format!("workspace {} attached", manifest.id))?;
+        self.refresh_from_disk(&format!("dev source {} attached", manifest.id))?;
         self.get(&manifest.id).ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::NotFound,
@@ -264,19 +264,19 @@ impl ExtensionRuntime {
         })
     }
 
-    pub fn detach_workspace(&self, extension_id: &str) -> io::Result<bool> {
+    pub fn detach_dev_source(&self, extension_id: &str) -> io::Result<bool> {
         let mut registry = read_registry_file(&self.config.registry_file)?;
         let original_len = registry.extensions.len();
         registry
             .extensions
-            .retain(|item| !(item.id == extension_id && item.source == "workspace"));
+            .retain(|item| !(item.id == extension_id && item.source == "dev"));
         if registry.extensions.len() == original_len {
             return Ok(false);
         }
 
         sort_registry_entries(&mut registry.extensions);
         write_registry_file(&self.config.registry_file, &registry)?;
-        let _ = self.refresh_from_disk(&format!("workspace {extension_id} detached"))?;
+        let _ = self.refresh_from_disk(&format!("dev source {extension_id} detached"))?;
         Ok(true)
     }
 
@@ -646,7 +646,7 @@ impl Drop for ExtensionRuntimeState {
 
 fn source_priority(extension: &ResolvedExtensionSnapshot) -> u8 {
     match extension.source_mode {
-        ExtensionSourceMode::Workspace => 2,
+        ExtensionSourceMode::Dev => 2,
         ExtensionSourceMode::Package => 1,
     }
 }
@@ -761,7 +761,7 @@ fn resolve_frontend(
     frontend: &ExtensionFrontendSpec,
     manifest: &ExtensionManifest,
 ) -> io::Result<Option<ResolvedFrontendEntry>> {
-    if *source_mode == ExtensionSourceMode::Workspace {
+    if *source_mode == ExtensionSourceMode::Dev {
         if let Some(dev_url) = frontend.dev_url.clone() {
             return Ok(Some(ResolvedFrontendEntry {
                 kind: "url".to_string(),
@@ -799,7 +799,7 @@ fn resolve_backend(
     source_mode: &ExtensionSourceMode,
     manifest: &ExtensionManifest,
 ) -> io::Result<Option<ResolvedBackendEntry>> {
-    if *source_mode == ExtensionSourceMode::Workspace {
+    if *source_mode == ExtensionSourceMode::Dev {
         if let Some(command) = manifest.backend.dev_command.clone() {
             let entry = manifest
                 .backend
@@ -945,7 +945,7 @@ pub fn write_registry_file(path: &Path, file: &ExtensionRegistryFile) -> io::Res
 
 fn registry_source_mode(entry: &ExtensionRegistryEntry) -> ExtensionSourceMode {
     match entry.source.as_str() {
-        "workspace" => ExtensionSourceMode::Workspace,
+        "dev" => ExtensionSourceMode::Dev,
         _ => ExtensionSourceMode::Package,
     }
 }
@@ -1060,7 +1060,7 @@ mod tests {
             &ExtensionRegistryFile {
                 extensions: vec![ExtensionRegistryEntry {
                     id: "observatory".to_string(),
-                    source: "workspace".to_string(),
+                    source: "dev".to_string(),
                     enabled: true,
                     removed: false,
                     path: normalize_display_path(&ext_dir),
@@ -1084,7 +1084,7 @@ mod tests {
     }
 
     #[test]
-    fn attach_workspace_updates_runtime_snapshot() {
+    fn attach_dev_source_updates_runtime_snapshot() {
         let root = unique_test_dir("runtime-attach");
         let ext_dir = root.join("foo");
         fs::create_dir_all(&ext_dir).expect("create extension dir");
@@ -1100,8 +1100,8 @@ mod tests {
         };
         let runtime = ExtensionRuntime::bootstrap(config).expect("bootstrap runtime");
         let attached = runtime
-            .attach_workspace(&ext_dir)
-            .expect("attach workspace");
+            .attach_dev_source(&ext_dir)
+            .expect("attach dev source");
         assert_eq!(attached.id, "foo");
         assert_eq!(runtime.snapshot().extensions.len(), 1);
 
@@ -1121,9 +1121,9 @@ kind = "extension"
 version = "0.1.0"
 
 [source]
-mode = "workspace"
+mode = "dev"
 root = "."
-workspace = true
+dev = true
 
 [frontend]
 runtime = "browser-esm"

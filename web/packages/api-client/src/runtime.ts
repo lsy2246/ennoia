@@ -1,5 +1,5 @@
 ﻿import { fetchJson } from "./core";
-import type { AppConfig, BootstrapSetupResponse, BootstrapState, UiMessagesResponse, UiPreferenceRecord, UiRuntime, WorkspaceProfile } from "./types";
+import type { AppConfig, BootstrapSetupResponse, BootstrapState, RuntimeProfile, UiMessagesResponse, UiPreferenceRecord, UiRuntime } from "./types";
 
 export async function fetchBootstrapStatus() {
   return fetchJson<BootstrapState>("/api/v1/bootstrap/status");
@@ -34,7 +34,7 @@ export async function fetchUiMessages(locale: string, namespaces: string[] = [])
 }
 
 export async function fetchRuntimeProfile() {
-  return fetchJson<WorkspaceProfile | null>("/api/v1/runtime/profile");
+  return fetchJson<RuntimeProfile | null>("/api/v1/runtime/profile");
 }
 
 export async function saveRuntimeProfile(payload: {
@@ -43,7 +43,7 @@ export async function saveRuntimeProfile(payload: {
   time_zone?: string | null;
   default_space_id?: string | null;
 }) {
-  return fetchJson<WorkspaceProfile>("/api/v1/runtime/profile", {
+  return fetchJson<RuntimeProfile>("/api/v1/runtime/profile", {
     method: "PUT",
     body: JSON.stringify(payload),
   });

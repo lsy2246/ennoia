@@ -11,7 +11,7 @@ import {
 import { useUiHelpers } from "@/stores/ui";
 import { useWorkbenchStore } from "@/stores/workbench";
 
-export function Workspace() {
+export function Conversations() {
   const { t } = useUiHelpers();
   const openView = useWorkbenchStore((state) => state.openView);
   const [agents, setAgents] = useState<AgentProfile[]>([]);
@@ -50,7 +50,7 @@ export function Workspace() {
   async function handleCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (selectedAgentIds.length === 0) {
-      setError(t("web.workspace.agent_required", "请至少选择 1 个 Agent。1 个 Agent 会创建 direct，2 个及以上会创建 group。"));
+      setError(t("web.conversations.agent_required", "请至少选择 1 个 Agent。1 个 Agent 会创建 direct，2 个及以上会创建 group。"));
       return;
     }
     setBusy(true);
@@ -90,19 +90,19 @@ export function Workspace() {
   }
 
   return (
-    <div className="workspace-grid workspace-grid--catalog">
+    <div className="conversation-grid conversation-grid--catalog">
       <section className="work-panel">
         <div className="page-heading">
-          <span>{t("web.workspace.hero_eyebrow", "Ennoia Workspace")}</span>
-          <h1>{t("web.workspace.hero_title", "统一从这里发起 direct 和 group conversation。")}</h1>
-          <p>{t("web.workspace.hero_body", "选中 1 个 Agent 就是 direct，选中 2 个及以上就是 group。每个 Conversation 都有唯一 ID。")}</p>
+          <span>{t("web.conversations.hero_eyebrow", "Conversations")}</span>
+          <h1>{t("web.conversations.hero_title", "统一从这里发起 direct 和 group conversation。")}</h1>
+          <p>{t("web.conversations.hero_body", "选中 1 个 Agent 就是 direct，选中 2 个及以上就是 group。每个 Conversation 都有唯一 ID。")}</p>
         </div>
         {error ? <div className="error">{error}</div> : null}
         <form className="stack" onSubmit={handleCreate}>
           <input
             value={title}
             onChange={(event) => setTitle(event.target.value)}
-            placeholder={t("web.workspace.title_placeholder", "可选：Conversation 标题")}
+            placeholder={t("web.conversations.title_placeholder", "可选：Conversation 标题")}
           />
           <div className="chip-grid">
             {agents.map((agent) => (
@@ -119,8 +119,8 @@ export function Workspace() {
           <div className="button-row">
             <button type="submit" disabled={busy}>
               {selectedAgentIds.length <= 1
-                ? t("web.workspace.create_direct", "创建 direct")
-                : t("web.workspace.create_group", "创建 group")}
+                ? t("web.conversations.create_direct", "创建 direct")
+                : t("web.conversations.create_group", "创建 group")}
             </button>
             <button type="button" className="secondary" onClick={() => void refresh()}>
               {t("web.action.refresh", "刷新")}
@@ -130,14 +130,14 @@ export function Workspace() {
       </section>
 
       <section className="work-panel">
-        <div className="panel-title">{t("web.workspace.panel.conversations", "Conversations")}</div>
+        <div className="panel-title">{t("web.conversations.panel.conversations", "Conversations")}</div>
         <div className="stack">
           {sessions.map((conversation) => (
             <article key={conversation.id} className="session-card">
               <div>
                 <strong>{conversation.title}</strong>
                 <span>
-                  {conversation.topology === "direct" ? t("web.workspace.kind_direct", "Direct") : t("web.workspace.kind_group", "Group")}
+                  {conversation.topology === "direct" ? t("web.conversations.kind_direct", "Direct") : t("web.conversations.kind_group", "Group")}
                   {" · "}
                   {conversation.id}
                 </span>

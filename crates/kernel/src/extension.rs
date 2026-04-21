@@ -109,12 +109,12 @@ pub struct ContributionSet {
     pub hooks: Vec<HookContribution>,
 }
 
-/// ExtensionSourceMode identifies whether an extension comes from a workspace
+/// ExtensionSourceMode identifies whether an extension comes from a development
 /// source tree or from a packaged install directory.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ExtensionSourceMode {
-    Workspace,
+    Dev,
     Package,
 }
 
@@ -144,7 +144,7 @@ pub struct ExtensionSourceSpec {
     #[serde(default)]
     pub root: Option<String>,
     #[serde(default)]
-    pub workspace: bool,
+    pub dev: bool,
 }
 
 /// ExtensionFrontendSpec describes the logical frontend entry.
@@ -240,8 +240,8 @@ impl ExtensionCapabilities {
     }
 }
 
-/// ExtensionManifest is the canonical descriptor parsed from disk. It supports
-/// both the old manifest fields and the new workspace/package runtime fields.
+/// ExtensionManifest is the canonical descriptor parsed from disk and used by
+/// installed packages, built-in packages and development sources.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ExtensionManifest {
     pub id: String,

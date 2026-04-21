@@ -98,14 +98,12 @@ pub struct AgentConfig {
     pub enabled: bool,
     #[serde(default = "default_agent_kind")]
     pub kind: String,
-    #[serde(default = "default_workspace_mode")]
-    pub workspace_mode: String,
     #[serde(default)]
     pub default_model: String,
     #[serde(default)]
     pub skills_dir: String,
     #[serde(default)]
-    pub workspace_dir: String,
+    pub working_dir: String,
     #[serde(default)]
     pub artifacts_dir: String,
 }
@@ -211,10 +209,6 @@ impl Default for ProviderModelDiscoveryConfig {
 
 fn default_agent_kind() -> String {
     "agent".to_string()
-}
-
-fn default_workspace_mode() -> String {
-    "private".to_string()
 }
 
 fn default_reasoning_effort() -> String {

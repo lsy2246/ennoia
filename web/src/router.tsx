@@ -10,7 +10,7 @@ import { Settings } from "@/pages/settings";
 import { Skills } from "@/pages/skills";
 import { Tasks } from "@/pages/tasks";
 import { Welcome } from "@/pages/welcome";
-import { Workspace } from "@/pages/workspace";
+import { Conversations } from "@/pages/conversations";
 import { ExtensionPageView } from "@/views/extensions/Page";
 import { useRuntimeStore } from "@/stores/runtime";
 
@@ -21,10 +21,10 @@ function requireInitialized() {
   }
 }
 
-function redirectToWorkspace() {
+function redirectToConversations() {
   const { bootstrap } = useRuntimeStore.getState();
   if (bootstrap?.is_initialized) {
-    throw redirect({ to: "/workspace" });
+    throw redirect({ to: "/conversations" });
   }
 }
 
@@ -34,7 +34,7 @@ const welcomeRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/welcome",
   component: Welcome,
-  beforeLoad: redirectToWorkspace,
+  beforeLoad: redirectToConversations,
 });
 
 const shellRoute = createRoute({
@@ -48,14 +48,14 @@ const homeRoute = createRoute({
   getParentRoute: () => shellRoute,
   path: "/",
   beforeLoad: () => {
-    throw redirect({ to: "/workspace" });
+    throw redirect({ to: "/conversations" });
   },
 });
 
-const workspaceRoute = createRoute({
+const conversationsRoute = createRoute({
   getParentRoute: () => shellRoute,
-  path: "/workspace",
-  component: Workspace,
+  path: "/conversations",
+  component: Conversations,
 });
 
 const agentsRoute = createRoute({
@@ -116,7 +116,7 @@ const routeTree = rootRoute.addChildren([
   welcomeRoute,
   shellRoute.addChildren([
     homeRoute,
-    workspaceRoute,
+    conversationsRoute,
     agentsRoute,
     skillsRoute,
     providersRoute,

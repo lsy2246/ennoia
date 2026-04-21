@@ -163,7 +163,7 @@
 ## 9. 扩展与热加载约定
 
 - 扩展扫描、attach、reload、restart 必须统一走 Extension Runtime
-- Workspace 扩展与 package 扩展共用统一描述协议
+- 开发来源扩展与已安装扩展共用统一描述协议
 - 前端 dev server、扩展前端 dev command、扩展后端 dev command 的行为必须纳入一键开发链路
 - 热加载相关问题必须以真实启动链路验证
 

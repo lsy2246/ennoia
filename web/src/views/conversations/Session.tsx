@@ -121,7 +121,7 @@ export function SessionView({ sessionId }: { sessionId: string }) {
           </div>
           <div className="message-stream">
             {detail.messages.length === 0 ? (
-              <div className="empty-card">{t("web.workspace.empty_messages", "还没有消息。在输入框里用 @agent_id 定向某个 Agent。")}</div>
+              <div className="empty-card">{t("web.conversations.empty_messages", "还没有消息。在输入框里用 @agent_id 定向某个 Agent。")}</div>
             ) : (
               detail.messages.map((message) => (
                 <article
@@ -142,10 +142,10 @@ export function SessionView({ sessionId }: { sessionId: string }) {
               value={draft}
               onChange={(event) => setDraft(event.target.value)}
               rows={4}
-              placeholder={t("web.workspace.composer_placeholder", "输入消息，使用 @agent_id 定向；不写 @ 时默认发给当前 Conversation 的 Agent 集合。")}
+              placeholder={t("web.conversations.composer_placeholder", "输入消息，使用 @agent_id 定向；不写 @ 时默认发给当前 Conversation 的 Agent 集合。")}
             />
             <button type="submit" disabled={busy || !draft.trim()}>
-              {t("web.workspace.send", "发送")}
+              {t("web.conversations.send", "发送")}
             </button>
           </form>
         </>

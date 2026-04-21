@@ -32,7 +32,7 @@ export function Welcome() {
 
   useEffect(() => {
     if (bootstrap?.is_initialized) {
-      navigate({ to: "/workspace" });
+      navigate({ to: "/conversations" });
     }
   }, [bootstrap, navigate]);
 
@@ -67,7 +67,7 @@ export function Welcome() {
         theme_id: themeId,
       });
       await Promise.all([hydrateRuntime(), hydrateUi()]);
-      navigate({ to: "/workspace" });
+      navigate({ to: "/conversations" });
     } catch (err) {
       setError(String(err));
     } finally {
@@ -85,7 +85,7 @@ export function Welcome() {
         <p className="onboarding-hero__lead">
           {t(
             "settings.bootstrap.hero_lead",
-            "Ennoia 现在是单操作者、多 Agent 的本地工作台。这里不需要账号，初始化完成后会直接进入工作区。",
+            "Ennoia 现在是单操作者、多 Agent 的本地实例。这里不需要账号，初始化完成后会直接进入会话。",
           )}
         </p>
       </section>
@@ -148,7 +148,7 @@ export function Welcome() {
           <button type="submit" disabled={busy}>
             {busy
               ? t("settings.bootstrap.submitting", "正在初始化…")
-              : t("settings.bootstrap.submit", "完成初始化并进入工作台")}
+              : t("settings.bootstrap.submit", "完成初始化并进入会话")}
           </button>
         </div>
       </form>

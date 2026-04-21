@@ -25,8 +25,8 @@ use ennoia_kernel::{
     AgentConfig, AppConfig, ArtifactKind, ArtifactSpec, BootstrapState, ConfigChangeRecord,
     ConfigEntry, ConfigStore, ConversationSpec, ConversationTopology, ExtensionDiagnostic,
     ExtensionRuntimeEvent, HandoffSpec, LaneSpec, LocalizedText, MessageRole, MessageSpec,
-    OwnerKind, OwnerRef, ProviderConfig, RunSpec, SkillConfig, SystemConfig, TaskSpec, UiConfig,
-    UiPreference, UiPreferenceRecord, WorkspaceProfile, ALL_CONFIG_KEYS, CONFIG_KEY_BOOTSTRAP,
+    OwnerKind, OwnerRef, ProviderConfig, RunSpec, RuntimeProfile, SkillConfig, SystemConfig,
+    TaskSpec, UiConfig, UiPreference, UiPreferenceRecord, ALL_CONFIG_KEYS, CONFIG_KEY_BOOTSTRAP,
 };
 use ennoia_memory::{
     AssembleRequest, ContextView, EpisodeKind, EpisodeRequest, MemoryKind, MemoryRecord,
@@ -357,12 +357,12 @@ struct BootstrapSetupPayload {
 #[derive(Debug, Serialize)]
 struct BootstrapSetupResponse {
     bootstrap: BootstrapState,
-    profile: WorkspaceProfile,
+    profile: RuntimeProfile,
     preference: UiPreferenceRecord,
 }
 
 #[derive(Debug, Deserialize)]
-struct WorkspaceProfilePayload {
+struct RuntimeProfilePayload {
     #[serde(default)]
     display_name: Option<String>,
     #[serde(default)]
@@ -960,7 +960,7 @@ fn resolve_owner(
             if let Some(space_id) = space_id {
                 OwnerRef::space(space_id.to_string())
             } else {
-                OwnerRef::global("workspace")
+                OwnerRef::global("global")
             }
         }
     }

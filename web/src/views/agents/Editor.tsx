@@ -239,14 +239,14 @@ export function AgentEditorView({
         </div>
       </div>
       <div className="details-panel">
-        <div className="panel-title">{t("web.agents.derived_workspace", "派生工作区")}</div>
+        <div className="panel-title">{t("web.agents.working_dir", "工作目录")}</div>
         <div className="kv-list">
-          <span>{t("web.agents.derived_workspace", "派生工作区")}</span>
-          <strong>{formatRelativePath(form.workspace_dir || "")}</strong>
+          <span>{t("web.agents.working_dir", "工作目录")}</span>
+          <strong>{formatRelativePath(form.working_dir || "")}</strong>
           <span>{t("web.agents.skills", "技能")}</span>
           <strong>{formatRelativePath(form.skills_dir || "")}</strong>
         </div>
-        <p className="helper-text">{t("web.agents.derived_workspace_help", "Agent 工作目录自动派生到 agents/{agent_id}/workspace，无需单独配置。")}</p>
+        <p className="helper-text">{t("web.agents.working_dir_help", "Agent 工作目录自动派生到 agents/{agent_id}/work，无需单独配置。")}</p>
       </div>
       <div className="button-row">
         <button type="submit" disabled={busy}>

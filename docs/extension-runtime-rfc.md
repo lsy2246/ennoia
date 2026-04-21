@@ -1,6 +1,6 @@
 ﻿# Extension Runtime RFC
 
-本文档记录当前 Extension Runtime 的已落地约定。历史设计中的 `global/extensions`、`packages/extensions`、`extensions/attached/workspaces.toml` 和 Skill/Extension 混合模型已经废弃。
+本文档记录当前 Extension Runtime 的已落地约定。历史设计中的 `global/extensions`、`packages/extensions`、旧附加来源注册表和 Skill/Extension 混合模型已经废弃。
 
 ## 当前目录
 
@@ -29,7 +29,7 @@ Extension descriptor 包含：
 
 1. CLI 初始化运行目录和默认配置。
 2. CLI 同步内置扩展到 `<ENNOIA_HOME>/extensions/*`，并写入 `config/extensions.toml`。
-3. 开发模式下 CLI 把仓库内 `builtins/extensions/*` 追加为 workspace 来源。
+3. 开发模式下 CLI 把仓库内 `builtins/extensions/*` 追加为开发来源。
 4. Extension Host 扫描 `config/extensions.toml` 中启用且未移除的扩展来源。
 5. Extension Host 启动后端 dev command 并采集事件。
 6. Server 暴露 runtime snapshot、事件、诊断、日志和资源贡献接口。
