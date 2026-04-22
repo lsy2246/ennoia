@@ -32,7 +32,7 @@ export function Welcome() {
 
   useEffect(() => {
     if (bootstrap?.is_initialized) {
-      navigate({ to: "/conversations" });
+      navigate({ to: "/" });
     }
   }, [bootstrap, navigate]);
 
@@ -67,7 +67,7 @@ export function Welcome() {
         theme_id: themeId,
       });
       await Promise.all([hydrateRuntime(), hydrateUi()]);
-      navigate({ to: "/conversations" });
+      navigate({ to: "/" });
     } catch (err) {
       setError(String(err));
     } finally {

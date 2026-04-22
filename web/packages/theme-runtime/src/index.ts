@@ -36,6 +36,61 @@ const WEB_THEME_VARIABLE_BRIDGE: Record<string, string> = {
   "--text-muted": "--color-text-muted",
   "--accent": "--color-primary",
   "--accent-soft": "--color-primary",
+  "--dockview-header-surface": "--color-surface",
+  "--dockview-header-border": "--color-border",
+  "--dockview-tab-surface": "--color-surface",
+  "--dockview-tab-hover": "--color-surface-2",
+  "--dockview-tab-border": "--color-border",
+  "--dockview-tab-accent": "--color-primary",
+  "--dockview-drop-surface": "--color-surface-2",
+  "--dockview-splitter-line": "--color-border",
+  "--dockview-splitter-track": "--color-border",
+  "--dockview-splitter-hover": "--color-primary",
+  "--dockview-empty-surface": "--color-surface",
+  "--dockview-empty-border": "--color-border",
+  "--dockview-empty-accent": "--color-primary",
+  "--dockview-empty-card": "--color-surface",
+  "--dockview-empty-card-hover": "--color-surface-2",
+};
+
+const LIGHT_DOCKVIEW_TOKENS = {
+  "--dockview-header-surface": "rgba(255, 255, 255, 0.84)",
+  "--dockview-header-border": "rgba(0, 0, 0, 0.08)",
+  "--dockview-tab-surface": "rgba(255, 255, 255, 0.96)",
+  "--dockview-tab-hover": "rgba(0, 0, 0, 0.04)",
+  "--dockview-tab-border": "rgba(0, 0, 0, 0.08)",
+  "--dockview-tab-accent": "var(--color-primary)",
+  "--dockview-drop-surface": "rgba(0, 122, 255, 0.12)",
+  "--dockview-tab-shadow": "inset 0 1px 0 rgba(255, 255, 255, 0.58)",
+  "--dockview-divider-shadow": "rgba(255, 255, 255, 0.55)",
+  "--dockview-splitter-line": "rgba(0, 0, 0, 0.12)",
+  "--dockview-splitter-track": "rgba(0, 0, 0, 0.08)",
+  "--dockview-splitter-hover": "var(--color-primary)",
+  "--dockview-empty-surface": "linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(255, 255, 255, 0.82))",
+  "--dockview-empty-border": "rgba(0, 0, 0, 0.08)",
+  "--dockview-empty-accent": "rgba(0, 122, 255, 0.14)",
+  "--dockview-empty-card": "rgba(255, 255, 255, 0.8)",
+  "--dockview-empty-card-hover": "rgba(255, 255, 255, 0.96)",
+};
+
+const DARK_DOCKVIEW_TOKENS = {
+  "--dockview-header-surface": "rgba(20, 24, 32, 0.82)",
+  "--dockview-header-border": "rgba(255, 255, 255, 0.08)",
+  "--dockview-tab-surface": "rgba(255, 255, 255, 0.04)",
+  "--dockview-tab-hover": "rgba(255, 255, 255, 0.05)",
+  "--dockview-tab-border": "rgba(255, 255, 255, 0.08)",
+  "--dockview-tab-accent": "var(--color-primary)",
+  "--dockview-drop-surface": "rgba(10, 132, 255, 0.16)",
+  "--dockview-tab-shadow": "inset 0 1px 0 rgba(255, 255, 255, 0.05)",
+  "--dockview-divider-shadow": "rgba(0, 0, 0, 0.2)",
+  "--dockview-splitter-line": "rgba(255, 255, 255, 0.12)",
+  "--dockview-splitter-track": "rgba(255, 255, 255, 0.08)",
+  "--dockview-splitter-hover": "var(--color-primary)",
+  "--dockview-empty-surface": "linear-gradient(180deg, rgba(20, 24, 32, 0.94), rgba(20, 24, 32, 0.82))",
+  "--dockview-empty-border": "rgba(255, 255, 255, 0.08)",
+  "--dockview-empty-accent": "rgba(10, 132, 255, 0.18)",
+  "--dockview-empty-card": "rgba(255, 255, 255, 0.04)",
+  "--dockview-empty-card-hover": "rgba(255, 255, 255, 0.06)",
 };
 
 export const BUILTIN_THEMES: ThemeDefinition[] = [
@@ -43,8 +98,44 @@ export const BUILTIN_THEMES: ThemeDefinition[] = [
     id: "system",
     label: "System",
     appearance: "system",
-    previewColor: "#5b8def",
+    previewColor: "#007aff",
     variables: {},
+    source: "builtin",
+  },
+  {
+    id: "apple.light",
+    label: "macOS Light",
+    appearance: "light",
+    previewColor: "#007aff",
+    variables: {
+      "--color-bg": "#f5f5f7",
+      "--color-surface": "#ffffff",
+      "--color-surface-2": "#ececec",
+      "--color-border": "rgba(0, 0, 0, 0.1)",
+      "--color-text": "#1d1d1f",
+      "--color-text-muted": "#86868b",
+      "--color-primary": "#007aff",
+      "--color-primary-hover": "#005bb5",
+      ...LIGHT_DOCKVIEW_TOKENS,
+    },
+    source: "builtin",
+  },
+  {
+    id: "apple.dark",
+    label: "macOS Dark",
+    appearance: "dark",
+    previewColor: "#0a84ff",
+    variables: {
+      "--color-bg": "#1e1e1e",
+      "--color-surface": "#282828",
+      "--color-surface-2": "#323232",
+      "--color-border": "rgba(255, 255, 255, 0.1)",
+      "--color-text": "#f5f5f7",
+      "--color-text-muted": "#98989d",
+      "--color-primary": "#0a84ff",
+      "--color-primary-hover": "#409cff",
+      ...DARK_DOCKVIEW_TOKENS,
+    },
     source: "builtin",
   },
   {
@@ -61,6 +152,23 @@ export const BUILTIN_THEMES: ThemeDefinition[] = [
       "--color-text-muted": "#7b8aa8",
       "--color-primary": "#5b8def",
       "--color-primary-hover": "#7aa3ff",
+      "--dockview-header-surface": "rgba(20, 26, 42, 0.88)",
+      "--dockview-header-border": "#23304a",
+      "--dockview-tab-surface": "rgba(255, 255, 255, 0.05)",
+      "--dockview-tab-hover": "rgba(255, 255, 255, 0.04)",
+      "--dockview-tab-border": "#23304a",
+      "--dockview-tab-accent": "#7aa3ff",
+      "--dockview-drop-surface": "rgba(122, 163, 255, 0.14)",
+      "--dockview-tab-shadow": "inset 0 1px 0 rgba(255, 255, 255, 0.05)",
+      "--dockview-divider-shadow": "rgba(0, 0, 0, 0.2)",
+      "--dockview-splitter-line": "#2b3a58",
+      "--dockview-splitter-track": "rgba(43, 58, 88, 0.86)",
+      "--dockview-splitter-hover": "#7aa3ff",
+      "--dockview-empty-surface": "linear-gradient(180deg, rgba(20, 26, 42, 0.96), rgba(20, 26, 42, 0.84))",
+      "--dockview-empty-border": "#23304a",
+      "--dockview-empty-accent": "rgba(122, 163, 255, 0.14)",
+      "--dockview-empty-card": "rgba(255, 255, 255, 0.04)",
+      "--dockview-empty-card-hover": "rgba(255, 255, 255, 0.06)",
     },
     source: "builtin",
   },
@@ -78,6 +186,23 @@ export const BUILTIN_THEMES: ThemeDefinition[] = [
       "--color-text-muted": "#6b7280",
       "--color-primary": "#2f6fed",
       "--color-primary-hover": "#3f7cff",
+      "--dockview-header-surface": "rgba(255, 250, 241, 0.88)",
+      "--dockview-header-border": "#d3c5ad",
+      "--dockview-tab-surface": "rgba(255, 255, 255, 0.9)",
+      "--dockview-tab-hover": "rgba(211, 197, 173, 0.16)",
+      "--dockview-tab-border": "#d3c5ad",
+      "--dockview-tab-accent": "#2f6fed",
+      "--dockview-drop-surface": "rgba(47, 111, 237, 0.12)",
+      "--dockview-tab-shadow": "inset 0 1px 0 rgba(255, 255, 255, 0.64)",
+      "--dockview-divider-shadow": "rgba(255, 255, 255, 0.5)",
+      "--dockview-splitter-line": "#d3c5ad",
+      "--dockview-splitter-track": "rgba(211, 197, 173, 0.9)",
+      "--dockview-splitter-hover": "#2f6fed",
+      "--dockview-empty-surface": "linear-gradient(180deg, rgba(255, 250, 241, 0.96), rgba(255, 250, 241, 0.86))",
+      "--dockview-empty-border": "#d3c5ad",
+      "--dockview-empty-accent": "rgba(47, 111, 237, 0.12)",
+      "--dockview-empty-card": "rgba(255, 255, 255, 0.76)",
+      "--dockview-empty-card-hover": "rgba(255, 255, 255, 0.94)",
     },
     source: "builtin",
   },
@@ -95,6 +220,23 @@ export const BUILTIN_THEMES: ThemeDefinition[] = [
       "--color-text-muted": "#8e6f5b",
       "--color-primary": "#d97706",
       "--color-primary-hover": "#ea8c1d",
+      "--dockview-header-surface": "rgba(255, 250, 243, 0.9)",
+      "--dockview-header-border": "#e5c9a2",
+      "--dockview-tab-surface": "rgba(255, 255, 255, 0.92)",
+      "--dockview-tab-hover": "rgba(229, 201, 162, 0.18)",
+      "--dockview-tab-border": "#e5c9a2",
+      "--dockview-tab-accent": "#d97706",
+      "--dockview-drop-surface": "rgba(217, 119, 6, 0.12)",
+      "--dockview-tab-shadow": "inset 0 1px 0 rgba(255, 255, 255, 0.66)",
+      "--dockview-divider-shadow": "rgba(255, 255, 255, 0.52)",
+      "--dockview-splitter-line": "#e5c9a2",
+      "--dockview-splitter-track": "rgba(229, 201, 162, 0.92)",
+      "--dockview-splitter-hover": "#d97706",
+      "--dockview-empty-surface": "linear-gradient(180deg, rgba(255, 250, 243, 0.98), rgba(255, 250, 243, 0.88))",
+      "--dockview-empty-border": "#e5c9a2",
+      "--dockview-empty-accent": "rgba(217, 119, 6, 0.12)",
+      "--dockview-empty-card": "rgba(255, 255, 255, 0.82)",
+      "--dockview-empty-card-hover": "rgba(255, 255, 255, 0.96)",
     },
     source: "builtin",
   },
@@ -191,8 +333,8 @@ export function resolveThemeDefinition(themeId?: string | null) {
 
 function resolveSystemBaseTheme() {
   return window.matchMedia("(prefers-color-scheme: dark)").matches
-    ? BUILTIN_THEME_MAP.get("ennoia.midnight")!
-    : BUILTIN_THEME_MAP.get("ennoia.paper")!;
+    ? BUILTIN_THEME_MAP.get("apple.dark")!
+    : BUILTIN_THEME_MAP.get("apple.light")!;
 }
 
 function resolveBaseTheme(theme: ThemeDefinition): ThemeDefinition {
@@ -204,8 +346,8 @@ function resolveBaseTheme(theme: ThemeDefinition): ThemeDefinition {
   }
   if (theme.extends === "system") {
     return theme.appearance === "dark"
-      ? BUILTIN_THEME_MAP.get("ennoia.midnight")!
-      : BUILTIN_THEME_MAP.get("ennoia.paper")!;
+      ? BUILTIN_THEME_MAP.get("apple.dark")!
+      : BUILTIN_THEME_MAP.get("apple.light")!;
   }
   return resolveThemeDefinition(theme.extends);
 }
