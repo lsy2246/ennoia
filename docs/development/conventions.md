@@ -110,7 +110,6 @@
 
 扩展后端如果使用数据库，schema、迁移和初始化入口必须放在该扩展自己的 `data/` 或 `plugins/*/src/` 边界内，例如：
 
-- `builtins/extensions/session/data/schema.sql`
 - `builtins/extensions/memory/data/schema.sql`
 - `builtins/extensions/workflow/data/schema.sql`
 

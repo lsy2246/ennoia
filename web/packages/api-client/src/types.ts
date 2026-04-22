@@ -91,6 +91,10 @@ export type AppConfig = {
 export type ServerConfig = {
   host: string;
   port: number;
+  enable_ws: boolean;
+  journal: {
+    enabled: boolean;
+  };
   rate_limit: {
     enabled: boolean;
     per_ip_rpm: number;

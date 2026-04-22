@@ -7,8 +7,8 @@ export const builtinExtensionPages: Record<string, ExtensionPageDescriptor> = {
   "memory.page": {
     mount: "memory.page",
     eyebrow: "Memory",
-    summary: "以扩展页形式承接记忆的检索、审核和可视化。",
-    highlights: ["记忆检索", "人工审核", "扩展后端代理"],
+    summary: "以扩展页形式承接记忆检索、上下文装配、人工审核和图谱概览。",
+    highlights: ["记忆检索", "上下文装配", "人工审核", "图谱侧车"],
   },
   "observatory.events.page": {
     mount: "observatory.events.page",

@@ -364,10 +364,12 @@ export function App() {
       runtime?.registry.pages
         .filter(
           (page) =>
+            page.page.nav?.default_pinned &&
             !HIDDEN_EXTENSION_IDS.has(page.extension_id) &&
             !HIDDEN_EXTENSION_ROUTES.has(page.page.route) &&
             !page.page.mount.startsWith("observatory."),
         )
+        .sort((left, right) => (left.page.nav?.order ?? 1000) - (right.page.nav?.order ?? 1000))
         .map((page) => ({
           id: page.page.id,
           href: `/extension-pages/${encodeURIComponent(page.page.id)}`,

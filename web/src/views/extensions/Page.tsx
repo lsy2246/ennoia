@@ -9,10 +9,14 @@ function pageIdFromPath(pathname: string) {
   return match ? decodeURIComponent(match[1]) : "";
 }
 
-export function ExtensionPageView() {
+type ExtensionPageViewProps = {
+  pageId?: string;
+};
+
+export function ExtensionPageView({ pageId: explicitPageId }: ExtensionPageViewProps = {}) {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const { runtime, resolveText, t } = useUiHelpers();
-  const pageId = pageIdFromPath(pathname);
+  const pageId = explicitPageId ?? pageIdFromPath(pathname);
   const page = runtime?.registry.pages.find(
     (item) =>
       item.page.id === pageId &&

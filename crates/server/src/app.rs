@@ -37,6 +37,7 @@ pub struct AppState {
     pub providers: Vec<ProviderConfig>,
     pub spaces: Vec<SpaceSpec>,
     pub rate_limit_state: RateLimitState,
+    pub journal_lock: Arc<tokio::sync::Mutex<()>>,
     pub observability_guard: Option<Arc<ObservabilityGuard>>,
 }
 
@@ -60,6 +61,7 @@ pub fn default_app_state() -> AppState {
         providers: Vec::new(),
         spaces: default_spaces(),
         rate_limit_state: RateLimitState::new(),
+        journal_lock: Arc::new(tokio::sync::Mutex::new(())),
         observability_guard: None,
     }
 }
@@ -101,6 +103,7 @@ pub async fn bootstrap_app_state(home_dir: impl AsRef<Path>) -> Result<AppState,
         providers,
         spaces,
         rate_limit_state: RateLimitState::new(),
+        journal_lock: Arc::new(tokio::sync::Mutex::new(())),
         observability_guard,
     })
 }

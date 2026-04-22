@@ -2,26 +2,34 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::{
-    extract::{Query, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     routing::{get, post},
     Json, Router,
 };
-use ennoia_kernel::{MemoryPolicy, OwnerKind, OwnerRef};
+use ennoia_kernel::{
+    ConversationSpec, ConversationTopology, LaneSpec, MemoryPolicy, MessageRole, MessageSpec,
+    OwnerKind, OwnerRef,
+};
 use ennoia_memory::{
-    initialize_memory_schema, MemoryKind, MemoryStore, RecallMode, RecallQuery, RememberRequest,
-    ReviewAction, ReviewActionKind, SqliteMemoryStore, Stability,
+    conversations::ConversationStore, initialize_memory_schema, EpisodeKind, EpisodeRequest,
+    MemoryKind, MemoryStore, RecallMode, RecallQuery, RememberRequest, ReviewAction,
+    ReviewActionKind, SqliteMemoryStore, Stability,
 };
 use ennoia_paths::RuntimePaths;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+use sqlx::SqlitePool;
 use tokio::net::TcpListener;
+use uuid::Uuid;
 
 type ApiResult<T> = Result<Json<T>, (StatusCode, String)>;
 
 #[derive(Clone)]
 struct MemoryApiState {
     store: Arc<dyn MemoryStore>,
+    conversations: ConversationStore,
+    pool: SqlitePool,
 }
 
 #[derive(Deserialize)]
@@ -83,6 +91,65 @@ struct ReviewPayload {
     notes: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct CreateConversationPayload {
+    topology: String,
+    #[serde(default)]
+    title: Option<String>,
+    #[serde(default)]
+    space_id: Option<String>,
+    #[serde(default)]
+    agent_ids: Vec<String>,
+    #[serde(default)]
+    lane_name: Option<String>,
+    #[serde(default)]
+    lane_type: Option<String>,
+    #[serde(default)]
+    lane_goal: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct ConversationCreateResponse {
+    conversation: ConversationSpec,
+    default_lane: LaneSpec,
+}
+
+#[derive(Debug, Serialize)]
+struct ConversationDetailResponse {
+    conversation: ConversationSpec,
+    lanes: Vec<LaneSpec>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ConversationMessagePayload {
+    body: String,
+    #[serde(default)]
+    lane_id: Option<String>,
+    #[serde(default)]
+    goal: Option<String>,
+    #[serde(default)]
+    addressed_agents: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct ConversationMessageResponse {
+    conversation: ConversationSpec,
+    lane: LaneSpec,
+    message: MessageSpec,
+    runs: Vec<serde_json::Value>,
+    tasks: Vec<serde_json::Value>,
+    artifacts: Vec<serde_json::Value>,
+}
+
+#[derive(Debug, Serialize)]
+struct MemoryWorkspaceSummary {
+    conversations: Vec<ConversationSpec>,
+    pending_review_count: usize,
+    active_memory_count: usize,
+    message_count: i64,
+    graph_nodes_count: i64,
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let options = parse_options(std::env::args().skip(1).collect());
@@ -106,17 +173,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     initialize_memory_schema(&pool).await?;
     let state = MemoryApiState {
         store: Arc::new(SqliteMemoryStore::new(
-            pool,
+            pool.clone(),
             Arc::new(MemoryPolicy::builtin()),
         )),
+        conversations: ConversationStore::new(pool.clone()),
+        pool,
     };
 
     let router = Router::new()
         .route("/health", get(health))
+        .route("/workspace", get(workspace_summary))
         .route("/memories", get(list_memories))
         .route("/memories/remember", post(remember_memory))
         .route("/memories/recall", post(recall_memories))
         .route("/memories/review", post(review_memory))
+        .route(
+            "/conversations",
+            get(conversations_list).post(conversations_create),
+        )
+        .route(
+            "/conversations/{conversation_id}",
+            get(conversation_detail).delete(conversation_delete),
+        )
+        .route(
+            "/conversations/{conversation_id}/messages",
+            get(conversation_messages).post(conversation_messages_create),
+        )
+        .route(
+            "/conversations/{conversation_id}/lanes",
+            get(conversation_lanes),
+        )
         .with_state(state);
 
     let listener = TcpListener::bind(("127.0.0.1", options.port)).await?;
@@ -126,6 +212,43 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
 async fn health() -> Json<serde_json::Value> {
     Json(serde_json::json!({ "status": "ok", "service": "memory-extension" }))
+}
+
+async fn workspace_summary(
+    State(state): State<MemoryApiState>,
+) -> ApiResult<MemoryWorkspaceSummary> {
+    let conversations = state
+        .conversations
+        .list_conversations()
+        .await
+        .map_err(internal_sql)?;
+    let pending_review_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM memories WHERE review_state IN ('pending_review', 'pending') OR status = 'pending_review'",
+    )
+    .fetch_one(&state.pool)
+    .await
+    .map_err(internal_sql)?;
+    let active_memory_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM memories WHERE status = 'active'")
+            .fetch_one(&state.pool)
+            .await
+            .map_err(internal_sql)?;
+    let message_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM messages")
+        .fetch_one(&state.pool)
+        .await
+        .map_err(internal_sql)?;
+    let graph_nodes_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM gm_nodes")
+        .fetch_one(&state.pool)
+        .await
+        .map_err(internal_sql)?;
+
+    Ok(Json(MemoryWorkspaceSummary {
+        conversations,
+        pending_review_count: pending_review_count.max(0) as usize,
+        active_memory_count: active_memory_count.max(0) as usize,
+        message_count,
+        graph_nodes_count,
+    }))
 }
 
 async fn list_memories(
@@ -215,6 +338,247 @@ async fn review_memory(
         .map_err(internal_error)
 }
 
+async fn conversations_list(State(state): State<MemoryApiState>) -> Json<Vec<ConversationSpec>> {
+    Json(
+        state
+            .conversations
+            .list_conversations()
+            .await
+            .unwrap_or_default(),
+    )
+}
+
+async fn conversations_create(
+    State(state): State<MemoryApiState>,
+    Json(payload): Json<CreateConversationPayload>,
+) -> ApiResult<ConversationCreateResponse> {
+    let topology = topology_from_payload(&payload)?;
+    let agent_ids = payload
+        .agent_ids
+        .into_iter()
+        .filter(|id| !id.is_empty())
+        .collect::<Vec<_>>();
+    if agent_ids.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "at least one agent is required".to_string(),
+        ));
+    }
+
+    let now = now_iso();
+    let conversation_id = format!("conv-{}", Uuid::new_v4());
+    let lane_id = format!("lane-{}", Uuid::new_v4());
+    let participants = build_participants(&agent_ids);
+    let owner = match topology {
+        ConversationTopology::Direct => OwnerRef::agent(agent_ids[0].clone()),
+        ConversationTopology::Group => payload
+            .space_id
+            .clone()
+            .map(OwnerRef::space)
+            .unwrap_or_else(|| OwnerRef::global("global")),
+    };
+    let conversation = ConversationSpec {
+        id: conversation_id.clone(),
+        topology,
+        owner,
+        space_id: payload.space_id.clone(),
+        title: payload
+            .title
+            .unwrap_or_else(|| default_conversation_title(&agent_ids)),
+        participants: participants.clone(),
+        default_lane_id: Some(lane_id.clone()),
+        created_at: now.clone(),
+        updated_at: now.clone(),
+    };
+    let lane = LaneSpec {
+        id: lane_id,
+        conversation_id,
+        space_id: payload.space_id,
+        name: payload
+            .lane_name
+            .unwrap_or_else(|| default_lane_name(&agent_ids)),
+        lane_type: payload.lane_type.unwrap_or_else(|| "primary".to_string()),
+        status: "active".to_string(),
+        goal: payload
+            .lane_goal
+            .unwrap_or_else(|| default_lane_goal(&agent_ids)),
+        participants,
+        created_at: now.clone(),
+        updated_at: now,
+    };
+    state
+        .conversations
+        .upsert_conversation(&conversation)
+        .await
+        .map_err(internal_sql)?;
+    state
+        .conversations
+        .upsert_lane(&lane)
+        .await
+        .map_err(internal_sql)?;
+
+    Ok(Json(ConversationCreateResponse {
+        conversation,
+        default_lane: lane,
+    }))
+}
+
+async fn conversation_detail(
+    State(state): State<MemoryApiState>,
+    Path(conversation_id): Path<String>,
+) -> ApiResult<ConversationDetailResponse> {
+    let conversation = state
+        .conversations
+        .get_conversation(&conversation_id)
+        .await
+        .map_err(internal_sql)?
+        .ok_or_else(not_found)?;
+    let lanes = state
+        .conversations
+        .list_lanes(&conversation_id)
+        .await
+        .map_err(internal_sql)?;
+    Ok(Json(ConversationDetailResponse {
+        conversation,
+        lanes,
+    }))
+}
+
+async fn conversation_delete(
+    State(state): State<MemoryApiState>,
+    Path(conversation_id): Path<String>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    if state
+        .conversations
+        .delete_conversation(&conversation_id)
+        .await
+        .map_err(internal_sql)?
+    {
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        Err(not_found())
+    }
+}
+
+async fn conversation_messages(
+    State(state): State<MemoryApiState>,
+    Path(conversation_id): Path<String>,
+) -> Json<Vec<MessageSpec>> {
+    Json(
+        state
+            .conversations
+            .list_messages(&conversation_id)
+            .await
+            .unwrap_or_default(),
+    )
+}
+
+async fn conversation_lanes(
+    State(state): State<MemoryApiState>,
+    Path(conversation_id): Path<String>,
+) -> Json<Vec<LaneSpec>> {
+    Json(
+        state
+            .conversations
+            .list_lanes(&conversation_id)
+            .await
+            .unwrap_or_default(),
+    )
+}
+
+async fn conversation_messages_create(
+    State(state): State<MemoryApiState>,
+    Path(conversation_id): Path<String>,
+    Json(payload): Json<ConversationMessagePayload>,
+) -> ApiResult<ConversationMessageResponse> {
+    let _goal = payload.goal.clone();
+    let conversation = state
+        .conversations
+        .get_conversation(&conversation_id)
+        .await
+        .map_err(internal_sql)?
+        .ok_or_else(not_found)?;
+    let lanes = state
+        .conversations
+        .list_lanes(&conversation_id)
+        .await
+        .map_err(internal_sql)?;
+    let lane = select_lane(&lanes, payload.lane_id.as_deref())
+        .ok_or_else(|| (StatusCode::BAD_REQUEST, "lane not found".to_string()))?;
+    let target_agents = resolve_addressed_agents(&conversation, &lane, payload.addressed_agents);
+    if target_agents.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "no addressed agents resolved for this message".to_string(),
+        ));
+    }
+
+    let now = now_iso();
+    let message = MessageSpec {
+        id: format!("msg-{}", Uuid::new_v4()),
+        conversation_id: conversation.id.clone(),
+        lane_id: Some(lane.id.clone()),
+        sender: "operator".to_string(),
+        role: MessageRole::Operator,
+        body: payload.body.clone(),
+        mentions: target_agents,
+        created_at: now.clone(),
+    };
+    state
+        .conversations
+        .insert_message(&message)
+        .await
+        .map_err(internal_sql)?;
+    let conversation = ConversationSpec {
+        updated_at: now.clone(),
+        ..conversation
+    };
+    state
+        .conversations
+        .upsert_conversation(&conversation)
+        .await
+        .map_err(internal_sql)?;
+    let lane = LaneSpec {
+        updated_at: now.clone(),
+        ..lane
+    };
+    state
+        .conversations
+        .upsert_lane(&lane)
+        .await
+        .map_err(internal_sql)?;
+
+    let namespace = format!("recent/conversations/{}/L1#core", conversation.id);
+    state
+        .store
+        .record_episode(EpisodeRequest {
+            owner: conversation.owner.clone(),
+            namespace,
+            conversation_id: Some(conversation.id.clone()),
+            run_id: None,
+            episode_kind: EpisodeKind::Message,
+            role: Some(message_role_str(message.role).to_string()),
+            content: message.body.clone(),
+            content_type: Some("text/plain".to_string()),
+            source_uri: None,
+            entities: Vec::new(),
+            tags: vec!["conversation".to_string(), message.sender.clone()],
+            importance: Some(0.4),
+            occurred_at: Some(message.created_at.clone()),
+        })
+        .await
+        .map_err(internal_error)?;
+
+    Ok(Json(ConversationMessageResponse {
+        conversation,
+        lane,
+        message,
+        runs: Vec::new(),
+        tasks: Vec::new(),
+        artifacts: Vec::new(),
+    }))
+}
+
 fn owner_kind_from(value: &str) -> OwnerKind {
     match value {
         "agent" => OwnerKind::Agent,
@@ -240,7 +604,115 @@ fn review_action_from(value: &str) -> ReviewActionKind {
     }
 }
 
+fn message_role_str(role: MessageRole) -> &'static str {
+    match role {
+        MessageRole::Operator => "operator",
+        MessageRole::Agent => "agent",
+        MessageRole::System => "system",
+        MessageRole::Tool => "tool",
+    }
+}
+
+fn topology_from_payload(
+    payload: &CreateConversationPayload,
+) -> Result<ConversationTopology, (StatusCode, String)> {
+    let requested = match payload.topology.as_str() {
+        "direct" => ConversationTopology::Direct,
+        "group" => ConversationTopology::Group,
+        _ => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "invalid conversation topology".to_string(),
+            ))
+        }
+    };
+    if payload.agent_ids.len() > 1 {
+        Ok(ConversationTopology::Group)
+    } else {
+        Ok(requested)
+    }
+}
+
+fn build_participants(agent_ids: &[String]) -> Vec<String> {
+    let mut participants = vec!["operator".to_string()];
+    participants.extend(agent_ids.iter().cloned());
+    participants
+}
+
+fn select_lane(lanes: &[LaneSpec], lane_id: Option<&str>) -> Option<LaneSpec> {
+    lane_id
+        .and_then(|id| lanes.iter().find(|lane| lane.id == id).cloned())
+        .or_else(|| lanes.first().cloned())
+}
+
+fn resolve_addressed_agents(
+    conversation: &ConversationSpec,
+    lane: &LaneSpec,
+    addressed_agents: Vec<String>,
+) -> Vec<String> {
+    if !addressed_agents.is_empty() {
+        return addressed_agents;
+    }
+    let source = if lane.participants.is_empty() {
+        &conversation.participants
+    } else {
+        &lane.participants
+    };
+    source
+        .iter()
+        .filter(|participant| participant.as_str() != "operator")
+        .cloned()
+        .collect()
+}
+
+fn default_conversation_title(agent_ids: &[String]) -> String {
+    if agent_ids.len() <= 1 {
+        format!(
+            "与 {} 的会话",
+            agent_ids.first().cloned().unwrap_or_default()
+        )
+    } else {
+        format!(
+            "{} 协作会话",
+            agent_ids
+                .iter()
+                .take(3)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join("、")
+        )
+    }
+}
+
+fn default_lane_name(agent_ids: &[String]) -> String {
+    if agent_ids.len() <= 1 {
+        "私聊".to_string()
+    } else {
+        "群聊".to_string()
+    }
+}
+
+fn default_lane_goal(agent_ids: &[String]) -> String {
+    if agent_ids.len() <= 1 {
+        "与目标 Agent 持续推进当前问题".to_string()
+    } else {
+        "在多 Agent 协作中持续推进当前问题".to_string()
+    }
+}
+
+fn not_found() -> (StatusCode, String) {
+    (StatusCode::NOT_FOUND, "conversation not found".to_string())
+}
+
+fn now_iso() -> String {
+    chrono::Utc::now().to_rfc3339()
+}
+
 fn internal_error(error: ennoia_memory::MemoryError) -> (StatusCode, String) {
+    (StatusCode::INTERNAL_SERVER_ERROR, error.to_string())
+}
+
+fn internal_sql(error: sqlx::Error) -> (StatusCode, String) {
     (StatusCode::INTERNAL_SERVER_ERROR, error.to_string())
 }
 

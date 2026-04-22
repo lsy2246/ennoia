@@ -41,11 +41,13 @@ use crate::middleware::{
 };
 
 mod extensions;
+mod journal;
 mod logs;
 mod resources;
 mod runtime;
 
 use extensions::*;
+use journal::*;
 use logs::*;
 use resources::*;
 use runtime::*;
@@ -135,6 +137,22 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/api/v1/extensions/attach/{extension_id}",
             delete(extension_detach),
+        )
+        .route(
+            "/api/v1/conversations",
+            get(conversations_list).post(conversations_create),
+        )
+        .route(
+            "/api/v1/conversations/{conversation_id}",
+            get(conversation_detail).delete(conversation_delete),
+        )
+        .route(
+            "/api/v1/conversations/{conversation_id}/messages",
+            get(conversation_messages).post(conversation_messages_create),
+        )
+        .route(
+            "/api/v1/conversations/{conversation_id}/lanes",
+            get(conversation_lanes),
         )
         .route("/api/v1/agents", get(agents).post(agent_create))
         .route(
@@ -674,6 +692,8 @@ fn now_iso() -> String {
 
 const BUILTIN_THEME_IDS: &[&str] = &[
     "system",
+    "apple.light",
+    "apple.dark",
     "ennoia.midnight",
     "ennoia.paper",
     "observatory.daybreak",

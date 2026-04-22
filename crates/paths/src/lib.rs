@@ -108,6 +108,18 @@ impl RuntimePaths {
         self.state_dir().join("cache")
     }
 
+    pub fn journal_dir(&self) -> PathBuf {
+        self.state_dir().join("journal")
+    }
+
+    pub fn journal_index_dir(&self) -> PathBuf {
+        self.journal_dir().join("index")
+    }
+
+    pub fn journal_conversations_dir(&self) -> PathBuf {
+        self.journal_dir().join("conversations")
+    }
+
     pub fn extensions_state_dir(&self) -> PathBuf {
         self.state_dir().join("extensions")
     }

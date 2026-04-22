@@ -17,6 +17,11 @@ type DockviewApiLike = {
   getPanel?: (id: string) => any;
   setActivePanel?: (panel: unknown) => void;
   activePanel?: { id: string } | null;
+  panels?: unknown[];
+  toJSON?: () => unknown;
+  fromJSON?: (data: unknown, options?: { reuseExistingPanels: boolean }) => void;
+  onDidLayoutChange?: (listener: () => void) => { dispose: () => void };
+  onDidActivePanelChange?: (listener: (panel: unknown) => void) => { dispose: () => void };
 };
 
 type OpenViewOptions = {

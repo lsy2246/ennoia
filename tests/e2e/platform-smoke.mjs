@@ -37,14 +37,14 @@ try {
   await ensureAgent(baseUrl, "coder", "Coder");
   await ensureAgent(baseUrl, "planner", "Planner");
 
-  const directConversation = await fetchJson(baseUrl, "/api/ext/session/conversations", {
+  const directConversation = await fetchJson(baseUrl, "/api/v1/conversations", {
     method: "POST",
     body: JSON.stringify({
       topology: "direct",
       agent_ids: ["coder"],
     }),
   });
-  const groupConversation = await fetchJson(baseUrl, "/api/ext/session/conversations", {
+  const groupConversation = await fetchJson(baseUrl, "/api/v1/conversations", {
     method: "POST",
     body: JSON.stringify({
       topology: "group",
@@ -55,7 +55,7 @@ try {
 
   const directEnvelope = await fetchJson(
     baseUrl,
-    `/api/ext/session/conversations/${directConversation.conversation.id}/messages`,
+    `/api/v1/conversations/${directConversation.conversation.id}/messages`,
     {
       method: "POST",
       body: JSON.stringify({
@@ -67,7 +67,7 @@ try {
   );
   const groupEnvelope = await fetchJson(
     baseUrl,
-    `/api/ext/session/conversations/${groupConversation.conversation.id}/messages`,
+    `/api/v1/conversations/${groupConversation.conversation.id}/messages`,
     {
       method: "POST",
       body: JSON.stringify({
@@ -83,29 +83,27 @@ try {
     baseUrl,
     "/api/v1/ui/messages?locale=zh-CN&namespaces=web,ext.observatory",
   );
-  const conversations = await fetchJson(baseUrl, "/api/ext/session/conversations");
+  const conversations = await fetchJson(baseUrl, "/api/v1/conversations");
   const directMessages = await fetchJson(
     baseUrl,
-    `/api/ext/session/conversations/${directConversation.conversation.id}/messages`,
+    `/api/v1/conversations/${directConversation.conversation.id}/messages`,
   );
   const groupMessages = await fetchJson(
     baseUrl,
-    `/api/ext/session/conversations/${groupConversation.conversation.id}/messages`,
+    `/api/v1/conversations/${groupConversation.conversation.id}/messages`,
   );
   const memoryExtension = await fetchJson(baseUrl, "/api/v1/extensions/memory");
-  const sessionExtension = await fetchJson(baseUrl, "/api/v1/extensions/session");
   const workflowExtension = await fetchJson(baseUrl, "/api/v1/extensions/workflow");
 
   assert(overview.counts.extensions >= 1, "overview should expose extensions count");
   assert(uiMessages.bundles.length === 2, "ui messages should include requested builtin bundles");
   assert(overview.counts.extensions >= 3, "overview should expose builtin extensions count");
-  assert(directEnvelope.message.id, "direct session should return a persisted message");
-  assert(groupEnvelope.message.id, "group session should return a persisted message");
+  assert(directEnvelope.message.id, "direct conversation should return a persisted message");
+  assert(groupEnvelope.message.id, "group conversation should return a persisted message");
   assert(conversations.length >= 2, "conversations should include direct and group sessions");
   assert(directMessages.length === 1, "direct conversation should contain one message");
   assert(groupMessages.length === 1, "group conversation should contain one message");
   assert(memoryExtension.id === "memory", "memory extension should be registered");
-  assert(sessionExtension.id === "session", "session extension should be registered");
   assert(workflowExtension.id === "workflow", "workflow extension should be registered");
   assert(memoryExtension.backend?.base_url, "memory extension should expose backend proxy info");
 

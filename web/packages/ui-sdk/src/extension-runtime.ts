@@ -15,6 +15,10 @@ export type ExtensionPageContribution = {
     route: string;
     mount: string;
     icon?: string | null;
+    nav?: {
+      default_pinned?: boolean;
+      order?: number | null;
+    } | null;
   };
 };
 

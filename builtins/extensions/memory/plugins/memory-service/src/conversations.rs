@@ -5,11 +5,11 @@ use ennoia_kernel::{
 use sqlx::{Row, SqlitePool};
 
 #[derive(Debug, Clone)]
-pub struct SessionStore {
+pub struct ConversationStore {
     pool: SqlitePool,
 }
 
-impl SessionStore {
+impl ConversationStore {
     pub fn new(pool: SqlitePool) -> Self {
         Self { pool }
     }

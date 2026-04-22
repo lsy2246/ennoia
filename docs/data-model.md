@@ -9,9 +9,9 @@
 - `ExtensionRuntimeState`
 - `SystemLog`
 
-核心模型只表达系统配置、扩展运行态和宿主协议。Conversation、Message、Memory、Run、Task、Artifact、Timer/Job 等业务数据由对应扩展在私有边界内管理。
+核心模型表达系统配置、扩展运行态、宿主协议和 journal 原始记录。Memory、Run、Task、Artifact、Timer/Job 等业务数据由对应扩展在私有边界内管理。
 
-## Session 扩展域
+## Journal 域
 
 `ConversationSpec` 字段：
 
@@ -29,7 +29,7 @@
 
 - `agent_ids.len() == 1` 创建 `direct`。
 - `agent_ids.len() >= 2` 创建 `group`。
-- 产品文案可以称为“会话”，session 扩展 API 和私有数据库使用 `conversation`。
+- 产品文案可以称为“会话”，系统 API 和 journal 文件使用 `conversation`。
 
 ## Message 域
 
@@ -77,6 +77,7 @@
 ## 存储快照
 
 - 核心系统配置：`~/.ennoia/config/*.toml`。
+- Journal 原始记录：`~/.ennoia/data/journal/`。
 - 核心前端日志：`~/.ennoia/logs/frontend.jsonl`。
 - 扩展私有数据：`~/.ennoia/data/extensions/{extension_id}/`。
 - 核心不维护主业务数据库快照。

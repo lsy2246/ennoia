@@ -1,10 +1,10 @@
 ﻿import { fetchJson } from "./core";
 import type { ChatLane, ChatMessage, ChatSendResponse, ChatThread, ChatThreadDetail } from "./types";
 
-const SESSION_API = "/api/ext/session";
+const CONVERSATIONS_API = "/api/v1/conversations";
 
 export async function listChats() {
-  return fetchJson<ChatThread[]>(`${SESSION_API}/conversations`);
+  return fetchJson<ChatThread[]>(CONVERSATIONS_API);
 }
 
 export async function createChat(payload: {
@@ -15,20 +15,20 @@ export async function createChat(payload: {
   lane_type?: string;
   lane_goal?: string;
 }) {
-  return fetchJson<{ conversation: ChatThread; default_lane: ChatLane }>(`${SESSION_API}/conversations`, {
+  return fetchJson<{ conversation: ChatThread; default_lane: ChatLane }>(CONVERSATIONS_API, {
     method: "POST",
     body: JSON.stringify(payload),
   });
 }
 
 export async function deleteChat(chatId: string) {
-  return fetchJson<void>(`${SESSION_API}/conversations/${chatId}`, { method: "DELETE" });
+  return fetchJson<void>(`${CONVERSATIONS_API}/${chatId}`, { method: "DELETE" });
 }
 
 export async function getChat(chatId: string): Promise<ChatThreadDetail> {
   const [detail, messages] = await Promise.all([
-    fetchJson<{ conversation: ChatThread; lanes: ChatLane[] }>(`${SESSION_API}/conversations/${chatId}`),
-    fetchJson<ChatMessage[]>(`${SESSION_API}/conversations/${chatId}/messages`),
+    fetchJson<{ conversation: ChatThread; lanes: ChatLane[] }>(`${CONVERSATIONS_API}/${chatId}`),
+    fetchJson<ChatMessage[]>(`${CONVERSATIONS_API}/${chatId}/messages`),
   ]);
   return {
     conversation: detail.conversation,
@@ -49,7 +49,7 @@ export async function sendChatMessage(
     addressed_agents?: string[];
   },
 ) {
-  return fetchJson<ChatSendResponse>(`${SESSION_API}/conversations/${chatId}/messages`, {
+  return fetchJson<ChatSendResponse>(`${CONVERSATIONS_API}/${chatId}/messages`, {
     method: "POST",
     body: JSON.stringify(payload),
   });

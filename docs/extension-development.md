@@ -34,6 +34,18 @@ Extension 是系统插件包，Skill 是 Agent 可引用的能力包。两者目
 - `providers[]`
 - `hooks[]`
 
+`pages[]` 是可选 UI 贡献。声明页面后，Web 的扩展详情页会提供“打开视图”；只有页面额外声明 `nav.default_pinned = true` 时才默认进入主导航：
+
+```toml
+[capabilities]
+pages = true
+
+[contributes]
+pages = [
+  { id = "memory.page", title = { key = "web.nav.memory", fallback = "记忆" }, route = "/memory", mount = "memory.page", icon = "memory", nav = { default_pinned = true, order = 30 } }
+]
+```
+
 Hook 贡献声明扩展要接收的系统时机：
 
 ```toml

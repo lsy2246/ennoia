@@ -25,6 +25,17 @@ pub struct PageContribution {
     pub route: String,
     pub mount: String,
     pub icon: Option<String>,
+    #[serde(default)]
+    pub nav: Option<PageNavContribution>,
+}
+
+/// PageNavContribution describes optional navigation exposure for an extension page.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PageNavContribution {
+    #[serde(default)]
+    pub default_pinned: bool,
+    #[serde(default)]
+    pub order: Option<i32>,
 }
 
 /// PanelContribution describes a panel mounted in the web dock area.

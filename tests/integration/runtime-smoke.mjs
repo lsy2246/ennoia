@@ -55,7 +55,7 @@ try {
     "/api/v1/ui/messages?locale=zh-CN&namespaces=web,settings,ext.observatory",
   );
   await ensureAgent(baseUrl, "coder", "Coder");
-  const createdConversation = await fetchJson(baseUrl, "/api/ext/session/conversations", {
+  const createdConversation = await fetchJson(baseUrl, "/api/v1/conversations", {
     method: "POST",
     body: JSON.stringify({
       topology: "direct",
@@ -64,7 +64,7 @@ try {
   });
   const envelope = await fetchJson(
     baseUrl,
-    `/api/ext/session/conversations/${createdConversation.conversation.id}/messages`,
+    `/api/v1/conversations/${createdConversation.conversation.id}/messages`,
     {
       method: "POST",
       body: JSON.stringify({
@@ -74,13 +74,12 @@ try {
       }),
     },
   );
-  const conversations = await fetchJson(baseUrl, "/api/ext/session/conversations");
+  const conversations = await fetchJson(baseUrl, "/api/v1/conversations");
   const messages = await fetchJson(
     baseUrl,
-    `/api/ext/session/conversations/${createdConversation.conversation.id}/messages`,
+    `/api/v1/conversations/${createdConversation.conversation.id}/messages`,
   );
   const memoryExtension = await fetchJson(baseUrl, "/api/v1/extensions/memory");
-  const sessionExtension = await fetchJson(baseUrl, "/api/v1/extensions/session");
   const workflowExtension = await fetchJson(baseUrl, "/api/v1/extensions/workflow");
 
   assert(health.status === "ok", "health status should be ok");
@@ -95,9 +94,8 @@ try {
   );
   assert(conversations.length >= 1, "conversations should not be empty");
   assert(messages.length === 1, "conversation should contain the created message");
-  assert(envelope.message.id, "session extension should return the persisted message");
+  assert(envelope.message.id, "journal should return the persisted message");
   assert(memoryExtension.id === "memory", "memory extension should be registered");
-  assert(sessionExtension.id === "session", "session extension should be registered");
   assert(workflowExtension.id === "workflow", "workflow extension should be registered");
   assert(memoryExtension.backend?.base_url, "memory extension should expose backend proxy info");
 

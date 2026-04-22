@@ -9,7 +9,6 @@ members = [
   "crates/contract",
   "crates/server",
   "crates/cli",
-  "builtins/extensions/session/plugins/session-service",
   "builtins/extensions/memory/plugins/memory-service",
   "builtins/extensions/workflow/plugins/workflow-service",
 ]

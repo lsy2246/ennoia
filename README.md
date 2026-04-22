@@ -9,8 +9,8 @@
 - 技能：Agent 可引用的能力包，和扩展严格分离。
 - API 上游渠道：Agent 绑定的具体模型访问实例。
 - 扩展：系统插件包，可贡献页面、面板、主题、语言、命令、Hook 和上游实现。
-- 会话：以内置 `session` 扩展形式提供 Conversation、Lane、Message 与 Handoff。
-- 记忆：以内置 `memory` 扩展形式提供独立前后端、私有数据库与 Web 页面。
+- 会话：系统内置 `journal` 文件记录层提供一套 Conversation、Lane、Message 与事件原文能力，默认关闭。
+- 记忆：以内置 `memory` 扩展形式提供另一套独立前后端、私有数据库与 Web 页面；它与 journal 可并存，不自动消费或关闭 journal。
 - 编排：以内置 `workflow` 扩展承载运行编排、stage、decision、gate 与 artifact 产出。
 - 日志：聚合前端日志和扩展运行事件。
 - 设置：通过表单直接编辑 `app/server` 文件配置、`config/profile.toml` 和 `config/preferences/*.toml`。
@@ -18,7 +18,7 @@
 ## 技术栈
 
 - 后端：Rust、Tokio、Axum、Serde、TOML
-- 存储：系统配置走 TOML 文件；扩展按需使用自己的私有存储。
+- 存储：系统配置走 TOML 文件；journal 走 `data/journal/` 文件；扩展按需使用自己的私有存储。
 - 前端：React、Vite、TanStack Router、Zustand
 - 包管理：`bun`
 - 发布目标：一个 npm 包 + `~/.ennoia` 运行目录
@@ -31,8 +31,7 @@
 - `crates/cli`：初始化、开发与启动入口
 - `web`：Ennoia Web 工作台
 - `web/packages/api-client`：前端统一 API 访问层
-- `builtins/extensions/session`：内置会话扩展，包含 `plugins/`、`ui/`、`data/`
-- `builtins/extensions/memory`：内置记忆扩展，包含 `plugins/`、`ui/`、`data/`
+- `builtins/extensions/memory`：内置记忆扩展，包含上下文、审查与图谱能力
 - `builtins/extensions/workflow`：内置编排扩展，包含 `plugins/`、`hooks/`、`timers/`、`data/`
 
 ## 内置能力源码
@@ -45,9 +44,10 @@
 ## 存储边界
 
 - 核心系统配置只走 `~/.ennoia/config/*.toml`。
+- 系统原始会话记录写入 `~/.ennoia/data/journal/`，默认关闭，可通过 `server.toml` 的 `journal.enabled` 开启。
 - 核心日志写入 `~/.ennoia/logs/`。
 - 扩展私有数据写入 `~/.ennoia/data/extensions/{extension_id}/`。
-- 核心不提供主业务 SQLite，不内建会话、记忆、编排、任务或产物索引表。
+- 核心不提供主业务 SQLite，不内建语义记忆、编排、任务或产物索引表。
 
 ## 启动方式
 

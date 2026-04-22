@@ -1,5 +1,6 @@
 //! Memory module owns its domain model, store contract and sqlite implementation.
 
+pub mod conversations;
 pub mod model;
 pub mod schema;
 pub mod sqlite;

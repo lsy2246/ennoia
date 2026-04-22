@@ -33,6 +33,8 @@ pub struct ServerConfig {
     pub port: u16,
     pub enable_ws: bool,
     #[serde(default)]
+    pub journal: JournalConfig,
+    #[serde(default)]
     pub rate_limit: RateLimitConfig,
     #[serde(default)]
     pub cors: CorsConfig,
@@ -52,6 +54,7 @@ impl Default for ServerConfig {
             host: "127.0.0.1".to_string(),
             port: 3710,
             enable_ws: true,
+            journal: JournalConfig::default(),
             rate_limit: RateLimitConfig::default(),
             cors: CorsConfig {
                 origins: default_local_dev_origins(),
@@ -62,6 +65,18 @@ impl Default for ServerConfig {
             body_limit: BodyLimitConfig::default(),
             bootstrap: BootstrapState::default(),
         }
+    }
+}
+
+/// JournalConfig controls the built-in file-backed raw conversation journal.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct JournalConfig {
+    pub enabled: bool,
+}
+
+impl Default for JournalConfig {
+    fn default() -> Self {
+        Self { enabled: false }
     }
 }
 

@@ -1,4 +1,4 @@
-import { fetchJson } from "@ennoia/api-client";
+import { fetchJson, type ChatThread } from "@ennoia/api-client";
 
 export type MemorySource = {
   kind: string;
@@ -34,8 +34,20 @@ export type RecallResult = {
   total_chars: number;
 };
 
+export type WorkspaceSummary = {
+  conversations: ChatThread[];
+  pending_review_count: number;
+  active_memory_count: number;
+  message_count: number;
+  graph_nodes_count: number;
+};
+
 export async function listMemoryRecords() {
   return fetchJson<MemoryRecord[]>("/api/ext/memory/memories");
+}
+
+export async function getMemoryWorkspaceSummary() {
+  return fetchJson<WorkspaceSummary>("/api/ext/memory/workspace");
 }
 
 export async function recallMemoryRecords(payload: {

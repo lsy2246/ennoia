@@ -20,24 +20,6 @@
 - `GET /api/v1/runtime/server-config`
 - `PUT /api/v1/runtime/server-config`
 
-## Session Extension
-
-- `GET /api/ext/session/conversations`
-- `POST /api/ext/session/conversations`
-- `GET /api/ext/session/conversations/{conversation_id}`
-- `DELETE /api/ext/session/conversations/{conversation_id}`
-- `GET /api/ext/session/conversations/{conversation_id}/messages`
-- `POST /api/ext/session/conversations/{conversation_id}/messages`
-- `GET /api/ext/session/conversations/{conversation_id}/lanes`
-- `GET /api/ext/session/lanes/{lane_id}/handoffs`
-- `POST /api/ext/session/lanes/{lane_id}/handoffs`
-
-### Conversation 约定
-
-- `agent_ids.len() == 1` 时创建 `direct`
-- `agent_ids.len() >= 2` 时创建 `group`
-- 消息可附带 `addressed_agents`
-
 ## Agent / Skill / API 上游渠道
 
 - `GET /api/v1/agents`
@@ -83,12 +65,40 @@
 - `DELETE /api/v1/extensions/attach/{extension_id}`
 - `ANY /api/ext/{extension_id}/{*path}`
 
+## Journal / Conversation
+
+- `GET /api/v1/conversations`
+- `POST /api/v1/conversations`
+- `GET /api/v1/conversations/{conversation_id}`
+- `DELETE /api/v1/conversations/{conversation_id}`
+- `GET /api/v1/conversations/{conversation_id}/messages`
+- `POST /api/v1/conversations/{conversation_id}/messages`
+- `GET /api/v1/conversations/{conversation_id}/lanes`
+
+Journal 默认关闭；`journal.enabled = false` 时，Conversation API 返回 `journal_disabled`，系统不读写 `data/journal/`。
+
 ## Memory Extension
 
+- `GET /api/ext/memory/workspace`
+- `GET /api/ext/memory/conversations`
+- `POST /api/ext/memory/conversations`
+- `GET /api/ext/memory/conversations/{conversation_id}`
+- `DELETE /api/ext/memory/conversations/{conversation_id}`
+- `GET /api/ext/memory/conversations/{conversation_id}/messages`
+- `POST /api/ext/memory/conversations/{conversation_id}/messages`
+- `GET /api/ext/memory/conversations/{conversation_id}/lanes`
 - `GET /api/ext/memory/memories`
 - `POST /api/ext/memory/memories/remember`
 - `POST /api/ext/memory/memories/recall`
 - `POST /api/ext/memory/memories/review`
+
+Memory 扩展拥有自己的 Conversation API 和私有存储；它与 Journal 是并存机制，不通过 Journal 同步。
+
+### Conversation 约定
+
+- `agent_ids.len() == 1` 时创建 `direct`
+- `agent_ids.len() >= 2` 时创建 `group`
+- 消息可附带 `addressed_agents`
 
 ## Workflow Extension
 

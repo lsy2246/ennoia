@@ -18,4 +18,4 @@ healthcheck = "/health"
 pages = true
 
 [contributes]
-pages = [{ id = "memory.page", title = { key = "web.nav.memory", fallback = "记忆" }, route = "/memory", mount = "memory.page", icon = "memory" }]
+pages = [{ id = "memory.page", title = { key = "web.nav.memory", fallback = "记忆" }, route = "/memory", mount = "memory.page", icon = "memory", nav = { default_pinned = true, order = 30 } }]

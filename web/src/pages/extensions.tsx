@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import {
   getExtension,
@@ -12,9 +12,11 @@ import {
 } from "@ennoia/api-client";
 import { formatRelativePath } from "@/lib/pathDisplay";
 import { useUiHelpers } from "@/stores/ui";
+import { useWorkbenchStore } from "@/stores/workbench";
 
 export function Extensions() {
-  const { t } = useUiHelpers();
+  const { resolveText, runtime, t } = useUiHelpers();
+  const workbenchApi = useWorkbenchStore((state) => state.api);
   const [extensions, setExtensions] = useState<ExtensionRuntimeState[]>([]);
   const [selected, setSelected] = useState<ExtensionRuntimeState | null>(null);
   const [detail, setDetail] = useState<ExtensionDetail | null>(null);
@@ -62,6 +64,30 @@ export function Extensions() {
 
   async function loadLogs(extensionId: string) {
     setLogs(await getExtensionLogs(extensionId));
+  }
+
+  const selectedPages = useMemo(
+    () =>
+      runtime?.registry.pages.filter((page) => page.extension_id === selected?.id) ?? [],
+    [runtime?.registry.pages, selected?.id],
+  );
+
+  function openExtensionPage(pageId: string, label: string) {
+    if (!workbenchApi) {
+      setError(t("web.extensions.open_page_unavailable", "工作台尚未就绪，无法打开扩展视图。"));
+      return;
+    }
+    workbenchApi.addPanel({
+      id: `route:extension:${pageId}:${Date.now().toString(36)}`,
+      title: label,
+      component: "route",
+      params: {
+        routeId: pageId,
+        href: `/extension-pages/${encodeURIComponent(pageId)}`,
+        label,
+        source: "extension",
+      },
+    });
   }
 
   return (
@@ -125,6 +151,27 @@ export function Extensions() {
               <button type="button" className="secondary" onClick={() => void handleAction("reload")}>{t("web.action.reload", "重载")}</button>
               <button type="button" className="secondary" onClick={() => void handleAction("restart")}>{t("web.action.restart", "重启")}</button>
               <button type="button" className="secondary" onClick={() => void loadLogs(selected.id)}>{t("web.extensions.view_logs", "查看日志")}</button>
+            </div>
+            <div className="stack">
+              <div className="panel-title">{t("web.extensions.pages", "扩展视图")}</div>
+              {selectedPages.length === 0 ? (
+                <div className="empty-card">{t("web.extensions.pages_empty", "这个扩展没有声明视图。")}</div>
+              ) : (
+                selectedPages.map((page) => {
+                  const label = resolveText(page.page.title);
+                  return (
+                    <article key={page.page.id} className="mini-card">
+                      <strong>{label}</strong>
+                      <span>{page.page.mount}</span>
+                      <div className="button-row">
+                        <button type="button" className="secondary" onClick={() => openExtensionPage(page.page.id, label)}>
+                          {t("web.extensions.open_page", "打开视图")}
+                        </button>
+                      </div>
+                    </article>
+                  );
+                })
+              )}
             </div>
             <pre className="log-view">{logs || t("web.extensions.log_empty", "选择“查看日志”加载扩展日志。")}</pre>
           </>
