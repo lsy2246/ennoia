@@ -2,16 +2,15 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use ennoia_contract::behavior::{BehaviorRunRequest, BehaviorRunResponse};
 use ennoia_kernel::{
-    AgentConfig, ArtifactKind, ArtifactSpec, ContextLayer, ConversationMessageHookPayload,
-    ConversationSpec, ConversationTopology, ConversationWorkflowOutput, LaneSpec, OwnerRef,
-    RunContext, RunSpec,
+    AgentConfig, ArtifactKind, ArtifactSpec, ContextLayer, HandoffSpec, OwnerRef, RunSpec,
 };
 use ennoia_paths::RuntimePaths;
 use sqlx::SqlitePool;
 use uuid::Uuid;
 
-use crate::orchestrator::{OrchestratorService, RunRequest, RunTrigger};
+use crate::orchestrator::{OrchestratorService, RunRequest};
 use crate::runtime::RuntimeStore;
 
 #[derive(Clone)]
@@ -23,49 +22,41 @@ pub struct WorkflowRuntime {
     pub agents_fallback: Vec<AgentConfig>,
 }
 
-pub async fn run_conversation_workflow(
+pub async fn run_behavior(
     runtime: &WorkflowRuntime,
-    payload: ConversationMessageHookPayload,
-) -> Result<ConversationWorkflowOutput, String> {
-    let recent_messages = vec![format!(
-        "{}: {}",
-        payload.message.sender, payload.message.body
-    )];
-
-    let mut context = RunContext {
-        recent_messages,
-        ..RunContext::default()
-    };
-    context.total_chars += context
-        .recent_messages
-        .iter()
-        .map(|item| item.chars().count() as u32)
-        .sum::<u32>();
+    payload: BehaviorRunRequest,
+) -> Result<BehaviorRunResponse, String> {
+    let mut context = payload.context.clone();
     context.push(ContextLayer::Core, format!("goal={}", payload.goal));
-    context.push(
-        ContextLayer::Execution,
-        format!(
-            "lane={} participants={}",
-            payload.lane.name,
-            payload.lane.participants.join(",")
-        ),
-    );
+    if !payload.participants.is_empty() {
+        context.push(
+            ContextLayer::Execution,
+            format!("participants={}", payload.participants.join(",")),
+        );
+    }
 
     let available_agents: Vec<String> = load_agent_configs(&runtime.runtime_paths)
         .unwrap_or_else(|_| runtime.agents_fallback.clone())
         .into_iter()
         .map(|agent| agent.id)
         .collect();
+    let conversation_id = payload
+        .source_refs
+        .iter()
+        .find_map(|item| item.conversation_id.clone())
+        .unwrap_or_else(|| "behavior".to_string());
+    let lane_id = payload
+        .source_refs
+        .iter()
+        .find_map(|item| item.lane_id.clone());
     let request = RunRequest {
-        owner: payload.conversation.owner.clone(),
-        conversation: payload.conversation.clone(),
-        message: payload.message.clone(),
-        trigger: match payload.conversation.topology {
-            ConversationTopology::Direct => RunTrigger::DirectConversation,
-            ConversationTopology::Group => RunTrigger::GroupConversation,
-        },
+        owner: payload.owner.clone(),
+        conversation_id,
+        lane_id: lane_id.clone(),
+        trigger: payload.trigger.clone(),
         goal: payload.goal.clone(),
-        addressed_agents: payload.message.mentions.clone(),
+        participants: payload.participants.clone(),
+        addressed_agents: payload.addressed_agents.clone(),
     };
     let plan = runtime
         .orchestrator
@@ -93,21 +84,24 @@ pub async fn run_conversation_workflow(
     let artifact = persist_run_artifact(
         &runtime.runtime_paths,
         &plan.run,
-        &payload.conversation.owner,
+        &payload.owner,
         &payload.goal,
     );
+    let handoffs = Vec::<HandoffSpec>::new();
+    runtime
+        .runtime_store
+        .save_run_bundle(&plan.run, &plan.tasks, &[artifact.clone()], &handoffs)
+        .await
+        .map_err(|error| error.to_string())?;
 
-    Ok(ConversationWorkflowOutput {
-        conversation: plan.conversation,
-        lane: payload.lane,
-        message: plan.message,
+    Ok(BehaviorRunResponse {
         run: plan.run,
         tasks: plan.tasks,
         artifacts: vec![artifact],
-        context: plan.context,
-        gate_verdicts: plan.gate_verdicts,
-        stage_event: plan.stage_event,
+        handoffs,
+        stage_events: vec![plan.stage_event],
         decision: plan.decision,
+        gate_verdicts: plan.gate_verdicts,
     })
 }
 
@@ -143,27 +137,6 @@ pub fn persist_run_artifact(
         relative_path,
         created_at: now_iso(),
     }
-}
-
-pub fn resolve_addressed_agents(
-    conversation: &ConversationSpec,
-    lane: &LaneSpec,
-    addressed_agents: Vec<String>,
-) -> Vec<String> {
-    if !addressed_agents.is_empty() {
-        return addressed_agents;
-    }
-
-    let source = if !lane.participants.is_empty() {
-        &lane.participants
-    } else {
-        &conversation.participants
-    };
-    source
-        .iter()
-        .filter(|participant| participant.as_str() != "operator")
-        .cloned()
-        .collect()
 }
 
 fn now_iso() -> String {

@@ -4,9 +4,10 @@ pub mod registry;
 
 pub use registry::{
     read_registry_file, write_registry_file, ExtensionRuntime, ExtensionRuntimeConfig,
-    ExtensionRuntimeSnapshot, RegisteredCommandContribution, RegisteredHookContribution,
-    RegisteredLocaleContribution, RegisteredPageContribution, RegisteredPanelContribution,
-    RegisteredProviderContribution, RegisteredThemeContribution, ResolvedExtensionSnapshot,
+    ExtensionRuntimeSnapshot, RegisteredBehaviorContribution, RegisteredCommandContribution,
+    RegisteredHookContribution, RegisteredLocaleContribution, RegisteredMemoryContribution,
+    RegisteredPageContribution, RegisteredPanelContribution, RegisteredProviderContribution,
+    RegisteredThemeContribution, ResolvedExtensionSnapshot,
 };
 
 /// Returns the current extension host module name.
@@ -32,6 +33,8 @@ mod tests {
             locales: Vec::new(),
             commands: Vec::new(),
             providers: Vec::new(),
+            behaviors: Vec::new(),
+            memories: Vec::new(),
             hooks: Vec::new(),
         };
         let event = ExtensionRuntimeEvent {

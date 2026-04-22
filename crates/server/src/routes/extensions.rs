@@ -4,6 +4,8 @@ use axum::http::{HeaderMap, Method, Uri};
 use ennoia_kernel::HookDispatchResponse;
 use tracing::warn;
 
+use crate::system_log::{SystemLogWrite, SYSTEM_LOG_COMPONENT_EXTENSION_HOST};
+
 #[allow(dead_code)]
 const HOOK_DISPATCH_ATTEMPTS: usize = 20;
 #[allow(dead_code)]
@@ -215,6 +217,16 @@ pub(super) async fn extension_reload(
                 &request,
             )
         })?;
+    let _ = state.system_log.append(SystemLogWrite {
+        event: "runtime.extension.reloaded".to_string(),
+        level: "info".to_string(),
+        component: SYSTEM_LOG_COMPONENT_EXTENSION_HOST.to_string(),
+        source_kind: "extension".to_string(),
+        source_id: Some(extension_id),
+        summary: "extension reloaded".to_string(),
+        payload: serde_json::json!({}),
+        created_at: None,
+    });
     Ok(Json(item))
 }
 
@@ -233,6 +245,16 @@ pub(super) async fn extension_restart(
                 &request,
             )
         })?;
+    let _ = state.system_log.append(SystemLogWrite {
+        event: "runtime.extension.restarted".to_string(),
+        level: "info".to_string(),
+        component: SYSTEM_LOG_COMPONENT_EXTENSION_HOST.to_string(),
+        source_kind: "extension".to_string(),
+        source_id: Some(extension_id),
+        summary: "extension restarted".to_string(),
+        payload: serde_json::json!({}),
+        created_at: None,
+    });
     Ok(Json(item))
 }
 
@@ -245,6 +267,16 @@ pub(super) async fn extension_attach(
         .extensions
         .attach_dev_source(&payload.path)
         .map_err(|error| scoped(ApiError::bad_request(error.to_string()), &request))?;
+    let _ = state.system_log.append(SystemLogWrite {
+        event: "runtime.extension.attached".to_string(),
+        level: "info".to_string(),
+        component: SYSTEM_LOG_COMPONENT_EXTENSION_HOST.to_string(),
+        source_kind: "extension".to_string(),
+        source_id: Some(item.id.clone()),
+        summary: "extension attached".to_string(),
+        payload: serde_json::json!({ "path": payload.path }),
+        created_at: None,
+    });
     Ok(Json(item))
 }
 
@@ -263,6 +295,16 @@ pub(super) async fn extension_detach(
             &request,
         ));
     }
+    let _ = state.system_log.append(SystemLogWrite {
+        event: "runtime.extension.detached".to_string(),
+        level: "info".to_string(),
+        component: SYSTEM_LOG_COMPONENT_EXTENSION_HOST.to_string(),
+        source_kind: "extension".to_string(),
+        source_id: Some(extension_id),
+        summary: "extension detached".to_string(),
+        payload: serde_json::json!({}),
+        created_at: None,
+    });
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -300,6 +342,20 @@ pub(super) async fn extension_enabled_put(
             },
             ..existing
         });
+    let _ = state.system_log.append(SystemLogWrite {
+        event: if payload.enabled {
+            "runtime.extension.enabled".to_string()
+        } else {
+            "runtime.extension.disabled".to_string()
+        },
+        level: "info".to_string(),
+        component: SYSTEM_LOG_COMPONENT_EXTENSION_HOST.to_string(),
+        source_kind: "extension".to_string(),
+        source_id: Some(extension_id.clone()),
+        summary: "extension enablement changed".to_string(),
+        payload: serde_json::json!({ "enabled": payload.enabled }),
+        created_at: None,
+    });
     Ok(Json(updated))
 }
 
@@ -375,7 +431,7 @@ pub(super) async fn extension_api_proxy(
         .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))
 }
 
-async fn send_extension_proxy_request(
+pub(crate) async fn send_extension_proxy_request(
     client: &reqwest::Client,
     method: reqwest::Method,
     target_url: &str,
@@ -507,7 +563,7 @@ async fn dispatch_hook_request(
     None
 }
 
-fn build_extension_proxy_url(base_url: &str, path: &str, query: Option<&str>) -> String {
+pub(crate) fn build_extension_proxy_url(base_url: &str, path: &str, query: Option<&str>) -> String {
     let mut url = format!(
         "{}/{}",
         base_url.trim_end_matches('/'),

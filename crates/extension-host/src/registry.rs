@@ -8,11 +8,11 @@ use std::sync::{Arc, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use ennoia_kernel::{
-    CommandContribution, ExtensionCapabilities, ExtensionDiagnostic, ExtensionFrontendSpec,
-    ExtensionHealth, ExtensionKind, ExtensionManifest, ExtensionRegistryEntry,
-    ExtensionRegistryFile, ExtensionRuntimeEvent, ExtensionSourceMode, HookContribution,
-    LocaleContribution, PageContribution, PanelContribution, ProviderContribution,
-    ResolvedBackendEntry, ResolvedFrontendEntry, ThemeContribution,
+    BehaviorContribution, CommandContribution, ExtensionCapabilities, ExtensionDiagnostic,
+    ExtensionFrontendSpec, ExtensionHealth, ExtensionKind, ExtensionManifest,
+    ExtensionRegistryEntry, ExtensionRegistryFile, ExtensionRuntimeEvent, ExtensionSourceMode,
+    HookContribution, LocaleContribution, MemoryContribution, PageContribution, PanelContribution,
+    ProviderContribution, ResolvedBackendEntry, ResolvedFrontendEntry, ThemeContribution,
 };
 use serde::Serialize;
 
@@ -36,6 +36,8 @@ pub struct ResolvedExtensionSnapshot {
     pub locales: Vec<LocaleContribution>,
     pub commands: Vec<CommandContribution>,
     pub providers: Vec<ProviderContribution>,
+    pub behaviors: Vec<BehaviorContribution>,
+    pub memories: Vec<MemoryContribution>,
     pub hooks: Vec<HookContribution>,
     pub diagnostics: Vec<ExtensionDiagnostic>,
 }
@@ -101,6 +103,26 @@ pub struct RegisteredProviderContribution {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RegisteredBehaviorContribution {
+    pub extension_id: String,
+    pub extension_kind: ExtensionKind,
+    pub extension_version: String,
+    pub source_mode: ExtensionSourceMode,
+    pub install_dir: String,
+    pub behavior: BehaviorContribution,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RegisteredMemoryContribution {
+    pub extension_id: String,
+    pub extension_kind: ExtensionKind,
+    pub extension_version: String,
+    pub source_mode: ExtensionSourceMode,
+    pub install_dir: String,
+    pub memory: MemoryContribution,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RegisteredHookContribution {
     pub extension_id: String,
     pub extension_kind: ExtensionKind,
@@ -121,6 +143,8 @@ pub struct ExtensionRuntimeSnapshot {
     pub locales: Vec<RegisteredLocaleContribution>,
     pub commands: Vec<RegisteredCommandContribution>,
     pub providers: Vec<RegisteredProviderContribution>,
+    pub behaviors: Vec<RegisteredBehaviorContribution>,
+    pub memories: Vec<RegisteredMemoryContribution>,
     pub hooks: Vec<RegisteredHookContribution>,
 }
 
@@ -446,6 +470,36 @@ impl ResolvedExtensionSnapshot {
             .collect()
     }
 
+    fn behavior_rows(&self) -> Vec<RegisteredBehaviorContribution> {
+        self.behaviors
+            .iter()
+            .cloned()
+            .map(|behavior| RegisteredBehaviorContribution {
+                extension_id: self.id.clone(),
+                extension_kind: self.kind.clone(),
+                extension_version: self.version.clone(),
+                source_mode: self.source_mode.clone(),
+                install_dir: self.install_dir.clone(),
+                behavior,
+            })
+            .collect()
+    }
+
+    fn memory_rows(&self) -> Vec<RegisteredMemoryContribution> {
+        self.memories
+            .iter()
+            .cloned()
+            .map(|memory| RegisteredMemoryContribution {
+                extension_id: self.id.clone(),
+                extension_kind: self.kind.clone(),
+                extension_version: self.version.clone(),
+                source_mode: self.source_mode.clone(),
+                install_dir: self.install_dir.clone(),
+                memory,
+            })
+            .collect()
+    }
+
     fn hook_rows(&self) -> Vec<RegisteredHookContribution> {
         self.hooks
             .iter()
@@ -485,6 +539,8 @@ fn build_snapshot(
     let mut locales = Vec::new();
     let mut commands = Vec::new();
     let mut providers = Vec::new();
+    let mut behaviors = Vec::new();
+    let mut memories = Vec::new();
     let mut hooks = Vec::new();
 
     for extension in &extensions {
@@ -494,6 +550,8 @@ fn build_snapshot(
         locales.extend(extension.locale_rows());
         commands.extend(extension.command_rows());
         providers.extend(extension.provider_rows());
+        behaviors.extend(extension.behavior_rows());
+        memories.extend(extension.memory_rows());
         hooks.extend(extension.hook_rows());
     }
 
@@ -507,6 +565,8 @@ fn build_snapshot(
         locales,
         commands,
         providers,
+        behaviors,
+        memories,
         hooks,
     })
 }
@@ -780,6 +840,8 @@ fn resolve_manifest(
         locales: manifest.contributes.locales,
         commands: manifest.contributes.commands,
         providers: manifest.contributes.providers,
+        behaviors: manifest.contributes.behaviors,
+        memories: manifest.contributes.memories,
         hooks: manifest.contributes.hooks,
         diagnostics,
     }
@@ -981,6 +1043,8 @@ fn failed_extension_snapshot(
         locales: Vec::new(),
         commands: Vec::new(),
         providers: Vec::new(),
+        behaviors: Vec::new(),
+        memories: Vec::new(),
         hooks: Vec::new(),
         diagnostics: vec![diagnostic(
             "error",
@@ -1049,6 +1113,8 @@ fn equivalent_snapshots(
         && current.locales == next.locales
         && current.commands == next.commands
         && current.providers == next.providers
+        && current.behaviors == next.behaviors
+        && current.memories == next.memories
         && current.hooks == next.hooks
 }
 
@@ -1076,6 +1142,8 @@ fn empty_snapshot() -> ExtensionRuntimeSnapshot {
         locales: Vec::new(),
         commands: Vec::new(),
         providers: Vec::new(),
+        behaviors: Vec::new(),
+        memories: Vec::new(),
         hooks: Vec::new(),
     }
 }

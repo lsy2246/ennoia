@@ -16,9 +16,9 @@ pub mod ui;
 // ========== Re-exports ==========
 
 pub use config::{
-    AgentConfig, AppConfig, ExtensionRegistryEntry, ExtensionRegistryFile, ProviderConfig,
-    ProviderModelDiscoveryConfig, ServerConfig, SkillConfig, SkillRegistryEntry, SkillRegistryFile,
-    UiConfig,
+    AgentConfig, AppConfig, BehaviorConfig, ExtensionRegistryEntry, ExtensionRegistryFile,
+    MemoryConfig, ProviderConfig, ProviderModelDiscoveryConfig, ServerConfig, SkillConfig,
+    SkillRegistryEntry, SkillRegistryFile, UiConfig,
 };
 pub use context::{ContextFrame, ContextLayer, RunContext};
 pub use decision::{Decision, DecisionSnapshot, NextAction};
@@ -28,13 +28,13 @@ pub use domain::{
     RunSpec, RuntimeProfile, SpaceSpec, TaskKind, TaskSpec, TaskStatus,
 };
 pub use extension::{
-    CommandContribution, ContributionSet, ConversationMessageHookPayload,
-    ConversationWorkflowOutput, ExtensionAssetsSpec, ExtensionBackendSpec, ExtensionCapabilities,
-    ExtensionDiagnostic, ExtensionFrontendSpec, ExtensionHealth, ExtensionKind, ExtensionManifest,
-    ExtensionRuntimeEvent, ExtensionSourceMode, ExtensionSourceSpec, ExtensionWatchSpec,
-    HookContribution, HookDispatchResponse, HookEventEnvelope, HookResourceRef, LocaleContribution,
-    PageContribution, PanelContribution, ProviderContribution, ProviderGenerationOption,
-    ResolvedBackendEntry, ResolvedFrontendEntry, ThemeContribution, HOOK_EVENT_ARTIFACT_CREATED,
+    BehaviorContribution, CommandContribution, ContributionSet, ExtensionAssetsSpec,
+    ExtensionBackendSpec, ExtensionCapabilities, ExtensionDiagnostic, ExtensionFrontendSpec,
+    ExtensionHealth, ExtensionKind, ExtensionManifest, ExtensionRuntimeEvent, ExtensionSourceMode,
+    ExtensionSourceSpec, ExtensionWatchSpec, HookContribution, HookDispatchResponse,
+    HookEventEnvelope, HookResourceRef, LocaleContribution, MemoryContribution, PageContribution,
+    PanelContribution, ProviderContribution, ProviderGenerationOption, ResolvedBackendEntry,
+    ResolvedFrontendEntry, ThemeContribution, HOOK_EVENT_ARTIFACT_CREATED,
     HOOK_EVENT_CONVERSATION_CREATED, HOOK_EVENT_CONVERSATION_MESSAGE_CREATED, HOOK_EVENT_JOB_DUE,
     HOOK_EVENT_RUN_REQUESTED, HOOK_EVENT_RUN_STAGE_CHANGED,
 };

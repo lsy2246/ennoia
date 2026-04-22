@@ -7,8 +7,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use ennoia_kernel::{
-    Decision, DecisionSnapshot, GateRecord, GateVerdict, RunContext, RunSpec, RunStage,
-    RunStageEvent, Signals, StageTransition,
+    ArtifactSpec, Decision, DecisionSnapshot, GateRecord, GateVerdict, HandoffSpec, RunContext,
+    RunSpec, RunStage, RunStageEvent, Signals, StageTransition, TaskSpec,
 };
 
 // ========== StageMachine ==========
@@ -77,9 +77,21 @@ impl GatePipeline {
 /// RuntimeStore persists decision snapshots, stage transitions, and gate verdicts.
 #[async_trait]
 pub trait RuntimeStore: Send + Sync {
+    async fn save_run_bundle(
+        &self,
+        run: &RunSpec,
+        tasks: &[TaskSpec],
+        artifacts: &[ArtifactSpec],
+        handoffs: &[HandoffSpec],
+    ) -> Result<(), RuntimeError>;
     async fn log_stage_event(&self, event: &RunStageEvent) -> Result<(), RuntimeError>;
     async fn log_decision(&self, snapshot: &DecisionSnapshot) -> Result<(), RuntimeError>;
     async fn log_gate_verdict(&self, record: &GateRecord) -> Result<(), RuntimeError>;
+    async fn get_run(&self, run_id: &str) -> Result<Option<RunSpec>, RuntimeError>;
+    async fn list_tasks_for_run(&self, run_id: &str) -> Result<Vec<TaskSpec>, RuntimeError>;
+    async fn list_artifacts_for_run(&self, run_id: &str)
+        -> Result<Vec<ArtifactSpec>, RuntimeError>;
+    async fn list_handoffs_for_run(&self, run_id: &str) -> Result<Vec<HandoffSpec>, RuntimeError>;
     async fn list_stage_events_for_run(
         &self,
         run_id: &str,

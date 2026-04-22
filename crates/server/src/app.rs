@@ -6,8 +6,8 @@ use std::time::Duration;
 use ennoia_assets::builtins;
 use ennoia_extension_host::{ExtensionRuntime, ExtensionRuntimeConfig};
 use ennoia_kernel::{
-    AgentConfig, AppConfig, PlatformOverview, ProviderConfig, ServerConfig, SkillConfig,
-    SkillRegistryEntry, SkillRegistryFile, SpaceSpec, UiConfig,
+    AgentConfig, AppConfig, BehaviorConfig, MemoryConfig, PlatformOverview, ProviderConfig,
+    ServerConfig, SkillConfig, SkillRegistryEntry, SkillRegistryFile, SpaceSpec, UiConfig,
 };
 use ennoia_observability::{self, ObservabilityGuard};
 use ennoia_paths::{default_home_dir, RuntimePaths};
@@ -16,6 +16,9 @@ use tracing::info;
 
 use crate::middleware::RateLimitState;
 use crate::routes::build_router;
+use crate::system_log::{
+    SystemLogStore, SystemLogWrite, SYSTEM_LOG_COMPONENT_EXTENSION_HOST, SYSTEM_LOG_COMPONENT_HOST,
+};
 
 type AppError = Box<dyn std::error::Error + Send + Sync>;
 
@@ -29,6 +32,8 @@ pub struct AppState {
     pub app_config: AppConfig,
     pub server_config: ServerConfig,
     pub ui_config: UiConfig,
+    pub behavior_config: BehaviorConfig,
+    pub memory_config: MemoryConfig,
     pub overview: PlatformOverview,
     pub runtime_paths: Arc<RuntimePaths>,
     pub extensions: ExtensionRuntime,
@@ -38,6 +43,7 @@ pub struct AppState {
     pub spaces: Vec<SpaceSpec>,
     pub rate_limit_state: RateLimitState,
     pub journal_lock: Arc<tokio::sync::Mutex<()>>,
+    pub system_log: Arc<SystemLogStore>,
     pub observability_guard: Option<Arc<ObservabilityGuard>>,
 }
 
@@ -48,11 +54,14 @@ pub fn default_app_state() -> AppState {
     runtime_paths.ensure_layout().expect("runtime layout");
     let extensions =
         ExtensionRuntime::bootstrap(extension_runtime_config(&runtime_paths)).expect("runtime");
+    let system_log = Arc::new(SystemLogStore::new(&runtime_paths).expect("system log"));
 
     AppState {
         app_config,
         server_config: ServerConfig::default(),
         ui_config: UiConfig::default(),
+        behavior_config: BehaviorConfig::default(),
+        memory_config: MemoryConfig::default(),
         overview: PlatformOverview::default(),
         runtime_paths: runtime_paths.clone(),
         extensions,
@@ -62,6 +71,7 @@ pub fn default_app_state() -> AppState {
         spaces: default_spaces(),
         rate_limit_state: RateLimitState::new(),
         journal_lock: Arc::new(tokio::sync::Mutex::new(())),
+        system_log,
         observability_guard: None,
     }
 }
@@ -78,6 +88,9 @@ pub async fn bootstrap_app_state(home_dir: impl AsRef<Path>) -> Result<AppState,
     runtime_paths.ensure_layout()?;
     let server_config: ServerConfig = read_toml_or_default(runtime_paths.server_config_file())?;
     let ui_config: UiConfig = read_toml_or_default(runtime_paths.ui_config_file())?;
+    let behavior_config: BehaviorConfig =
+        read_toml_or_default(runtime_paths.behavior_config_file())?;
+    let memory_config: MemoryConfig = read_toml_or_default(runtime_paths.memory_config_file())?;
     let observability_guard = Some(Arc::new(ennoia_observability::init(
         OBSERVABILITY_TARGET,
         &server_config.logging.level,
@@ -90,11 +103,14 @@ pub async fn bootstrap_app_state(home_dir: impl AsRef<Path>) -> Result<AppState,
     let providers = load_provider_configs(&runtime_paths)?;
     let spaces = default_spaces();
     let extensions = ExtensionRuntime::bootstrap(extension_runtime_config(&runtime_paths))?;
+    let system_log = Arc::new(SystemLogStore::new(&runtime_paths)?);
 
     Ok(AppState {
         app_config,
         server_config,
         ui_config,
+        behavior_config,
+        memory_config,
         overview: PlatformOverview::default(),
         runtime_paths,
         extensions,
@@ -104,22 +120,49 @@ pub async fn bootstrap_app_state(home_dir: impl AsRef<Path>) -> Result<AppState,
         spaces,
         rate_limit_state: RateLimitState::new(),
         journal_lock: Arc::new(tokio::sync::Mutex::new(())),
+        system_log,
         observability_guard,
     })
 }
 
 pub async fn run_server(home_dir: impl AsRef<Path>) -> Result<(), AppError> {
     let state = bootstrap_app_state(home_dir).await?;
+    let system_log = state.system_log.clone();
+    let _ = state.system_log.append(SystemLogWrite {
+        event: "runtime.host.started".to_string(),
+        level: "info".to_string(),
+        component: SYSTEM_LOG_COMPONENT_HOST.to_string(),
+        source_kind: "system".to_string(),
+        source_id: None,
+        summary: "server started".to_string(),
+        payload: serde_json::json!({
+            "host": state.server_config.host,
+            "port": state.server_config.port,
+        }),
+        created_at: None,
+    });
 
     let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
     let extensions = state.extensions.clone();
+    let refresh_log = state.system_log.clone();
     let mut extension_cancel = cancel_rx.clone();
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(2));
         loop {
             tokio::select! {
                 _ = interval.tick() => {
-                    let _ = extensions.refresh_from_disk(EXTENSION_REFRESH_SUMMARY);
+                    if extensions.refresh_from_disk(EXTENSION_REFRESH_SUMMARY).is_err() {
+                        let _ = refresh_log.append(SystemLogWrite {
+                            event: "runtime.extension.refresh_failed".to_string(),
+                            level: "warn".to_string(),
+                            component: SYSTEM_LOG_COMPONENT_EXTENSION_HOST.to_string(),
+                            source_kind: "system".to_string(),
+                            source_id: None,
+                            summary: "extension refresh failed".to_string(),
+                            payload: serde_json::json!({}),
+                            created_at: None,
+                        });
+                    }
                 }
                 changed = extension_cancel.changed() => {
                     if changed.is_err() || *extension_cancel.borrow() {
@@ -134,6 +177,16 @@ pub async fn run_server(home_dir: impl AsRef<Path>) -> Result<(), AppError> {
     let listener = TcpListener::bind(&address).await?;
     let serve_result = axum::serve(listener, build_router(state)).await;
     let _ = cancel_tx.send(true);
+    let _ = system_log.append(SystemLogWrite {
+        event: "runtime.host.stopping".to_string(),
+        level: "info".to_string(),
+        component: SYSTEM_LOG_COMPONENT_HOST.to_string(),
+        source_kind: "system".to_string(),
+        source_id: None,
+        summary: "server stopping".to_string(),
+        payload: serde_json::json!({}),
+        created_at: None,
+    });
     serve_result?;
     Ok(())
 }

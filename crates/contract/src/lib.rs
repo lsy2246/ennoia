@@ -1,5 +1,8 @@
 //! Shared API contract primitives for backend responses.
 
+pub mod behavior;
+pub mod memory;
+
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;

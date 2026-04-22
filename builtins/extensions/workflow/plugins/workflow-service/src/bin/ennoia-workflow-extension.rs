@@ -2,17 +2,19 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::{
-    extract::State,
+    extract::{Path, State},
     http::StatusCode,
     routing::{get, post},
     Json, Router,
 };
-use ennoia_kernel::{ConversationMessageHookPayload, HookDispatchResponse, HookEventEnvelope};
+use ennoia_contract::behavior::{
+    BehaviorRunDetailResponse, BehaviorRunRequest, BehaviorRunResponse, BehaviorStatusResponse,
+};
 use ennoia_paths::RuntimePaths;
 use ennoia_policy::PolicySet;
 use ennoia_workflow::{
     orchestrator::OrchestratorService,
-    pipeline::{run_conversation_workflow, WorkflowRuntime},
+    pipeline::{run_behavior, WorkflowRuntime},
     runtime::{
         builtin_pipeline, initialize_workflow_schema, PolicyStageMachine, RuntimeStore,
         SqliteRuntimeStore,
@@ -63,10 +65,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let router = Router::new()
         .route("/health", get(health))
-        .route(
-            "/hooks/conversation-message-created",
-            post(conversation_message_created),
-        )
+        .route("/status", get(status))
+        .route("/runs", post(runs_create))
+        .route("/runs/{run_id}", get(run_detail))
+        .route("/runs/{run_id}/tasks", get(run_tasks))
+        .route("/runs/{run_id}/artifacts", get(run_artifacts))
+        .route("/runs/{run_id}/handoffs", get(run_handoffs))
         .with_state(state);
 
     let listener = TcpListener::bind(("127.0.0.1", options.port)).await?;
@@ -81,24 +85,133 @@ async fn health() -> Json<serde_json::Value> {
     }))
 }
 
-async fn conversation_message_created(
+async fn status(State(_state): State<WorkflowApiState>) -> Json<BehaviorStatusResponse> {
+    Json(BehaviorStatusResponse {
+        extension_id: "workflow".to_string(),
+        behavior_id: "default".to_string(),
+        healthy: true,
+        version: env!("CARGO_PKG_VERSION").to_string(),
+        interfaces: vec![
+            "runs".to_string(),
+            "tasks".to_string(),
+            "artifacts".to_string(),
+            "handoffs".to_string(),
+            "status".to_string(),
+        ],
+    })
+}
+
+async fn runs_create(
     State(state): State<WorkflowApiState>,
-    Json(event): Json<HookEventEnvelope>,
-) -> ApiResult<HookDispatchResponse> {
-    let payload: ConversationMessageHookPayload = serde_json::from_value(event.payload)
-        .map_err(|error| (StatusCode::BAD_REQUEST, error.to_string()))?;
-    let output = run_conversation_workflow(&state.runtime, payload)
+    Json(payload): Json<BehaviorRunRequest>,
+) -> ApiResult<BehaviorRunResponse> {
+    let output = run_behavior(&state.runtime, payload)
         .await
         .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error))?;
+    Ok(Json(output))
+}
 
-    Ok(Json(HookDispatchResponse {
-        handled: true,
-        result: Some(
-            serde_json::to_value(output)
-                .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?,
-        ),
-        message: None,
+async fn run_detail(
+    State(state): State<WorkflowApiState>,
+    Path(run_id): Path<String>,
+) -> ApiResult<BehaviorRunDetailResponse> {
+    let run = state
+        .runtime
+        .runtime_store
+        .get_run(&run_id)
+        .await
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "run not found".to_string()))?;
+    let tasks = state
+        .runtime
+        .runtime_store
+        .list_tasks_for_run(&run_id)
+        .await
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    let artifacts = state
+        .runtime
+        .runtime_store
+        .list_artifacts_for_run(&run_id)
+        .await
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    let handoffs = state
+        .runtime
+        .runtime_store
+        .list_handoffs_for_run(&run_id)
+        .await
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    let stage_events = state
+        .runtime
+        .runtime_store
+        .list_stage_events_for_run(&run_id)
+        .await
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    let gate_verdicts = state
+        .runtime
+        .runtime_store
+        .list_gate_verdicts_for_run(&run_id)
+        .await
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
+        .into_iter()
+        .map(|record| ennoia_kernel::GateVerdict {
+            gate_name: record.gate_name,
+            allow: record.verdict != "deny",
+            severity: match record.verdict.as_str() {
+                "warn" => ennoia_kernel::GateSeverity::Warn,
+                "deny" => ennoia_kernel::GateSeverity::Deny,
+                _ => ennoia_kernel::GateSeverity::Info,
+            },
+            reason: record.reason.unwrap_or_default(),
+        })
+        .collect();
+
+    Ok(Json(BehaviorRunDetailResponse {
+        run,
+        tasks,
+        artifacts,
+        handoffs,
+        stage_events,
+        gate_verdicts,
     }))
+}
+
+async fn run_tasks(
+    State(state): State<WorkflowApiState>,
+    Path(run_id): Path<String>,
+) -> ApiResult<Vec<ennoia_kernel::TaskSpec>> {
+    state
+        .runtime
+        .runtime_store
+        .list_tasks_for_run(&run_id)
+        .await
+        .map(Json)
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))
+}
+
+async fn run_artifacts(
+    State(state): State<WorkflowApiState>,
+    Path(run_id): Path<String>,
+) -> ApiResult<Vec<ennoia_kernel::ArtifactSpec>> {
+    state
+        .runtime
+        .runtime_store
+        .list_artifacts_for_run(&run_id)
+        .await
+        .map(Json)
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))
+}
+
+async fn run_handoffs(
+    State(state): State<WorkflowApiState>,
+    Path(run_id): Path<String>,
+) -> ApiResult<Vec<ennoia_kernel::HandoffSpec>> {
+    state
+        .runtime
+        .runtime_store
+        .list_handoffs_for_run(&run_id)
+        .await
+        .map(Json)
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))
 }
 
 struct Options {

@@ -1,64 +1,88 @@
-﻿# Ennoia 架构总览
+# Ennoia 架构总览
 
 ## 目标
 
-`Ennoia` 是单操作者、多 Agent 的本地 AI Web 工作台。核心定位为极简宿主，只负责配置、路径、日志、扩展生命周期、Hook 派发和扩展代理；业务能力由扩展接入。
+`Ennoia` 是单操作者、多 Agent 的本地 AI 工作台。系统核心只负责运行时骨架：配置、路径、系统日志、扩展生命周期、能力路由和扩展代理；具体业务能力通过内置实现或扩展实现接入。
 
-## 分层
+## 总体分层
 
 ```text
 Web
   -> API Client
     -> Server
-      -> Kernel
+      -> Kernel / Contract / Paths / Observability
       -> Extension Host
-      -> Config / Paths / Logs
-    -> Extension Proxy
-      -> Memory Extension Backend
+      -> System Log
+    -> Behavior Router
       -> Workflow Extension Backend
+    -> Memory Router
+      -> Journal Builtin Memory
+      -> Memory Extension Backend
 ```
 
-## 领域边界
+## 核心边界
 
-- `Kernel` 定义共享协议、配置结构、UI 文本结构和扩展 manifest 模型。
-- `Server` 负责 API 路由、TOML 配置文件、journal 文件记录、前端日志、扩展代理与扩展运行时装配。
-- `Extension Host` 负责扩展扫描、attach/detach、运行状态、诊断、贡献注册和扩展后端进程托管。
-- `Journal` 是系统内置的文件记录层，负责一套 Conversation、Lane、Message 与事件原文，默认关闭，可通过 `server.toml` 开启。
-- `Memory` 是内置扩展，源码物理位于 `builtins/extensions/memory/`，负责另一套完整记忆机制，包括 Conversation、Lane、Message、Truth Memory、Context Artifact、Review 与 Graph。
-- `Workflow` 是内置扩展，源码物理位于 `builtins/extensions/workflow/`，负责运行编排、任务、stage、decision、gate 与 artifact；定时器规范也归扩展自己实现。
-- `Web` 负责工作台 UI、Dockview 多实例视图、文件配置表单和扩展贡献挂载。
+- `Kernel`：定义系统级配置、扩展 manifest、共享运行时模型和能力声明结构。
+- `Contract`：定义跨边界 DTO；当前包含 `behavior` 与 `memory` 协议响应结构。
+- `Paths`：统一解析运行目录，所有运行时文件位置都通过 `RuntimePaths` 推导。
+- `Extension Host`：负责扩展扫描、attach / detach、reload / restart、诊断和后端进程托管。
+- `Server`：负责 HTTP API、配置读写、能力选择、能力代理、系统日志和系统内置组件装配。
 
-## Conversation 模型
+## 行为层
 
-- `direct`：一个 Agent。
-- `group`：两个及以上 Agent。
-- 每个 Conversation 有默认 Lane，可按 Lane 展示消息、handoff、run 和 artifact。
-- 消息通过 `mentions` 与请求中的 `addressed_agents` 共同决定目标 Agent。
+- 行为层解决“系统如何触发一次执行”。
+- 系统只认识 `behavior` 能力协议，不依赖具体 `workflow` 实现。
+- `workflow` 是一个内置扩展实现，声明 `contributes.behaviors`，通过统一入口对外暴露运行能力。
+- 当前系统行为入口包括：
+  - `GET /api/v1/behaviors`
+  - `GET /api/v1/behaviors/active`
+  - `GET /api/v1/behavior/status`
+  - `ANY /api/v1/behavior/{*path}`
+- `config/behavior.toml` 只负责选择当前激活的行为实现：`active_extension` 与 `active_behavior`。
 
-## Agent / Skill / Provider / Extension
+## 记忆层
 
-- `Agent` 是长期协作者档案，只表达身份、上游、模型、技能和启用状态。
-- `Skill` 是 Agent 可引用的能力包，不承担插件挂载。
-- `Provider` 是 API 上游渠道实例，`kind` 表示接口类型，并由系统按 `kind` 自动解析唯一实现扩展；当前 OpenAI 生成 / 对话能力统一收敛为单一 `openai` 接口，`default_model` 表示用户确认后的默认模型。
-- `Extension` 是系统插件包，可贡献页面、面板、主题、语言、命令、Hook 和 Provider 实现。
-- `Hook` 是扩展 manifest 的一部分，系统只定义事件名、事件 envelope 与触发时机，扩展声明 `event + handler` 并通过 HTTP 回包表达是否处理。
-- 扩展页面是可选贡献；声明 `pages[].nav.default_pinned = true` 的页面默认进入导航栏，其余页面可从扩展详情页打开。
-- `Memory` 是内置扩展：前端通过 `memory.page` 扩展页挂载，后端通过 `/api/ext/memory/*` 提供独立会话、上下文与记忆能力。
-- `Workflow` 是内置扩展：编排实现和运行态产出都留在扩展私有边界。
-- 扩展与技能的安装登记统一放在 `config/extensions.toml` 与 `config/skills.toml`，真实包内容放在 `extensions/*` 与 `skills/*`。
+- 记忆层解决“系统从哪里读写会话、工作区和记忆数据”。
+- 系统只负责记忆能力路由，不实现复杂记忆内部逻辑。
+- `journal` 与 `memory` 都属于记忆层实现，只是能力强度不同：
+  - `journal`：系统内置、文件机制、偏轻量的记忆实现。
+  - `memory`：内置扩展、完整记忆系统实现。
+- 多种记忆实现可以并存；是否启用、优先读哪个、优先工作区用哪个，由 `config/memory.toml` 决定。
+- 当前系统记忆入口包括：
+  - `GET /api/v1/memories`
+  - `GET /api/v1/memories/active`
+  - `GET /api/v1/memories/{memory_id}/status`
+  - `ANY /api/v1/memory/{memory_id}/{*path}`
+  - `ANY /api/v1/memory/active/{*path}`
+- Conversation / message / handoff / history 这些具体数据组织属于记忆层内部责任，不属于系统日志。
 
-## Hook 事件边界
+## 系统日志
 
-- 核心机制在系统生命周期时机构造 `HookEventEnvelope`，包含 `event`、`occurred_at`、`owner`、`resource` 和 `payload`。
-- Extension Host 按 `contributes.hooks[]` 查找订阅扩展，并把 envelope POST 到扩展后端 handler。
-- 扩展返回 `HookDispatchResponse`，其中 `handled=true` 表示该扩展接管了本次时机。
-- Hook 决定“什么时候触发”，Plugin 决定“触发后做什么”，Extension 负责组织并接入系统。
+- 系统日志是系统组件自己的观测层，不属于记忆层。
+- 系统日志记录系统级事件，例如：宿主启动、扩展 attach / reload / restart、行为路由失败、记忆路由失败、扩展代理失败等。
+- 系统日志使用独立 SQLite，文件位于 `data/system/sqlite/system-log.db`。
+- 系统日志通过以下接口暴露：
+  - `GET /api/v1/system/logs`
+  - `GET /api/v1/system/logs/{log_id}`
+- 系统日志不承载记忆层 history，也不作为 `memory` / `journal` 的底层存储依赖。
 
-## 存储
+## Hook 边界
 
-- 系统级配置只走 `~/.ennoia/config/*.toml`。
-- Journal 原始记录写入 `~/.ennoia/data/journal/`，包含 conversations、messages 和 events 文件；默认关闭，关闭后系统不读写该目录。
-- Memory 扩展私有记录写入 `~/.ennoia/data/extensions/memory/`，与 Journal 并存，启用任一方都不会自动关闭另一方。
-- 核心日志写入 `~/.ennoia/logs/`。
-- 核心不提供主业务数据库；会话事实由 Journal 文件记录，语义记忆、运行编排、任务、产物索引或调度队列由扩展管理。
-- 扩展私有存储位于 `~/.ennoia/data/extensions/{extension_id}/`，例如 `memory.db` 和 `workflow.db`。
+- Hook 保留为系统事件分发机制，但不再承担行为执行主通道。
+- 行为层通过 `behavior` 能力协议直接接入。
+- 记忆层通过 `memory` 能力协议直接接入。
+- 系统只在确实需要广播系统事件时才使用 Hook，不把行为和记忆重新耦合回 Hook。
+
+## 扩展能力模型
+
+- 扩展可声明多类贡献：`pages`、`panels`、`themes`、`locales`、`commands`、`providers`、`behaviors`、`memories`、`hooks`。
+- UI 工作台读取扩展快照时，同时获得 `behaviors` 与 `memories` 能力清单。
+- `workflow` 依赖系统定义的 behavior SPI；`memory` 扩展依赖系统定义的 memory SPI；系统不反向依赖具体扩展。
+
+## 存储划分
+
+- 系统级配置：`~/.ennoia/config/*.toml`
+- 系统级日志：`~/.ennoia/data/system/sqlite/system-log.db`
+- `journal` 内置记忆：`~/.ennoia/data/journal/`
+- 扩展私有数据：`~/.ennoia/data/extensions/{extension_id}/`
+- 核心不维护主业务总库；行为运行数据和完整记忆数据都放在各自实现边界内。

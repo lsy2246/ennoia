@@ -16,15 +16,15 @@ use axum::{
 use chrono::Utc;
 use ennoia_contract::ApiError;
 use ennoia_extension_host::{
-    read_registry_file, ExtensionRuntimeSnapshot, RegisteredCommandContribution,
-    RegisteredHookContribution, RegisteredLocaleContribution, RegisteredPageContribution,
-    RegisteredPanelContribution, RegisteredProviderContribution, RegisteredThemeContribution,
-    ResolvedExtensionSnapshot,
+    read_registry_file, ExtensionRuntimeSnapshot, RegisteredBehaviorContribution,
+    RegisteredCommandContribution, RegisteredHookContribution, RegisteredLocaleContribution,
+    RegisteredMemoryContribution, RegisteredPageContribution, RegisteredPanelContribution,
+    RegisteredProviderContribution, RegisteredThemeContribution, ResolvedExtensionSnapshot,
 };
 use ennoia_kernel::{
-    AgentConfig, AppConfig, BootstrapState, ExtensionDiagnostic, ExtensionRuntimeEvent,
-    HookEventEnvelope, LocalizedText, ProviderConfig, RuntimeProfile, ServerConfig, SkillConfig,
-    UiConfig, UiPreference, UiPreferenceRecord,
+    AgentConfig, AppConfig, BehaviorConfig, BootstrapState, ExtensionDiagnostic,
+    ExtensionRuntimeEvent, HookEventEnvelope, LocalizedText, MemoryConfig, ProviderConfig,
+    RuntimeProfile, ServerConfig, SkillConfig, UiConfig, UiPreference, UiPreferenceRecord,
 };
 use ennoia_observability::RequestContext;
 use serde::{Deserialize, Serialize};
@@ -40,17 +40,23 @@ use crate::middleware::{
     request_context_middleware, timeout_middleware,
 };
 
+mod behavior;
 mod extensions;
 mod journal;
 mod logs;
+mod memory;
 mod resources;
 mod runtime;
+mod system_logs;
 
+use behavior::*;
 use extensions::*;
 use journal::*;
 use logs::*;
+use memory::*;
 use resources::*;
 use runtime::*;
+use system_logs::*;
 
 type ApiResult<T> = Result<Json<T>, ApiError>;
 
@@ -79,6 +85,14 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/api/v1/runtime/server-config",
             get(runtime_server_config).put(runtime_server_config_put),
+        )
+        .route(
+            "/api/v1/runtime/behavior-config",
+            get(runtime_behavior_config).put(runtime_behavior_config_put),
+        )
+        .route(
+            "/api/v1/runtime/memory-config",
+            get(runtime_memory_config).put(runtime_memory_config_put),
         );
 
     Router::new()
@@ -106,6 +120,8 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/v1/extensions/panels", get(extension_panels))
         .route("/api/v1/extensions/commands", get(extension_commands))
         .route("/api/v1/extensions/providers", get(extension_providers))
+        .route("/api/v1/extensions/behaviors", get(extension_behaviors))
+        .route("/api/v1/extensions/memories", get(extension_memories))
         .route("/api/v1/extensions/hooks", get(extension_hooks))
         .route("/api/v1/extensions/attach", post(extension_attach))
         .route("/api/v1/extensions/{extension_id}", get(extension_detail))
@@ -130,6 +146,18 @@ pub fn build_router(state: AppState) -> Router {
             post(extension_reload),
         )
         .route("/api/ext/{extension_id}/{*path}", any(extension_api_proxy))
+        .route("/api/v1/behaviors", get(behaviors))
+        .route("/api/v1/behaviors/active", get(active_behavior))
+        .route("/api/v1/behavior/status", get(behavior_status))
+        .route("/api/v1/behavior/{*path}", any(behavior_api_proxy))
+        .route("/api/v1/memories", get(memories))
+        .route("/api/v1/memories/active", get(active_memory))
+        .route("/api/v1/memories/{memory_id}/status", get(memory_status))
+        .route("/api/v1/memory/{memory_id}/{*path}", any(memory_api_proxy))
+        .route(
+            "/api/v1/memory/active/{*path}",
+            any(active_memory_api_proxy),
+        )
         .route(
             "/api/v1/extensions/{extension_id}/restart",
             post(extension_restart),
@@ -177,6 +205,8 @@ pub fn build_router(state: AppState) -> Router {
         )
         .route("/api/v1/spaces", get(spaces))
         .route("/api/v1/logs", get(logs_list))
+        .route("/api/v1/system/logs", get(system_logs))
+        .route("/api/v1/system/logs/{log_id}", get(system_log_detail))
         .route("/api/v1/logs/frontend", post(frontend_log_create))
         .merge(bootstrap)
         .merge(runtime)
@@ -226,6 +256,8 @@ struct UiRuntimeRegistryResponse {
     themes: Vec<RegisteredThemeContribution>,
     locales: Vec<RegisteredLocaleContribution>,
     providers: Vec<RegisteredProviderContribution>,
+    behaviors: Vec<RegisteredBehaviorContribution>,
+    memories: Vec<RegisteredMemoryContribution>,
 }
 
 #[derive(Debug, Serialize)]
@@ -422,7 +454,9 @@ async fn ui_runtime(State(state): State<AppState>) -> Json<UiRuntimeResponse> {
         + snapshot.panels.len()
         + snapshot.themes.len()
         + snapshot.locales.len()
-        + snapshot.providers.len()) as u64;
+        + snapshot.providers.len()
+        + snapshot.behaviors.len()
+        + snapshot.memories.len()) as u64;
     let preference_version = ui_preference_version_from_disk(&state);
 
     Json(UiRuntimeResponse {
@@ -433,6 +467,8 @@ async fn ui_runtime(State(state): State<AppState>) -> Json<UiRuntimeResponse> {
             themes: snapshot.themes,
             locales: snapshot.locales,
             providers: snapshot.providers,
+            behaviors: snapshot.behaviors,
+            memories: snapshot.memories,
         },
         instance_preference,
         space_preferences,

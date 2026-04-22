@@ -138,6 +138,36 @@ export type ExtensionHookContribution = {
   };
 };
 
+export type ExtensionBehaviorContribution = {
+  extension_id: string;
+  extension_kind: string;
+  extension_version: string;
+  source_mode: "dev" | "package";
+  install_dir: string;
+  behavior: {
+    id: string;
+    extension_id?: string | null;
+    interfaces: string[];
+    entry?: string | null;
+    version: string;
+  };
+};
+
+export type ExtensionMemoryContribution = {
+  extension_id: string;
+  extension_kind: string;
+  extension_version: string;
+  source_mode: "dev" | "package";
+  install_dir: string;
+  memory: {
+    id: string;
+    extension_id?: string | null;
+    interfaces: string[];
+    entry?: string | null;
+    version: string;
+  };
+};
+
 export type ResolvedFrontendEntry = {
   kind: string;
   entry: string;
@@ -181,6 +211,8 @@ export type ExtensionRuntimeExtension = {
     locales: boolean;
     commands: boolean;
     providers: boolean;
+    behaviors: boolean;
+    memories: boolean;
     hooks: boolean;
   };
   pages: ExtensionPageContribution["page"][];
@@ -189,6 +221,8 @@ export type ExtensionRuntimeExtension = {
   locales: ExtensionLocaleContribution["locale"][];
   commands: ExtensionCommandContribution["command"][];
   providers: ExtensionProviderContribution["provider"][];
+  behaviors: ExtensionBehaviorContribution["behavior"][];
+  memories: ExtensionMemoryContribution["memory"][];
   hooks: ExtensionHookContribution["hook"][];
   diagnostics: ExtensionDiagnostic[];
 };
@@ -203,6 +237,8 @@ export type ExtensionRuntimeSnapshot = {
   locales: ExtensionLocaleContribution[];
   commands: ExtensionCommandContribution[];
   providers: ExtensionProviderContribution[];
+  behaviors: ExtensionBehaviorContribution[];
+  memories: ExtensionMemoryContribution[];
   hooks: ExtensionHookContribution[];
 };
 

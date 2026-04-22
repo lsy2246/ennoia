@@ -16,6 +16,10 @@ healthcheck = "/health"
 
 [capabilities]
 pages = true
+memories = true
 
 [contributes]
 pages = [{ id = "memory.page", title = { key = "web.nav.memory", fallback = "记忆" }, route = "/memory", mount = "memory.page", icon = "memory", nav = { default_pinned = true, order = 30 } }]
+memories = [
+  { id = "memory", extension_id = "memory", interfaces = ["workspace", "conversations", "messages", "lanes", "handoffs", "truth", "context", "review", "graph"], entry = "/", version = "1" }
+]

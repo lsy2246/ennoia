@@ -4,9 +4,9 @@ use std::path::{Path as StdPath, PathBuf};
 use std::sync::Arc;
 
 use ennoia_kernel::{
-    ArtifactSpec, ConversationMessageHookPayload, ConversationSpec, ConversationTopology,
-    HookResourceRef, LaneSpec, MessageRole, MessageSpec, OwnerRef, RunSpec, TaskSpec,
-    HOOK_EVENT_CONVERSATION_CREATED, HOOK_EVENT_CONVERSATION_MESSAGE_CREATED,
+    ArtifactSpec, ConversationSpec, ConversationTopology, HookResourceRef, LaneSpec, MessageRole,
+    MessageSpec, OwnerRef, RunSpec, TaskSpec, HOOK_EVENT_CONVERSATION_CREATED,
+    HOOK_EVENT_CONVERSATION_MESSAGE_CREATED,
 };
 use ennoia_paths::RuntimePaths;
 
@@ -48,6 +48,7 @@ pub(super) struct ConversationMessagePayload {
     body: String,
     #[serde(default)]
     lane_id: Option<String>,
+    #[allow(dead_code)]
     #[serde(default)]
     goal: Option<String>,
     #[serde(default)]
@@ -67,6 +68,12 @@ pub(super) struct ConversationMessageResponse {
     artifacts: Vec<ArtifactSpec>,
 }
 
+#[derive(Debug, Serialize)]
+pub(super) struct JournalWorkspaceResponse {
+    conversations: Vec<ConversationSpec>,
+    message_count: usize,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct JournalEvent {
     id: String,
@@ -76,12 +83,37 @@ struct JournalEvent {
     payload: serde_json::Value,
 }
 
+struct PersistedOperatorMessage {
+    conversation: ConversationSpec,
+    lane: LaneSpec,
+    message: MessageSpec,
+}
+
 pub(super) async fn conversations_list(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<ConversationSpec>>, ApiError> {
     let _guard = lock_journal(&state).await?;
     let store = JournalStore::new(state.runtime_paths.clone());
     store.list_conversations().map(Json).map_err(to_api_error)
+}
+
+pub(super) async fn journal_workspace(
+    State(state): State<AppState>,
+) -> Result<Json<JournalWorkspaceResponse>, ApiError> {
+    let _guard = lock_journal(&state).await?;
+    let store = JournalStore::new(state.runtime_paths.clone());
+    let conversations = store.list_conversations().map_err(to_api_error)?;
+    let mut message_count = 0usize;
+    for conversation in &conversations {
+        message_count += store
+            .list_messages(&conversation.id)
+            .map(|items| items.len())
+            .unwrap_or_default();
+    }
+    Ok(Json(JournalWorkspaceResponse {
+        conversations,
+        message_count,
+    }))
 }
 
 pub(super) async fn conversations_create(
@@ -283,7 +315,7 @@ fn persist_operator_message(
     store: &JournalStore,
     conversation_id: &str,
     payload: ConversationMessagePayload,
-) -> Result<ConversationMessageHookPayload, ApiError> {
+) -> Result<PersistedOperatorMessage, ApiError> {
     validate_segment(conversation_id)?;
     let conversation = store
         .get_conversation(conversation_id)
@@ -357,11 +389,10 @@ fn persist_operator_message(
         )
         .map_err(to_api_error)?;
 
-    Ok(ConversationMessageHookPayload {
+    Ok(PersistedOperatorMessage {
         conversation,
         lane,
         message,
-        goal: payload.goal.unwrap_or(payload.body),
     })
 }
 

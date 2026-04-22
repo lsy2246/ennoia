@@ -1,10 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
-use crate::{
-    ArtifactSpec, ConversationSpec, Decision, GateVerdict, LaneSpec, MessageSpec, OwnerRef,
-    RunContext, RunSpec, RunStageEvent, TaskSpec,
-};
+use crate::OwnerRef;
 
 use crate::ui::{LocalizedText, ThemeAppearance};
 
@@ -123,6 +120,32 @@ pub struct HookContribution {
     pub handler: Option<String>,
 }
 
+/// BehaviorContribution describes one behavior capability exported by an extension.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BehaviorContribution {
+    pub id: String,
+    #[serde(default)]
+    pub extension_id: Option<String>,
+    #[serde(default)]
+    pub interfaces: Vec<String>,
+    #[serde(default)]
+    pub entry: Option<String>,
+    pub version: String,
+}
+
+/// MemoryContribution describes one memory capability exported by an extension.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MemoryContribution {
+    pub id: String,
+    #[serde(default)]
+    pub extension_id: Option<String>,
+    #[serde(default)]
+    pub interfaces: Vec<String>,
+    #[serde(default)]
+    pub entry: Option<String>,
+    pub version: String,
+}
+
 pub const HOOK_EVENT_CONVERSATION_CREATED: &str = "conversation.created";
 pub const HOOK_EVENT_CONVERSATION_MESSAGE_CREATED: &str = "conversation.message.created";
 pub const HOOK_EVENT_RUN_REQUESTED: &str = "run.requested";
@@ -167,28 +190,6 @@ pub struct HookDispatchResponse {
     pub message: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct ConversationMessageHookPayload {
-    pub conversation: ConversationSpec,
-    pub lane: LaneSpec,
-    pub message: MessageSpec,
-    pub goal: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct ConversationWorkflowOutput {
-    pub conversation: ConversationSpec,
-    pub lane: LaneSpec,
-    pub message: MessageSpec,
-    pub run: RunSpec,
-    pub tasks: Vec<TaskSpec>,
-    pub artifacts: Vec<ArtifactSpec>,
-    pub context: RunContext,
-    pub gate_verdicts: Vec<GateVerdict>,
-    pub stage_event: RunStageEvent,
-    pub decision: Decision,
-}
-
 /// ContributionSet groups all extension contributions in one place.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ContributionSet {
@@ -204,6 +205,10 @@ pub struct ContributionSet {
     pub commands: Vec<CommandContribution>,
     #[serde(default)]
     pub providers: Vec<ProviderContribution>,
+    #[serde(default)]
+    pub behaviors: Vec<BehaviorContribution>,
+    #[serde(default)]
+    pub memories: Vec<MemoryContribution>,
     #[serde(default)]
     pub hooks: Vec<HookContribution>,
 }
@@ -326,6 +331,10 @@ pub struct ExtensionCapabilities {
     #[serde(default)]
     pub providers: bool,
     #[serde(default)]
+    pub behaviors: bool,
+    #[serde(default)]
+    pub memories: bool,
+    #[serde(default)]
     pub hooks: bool,
 }
 
@@ -338,6 +347,8 @@ impl ExtensionCapabilities {
             locales: !contributes.locales.is_empty(),
             commands: !contributes.commands.is_empty(),
             providers: !contributes.providers.is_empty(),
+            behaviors: !contributes.behaviors.is_empty(),
+            memories: !contributes.memories.is_empty(),
             hooks: !contributes.hooks.is_empty(),
         }
     }
@@ -389,6 +400,8 @@ impl ExtensionManifest {
             locales: declared.locales || inferred.locales,
             commands: declared.commands || inferred.commands,
             providers: declared.providers || inferred.providers,
+            behaviors: declared.behaviors || inferred.behaviors,
+            memories: declared.memories || inferred.memories,
             hooks: declared.hooks || inferred.hooks,
         }
     }

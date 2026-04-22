@@ -1,3 +1,45 @@
+CREATE TABLE IF NOT EXISTS runs (
+  id TEXT PRIMARY KEY,
+  payload_json TEXT NOT NULL,
+  stage TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_workflow_runs_time
+  ON runs(updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS tasks (
+  id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_workflow_tasks_run
+  ON tasks(run_id, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS artifacts (
+  id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_workflow_artifacts_run
+  ON artifacts(run_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS handoffs (
+  id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_workflow_handoffs_run
+  ON handoffs(run_id, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS run_stage_events (
   id TEXT PRIMARY KEY,
   run_id TEXT NOT NULL,

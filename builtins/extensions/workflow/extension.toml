@@ -15,9 +15,9 @@ command = "cargo run --manifest-path \"plugins/workflow-service/Cargo.toml\" --b
 healthcheck = "/health"
 
 [capabilities]
-hooks = true
+behaviors = true
 
 [contributes]
-hooks = [
-  { event = "conversation.message.created", handler = "/hooks/conversation-message-created" }
+behaviors = [
+  { id = "default", extension_id = "workflow", interfaces = ["runs", "tasks", "artifacts", "handoffs", "status"], entry = "/", version = "1" }
 ]

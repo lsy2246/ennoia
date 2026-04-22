@@ -71,6 +71,14 @@ impl RuntimePaths {
         self.config_dir().join("profile.toml")
     }
 
+    pub fn behavior_config_file(&self) -> PathBuf {
+        self.config_dir().join("behavior.toml")
+    }
+
+    pub fn memory_config_file(&self) -> PathBuf {
+        self.config_dir().join("memory.toml")
+    }
+
     pub fn preferences_dir(&self) -> PathBuf {
         self.config_dir().join("preferences")
     }
@@ -122,6 +130,18 @@ impl RuntimePaths {
 
     pub fn extensions_state_dir(&self) -> PathBuf {
         self.state_dir().join("extensions")
+    }
+
+    pub fn system_state_dir(&self) -> PathBuf {
+        self.state_dir().join("system")
+    }
+
+    pub fn system_sqlite_dir(&self) -> PathBuf {
+        self.system_state_dir().join("sqlite")
+    }
+
+    pub fn system_log_db(&self) -> PathBuf {
+        self.system_sqlite_dir().join("system-log.db")
     }
 
     pub fn extension_state_dir(&self, extension_id: &str) -> PathBuf {
@@ -244,6 +264,7 @@ impl RuntimePaths {
             self.state_runs_dir(),
             self.state_cache_dir(),
             self.extensions_state_dir(),
+            self.system_sqlite_dir(),
             self.agents_dir(),
             self.server_logs_dir(),
             self.agents_logs_dir(),

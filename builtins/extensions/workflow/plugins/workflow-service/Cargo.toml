@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+ennoia-contract = { path = "../../../../../crates/contract" }
 ennoia-kernel = { path = "../../../../../crates/kernel" }
 ennoia-paths = { path = "../../../../../crates/paths" }
 ennoia-policy = { path = "../../../../../crates/policy" }

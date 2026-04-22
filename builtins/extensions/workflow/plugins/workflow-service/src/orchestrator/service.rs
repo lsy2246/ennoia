@@ -2,9 +2,9 @@ use std::sync::Arc;
 
 use chrono::Utc;
 use ennoia_kernel::{
-    ConversationTopology, DecisionSnapshot, EvidenceSignals, ExecutionSignals, GateRecord,
-    GateSeverity, GateVerdict, IntentSignals, RunContext, RunSpec, RunStage, RunStageEvent,
-    Signals, TaskKind, TaskSpec, TaskStatus,
+    DecisionSnapshot, EvidenceSignals, ExecutionSignals, GateRecord, GateSeverity, GateVerdict,
+    IntentSignals, RunContext, RunSpec, RunStage, RunStageEvent, Signals, TaskKind, TaskSpec,
+    TaskStatus,
 };
 use uuid::Uuid;
 
@@ -36,9 +36,10 @@ impl OrchestratorService {
     ) -> PlannedRun {
         let now = now_iso();
         let run_id = format!("run-{}", Uuid::new_v4());
-        let task_kind = match request.conversation.topology {
-            ConversationTopology::Direct => TaskKind::Response,
-            ConversationTopology::Group => TaskKind::Collaboration,
+        let task_kind = if request.participants.len() > 1 {
+            TaskKind::Collaboration
+        } else {
+            TaskKind::Response
         };
 
         let assigned_agents = if request.addressed_agents.is_empty() {
@@ -55,8 +56,8 @@ impl OrchestratorService {
         let run = RunSpec {
             id: run_id.clone(),
             owner: request.owner.clone(),
-            conversation_id: request.conversation.id.clone(),
-            lane_id: request.message.lane_id.clone(),
+            conversation_id: request.conversation_id.clone(),
+            lane_id: request.lane_id.clone(),
             trigger: request.trigger.as_str().to_string(),
             stage: transition.to,
             goal: request.goal.clone(),
@@ -70,8 +71,8 @@ impl OrchestratorService {
             .map(|(index, agent_id)| TaskSpec {
                 id: format!("task-{run_id}-{}", index + 1),
                 run_id: run_id.clone(),
-                conversation_id: request.conversation.id.clone(),
-                lane_id: request.message.lane_id.clone(),
+                conversation_id: request.conversation_id.clone(),
+                lane_id: request.lane_id.clone(),
                 task_kind,
                 title: format!("{} · {}", request.goal, agent_id),
                 assigned_agent_id: agent_id.clone(),
@@ -117,8 +118,6 @@ impl OrchestratorService {
         };
 
         PlannedRun {
-            conversation: request.conversation,
-            message: request.message,
             run,
             tasks,
             context,
@@ -140,7 +139,7 @@ fn build_signals(
 ) -> Signals {
     let intent = IntentSignals {
         trigger: request.trigger.as_str().to_string(),
-        mention_count: request.message.mentions.len() as u32,
+        mention_count: request.addressed_agents.len() as u32,
         goal_len: request.goal.chars().count() as u32,
         has_question_mark: request.goal.contains('?') || request.goal.contains('？'),
     };

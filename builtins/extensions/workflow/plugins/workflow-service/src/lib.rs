@@ -7,5 +7,7 @@ pub mod orchestrator;
 pub mod pipeline;
 pub mod runtime;
 
-pub use ennoia_kernel::{ConversationMessageHookPayload, ConversationWorkflowOutput};
-pub use pipeline::{run_conversation_workflow, WorkflowRuntime};
+pub use ennoia_contract::behavior::{
+    BehaviorRunDetailResponse, BehaviorRunRequest, BehaviorRunResponse, BehaviorStatusResponse,
+};
+pub use pipeline::{run_behavior, WorkflowRuntime};

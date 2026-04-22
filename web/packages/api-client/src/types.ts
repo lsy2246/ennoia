@@ -1,6 +1,8 @@
-﻿import type {
+import type {
+  ExtensionBehaviorContribution,
   ExtensionDiagnostic,
   ExtensionLocaleContribution,
+  ExtensionMemoryContribution,
   ExtensionPageContribution,
   ExtensionPanelContribution,
   ExtensionProviderContribution,
@@ -48,6 +50,8 @@ export type UiRuntime = {
     themes: ExtensionThemeContribution[];
     locales: ExtensionLocaleContribution[];
     providers: ExtensionProviderContribution[];
+    behaviors: ExtensionBehaviorContribution[];
+    memories: ExtensionMemoryContribution[];
   };
   instance_preference?: UiPreferenceRecord | null;
   space_preferences: UiPreferenceRecord[];
@@ -341,5 +345,30 @@ export type SystemLog = {
   task_id?: string | null;
   at: string;
 };
+
+export type RuntimeBehaviorConfig = {
+  active_extension: string;
+  active_behavior: string;
+};
+
+export type RuntimeMemoryConfig = {
+  enabled: string[];
+  preferred_read: string;
+  preferred_workspace: string;
+};
+
+export type SystemLogEntry = {
+  id: string;
+  seq: number;
+  event: string;
+  level: string;
+  component: string;
+  source_kind: string;
+  source_id?: string | null;
+  summary: string;
+  payload: unknown;
+  created_at: string;
+};
+
 
 

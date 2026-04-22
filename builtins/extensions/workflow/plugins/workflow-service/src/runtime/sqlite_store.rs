@@ -1,6 +1,9 @@
 use super::{RuntimeError, RuntimeStore};
 use async_trait::async_trait;
-use ennoia_kernel::{DecisionSnapshot, GateRecord, RunStage, RunStageEvent};
+use ennoia_kernel::{
+    ArtifactSpec, DecisionSnapshot, GateRecord, HandoffSpec, RunSpec, RunStage, RunStageEvent,
+    TaskSpec,
+};
 use sea_query::{Expr, Iden, Query, SqliteQueryBuilder};
 use sea_query_binder::SqlxBinder;
 use sqlx::{Row, SqlitePool};
@@ -86,6 +89,101 @@ impl<T> IntoRuntimeError<T> for Result<T, sqlx::Error> {
 
 #[async_trait]
 impl RuntimeStore for SqliteRuntimeStore {
+    async fn save_run_bundle(
+        &self,
+        run: &RunSpec,
+        tasks: &[TaskSpec],
+        artifacts: &[ArtifactSpec],
+        handoffs: &[HandoffSpec],
+    ) -> Result<(), RuntimeError> {
+        let mut transaction = self.pool.begin().await.rt_err()?;
+        let run_json =
+            serde_json::to_string(run).map_err(|error| RuntimeError::Serde(error.to_string()))?;
+        sqlx::query(
+            "INSERT INTO runs (id, payload_json, stage, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(id) DO UPDATE SET
+               payload_json = excluded.payload_json,
+               stage = excluded.stage,
+               updated_at = excluded.updated_at",
+        )
+        .bind(&run.id)
+        .bind(run_json)
+        .bind(run.stage.as_str())
+        .bind(&run.created_at)
+        .bind(&run.updated_at)
+        .execute(&mut *transaction)
+        .await
+        .rt_err()?;
+
+        sqlx::query("DELETE FROM tasks WHERE run_id = ?1")
+            .bind(&run.id)
+            .execute(&mut *transaction)
+            .await
+            .rt_err()?;
+        for task in tasks {
+            let payload_json = serde_json::to_string(task)
+                .map_err(|error| RuntimeError::Serde(error.to_string()))?;
+            sqlx::query(
+                "INSERT INTO tasks (id, run_id, payload_json, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+            )
+            .bind(&task.id)
+            .bind(&task.run_id)
+            .bind(payload_json)
+            .bind(&task.created_at)
+            .bind(&task.updated_at)
+            .execute(&mut *transaction)
+            .await
+            .rt_err()?;
+        }
+
+        sqlx::query("DELETE FROM artifacts WHERE run_id = ?1")
+            .bind(&run.id)
+            .execute(&mut *transaction)
+            .await
+            .rt_err()?;
+        for artifact in artifacts {
+            let payload_json = serde_json::to_string(artifact)
+                .map_err(|error| RuntimeError::Serde(error.to_string()))?;
+            sqlx::query(
+                "INSERT INTO artifacts (id, run_id, payload_json, created_at)
+                 VALUES (?1, ?2, ?3, ?4)",
+            )
+            .bind(&artifact.id)
+            .bind(&artifact.run_id)
+            .bind(payload_json)
+            .bind(&artifact.created_at)
+            .execute(&mut *transaction)
+            .await
+            .rt_err()?;
+        }
+
+        sqlx::query("DELETE FROM handoffs WHERE run_id = ?1")
+            .bind(&run.id)
+            .execute(&mut *transaction)
+            .await
+            .rt_err()?;
+        for handoff in handoffs {
+            let payload_json = serde_json::to_string(handoff)
+                .map_err(|error| RuntimeError::Serde(error.to_string()))?;
+            sqlx::query(
+                "INSERT INTO handoffs (id, run_id, payload_json, created_at)
+                 VALUES (?1, ?2, ?3, ?4)",
+            )
+            .bind(&handoff.id)
+            .bind(&run.id)
+            .bind(payload_json)
+            .bind(&handoff.created_at)
+            .execute(&mut *transaction)
+            .await
+            .rt_err()?;
+        }
+
+        transaction.commit().await.rt_err()?;
+        Ok(())
+    }
+
     async fn log_stage_event(&self, event: &RunStageEvent) -> Result<(), RuntimeError> {
         let (sql, values) = Query::insert()
             .into_table(RunStageEvents::Table)
@@ -178,6 +276,55 @@ impl RuntimeStore for SqliteRuntimeStore {
             .await
             .rt_err()?;
         Ok(())
+    }
+
+    async fn get_run(&self, run_id: &str) -> Result<Option<RunSpec>, RuntimeError> {
+        let row = sqlx::query("SELECT payload_json FROM runs WHERE id = ?1")
+            .bind(run_id)
+            .fetch_optional(&self.pool)
+            .await
+            .rt_err()?;
+        row.map(|row| row.get::<String, _>("payload_json"))
+            .map(|payload| {
+                serde_json::from_str::<RunSpec>(&payload)
+                    .map_err(|error| RuntimeError::Serde(error.to_string()))
+            })
+            .transpose()
+    }
+
+    async fn list_tasks_for_run(&self, run_id: &str) -> Result<Vec<TaskSpec>, RuntimeError> {
+        let rows =
+            sqlx::query("SELECT payload_json FROM tasks WHERE run_id = ?1 ORDER BY updated_at ASC")
+                .bind(run_id)
+                .fetch_all(&self.pool)
+                .await
+                .rt_err()?;
+        decode_payload_rows(rows, "payload_json")
+    }
+
+    async fn list_artifacts_for_run(
+        &self,
+        run_id: &str,
+    ) -> Result<Vec<ArtifactSpec>, RuntimeError> {
+        let rows = sqlx::query(
+            "SELECT payload_json FROM artifacts WHERE run_id = ?1 ORDER BY created_at ASC",
+        )
+        .bind(run_id)
+        .fetch_all(&self.pool)
+        .await
+        .rt_err()?;
+        decode_payload_rows(rows, "payload_json")
+    }
+
+    async fn list_handoffs_for_run(&self, run_id: &str) -> Result<Vec<HandoffSpec>, RuntimeError> {
+        let rows = sqlx::query(
+            "SELECT payload_json FROM handoffs WHERE run_id = ?1 ORDER BY created_at ASC",
+        )
+        .bind(run_id)
+        .fetch_all(&self.pool)
+        .await
+        .rt_err()?;
+        decode_payload_rows(rows, "payload_json")
     }
 
     async fn list_stage_events_for_run(
@@ -299,4 +446,20 @@ impl RuntimeStore for SqliteRuntimeStore {
             })
             .collect())
     }
+}
+
+fn decode_payload_rows<T>(
+    rows: Vec<sqlx::sqlite::SqliteRow>,
+    column: &str,
+) -> Result<Vec<T>, RuntimeError>
+where
+    T: serde::de::DeserializeOwned,
+{
+    rows.into_iter()
+        .map(|row| {
+            let payload: String = row.get(column);
+            serde_json::from_str::<T>(&payload)
+                .map_err(|error| RuntimeError::Serde(error.to_string()))
+        })
+        .collect()
 }
