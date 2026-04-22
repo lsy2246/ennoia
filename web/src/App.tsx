@@ -252,7 +252,7 @@ export function App() {
   const visibleViews = openViews;
 
   return (
-    <div className="ide-shell">
+    <div className="ide-web">
       <aside className="activity-bar" aria-label={t("web.nav.aria", "主导航")}>
         <button
           type="button"

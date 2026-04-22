@@ -253,14 +253,14 @@ export function Settings() {
     try {
       await Promise.all([
         saveAppConfig(appConfig),
-        putConfig("rate_limit", config.rate_limit, "shell"),
+        putConfig("rate_limit", config.rate_limit, "web"),
         putConfig(
           "cors",
           {
             ...config.cors,
             origins: collectStringEntries(corsOrigins),
           },
-          "shell",
+          "web",
         ),
         putConfig(
           "timeout",
@@ -268,7 +268,7 @@ export function Settings() {
             ...config.timeout,
             per_path_ms: collectMapEntries(timeoutOverrides),
           },
-          "shell",
+          "web",
         ),
         putConfig(
           "logging",
@@ -276,7 +276,7 @@ export function Settings() {
             ...config.logging,
             redact_headers: collectStringEntries(redactHeaders),
           },
-          "shell",
+          "web",
         ),
         putConfig(
           "body_limit",
@@ -284,7 +284,7 @@ export function Settings() {
             ...config.body_limit,
             per_path_max: collectMapEntries(bodyLimitOverrides),
           },
-          "shell",
+          "web",
         ),
       ]);
       await hydrate();

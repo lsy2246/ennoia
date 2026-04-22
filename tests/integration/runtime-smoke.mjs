@@ -52,7 +52,7 @@ try {
   const preferences = await fetchJson(baseUrl, "/api/v1/runtime/preferences");
   const uiMessages = await fetchJson(
     baseUrl,
-    "/api/v1/ui/messages?locale=zh-CN&namespaces=shell,settings,ext.observatory",
+    "/api/v1/ui/messages?locale=zh-CN&namespaces=web,settings,ext.observatory",
   );
   const createdConversation = await fetchJson(baseUrl, "/api/v1/conversations", {
     method: "POST",

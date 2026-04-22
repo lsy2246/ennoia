@@ -19,7 +19,7 @@ use ennoia_paths::RuntimePaths;
 use ennoia_server::{bootstrap_app_state, default_app_state, run_server, AppState};
 use notify::{Config as NotifyConfig, RecommendedWatcher, RecursiveMode, Watcher};
 
-const WEB_SHELL_DIR: &str = "web";
+const WEB_DIR: &str = "web";
 const WEB_DEV_HOST: &str = "127.0.0.1";
 const WEB_DEV_PORT: u16 = 5173;
 
@@ -319,7 +319,7 @@ async fn run_dev_supervisor(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let repo_root = env::current_dir()?;
     let mut dev_processes = DevProcessGroup::new();
-    dev_processes.start_shell(&paths, &server_config)?;
+    dev_processes.start_web(&paths, &server_config)?;
     dev_processes.start_extension_frontends(&paths)?;
 
     let mut api = ApiDevProcess::new(repo_root.clone(), paths.clone(), server_config.clone());
@@ -571,27 +571,23 @@ impl DevProcessGroup {
         }
     }
 
-    fn start_shell(
-        &mut self,
-        paths: &RuntimePaths,
-        server_config: &ServerConfig,
-    ) -> io::Result<()> {
-        let shell_dir = env::current_dir()?.join(WEB_SHELL_DIR);
-        if !shell_dir.join("package.json").exists() {
-            println!("Web dev server skipped: {WEB_SHELL_DIR}/package.json not found");
+    fn start_web(&mut self, paths: &RuntimePaths, server_config: &ServerConfig) -> io::Result<()> {
+        let web_dir = env::current_dir()?.join(WEB_DIR);
+        if !web_dir.join("package.json").exists() {
+            println!("Web dev server skipped: {WEB_DIR}/package.json not found");
             return Ok(());
         }
 
-        let log_path = paths.server_logs_dir().join("shell-dev.log");
+        let log_path = paths.server_logs_dir().join("web-dev.log");
         let mut command = shell_command(
             &format!("bun run dev --host {WEB_DEV_HOST} --port {WEB_DEV_PORT} --strictPort"),
-            &shell_dir,
+            &web_dir,
         );
         command.env(
             "VITE_ENNOIA_API_URL",
             format!("http://{}:{}", server_config.host, server_config.port),
         );
-        self.spawn("shell", command, &log_path)
+        self.spawn("web", command, &log_path)
     }
 
     fn start_extension_frontends(&mut self, paths: &RuntimePaths) -> io::Result<()> {

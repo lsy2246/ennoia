@@ -93,7 +93,7 @@ try {
   const overview = await fetchJson(baseUrl, "/api/v1/overview");
   const uiMessages = await fetchJson(
     baseUrl,
-    "/api/v1/ui/messages?locale=zh-CN&namespaces=shell,ext.observatory",
+    "/api/v1/ui/messages?locale=zh-CN&namespaces=web,ext.observatory",
   );
   const conversations = await fetchJson(baseUrl, "/api/v1/conversations");
   const directMessages = await fetchJson(

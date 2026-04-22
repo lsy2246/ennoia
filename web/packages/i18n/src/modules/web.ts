@@ -4,6 +4,7 @@ export const webMessages = defineMessages("web", {
   "zh-CN": {
     "web.nav.aria": "主导航",
     "web.title": "Ennoia",
+    "web.loading.connecting": "正在连接 Ennoia…",
     "web.nav.conversations": "会话",
     "web.nav.conversations_hint": "统一发起私聊与群聊",
     "web.nav.agents": "Agents",
@@ -275,6 +276,7 @@ export const webMessages = defineMessages("web", {
   "en-US": {
     "web.nav.aria": "Primary navigation",
     "web.title": "Ennoia",
+    "web.loading.connecting": "Connecting to Ennoia…",
     "web.nav.conversations": "Conversations",
     "web.nav.conversations_hint": "Start direct or group chats",
     "web.nav.agents": "Agents",

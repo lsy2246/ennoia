@@ -65,7 +65,6 @@ SQLite 中的正式偏好表：
 
 `@ennoia/i18n` 采用“模块分文件 + 单入口注册 + runtime registry”的组织方式：
 
-- `shell`
 - `web`
 - `settings`
 - `ext.observatory`

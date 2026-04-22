@@ -35,12 +35,12 @@
 - [√] 3.1 重构 `web/packages/api-client/src/index.ts`，新增 Agent / Skill / Provider / Workbench / Log / Task 所需类型与请求函数 | depends_on: [2.1,2.2,2.3,2.4]
 - [√] 3.2 为前端增加日志上报与会话消息 `@agent` 路由辅助逻辑 | depends_on: [3.1]
 
-### 4. Shell 工作台与页面重构
+### 4. Web 工作台与页面重构
 
-- [√] 4.1 重构 `web/apps/shell/src/router.tsx` 与 `web/apps/shell/src/shell/AppShell.tsx`，建立 VSCode 风格工作台导航与布局 | depends_on: [3.1]
+- [√] 4.1 重构 `web/src/router.tsx` 与 `web/src/web/AppWeb.tsx`，建立 VSCode 风格工作台导航与布局 | depends_on: [3.1]
 - [√] 4.2 重写工作台会话页，统一新建会话入口、消息流、右侧检查器与底部面板 | depends_on: [4.1,3.2]
 - [√] 4.3 重写 Agent、技能、扩展、Provider、任务、日志、设置页面，使之匹配新的领域边界 | depends_on: [4.1,3.1]
-- [√] 4.4 重写 `web/apps/shell/src/styles.css` 与相关共享组件样式，形成完整控制台视觉系统 | depends_on: [4.1,4.2,4.3]
+- [√] 4.4 重写 `web/src/styles.css` 与相关共享组件样式，形成完整控制台视觉系统 | depends_on: [4.1,4.2,4.3]
 
 ### 5. 模板、文档与示例同步
 
@@ -59,7 +59,7 @@
 | 时间 | 任务 | 状态 | 备注 |
 |------|------|------|------|
 | 2026-04-21 11:56 | 1.1 | 已完成 | 已创建方案包并固化本次一次性重构范围 |
-| 2026-04-21 14:20 | 1.2-5.2 | 已完成 | 完成模型、API、Shell、文档与模板重构 |
+| 2026-04-21 14:20 | 1.2-5.2 | 已完成 | 完成模型、API、Web、文档与模板重构 |
 | 2026-04-21 14:26 | 6.1-6.2 | 已完成 | 已执行 Rust/Web 验证链并同步知识库 |
 
 ---

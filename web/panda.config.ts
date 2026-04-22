@@ -18,7 +18,7 @@ export default defineConfig({
           ember: { value: "#b75d24" },
           sky: { value: "#59a8ff" },
           sandLine: { value: "rgba(30, 29, 26, 0.08)" },
-          shellGlow: { value: "rgba(84, 60, 28, 0.12)" },
+          webGlow: { value: "rgba(84, 60, 28, 0.12)" },
         },
         fonts: {
           body: { value: '"Aptos", "Segoe UI", sans-serif' },

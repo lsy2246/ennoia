@@ -8,4 +8,4 @@
 
 执行方式：
 
-- 仓库根目录执行 `bun run test:integration`
+- 仓库根目录执行 `bun ./tests/integration/runtime-smoke.mjs`

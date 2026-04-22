@@ -1,4 +1,4 @@
-﻿# 变更提案: registry-first-web-workbench
+# 变更提案: registry-first-web-workbench
 
 ## 元信息
 ```yaml
@@ -18,7 +18,7 @@
 
 - 新页面没有完整接入多语言体系
 - 导航和视图仍是静态写死，不能像 VSCode 一样动态扩展
-- 对外产品术语仍混用 `Shell` / `网页端` / `Web`
+- 对外产品术语仍混用 `Web` / `网页端` / `Web`
 - AI 上游的展示层级不对，用户应该选择“已实现的上游类型”，而不是看具体实现细节
 - Agent 中的 Provider 语义不清，本质应是选择“上游接口”
 - 任务页中的 `schedule_kind / schedule_value / run_at` 是底层字段，不是产品语言
@@ -93,7 +93,7 @@
 ### 影响范围
 ```yaml
 涉及模块:
-  - web/apps/shell: AppShell、router、所有主要页面、布局样式、dockview 集成
+  - web: AppWeb、router、所有主要页面、布局样式、dockview 集成
   - web/packages/api-client: 类型命名与任务表单字段适配
   - web/packages/i18n: 新增 Web 工作台词条
   - crates/kernel: 工作区根路径/上游接口字段语义调整（如需要）
@@ -127,7 +127,7 @@ Web Workbench
 ```
 
 ### 核心设计点
-- `Web` 是对外产品名称，`shell` 仅保留为内部遗留目录名
+- `Web` 是对外产品名称，`web` 仅保留为内部遗留目录名
 - 导航不再硬编码为单一数组，而是由 registry 生成
 - 扩展提供的 page/panel 可以挂接到 Web 的导航和 dock 区域
 - Observatory 默认作为一个内建监控视图，并可消费扩展事件/面板贡献

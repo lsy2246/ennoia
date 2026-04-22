@@ -52,7 +52,7 @@
 - [ ] 计划任务重构为 `AI 任务 / 命令任务` 两类，支持超时、运行后删除、完成后投递到会话
 - [ ] 运行时配置默认表单化，保留高级 JSON 模式
 - [ ] `.env.example`、运行目录文档和 UI 路径展示修正为平台感知
-- [ ] `cargo fmt --all`、`cargo check --workspace`、`cargo test --workspace`、`bun run --cwd web/apps/shell typecheck`、`bun run --cwd web/apps/shell build` 通过
+- [ ] `cargo fmt --all`、`cargo check --workspace`、`cargo test --workspace`、`bun run --cwd web typecheck`、`bun run --cwd web build` 通过
 
 ---
 
@@ -68,7 +68,7 @@
    - 扩展日志系统，支持前端日志写入与统一查询
    - 扩展任务模型，让 UI 能表达 `AI 任务 / 命令任务 / 超时 / 删除 / 投递会话`
 
-2. **Shell 工作台重构**
+2. **Web 工作台重构**
    - 用 VSCode 风格工作台替换当前“页面列表式”结构
    - 重构路由为 `工作台 / Agent / 技能 / 扩展 / 任务 / Provider / 日志 / 设置`
    - 用统一的消息事件流视图替换旧的聊天详情页
@@ -93,7 +93,7 @@
   - crates/scheduler: 任务类型表达增强
   - crates/assets: 初始化模板与迁移补充
   - web/packages/api-client: 新 API 类型与请求函数
-  - web/apps/shell: 路由、工作台、页面、样式全面重构
+  - web: 路由、工作台、页面、样式全面重构
   - docs 与 README: 结构、路径、功能说明全面同步
 预计变更文件: 35-60
 ```
@@ -102,7 +102,7 @@
 | 风险 | 等级 | 应对 |
 |------|------|------|
 | 后端改动横跨配置、日志、任务、会话和初始化逻辑 | 高 | 以“新增接口 + 旧实现可并存但不再暴露”为策略，保持编译链稳定 |
-| Shell 全量改版易引入类型和样式回归 | 高 | 统一重写路由、布局和样式，最后用 typecheck/build 整体收口 |
+| Web 全量改版易引入类型和样式回归 | 高 | 统一重写路由、布局和样式，最后用 typecheck/build 整体收口 |
 | 前端日志统一上报需要数据库与 API 配套 | 中 | 采用最小正式实现：新表 + 新接口 + 全局 error/rejection 钩子 |
 | 任务真实执行链仍然有限 | 中 | 先把任务模型、UI 和 API 做成正式版，已有调度能力继续承接运行 |
 
@@ -113,13 +113,13 @@
 ### 架构设计
 ```mermaid
 flowchart TD
-    Shell[VSCode 风格 Workbench] --> SessionUI[会话工作台]
-    Shell --> AgentUI[Agent 管理]
-    Shell --> SkillUI[技能管理]
-    Shell --> ProviderUI[Provider 管理]
-    Shell --> TaskUI[计划任务]
-    Shell --> LogUI[日志中心]
-    Shell --> SettingUI[设置]
+    Web[VSCode 风格 Workbench] --> SessionUI[会话工作台]
+    Web --> AgentUI[Agent 管理]
+    Web --> SkillUI[技能管理]
+    Web --> ProviderUI[Provider 管理]
+    Web --> TaskUI[计划任务]
+    Web --> LogUI[日志中心]
+    Web --> SettingUI[设置]
 
     SessionUI --> ApiClient[API Client]
     AgentUI --> ApiClient
@@ -220,7 +220,7 @@ flowchart TD
 | B: 直接替换为 VSCode 风格工作台 | 一次性统一会话、面板、管理页和扩展能力 | 需要整套页面重写 |
 **决策**: 选择方案 B
 **理由**: 用户要求一次性重构，旧结构已经不值得继续缝补。
-**影响**: `web/apps/shell` 路由、页面和样式体系整体替换
+**影响**: `web` 路由、页面和样式体系整体替换
 
 ### platform-workbench-total-refactor#D002: 技能与扩展彻底分离，分别建模
 **日期**: 2026-04-21

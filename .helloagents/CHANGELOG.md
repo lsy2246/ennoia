@@ -1,16 +1,30 @@
 # 变更日志
 
+## [0.1.5] - 2026-04-22
+
+### 重构
+- **[workspace-scripts]**: 重命名安装与打包脚本，收敛根目录脚本为安装、热开发、Web 构建/检查、npm 打包和 Docker 构建入口 — by Codex
+  - 方案: 快速修改（无方案包）
+  - 决策: 使用 `install:workspace` 避免 `install` 生命周期脚本歧义
+
+## [0.1.4] - 2026-04-22
+
+### 重构
+- **[web]**: 一次性完成前端旧命名重构，统一 Docker、CLI、后端 i18n namespace、测试、文档和知识库为 Web — by Codex
+  - 方案: [202604221033_web-name-refactor](archive/2026-04/202604221033_web-name-refactor/)
+  - 决策: web-name-refactor#D001(不保留旧前端名称兼容层)
+
 ## [0.1.3] - 2026-04-21
 
 ### 重构
-- **[platform-workbench]**: 一次性完成工作台领域重构，统一 direct/group 会话入口，加入 Agent/Skill/Provider CRUD、统一日志与 VSCode 风格 Shell — by Codex
+- **[platform-workbench]**: 一次性完成工作台领域重构，统一 direct/group 会话入口，加入 Agent/Skill/Provider CRUD、统一日志与 VSCode 风格 Web — by Codex
   - 方案: [202604211156_platform-workbench-total-refactor](archive/2026-04/202604211156_platform-workbench-total-refactor/)
   - 关键变更:
     - Agent 模型收敛为 `system_prompt/provider_id/model_id/reasoning_effort/workspace_root/skills/enabled`
     - Skill 与 Extension 完全分离
     - 新增 Provider 配置目录与 CRUD
     - 前后端统一日志流并支持筛选
-    - Shell 重构为 `工作台 / Agents / 技能 / 上游 / 扩展 / 任务 / 日志 / 设置`
+    - Web 重构为 `工作台 / Agents / 技能 / 上游 / 扩展 / 任务 / 日志 / 设置`
 
 - **[registry-first-web-workbench]**: 第二轮把工作台升级为 Registry-First Web Workbench，补齐 i18n、动态扩展视图、Observatory 与统一工作区根路径 — by Codex
   - 方案: [202604211308_registry-first-web-workbench](archive/2026-04/202604211308_registry-first-web-workbench/)
@@ -24,6 +38,6 @@
 ## [0.1.2] - 2026-04-20
 
 ### 修复
-- **[web-shell]**: 一次性补完正式控制台，收口 i18n/主题并补齐 jobs、memories、extensions、logs 与会话删除链路 — by lsy
-  - 方案: [202604201723_shell-console-full-completion](archive/2026-04/202604201723_shell-console-full-completion/)
-  - 决策: shell-console-full-completion#D001(采用“一次性控制台重构”而非增量补洞)
+- **[web]**: 一次性补完正式控制台，收口 i18n/主题并补齐 jobs、memories、extensions、logs 与会话删除链路 — by lsy
+  - 方案: [202604201723_web-console-full-completion](archive/2026-04/202604201723_web-console-full-completion/)
+  - 决策: web-console-full-completion#D001(采用“一次性控制台重构”而非增量补洞)

@@ -24,13 +24,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: oven-sh/setup-bun@v2
-      - name: bun install
-        run: bun install
-      - name: bootstrap
-        run: bun run bootstrap
+      - name: install workspace
+        run: bun run install:workspace
       - name: web build
-        run: bun run build
+        run: bun run build:web
       - name: integration smoke
-        run: bun run test:integration
+        run: bun ./tests/integration/runtime-smoke.mjs
       - name: e2e smoke
-        run: bun run test:e2e
+        run: bun ./tests/e2e/platform-smoke.mjs

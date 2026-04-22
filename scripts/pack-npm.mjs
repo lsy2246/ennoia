@@ -12,7 +12,7 @@ const executableName = isWindows ? "ennoia.exe" : "ennoia";
 const builtBinary = resolve(rootDir, "target", "release", executableName);
 
 function run(label, command, args, cwd = rootDir, options = {}) {
-  console.log(`[package:npm] ${label}`);
+  console.log(`[pack:npm] ${label}`);
   const result = spawnSync(command, args, {
     cwd,
     stdio: "inherit",
@@ -20,7 +20,7 @@ function run(label, command, args, cwd = rootDir, options = {}) {
   });
 
   if (result.error) {
-    console.error(`[package:npm] ${label}失败: ${result.error.message}`);
+    console.error(`[pack:npm] ${label}失败: ${result.error.message}`);
     process.exit(1);
   }
 
@@ -47,7 +47,7 @@ syncPackageVersion();
 run("构建 release CLI", "cargo", ["build", "--release", "--bin", "ennoia"]);
 
 if (!existsSync(builtBinary)) {
-  console.error(`[package:npm] 未找到已构建二进制: ${builtBinary}`);
+  console.error(`[pack:npm] 未找到已构建二进制: ${builtBinary}`);
   process.exit(1);
 }
 
@@ -62,7 +62,7 @@ try {
   run("打包 npm tarball", "npm", ["pack", "--pack-destination", outDir], packagingDir, {
     shell: isWindows,
   });
-  console.log(`[package:npm] 完成，产物目录: ${outDir}`);
+  console.log(`[pack:npm] 完成，产物目录: ${outDir}`);
 } finally {
   rmSync(vendorDir, { recursive: true, force: true });
 }

@@ -24,7 +24,7 @@ function commandExists(command) {
 }
 
 function runStep(label, command, args) {
-  console.log(`\n[bootstrap] ${label}`);
+  console.log(`\n[install:workspace] ${label}`);
   const result = spawnSync(command, args, {
     cwd: rootDir,
     stdio: "inherit",
@@ -99,12 +99,12 @@ function runWindowsCargoCheck() {
 
   if (!vsDevCmd) {
     console.warn(
-      "[bootstrap] 未检测到 Visual Studio Build Tools，已跳过 Rust 校验。安装 C++ Build Tools 后可重新执行 `cargo check --workspace`。",
+      "[install:workspace] 未检测到 Visual Studio Build Tools，已跳过 Rust 校验。安装 C++ Build Tools 后可重新执行 `cargo check --workspace`。",
     );
     return;
   }
 
-  const scriptPath = resolve(tmpdir(), "ennoia-bootstrap-rust-check.cmd");
+  const scriptPath = resolve(tmpdir(), "ennoia-install-workspace-rust-check.cmd");
   const script = [
     "@echo off",
     `call "${vsDevCmd}" -arch=x64 -host_arch=x64`,
@@ -123,7 +123,7 @@ function runWindowsCargoCheck() {
 }
 
 if (!commandExists("bun")) {
-  console.error("[bootstrap] 未检测到 bun，请先安装 Bun 后再执行。");
+  console.error("[install:workspace] 未检测到 bun，请先安装 Bun 后再执行。");
   process.exit(1);
 }
 
@@ -131,7 +131,7 @@ runStep("安装根目录依赖", "bun", ["install"]);
 
 const shellDir = resolve(rootDir, "web");
 if (!existsSync(shellDir)) {
-  console.error("[bootstrap] 缺少 web 目录，无法继续。");
+  console.error("[install:workspace] 缺少 web 目录，无法继续。");
   process.exit(1);
 }
 
@@ -146,6 +146,6 @@ if (commandExists("cargo")) {
   }
 } else {
   console.warn(
-    "[bootstrap] 未检测到 cargo，已跳过 Rust 校验。安装 Rust toolchain 后可执行 `cargo check --workspace`。",
+    "[install:workspace] 未检测到 cargo，已跳过 Rust 校验。安装 Rust toolchain 后可执行 `cargo check --workspace`。",
   );
 }

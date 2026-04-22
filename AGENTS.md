@@ -35,9 +35,9 @@
 
 前端脚手架接入后，补充：
 
-1. `web shell` 的 lint
-2. `web shell` 的 typecheck
-3. `web shell` 的 build
+1. `web` 的 lint
+2. `web` 的 typecheck
+3. `web` 的 build
 
 若某项尚未接入，必须在结果汇报中显式说明。
 

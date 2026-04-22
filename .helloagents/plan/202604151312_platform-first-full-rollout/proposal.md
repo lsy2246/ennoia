@@ -21,7 +21,7 @@
 ### 目标
 - 以平台基础设施为先导，完成 `extension-host / runtime / cli / packaging / testing / CI` 的正式化建设
 - 在第二阶段完成 `thread / message / run / task / memory` 的正式领域模型、存储模型和 API
-- 在第三阶段完成 `web/shell` 正式工作台、extension page/panel 挂载和核心产品交互
+- 在第三阶段完成 `web` 正式工作台、extension page/panel 挂载和核心产品交互
 - 形成一套可持续开发的首版系统，而不是仅用于演示的临时闭环
 - 为后续真实 provider、实时流、更多系统 extension 接入打下稳定边界
 
@@ -37,7 +37,7 @@
 - [ ] CLI、runtime 模板、packaging、extension 安装位和 CI 形成可用平台基础
 - [ ] `thread / message / run / task / memory / extension contribution` 领域模型和 SQLite schema 正式化
 - [ ] `server` 暴露完整 REST API，私聊、群聊、run/task、memory、extension 均可真实读写与查询
-- [ ] `web/shell` 成为正式工作台，包含会话区、运行区、记忆区和 extension page/panel 容器
+- [ ] `web` 成为正式工作台，包含会话区、运行区、记忆区和 extension page/panel 容器
 - [ ] `tests/integration` 与 `tests/e2e` 不再为空壳，CI 可执行关键验证链
 - [ ] 文档、模板、实现保持一致，形成首版长期可持续开发起点
 
@@ -52,14 +52,14 @@
    - 统一 extension 安装/扫描/注册协议
    - 强化 CLI `init/dev/start`
    - 补运行目录模板、npm 打包入口、CI 和测试基建
-   - 为后续 conversation 和 shell 建立稳定基础
+   - 为后续 conversation 和 web 建立稳定基础
 2. Phase 2 完成正式领域层：
    - 新增并落地 `thread / message`
    - 完善 `run / task` 生命周期与状态流
    - 规范 `memory` 回写与召回
    - 统一 server repository/service/API 分层
 3. Phase 3 完成正式产品面：
-   - `web/shell` 重构为工作台结构
+   - `web` 重构为工作台结构
    - 支持私聊、群聊、run/task、memory 面板
    - 接入 extension page/panel mount contract
    - 完成 integration/e2e 与最终文档收口
@@ -75,7 +75,7 @@
   - crates/orchestrator: 私聊/群聊 run-task 生命周期
   - crates/memory: recall/remember/context assembly 规范化
   - crates/cli: init/dev/start/runtime setup 正式化
-  - web/shell: 正式 workspace、conversation 页面、panel 容器、extension mount
+  - web: 正式 workspace、conversation 页面、panel 容器、extension mount
   - packaging/home-template: runtime 模板与默认扩展内容
   - packaging/npm: 发布入口
   - tests: integration/e2e 基建与链路验证
@@ -88,7 +88,7 @@
 |------|------|------|
 | Phase 1 过重导致产品面延后 | 中 | 明确基础设施只做到服务后续阶段所需的“正式可用”边界，不扩张到生产级部署 |
 | 领域模型与现有骨架差异较大 | 高 | 在 Phase 2 集中完成 schema 与 service 分层重构，避免 Phase 3 返工 |
-| web/shell 重构时 UI 与后端协议耦合 | 中 | 在 Phase 2 先冻结 REST contract 和 extension mount contract |
+| web 重构时 UI 与后端协议耦合 | 中 | 在 Phase 2 先冻结 REST contract 和 extension mount contract |
 | 一次性推进范围过大 | 高 | 通过阶段验收和任务依赖控制执行顺序，确保每阶段结束后都可验证 |
 
 ---
@@ -105,9 +105,9 @@ flowchart TD
     Server --> Orchestrator[Orchestrator]
     Server --> Memory[Memory]
     Server --> SQLite[SQLite]
-    Server --> ShellAPI[REST / WS Contract]
-    ShellAPI --> Shell[Web Shell Workspace]
-    ExtensionHost --> Shell
+    Server --> WebAPI[REST / WS Contract]
+    WebAPI --> Web[Web Web Workspace]
+    ExtensionHost --> Web
 ```
 
 ### 领域模型补全方向
@@ -137,7 +137,7 @@ flowchart TD
   - `GET /api/v1/extensions/pages`
   - `GET /api/v1/extensions/panels`
 
-### Shell 设计方向
+### Web 设计方向
 
 - 左侧导航：私聊、群聊、Runs、Memory、Extensions
 - 主区：conversation workspace
@@ -192,7 +192,7 @@ flowchart TD
 
 ### Phase 3：产品工作台正式化
 
-- `web/shell`
+- `web`
   - conversation 页面
   - group space 页面
   - run/task/memory 面板
@@ -205,7 +205,7 @@ flowchart TD
   - 同步 API、架构、扩展开发和运行时文档
 
 验收：
-- shell 成为正式 workspace
+- web 成为正式 workspace
 - 私聊/群聊/运行状态/记忆/扩展挂载全链路可视化
 - e2e 可验证核心主链路
 - 文档与模板完成收口
@@ -217,21 +217,21 @@ flowchart TD
 > 执行完成后同步到对应模块文档
 
 ### 场景: 私聊正式链路
-**模块**: server / orchestrator / memory / shell
+**模块**: server / orchestrator / memory / web
 **条件**: 用户已进入私聊工作台并选择 Agent
-**行为**: 发送消息 -> 创建 thread/message -> 触发 run/task -> 组装 context -> 回写 memory -> shell 展示
+**行为**: 发送消息 -> 创建 thread/message -> 触发 run/task -> 组装 context -> 回写 memory -> web 展示
 **结果**: 用户看到完整私聊历史、run 状态、task 状态和 memory 摘要
 
 ### 场景: 群聊正式链路
-**模块**: server / orchestrator / shell
+**模块**: server / orchestrator / web
 **条件**: 用户进入某个 Space
-**行为**: 发送空间消息 -> 生成 space thread/run/task 集 -> shell 展示群聊与协作状态
+**行为**: 发送空间消息 -> 生成 space thread/run/task 集 -> web 展示群聊与协作状态
 **结果**: Space 页面能查看群聊上下文和执行状态
 
 ### 场景: Extension 页面与面板挂载
-**模块**: extension-host / shell
+**模块**: extension-host / web
 **条件**: runtime 中已安装并启用某个 system extension
-**行为**: server 输出 registry -> shell 动态注册 page/panel -> 用户进入对应页面或打开面板
+**行为**: server 输出 registry -> web 动态注册 page/panel -> 用户进入对应页面或打开面板
 **结果**: extension 贡献不再只是列表数据，而是正式挂载到工作台
 
 ---
@@ -263,7 +263,7 @@ flowchart TD
 ### 设计方向
 - **美学基调**: 温暖纸感工作台升级为正式 AI 作业台，保持编辑台气质，同时引入更明确的信息层级
 - **记忆点**: 会话区 + 运行面板 + 扩展面板同屏协作的工作台结构
-- **参考**: 延续当前 shell 的纸感与毛玻璃方向，但升级为真正的 workspace 布局
+- **参考**: 延续当前 web 的纸感与毛玻璃方向，但升级为真正的 workspace 布局
 
 ### 视觉要素
 - **配色**: 米色背景 + 墨色主文字 + 铜色标识 + 冷色状态提示

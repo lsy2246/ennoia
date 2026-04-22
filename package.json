@@ -9,15 +9,11 @@
     "web/packages/*"
   ],
   "scripts": {
-    "bootstrap": "node ./scripts/bootstrap.mjs",
-    "setup": "bun run bootstrap",
-    "build": "bun run --cwd web build",
-    "typecheck": "bun run --cwd web typecheck",
-    "package:npm": "node ./scripts/package-npm.mjs",
-    "docker:up": "docker compose up --build",
-    "docker:down": "docker compose down",
-    "test:web": "bun run --cwd web test:smoke",
-    "test:integration": "bun ./tests/integration/runtime-smoke.mjs",
-    "test:e2e": "bun ./tests/e2e/platform-smoke.mjs"
+    "install:workspace": "node ./scripts/install-workspace.mjs",
+    "dev": "cargo run -p ennoia-cli -- dev",
+    "build:web": "bun run --cwd web build",
+    "check:web": "bun run --cwd web typecheck",
+    "pack:npm": "node ./scripts/pack-npm.mjs",
+    "docker:build": "docker compose build"
   }
 }

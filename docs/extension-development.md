@@ -68,7 +68,7 @@ Skill 目录独立：
 5. CLI 启动 Web dev server 和扩展前端 dev command。
 6. Extension Host 托管扩展后端 dev command。
 7. Server 暴露 runtime snapshot、事件流、诊断、日志和资源贡献接口。
-8. Web Shell 根据 runtime snapshot 挂载页面、面板、主题、语言和命令。
+8. Web 工作台根据 runtime snapshot 挂载页面、面板、主题、语言和命令。
 
 ## 安装与扫描目录
 

@@ -11,14 +11,14 @@
 
 本地联调方式：
 
-1. 在仓库根目录执行 `bun run setup`
+1. 在仓库根目录执行 `bun run install:workspace`
 2. 进入 `packaging/npm/`
 3. 执行 `node ./bin/ennoia.js init`
 4. 执行 `node ./bin/ennoia.js start`
 
 当前平台 npm 包打包方式：
 
-1. 在仓库根目录执行 `bun run package:npm`
+1. 在仓库根目录执行 `bun run pack:npm`
 2. 产物输出到 `dist/npm/`
 3. 用 `npm install -g <tarball>` 安装
 
@@ -27,7 +27,7 @@
 - 打包脚本会先构建当前平台 release CLI
 - `vendor/` 目录由打包脚本临时生成，打包完成后自动清理
 - 当前 tarball 仅适用于打包时所在的平台
-4. 直接执行 `ennoia init` / `ennoia start`
+- 安装后可直接执行 `ennoia init` / `ennoia start`
 
 后续发布阶段会继续补充：
 

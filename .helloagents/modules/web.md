@@ -1,4 +1,4 @@
-# web-shell
+# web
 
 ## 职责
 
@@ -11,12 +11,12 @@
 
 ## 行为规范
 
-- 路由入口位于 `web/apps/shell/src/router.tsx`
-- 主壳位于 `web/apps/shell/src/shell/AppShell.tsx`
-- 工作台页位于 `web/apps/shell/src/pages/WorkspacePage.tsx`
-- 样式入口位于 `web/apps/shell/src/styles.css`
+- 路由入口位于 `web/src/router.tsx`
+- 主工作台位于 `web/src/App.tsx`
+- 样式入口位于 `web/src/styles.css`
 - 共享 API 访问统一收口到 `web/packages/api-client/src/index.ts`
 - 工作台支持 `@agent` 消息路由，不再使用“目标”输入框
+- 内置前端 i18n namespace 使用 `web`
 
 ## 依赖关系
 

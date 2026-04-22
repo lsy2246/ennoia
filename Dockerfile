@@ -44,11 +44,11 @@ COPY .npmrc package.json bun.lock ./
 COPY web ./web
 
 RUN bun install --frozen-lockfile
-RUN bun run --cwd web/apps/shell build
+RUN bun run --cwd web build
 
 # -------- web runtime --------
 FROM nginx:alpine AS web
 
-COPY --from=web-build /app/web/apps/shell/dist /usr/share/nginx/html
+COPY --from=web-build /app/web/dist /usr/share/nginx/html
 
 EXPOSE 80

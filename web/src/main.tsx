@@ -52,7 +52,7 @@ function App() {
   ) {
     return (
       <div className="page page--centered">
-        <p>{t("shell.loading.connecting", "Connecting to Ennoia…")}</p>
+        <p>{t("web.loading.connecting", "Connecting to Ennoia…")}</p>
       </div>
     );
   }

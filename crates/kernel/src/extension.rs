@@ -11,7 +11,7 @@ pub enum ExtensionKind {
     Skill,
 }
 
-/// PageContribution describes a child page mounted inside the shell content area.
+/// PageContribution describes a child page mounted inside the web content area.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PageContribution {
     pub id: String,
@@ -21,7 +21,7 @@ pub struct PageContribution {
     pub icon: Option<String>,
 }
 
-/// PanelContribution describes a panel mounted in the shell dock area.
+/// PanelContribution describes a panel mounted in the web dock area.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PanelContribution {
     pub id: String,
@@ -52,7 +52,7 @@ pub struct LocaleContribution {
     pub version: String,
 }
 
-/// CommandContribution describes a shell command palette action.
+/// CommandContribution describes a web command palette action.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CommandContribution {
     pub id: String,

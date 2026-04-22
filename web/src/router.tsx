@@ -37,15 +37,15 @@ const welcomeRoute = createRoute({
   beforeLoad: redirectToConversations,
 });
 
-const shellRoute = createRoute({
+const webRoute = createRoute({
   getParentRoute: () => rootRoute,
-  id: "shell",
+  id: "web",
   component: App,
   beforeLoad: requireInitialized,
 });
 
 const homeRoute = createRoute({
-  getParentRoute: () => shellRoute,
+  getParentRoute: () => webRoute,
   path: "/",
   beforeLoad: () => {
     throw redirect({ to: "/conversations" });
@@ -53,68 +53,68 @@ const homeRoute = createRoute({
 });
 
 const conversationsRoute = createRoute({
-  getParentRoute: () => shellRoute,
+  getParentRoute: () => webRoute,
   path: "/conversations",
   component: Conversations,
 });
 
 const agentsRoute = createRoute({
-  getParentRoute: () => shellRoute,
+  getParentRoute: () => webRoute,
   path: "/agents",
   component: Agents,
 });
 
 const skillsRoute = createRoute({
-  getParentRoute: () => shellRoute,
+  getParentRoute: () => webRoute,
   path: "/skills",
   component: Skills,
 });
 
 const providersRoute = createRoute({
-  getParentRoute: () => shellRoute,
+  getParentRoute: () => webRoute,
   path: "/upstreams",
   component: Providers,
 });
 
 const extensionPageRoute = createRoute({
-  getParentRoute: () => shellRoute,
+  getParentRoute: () => webRoute,
   path: "/extension-pages/$pageId",
   component: ExtensionPageView,
 });
 
 const extensionsRoute = createRoute({
-  getParentRoute: () => shellRoute,
+  getParentRoute: () => webRoute,
   path: "/extensions",
   component: Extensions,
 });
 
 const tasksRoute = createRoute({
-  getParentRoute: () => shellRoute,
+  getParentRoute: () => webRoute,
   path: "/tasks",
   component: Tasks,
 });
 
 const logsRoute = createRoute({
-  getParentRoute: () => shellRoute,
+  getParentRoute: () => webRoute,
   path: "/logs",
   component: Logs,
 });
 
 const memoryRoute = createRoute({
-  getParentRoute: () => shellRoute,
+  getParentRoute: () => webRoute,
   path: "/memory",
   component: Memory,
 });
 
 const settingsRoute = createRoute({
-  getParentRoute: () => shellRoute,
+  getParentRoute: () => webRoute,
   path: "/settings",
   component: Settings,
 });
 
 const routeTree = rootRoute.addChildren([
   welcomeRoute,
-  shellRoute.addChildren([
+  webRoute.addChildren([
     homeRoute,
     conversationsRoute,
     agentsRoute,

@@ -37,11 +37,11 @@
 
 ### 3. Phase 3 产品工作台正式化
 
-- [√] 3.1 重构 `web/shell` 为正式 workspace，拆出导航、会话区、运行面板、记忆面板和 extension 容器 | depends_on: [2.7]
+- [√] 3.1 重构 `web` 为正式 workspace，拆出导航、会话区、运行面板、记忆面板和 extension 容器 | depends_on: [2.7]
 - [√] 3.2 接入私聊正式链路：thread/message 查询、消息发送、run/task 状态展示、memory 摘要展示 | depends_on: [3.1]
 - [√] 3.3 接入群聊正式链路：Space 线程、参与 Agent、群聊运行态与共享记忆展示 | depends_on: [3.1,3.2]
 - [√] 3.4 建立 extension page/panel 动态挂载容器，并消费后端 registry 协议完成正式挂载 | depends_on: [1.1,2.3,3.1]
-- [√] 3.5 在 `web/builtins` / `web/ui-sdk` 中补齐最小正式接入点，避免 shell 直接写死扩展实现 | depends_on: [3.4]
+- [√] 3.5 在 `web/builtins` / `web/ui-sdk` 中补齐最小正式接入点，避免 web 直接写死扩展实现 | depends_on: [3.4]
 - [√] 3.6 为 workspace、私聊、群聊、extension mount 补 e2e / smoke 验证 | depends_on: [3.2,3.3,3.4,3.5]
 - [√] 3.7 完成最终文档收口与回归验证，确认方案范围内功能已一次性推进完成 | depends_on: [3.6]
 
@@ -55,7 +55,7 @@
 | 2026-04-15 15:48 | 1.4-1.5 | 已完成 | integration/e2e smoke 与 CI 接入完成，README/runtime/API/extension 文档同步完成 |
 | 2026-04-15 16:30 | 2.1-2.5 | 已完成 | kernel/memory/orchestrator/db 统一为正式线程、消息、run、task、artifact、memory 模型 |
 | 2026-04-15 16:42 | 2.6-2.7 | 已完成 | conversation API、Phase 2 smoke 验证与 data-model/architecture/api-surface 文档同步完成 |
-| 2026-04-18 10:28 | 3.1-3.5 | 已完成 | shell 重构为正式 workspace，私聊/群聊/extension surface 接入完成，builtins 与 ui-sdk 提供最小正式挂载描述 |
+| 2026-04-18 10:28 | 3.1-3.5 | 已完成 | web 重构为正式 workspace，私聊/群聊/extension surface 接入完成，builtins 与 ui-sdk 提供最小正式挂载描述 |
 | 2026-04-18 10:43 | 3.6-3.7 | 已完成 | workspace smoke/e2e 全绿，README/architecture/api-surface/data-model/runtime-layout 与方案包状态同步完成 |
 
 ---

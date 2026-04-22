@@ -18,7 +18,7 @@
 - 工作台统一承载 `direct/group` 会话
 - `1 Agent = direct`，`2+ Agents = group`
 - Agent / Skill / Provider / Extension 已拆分成独立边界
-- Web 术语已经替代对外的 Shell 表述
+- Web 术语已经替代旧前端名称
 - 工作区根路径只在全局设置维护，Agent/Space 路径自动派生
 - 计划任务分为 `AI 任务` 与 `命令任务`
 - 日志统一聚合前后端

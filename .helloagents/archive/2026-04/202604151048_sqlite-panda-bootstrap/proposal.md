@@ -14,12 +14,12 @@
 ## 1. 需求
 
 ### 背景
-当前仓库文档里仍保留 “PostgreSQL 为主” 的表述，但打包模板和运行目录已经明显偏向本地 `SQLite`。前端主壳也还停留在手写全局 CSS 阶段，缺少后续做 shell token、主题约束和布局复用的统一样式工具。
+当前仓库文档里仍保留 “PostgreSQL 为主” 的表述，但打包模板和运行目录已经明显偏向本地 `SQLite`。前端主壳也还停留在手写全局 CSS 阶段，缺少后续做 web token、主题约束和布局复用的统一样式工具。
 
 ### 目标
 - 把首版数据层方向收敛为 `SQLite-first`
-- 在 `web/shell` 引入 `Panda CSS`
-- 在根目录提供新机器首次拉仓库可直接执行的 bootstrap 命令
+- 在 `web` 引入 `Panda CSS`
+- 在根目录提供新机器首次拉仓库可直接执行的 install:workspace 命令
 
 ### 约束条件
 ```yaml
@@ -31,20 +31,20 @@
 
 ### 验收标准
 - [x] README 和相关文档改为 `SQLite-first`
-- [x] `web/shell` 接入 `Panda CSS` 并通过类型检查与构建
-- [x] 根目录新增 `bun run bootstrap`
+- [x] `web` 接入 `Panda CSS` 并通过类型检查与构建
+- [x] 根目录新增 `bun run install:workspace`
 
 ---
 
 ## 2. 方案
 
 ### 技术方案
-在 `web/shell` 增加 `@pandacss/dev`、`postcss`、`panda.config.ts`、`postcss.config.cjs` 和 `app.styles.ts`，把原本的全局类样式改为 `Panda CSS` 生成的样式对象。根目录 `package.json` 增加 `bootstrap` 命令，串联根依赖安装、前端依赖安装、Rust 校验和前端 typecheck。文档层将 README、架构、路线图和配置模型统一更新为 `SQLite-first + Panda CSS` 方案。
+在 `web` 增加 `@pandacss/dev`、`postcss`、`panda.config.ts`、`postcss.config.cjs` 和 `app.styles.ts`，把原本的全局类样式改为 `Panda CSS` 生成的样式对象。根目录 `package.json` 增加 `install:workspace` 命令，串联根依赖安装、前端依赖安装、Rust 校验和前端 typecheck。文档层将 README、架构、路线图和配置模型统一更新为 `SQLite-first + Panda CSS` 方案。
 
 ### 影响范围
 ```yaml
 涉及模块:
-  - web-shell: 接入 Panda CSS 并重写主壳样式入口
+  - web: 接入 Panda CSS 并重写主壳样式入口
   - workspace-docs: 收敛数据库与前端方案描述
 预计变更文件: 10+
 ```
@@ -68,8 +68,8 @@
 
 ### 开发入口
 
-- 根目录 `package.json`：新增 `bootstrap`
-- `web/shell/package.json`：新增 `panda:codegen`、`prepare`
+- 根目录 `package.json`：新增 `install:workspace`
+- `web/package.json`：新增 `panda:codegen`、`prepare`
 
 ---
 
@@ -80,13 +80,13 @@
 ### 场景: 新开发者初始化仓库
 **模块**: workspace-docs
 **条件**: 已安装 Bun 与 Rust 工具链
-**行为**: 在仓库根目录执行 `bun run bootstrap`
+**行为**: 在仓库根目录执行 `bun run install:workspace`
 **结果**: 完成前端依赖安装、Panda 代码生成、Rust 校验和前端 typecheck
 
-### 场景: Shell 页面开发
-**模块**: web-shell
-**条件**: 进入 `web/shell`
-**行为**: 使用 `Panda CSS` token 和样式对象维护 shell 页面布局
+### 场景: Web 页面开发
+**模块**: web
+**条件**: 进入 `web`
+**行为**: 使用 `Panda CSS` token 和样式对象维护 web 页面布局
 **结果**: 样式更易复用，后续主题和布局规则更容易收敛
 
 ---
@@ -106,7 +106,7 @@
 | B: SQLite + Panda CSS | 本地优先、样式可收敛、接入成本更低 | 需要增加代码生成步骤 |
 **决策**: 选择方案 B
 **理由**: 更符合当前骨架阶段“先跑通本地工作台、后扩远程能力”的节奏。
-**影响**: README、架构文档、根目录命令和 `web/shell` 样式实现同步变化
+**影响**: README、架构文档、根目录命令和 `web` 样式实现同步变化
 
 ---
 
@@ -116,7 +116,7 @@
 
 ### 设计方向
 - **美学基调**: 温暖纸感工作台，强调磨砂层次和编辑台氛围
-- **记忆点**: 带铜色眉题和纸张质感的 shell 面板
+- **记忆点**: 带铜色眉题和纸张质感的 web 面板
 - **参考**: 延续现有米色 + 天空蓝发光背景，但改成 token 化样式系统
 
 ### 视觉要素
@@ -128,4 +128,4 @@
 
 ### 技术约束
 - **可访问性**: 保持按钮、输入框、选择框的 focus 可见状态
-- **响应式**: 小屏时 shell 改为单列布局
+- **响应式**: 小屏时 web 改为单列布局

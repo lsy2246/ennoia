@@ -33,7 +33,7 @@ Extension descriptor 包含：
 4. Extension Host 扫描 `config/extensions.toml` 中启用且未移除的扩展来源。
 5. Extension Host 启动后端 dev command 并采集事件。
 6. Server 暴露 runtime snapshot、事件、诊断、日志和资源贡献接口。
-7. Web Shell 通过 runtime snapshot 动态挂载扩展贡献。
+7. Web 工作台通过 runtime snapshot 动态挂载扩展贡献。
 
 ## API
 

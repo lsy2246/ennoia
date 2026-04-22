@@ -989,7 +989,7 @@ fn parse_namespaces(value: &str) -> Vec<String> {
 
 fn builtin_message_namespaces() -> Vec<String> {
     vec![
-        "shell".to_string(),
+        "web".to_string(),
         "settings".to_string(),
         "ext.observatory".to_string(),
     ]
@@ -1000,8 +1000,8 @@ fn builtin_message_bundle(
     fallback_locale: &str,
     namespace: &str,
 ) -> Option<UiMessageBundleResponse> {
-    const SHELL_ZH_CN: StaticMessages = &[("shell.title", "Ennoia")];
-    const SHELL_EN_US: StaticMessages = &[("shell.title", "Ennoia")];
+    const WEB_ZH_CN: StaticMessages = &[("web.title", "Ennoia")];
+    const WEB_EN_US: StaticMessages = &[("web.title", "Ennoia")];
     const SETTINGS_ZH_CN: StaticMessages = &[("settings.personal.saved", "偏好已保存。")];
     const SETTINGS_EN_US: StaticMessages = &[("settings.personal.saved", "Preferences saved.")];
     const OBSERVATORY_ZH_CN: StaticMessages = &[
@@ -1018,10 +1018,10 @@ fn builtin_message_bundle(
     ];
 
     let (source, version, catalogs): (&str, &str, StaticCatalog) = match namespace {
-        "shell" => (
-            "builtin:shell",
+        "web" => (
+            "builtin:web",
             "1",
-            &[("zh-CN", SHELL_ZH_CN), ("en-US", SHELL_EN_US)],
+            &[("zh-CN", WEB_ZH_CN), ("en-US", WEB_EN_US)],
         ),
         "settings" => (
             "builtin:settings",

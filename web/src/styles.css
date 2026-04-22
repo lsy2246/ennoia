@@ -126,7 +126,7 @@ label {
   color: var(--text-muted);
 }
 
-.ide-shell {
+.ide-web {
   display: grid;
   grid-template-columns: var(--activity-width) var(--sidebar-width) minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr) var(--status-height);
@@ -924,7 +924,7 @@ label {
 }
 
 @media (max-width: 1400px) {
-  .ide-shell {
+  .ide-web {
     grid-template-columns: var(--activity-width) 240px minmax(0, 1fr);
   }
 
@@ -938,7 +938,7 @@ label {
     overflow: auto;
   }
 
-  .ide-shell {
+  .ide-web {
     grid-template-columns: 1fr;
     grid-template-rows: auto auto minmax(0, 1fr) var(--status-height);
   }

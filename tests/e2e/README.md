@@ -1,6 +1,6 @@
 # E2E Tests
 
-本目录存放 Shell 与主链路的端到端测试。
+本目录存放 Web 工作台与主链路的端到端测试。
 
 当前入口：
 
@@ -8,4 +8,4 @@
 
 执行方式：
 
-- 仓库根目录执行 `bun run test:e2e`
+- 仓库根目录执行 `bun ./tests/e2e/platform-smoke.mjs`

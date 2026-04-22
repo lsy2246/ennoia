@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "ennoia-shell",
+      "name": "ennoia-web",
       "dependencies": {
         "@tanstack/react-query": "^5.99.0",
         "@tanstack/react-router": "^1.168.21",

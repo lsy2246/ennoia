@@ -1,4 +1,4 @@
-﻿# 任务清单: registry-first-web-workbench
+# 任务清单: registry-first-web-workbench
 
 ```yaml
 @feature: registry-first-web-workbench
@@ -55,4 +55,4 @@
 
 - 本轮目标不是局部修补，而是把第一轮静态工作台进一步升级为 Registry-First Web Workbench
 - 技能与扩展仍然严格分离；扩展可以贡献上游实现、导航页、面板与 Observatory 能力
-- `shell` 目录名可以暂时保留，但对外产品与文档全部收敛为 `Web`
+- `web` 目录名可以暂时保留，但对外产品与文档全部收敛为 `Web`

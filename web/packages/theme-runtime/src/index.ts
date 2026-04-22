@@ -25,7 +25,7 @@ export type UiBootstrapCache = {
 
 export const UI_BOOTSTRAP_CACHE_KEY = "ennoia.ui.bootstrap";
 const ACTIVE_THEME_LINK_ID = "ennoia-runtime-theme-link";
-const SHELL_THEME_VARIABLE_BRIDGE: Record<string, string> = {
+const WEB_THEME_VARIABLE_BRIDGE: Record<string, string> = {
   "--bg": "--color-bg",
   "--bg-elevated": "--color-surface",
   "--bg-soft": "--color-surface-2",
@@ -112,7 +112,7 @@ function themeVariableKeys() {
   return Array.from(
     new Set([
       ...activeThemeDefinitions().flatMap((theme) => Object.keys(theme.variables ?? {})),
-      ...Object.keys(SHELL_THEME_VARIABLE_BRIDGE),
+      ...Object.keys(WEB_THEME_VARIABLE_BRIDGE),
     ]),
   );
 }
@@ -234,7 +234,7 @@ export function applyTheme(themeId?: string | null) {
   for (const [key, value] of Object.entries(baseTheme.variables ?? {})) {
     root.style.setProperty(key, value);
   }
-  for (const [target, source] of Object.entries(SHELL_THEME_VARIABLE_BRIDGE)) {
+  for (const [target, source] of Object.entries(WEB_THEME_VARIABLE_BRIDGE)) {
     const value = baseTheme.variables?.[source];
     if (value) {
       root.style.setProperty(target, value);

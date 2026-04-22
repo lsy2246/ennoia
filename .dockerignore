@@ -11,8 +11,8 @@ target/
 # Node / web
 node_modules/
 **/node_modules/
-web/apps/shell/dist/
-web/apps/shell/styled-system/
+web/dist/
+web/styled-system/
 dist/
 **/*.tsbuildinfo
 
