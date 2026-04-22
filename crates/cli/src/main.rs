@@ -12,11 +12,10 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use ennoia_assets::{builtins, templates};
 use ennoia_kernel::{
     ExtensionManifest, ExtensionRegistryEntry, ExtensionRegistryFile, ExtensionSourceMode,
-    OwnerKind, OwnerRef, ServerConfig, SkillRegistryEntry, SkillRegistryFile,
+    ServerConfig, SkillRegistryEntry, SkillRegistryFile,
 };
-use ennoia_memory::{MemoryKind, RecallMode, RecallQuery, RememberRequest, Stability};
 use ennoia_paths::RuntimePaths;
-use ennoia_server::{bootstrap_app_state, default_app_state, run_server, AppState};
+use ennoia_server::{bootstrap_app_state, default_app_state, run_server};
 use notify::{Config as NotifyConfig, RecommendedWatcher, RecursiveMode, Watcher};
 
 const WEB_DIR: &str = "web";
@@ -53,9 +52,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         Some("ext") => {
             extension_command(&args[2..]).await?;
         }
-        Some("memory") => {
-            memory_command(&args[2..]).await?;
-        }
         _ => {
             print_summary();
         }
@@ -86,9 +82,6 @@ fn print_summary() {
     println!("  ennoia ext logs [limit]");
     println!("  ennoia ext doctor <id>");
     println!("  ennoia ext graph");
-    println!("  ennoia memory list");
-    println!("  ennoia memory remember <owner_kind> <owner_id> <namespace> <content>");
-    println!("  ennoia memory recall <owner_kind> <owner_id> [query]");
 }
 
 fn print_default_config() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -105,126 +98,6 @@ fn print_default_config() -> Result<(), Box<dyn std::error::Error + Send + Sync>
         "\n[config/ui.toml]\n{}",
         toml::to_string_pretty(&state.ui_config)?
     );
-    Ok(())
-}
-
-async fn memory_command(args: &[String]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let paths = RuntimePaths::resolve(None);
-    init_home_template(&paths)?;
-    auto_attach_dev_extensions(&paths)?;
-    let state = bootstrap_app_state(paths.home()).await?;
-
-    let sub = args.first().map(String::as_str).unwrap_or("list");
-    match sub {
-        "list" => memory_list(&state).await,
-        "remember" => memory_remember(&state, &args[1..]).await,
-        "recall" => memory_recall(&state, &args[1..]).await,
-        other => {
-            eprintln!("unknown memory subcommand: {other}");
-            std::process::exit(2);
-        }
-    }
-}
-
-async fn memory_list(state: &AppState) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let memories = state.memory_store.list_memories(50).await?;
-    for memory in memories {
-        println!(
-            "{}  {:?}/{}  {}  {}",
-            memory.id,
-            memory.owner.kind,
-            memory.owner.id,
-            memory.namespace,
-            memory.title.as_deref().unwrap_or(&memory.content)
-        );
-    }
-    Ok(())
-}
-
-async fn memory_remember(
-    state: &AppState,
-    args: &[String],
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    if args.len() < 4 {
-        eprintln!("usage: ennoia memory remember <owner_kind> <owner_id> <namespace> <content>");
-        std::process::exit(2);
-    }
-    let owner = OwnerRef {
-        kind: match args[0].as_str() {
-            "agent" => OwnerKind::Agent,
-            "space" => OwnerKind::Space,
-            _ => OwnerKind::Global,
-        },
-        id: args[1].clone(),
-    };
-    let request = RememberRequest {
-        owner,
-        namespace: args[2].clone(),
-        memory_kind: MemoryKind::Fact,
-        stability: Stability::Working,
-        title: None,
-        content: args[3..].join(" "),
-        summary: None,
-        confidence: None,
-        importance: None,
-        valid_from: None,
-        valid_to: None,
-        sources: Vec::new(),
-        tags: Vec::new(),
-        entities: Vec::new(),
-    };
-    let receipt = state.memory_store.remember(request).await?;
-    println!("{}", serde_json::to_string_pretty(&receipt)?);
-    Ok(())
-}
-
-async fn memory_recall(
-    state: &AppState,
-    args: &[String],
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    if args.len() < 2 {
-        eprintln!("usage: ennoia memory recall <owner_kind> <owner_id> [query]");
-        std::process::exit(2);
-    }
-    let owner = OwnerRef {
-        kind: match args[0].as_str() {
-            "agent" => OwnerKind::Agent,
-            "space" => OwnerKind::Space,
-            _ => OwnerKind::Global,
-        },
-        id: args[1].clone(),
-    };
-    let query_text = if args.len() > 2 {
-        Some(args[2..].join(" "))
-    } else {
-        None
-    };
-    let mode = if query_text.is_some() {
-        RecallMode::Fts
-    } else {
-        RecallMode::Namespace
-    };
-    let query = RecallQuery {
-        owner,
-        conversation_id: None,
-        run_id: None,
-        query_text,
-        namespace_prefix: None,
-        memory_kind: None,
-        mode,
-        limit: 20,
-    };
-    let result = state.memory_store.recall(query).await?;
-    println!("receipt: {}", result.receipt_id);
-    println!("mode: {}", result.mode);
-    for memory in result.memories {
-        println!(
-            "- [{}] {}: {}",
-            memory.namespace,
-            memory.title.as_deref().unwrap_or("(no title)"),
-            memory.content
-        );
-    }
     Ok(())
 }
 
@@ -825,12 +698,8 @@ fn attached_dev_source_roots(paths: &RuntimePaths) -> io::Result<Vec<PathBuf>> {
 }
 
 fn descriptor_path(root: &Path) -> Option<PathBuf> {
-    [
-        root.join("ennoia.extension.toml"),
-        root.join("manifest.toml"),
-    ]
-    .into_iter()
-    .find(|path| path.exists())
+    let path = root.join("extension.toml");
+    path.exists().then_some(path)
 }
 
 fn auto_attach_dev_extensions(paths: &RuntimePaths) -> io::Result<()> {
@@ -847,7 +716,7 @@ fn auto_attach_dev_extensions(paths: &RuntimePaths) -> io::Result<()> {
             continue;
         }
         let root = entry.path();
-        if !root.join("ennoia.extension.toml").exists() {
+        if !root.join("extension.toml").exists() {
             continue;
         }
         let normalized = root.to_string_lossy().replace('\\', "/");
@@ -891,21 +760,20 @@ fn init_home_template(paths: &RuntimePaths) -> io::Result<()> {
 }
 
 fn render_app_config(paths: &RuntimePaths) -> String {
-    templates::app_config().replace(
-        "sqlite://~/.ennoia/data/sqlite/ennoia.db",
-        &format!("sqlite://{}", paths.display_for_user(paths.sqlite_db())),
-    )
+    let _ = paths;
+    templates::app_config().to_string()
 }
 
 fn sync_builtin_registries(paths: &RuntimePaths) -> io::Result<()> {
     let mut extension_registry = read_extension_registry(paths)?;
     for id in builtin_extension_ids() {
+        let path = builtin_extension_source_dir(&id).unwrap_or_else(|| paths.extension_dir(&id));
         if let Some(entry) = extension_registry
             .extensions
             .iter_mut()
             .find(|item| item.id == id && item.source == "builtin")
         {
-            entry.path = paths.display_for_user(paths.extension_dir(&id));
+            entry.path = paths.display_for_user(&path);
             continue;
         }
         extension_registry.extensions.push(ExtensionRegistryEntry {
@@ -913,7 +781,7 @@ fn sync_builtin_registries(paths: &RuntimePaths) -> io::Result<()> {
             source: "builtin".to_string(),
             enabled: true,
             removed: false,
-            path: paths.display_for_user(paths.extension_dir(&id)),
+            path: paths.display_for_user(&path),
         });
     }
     sort_extension_registry_entries(&mut extension_registry.extensions);
@@ -997,7 +865,16 @@ fn sync_builtin_provider_presets(paths: &RuntimePaths) -> io::Result<()> {
 }
 
 fn builtin_extension_ids() -> Vec<String> {
-    builtin_package_ids_from_assets(builtins::extensions(), "ennoia.extension.toml")
+    builtin_package_ids_from_assets(builtins::extensions(), "extension.toml")
+}
+
+fn builtin_extension_source_dir(id: &str) -> Option<PathBuf> {
+    let root = env::current_dir()
+        .ok()?
+        .join("builtins")
+        .join("extensions")
+        .join(id);
+    root.join("extension.toml").exists().then_some(root)
 }
 
 fn builtin_skill_ids() -> Vec<String> {

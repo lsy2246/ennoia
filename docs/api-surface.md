@@ -7,7 +7,7 @@
 - `GET /api/v1/bootstrap/status`
 - `POST /api/v1/bootstrap/setup`
 
-## Runtime
+## 系统运行配置
 
 - `GET /api/v1/ui/runtime`
 - `GET /api/v1/ui/messages`
@@ -15,24 +15,22 @@
 - `PUT /api/v1/runtime/profile`
 - `GET /api/v1/runtime/preferences`
 - `PUT /api/v1/runtime/preferences`
-- `GET /api/v1/runtime/config`
-- `GET /api/v1/runtime/config/snapshot`
-- `GET /api/v1/runtime/config/{key}`
-- `PUT /api/v1/runtime/config/{key}`
-- `GET /api/v1/runtime/config/{key}/history`
+- `GET /api/v1/runtime/app-config`
+- `PUT /api/v1/runtime/app-config`
+- `GET /api/v1/runtime/server-config`
+- `PUT /api/v1/runtime/server-config`
 
-## Conversation
+## Session Extension
 
-- `GET /api/v1/conversations`
-- `POST /api/v1/conversations`
-- `GET /api/v1/conversations/{conversation_id}`
-- `DELETE /api/v1/conversations/{conversation_id}`
-- `GET /api/v1/conversations/{conversation_id}/messages`
-- `POST /api/v1/conversations/{conversation_id}/messages`
-- `GET /api/v1/conversations/{conversation_id}/runs`
-- `GET /api/v1/conversations/{conversation_id}/lanes`
-- `GET /api/v1/lanes/{lane_id}/handoffs`
-- `POST /api/v1/lanes/{lane_id}/handoffs`
+- `GET /api/ext/session/conversations`
+- `POST /api/ext/session/conversations`
+- `GET /api/ext/session/conversations/{conversation_id}`
+- `DELETE /api/ext/session/conversations/{conversation_id}`
+- `GET /api/ext/session/conversations/{conversation_id}/messages`
+- `POST /api/ext/session/conversations/{conversation_id}/messages`
+- `GET /api/ext/session/conversations/{conversation_id}/lanes`
+- `GET /api/ext/session/lanes/{lane_id}/handoffs`
+- `POST /api/ext/session/lanes/{lane_id}/handoffs`
 
 ### Conversation 约定
 
@@ -83,32 +81,21 @@
 - `POST /api/v1/extensions/{extension_id}/restart`
 - `POST /api/v1/extensions/attach`
 - `DELETE /api/v1/extensions/attach/{extension_id}`
+- `ANY /api/ext/{extension_id}/{*path}`
 
-## Memory
+## Memory Extension
 
-- `GET /api/v1/memories`
-- `POST /api/v1/memories`
-- `POST /api/v1/memories/recall`
-- `POST /api/v1/memories/review`
+- `GET /api/ext/memory/memories`
+- `POST /api/ext/memory/memories/remember`
+- `POST /api/ext/memory/memories/recall`
+- `POST /api/ext/memory/memories/review`
 
-## 执行与调度
+## Workflow Extension
 
-- `GET /api/v1/runs`
-- `GET /api/v1/runs/{run_id}/tasks`
-- `GET /api/v1/runs/{run_id}/artifacts`
-- `GET /api/v1/runs/{run_id}/stages`
-- `GET /api/v1/runs/{run_id}/decisions`
-- `GET /api/v1/runs/{run_id}/gates`
-- `GET /api/v1/tasks`
-- `GET /api/v1/artifacts`
-- `GET /api/v1/jobs`
-- `POST /api/v1/jobs`
-- `GET /api/v1/jobs/{job_id}`
-- `PUT /api/v1/jobs/{job_id}`
-- `DELETE /api/v1/jobs/{job_id}`
-- `POST /api/v1/jobs/{job_id}/run`
-- `POST /api/v1/jobs/{job_id}/enable`
-- `POST /api/v1/jobs/{job_id}/disable`
+- `GET /api/ext/workflow/health`
+- `POST /api/ext/workflow/hooks/conversation-message-created`
+
+主系统不暴露 workflow 内部编排 API。运行编排、任务、产物索引、stage、decision 和 gate 都属于 workflow 扩展私有能力。
 
 ## 日志
 

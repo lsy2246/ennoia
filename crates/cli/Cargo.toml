@@ -7,7 +7,6 @@ license.workspace = true
 [dependencies]
 ennoia-assets = { path = "../assets" }
 ennoia-kernel = { path = "../kernel" }
-ennoia-memory = { path = "../memory" }
 ennoia-paths = { path = "../paths" }
 ennoia-server = { path = "../server" }
 notify = "8.2.0"

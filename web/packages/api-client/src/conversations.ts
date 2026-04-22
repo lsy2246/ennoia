@@ -1,8 +1,10 @@
 ﻿import { fetchJson } from "./core";
-import type { ChatLane, ChatMessage, ChatSendResponse, ChatThread, ChatThreadDetail, ExecutionRun, ExecutionStep, RunOutput } from "./types";
+import type { ChatLane, ChatMessage, ChatSendResponse, ChatThread, ChatThreadDetail } from "./types";
+
+const SESSION_API = "/api/ext/session";
 
 export async function listChats() {
-  return fetchJson<ChatThread[]>("/api/v1/conversations");
+  return fetchJson<ChatThread[]>(`${SESSION_API}/conversations`);
 }
 
 export async function createChat(payload: {
@@ -13,35 +15,28 @@ export async function createChat(payload: {
   lane_type?: string;
   lane_goal?: string;
 }) {
-  return fetchJson<{ conversation: ChatThread; default_lane: ChatLane }>("/api/v1/conversations", {
+  return fetchJson<{ conversation: ChatThread; default_lane: ChatLane }>(`${SESSION_API}/conversations`, {
     method: "POST",
     body: JSON.stringify(payload),
   });
 }
 
 export async function deleteChat(chatId: string) {
-  return fetchJson<void>(`/api/v1/conversations/${chatId}`, { method: "DELETE" });
+  return fetchJson<void>(`${SESSION_API}/conversations/${chatId}`, { method: "DELETE" });
 }
 
 export async function getChat(chatId: string): Promise<ChatThreadDetail> {
-  const [detail, messages, runs] = await Promise.all([
-    fetchJson<{ conversation: ChatThread; lanes: ChatLane[] }>(`/api/v1/conversations/${chatId}`),
-    fetchJson<ChatMessage[]>(`/api/v1/conversations/${chatId}/messages`),
-    fetchJson<ExecutionRun[]>(`/api/v1/conversations/${chatId}/runs`),
+  const [detail, messages] = await Promise.all([
+    fetchJson<{ conversation: ChatThread; lanes: ChatLane[] }>(`${SESSION_API}/conversations/${chatId}`),
+    fetchJson<ChatMessage[]>(`${SESSION_API}/conversations/${chatId}/messages`),
   ]);
-  const taskBuckets = await Promise.all(
-    runs.map((run) => fetchJson<ExecutionStep[]>(`/api/v1/runs/${run.id}/tasks`)),
-  );
-  const outputBuckets = await Promise.all(
-    runs.map((run) => fetchJson<RunOutput[]>(`/api/v1/runs/${run.id}/artifacts`)),
-  );
   return {
     conversation: detail.conversation,
     lanes: detail.lanes,
     messages,
-    runs,
-    tasks: taskBuckets.flat(),
-    outputs: outputBuckets.flat(),
+    runs: [],
+    tasks: [],
+    outputs: [],
   };
 }
 
@@ -54,7 +49,7 @@ export async function sendChatMessage(
     addressed_agents?: string[];
   },
 ) {
-  return fetchJson<ChatSendResponse>(`/api/v1/conversations/${chatId}/messages`, {
+  return fetchJson<ChatSendResponse>(`${SESSION_API}/conversations/${chatId}/messages`, {
     method: "POST",
     body: JSON.stringify(payload),
   });

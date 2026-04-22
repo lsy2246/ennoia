@@ -11,7 +11,8 @@
     "forceConsistentCasingInFileNames": true,
     "module": "ESNext",
     "moduleResolution": "Bundler",
-    "types": ["vite/client"],
+    "types": ["vite/client", "react", "react-dom"],
+    "typeRoots": ["./node_modules/@types"],
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"],
@@ -21,7 +22,10 @@
       "@ennoia/i18n": ["./packages/i18n/src/index.ts"],
       "@ennoia/observability": ["./packages/observability/src/index.ts"],
       "@ennoia/theme-runtime": ["./packages/theme-runtime/src/index.ts"],
-      "@ennoia/ui-sdk": ["./packages/ui-sdk/src/index.ts"]
+      "@ennoia/ui-sdk": ["./packages/ui-sdk/src/index.ts"],
+      "react": ["./node_modules/@types/react"],
+      "react/jsx-runtime": ["./node_modules/@types/react/jsx-runtime"],
+      "react-dom": ["./node_modules/@types/react-dom"]
     },
     "resolveJsonModule": true,
     "isolatedModules": true,
@@ -36,6 +40,7 @@
     "./packages/i18n/src",
     "./packages/observability/src",
     "./packages/theme-runtime/src",
-    "./packages/ui-sdk/src"
+    "./packages/ui-sdk/src",
+    "../builtins/extensions/*/ui"
   ]
 }

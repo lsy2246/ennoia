@@ -1,5 +1,14 @@
 ﻿import { fetchJson } from "./core";
-import type { AppConfig, BootstrapSetupResponse, BootstrapState, RuntimeProfile, UiMessagesResponse, UiPreferenceRecord, UiRuntime } from "./types";
+import type {
+  AppConfig,
+  BootstrapSetupResponse,
+  BootstrapState,
+  RuntimeProfile,
+  ServerConfig,
+  UiMessagesResponse,
+  UiPreferenceRecord,
+  UiRuntime,
+} from "./types";
 
 export async function fetchBootstrapStatus() {
   return fetchJson<BootstrapState>("/api/v1/bootstrap/status");
@@ -73,6 +82,17 @@ export async function fetchAppConfig() {
 
 export async function saveAppConfig(payload: AppConfig) {
   return fetchJson<AppConfig>("/api/v1/runtime/app-config", {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function fetchServerConfig() {
+  return fetchJson<ServerConfig>("/api/v1/runtime/server-config");
+}
+
+export async function saveServerConfig(payload: ServerConfig) {
+  return fetchJson<ServerConfig>("/api/v1/runtime/server-config", {
     method: "PUT",
     body: JSON.stringify(payload),
   });

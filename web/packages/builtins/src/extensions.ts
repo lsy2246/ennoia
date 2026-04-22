@@ -4,6 +4,12 @@ import type {
 } from "@ennoia/ui-sdk";
 
 export const builtinExtensionPages: Record<string, ExtensionPageDescriptor> = {
+  "memory.page": {
+    mount: "memory.page",
+    eyebrow: "Memory",
+    summary: "以扩展页形式承接记忆的检索、审核和可视化。",
+    highlights: ["记忆检索", "人工审核", "扩展后端代理"],
+  },
   "observatory.events.page": {
     mount: "observatory.events.page",
     eyebrow: "Observatory",

@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-export type WorkbenchViewKind = "agent" | "api-channel" | "session" | "memory";
+export type WorkbenchViewKind = "agent" | "api-channel" | "session";
 
 export type WorkbenchViewDescriptor = {
   panelId: string;

@@ -67,6 +67,27 @@ impl RuntimePaths {
         self.config_dir().join("ui.toml")
     }
 
+    pub fn profile_config_file(&self) -> PathBuf {
+        self.config_dir().join("profile.toml")
+    }
+
+    pub fn preferences_dir(&self) -> PathBuf {
+        self.config_dir().join("preferences")
+    }
+
+    pub fn instance_preference_file(&self) -> PathBuf {
+        self.preferences_dir().join("instance.toml")
+    }
+
+    pub fn space_preferences_dir(&self) -> PathBuf {
+        self.preferences_dir().join("spaces")
+    }
+
+    pub fn space_preference_file(&self, space_id: &str) -> PathBuf {
+        self.space_preferences_dir()
+            .join(format!("{space_id}.toml"))
+    }
+
     pub fn policies_dir(&self) -> PathBuf {
         self.home.join("policies")
     }
@@ -87,12 +108,20 @@ impl RuntimePaths {
         self.state_dir().join("cache")
     }
 
-    pub fn sqlite_dir(&self) -> PathBuf {
-        self.state_dir().join("sqlite")
+    pub fn extensions_state_dir(&self) -> PathBuf {
+        self.state_dir().join("extensions")
     }
 
-    pub fn sqlite_db(&self) -> PathBuf {
-        self.sqlite_dir().join("ennoia.db")
+    pub fn extension_state_dir(&self, extension_id: &str) -> PathBuf {
+        self.extensions_state_dir().join(extension_id)
+    }
+
+    pub fn extension_sqlite_dir(&self, extension_id: &str) -> PathBuf {
+        self.extension_state_dir(extension_id).join("sqlite")
+    }
+
+    pub fn extension_sqlite_db(&self, extension_id: &str, file_name: &str) -> PathBuf {
+        self.extension_sqlite_dir(extension_id).join(file_name)
     }
 
     pub fn global_dir(&self) -> PathBuf {
@@ -159,10 +188,6 @@ impl RuntimePaths {
         self.logs_dir().join("server")
     }
 
-    pub fn scheduler_logs_dir(&self) -> PathBuf {
-        self.logs_dir().join("scheduler")
-    }
-
     pub fn agents_logs_dir(&self) -> PathBuf {
         self.logs_dir().join("agents")
     }
@@ -199,15 +224,16 @@ impl RuntimePaths {
         for dir in [
             self.agents_config_dir(),
             self.providers_config_dir(),
+            self.preferences_dir(),
+            self.space_preferences_dir(),
             self.extensions_dir(),
             self.skills_dir(),
             self.state_queue_dir(),
             self.state_runs_dir(),
             self.state_cache_dir(),
-            self.sqlite_dir(),
+            self.extensions_state_dir(),
             self.agents_dir(),
             self.server_logs_dir(),
-            self.scheduler_logs_dir(),
             self.agents_logs_dir(),
             self.spaces_logs_dir(),
             self.extensions_logs_dir(),

@@ -1,6 +1,3 @@
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-
 import {
   assert,
   buildBaseUrl,
@@ -37,15 +34,17 @@ try {
       theme_id: "system",
     }),
   });
+  await ensureAgent(baseUrl, "coder", "Coder");
+  await ensureAgent(baseUrl, "planner", "Planner");
 
-  const directConversation = await fetchJson(baseUrl, "/api/v1/conversations", {
+  const directConversation = await fetchJson(baseUrl, "/api/ext/session/conversations", {
     method: "POST",
     body: JSON.stringify({
       topology: "direct",
       agent_ids: ["coder"],
     }),
   });
-  const groupConversation = await fetchJson(baseUrl, "/api/v1/conversations", {
+  const groupConversation = await fetchJson(baseUrl, "/api/ext/session/conversations", {
     method: "POST",
     body: JSON.stringify({
       topology: "group",
@@ -56,7 +55,7 @@ try {
 
   const directEnvelope = await fetchJson(
     baseUrl,
-    `/api/v1/conversations/${directConversation.conversation.id}/messages`,
+    `/api/ext/session/conversations/${directConversation.conversation.id}/messages`,
     {
       method: "POST",
       body: JSON.stringify({
@@ -68,7 +67,7 @@ try {
   );
   const groupEnvelope = await fetchJson(
     baseUrl,
-    `/api/v1/conversations/${groupConversation.conversation.id}/messages`,
+    `/api/ext/session/conversations/${groupConversation.conversation.id}/messages`,
     {
       method: "POST",
       body: JSON.stringify({
@@ -79,99 +78,36 @@ try {
     },
   );
 
-  const job = await fetchJson(baseUrl, "/api/v1/jobs", {
-    method: "POST",
-    body: JSON.stringify({
-      owner_kind: "space",
-      owner_id: "studio",
-      job_kind: "maintenance",
-      schedule_kind: "cron",
-      schedule_value: "0 */6 * * *",
-    }),
-  });
-
   const overview = await fetchJson(baseUrl, "/api/v1/overview");
   const uiMessages = await fetchJson(
     baseUrl,
     "/api/v1/ui/messages?locale=zh-CN&namespaces=web,ext.observatory",
   );
-  const conversations = await fetchJson(baseUrl, "/api/v1/conversations");
+  const conversations = await fetchJson(baseUrl, "/api/ext/session/conversations");
   const directMessages = await fetchJson(
     baseUrl,
-    `/api/v1/conversations/${directConversation.conversation.id}/messages`,
+    `/api/ext/session/conversations/${directConversation.conversation.id}/messages`,
   );
   const groupMessages = await fetchJson(
     baseUrl,
-    `/api/v1/conversations/${groupConversation.conversation.id}/messages`,
+    `/api/ext/session/conversations/${groupConversation.conversation.id}/messages`,
   );
-  const runs = await fetchJson(baseUrl, "/api/v1/runs");
-  const tasks = await fetchJson(baseUrl, "/api/v1/tasks");
-  const directRunTasks = await fetchJson(
-    baseUrl,
-    `/api/v1/runs/${directEnvelope.run.id}/tasks`,
-  );
-  const groupRunTasks = await fetchJson(
-    baseUrl,
-    `/api/v1/runs/${groupEnvelope.run.id}/tasks`,
-  );
-  const directArtifacts = await fetchJson(
-    baseUrl,
-    `/api/v1/runs/${directEnvelope.run.id}/artifacts`,
-  );
-  const artifacts = await fetchJson(baseUrl, "/api/v1/artifacts");
-  const jobs = await fetchJson(baseUrl, "/api/v1/jobs");
-  const memories = await fetchJson(baseUrl, "/api/v1/memories");
+  const memoryExtension = await fetchJson(baseUrl, "/api/v1/extensions/memory");
+  const sessionExtension = await fetchJson(baseUrl, "/api/v1/extensions/session");
+  const workflowExtension = await fetchJson(baseUrl, "/api/v1/extensions/workflow");
 
   assert(overview.counts.extensions >= 1, "overview should expose extensions count");
   assert(uiMessages.bundles.length === 2, "ui messages should include requested builtin bundles");
-  assert(overview.counts.conversations >= 2, "overview should expose conversation count");
-  assert(overview.counts.messages >= 2, "overview should expose message count");
-  assert(directEnvelope.run.owner.id === "coder", "direct run owner should be coder");
-  assert(groupEnvelope.run.owner.id === "studio", "group run owner should be studio");
-  assert(job.schedule_kind === "cron", "job schedule kind should stay normalized");
+  assert(overview.counts.extensions >= 3, "overview should expose builtin extensions count");
+  assert(directEnvelope.message.id, "direct session should return a persisted message");
+  assert(groupEnvelope.message.id, "group session should return a persisted message");
   assert(conversations.length >= 2, "conversations should include direct and group sessions");
   assert(directMessages.length === 1, "direct conversation should contain one message");
   assert(groupMessages.length === 1, "group conversation should contain one message");
-  assert(runs.length >= 2, "runs should include direct and group entries");
-  assert(tasks.length >= 3, "tasks should include direct and group planned tasks");
-  assert(directRunTasks.length === 1, "direct run should keep one response task");
-  assert(groupRunTasks.length === 2, "group run should create one task per addressed agent");
-  assert(directArtifacts.length === 1, "direct run should expose one artifact");
-  assert(artifacts.length >= 2, "artifacts should include all persisted summaries");
-  assert(jobs.length >= 1, "jobs should include the created job");
-  assert(memories.length >= 2, "memories should include created conversation summaries");
-  assert(
-    memories.some((memory) => memory.namespace.includes(directConversation.conversation.id)),
-    "memory should retain direct conversation ledger",
-  );
-
-  const directArtifactPath = join(
-    runtimeDir,
-    "agents",
-    "coder",
-    "artifacts",
-    "runs",
-    directEnvelope.run.id,
-    "summary.json",
-  );
-  const groupArtifactPath = join(
-    runtimeDir,
-    "spaces",
-    "studio",
-    "artifacts",
-    "runs",
-    groupEnvelope.run.id,
-    "summary.json",
-  );
-
-  assert(existsSync(directArtifactPath), "direct run artifact should exist");
-  assert(existsSync(groupArtifactPath), "group run artifact should exist");
-
-  const directArtifact = JSON.parse(readFileSync(directArtifactPath, "utf8"));
-  const groupArtifact = JSON.parse(readFileSync(groupArtifactPath, "utf8"));
-
-  assert(directArtifact.goal === "实现 settings 页面", "direct artifact goal should match");
-  assert(groupArtifact.goal === "整理 roadmap", "group artifact goal should match");
+  assert(memoryExtension.id === "memory", "memory extension should be registered");
+  assert(sessionExtension.id === "session", "session extension should be registered");
+  assert(workflowExtension.id === "workflow", "workflow extension should be registered");
+  assert(memoryExtension.backend?.base_url, "memory extension should expose backend proxy info");
 
   console.log("[e2e] platform smoke passed");
 } finally {
@@ -179,4 +115,21 @@ try {
     await stopServer(serverHandle);
   }
   cleanupRuntimeFixture(runtimeDir);
+}
+
+async function ensureAgent(baseUrl, id, displayName) {
+  return fetchJson(baseUrl, "/api/v1/agents", {
+    method: "POST",
+    body: JSON.stringify({
+      id,
+      display_name: displayName,
+      description: "",
+      system_prompt: "",
+      provider_id: "",
+      model_id: "",
+      generation_options: {},
+      skills: [],
+      enabled: true,
+    }),
+  });
 }

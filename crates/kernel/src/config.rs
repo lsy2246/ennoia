@@ -2,7 +2,10 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::system_config::default_local_dev_origins;
+use crate::server_settings::{
+    default_local_dev_origins, BodyLimitConfig, BootstrapState, CorsConfig, LoggingConfig,
+    RateLimitConfig, TimeoutConfig,
+};
 use crate::ui::LocalizedText;
 
 /// AppConfig stores startup-wide settings loaded from `config/ennoia.toml`.
@@ -10,9 +13,6 @@ use crate::ui::LocalizedText;
 pub struct AppConfig {
     pub app_name: String,
     pub mode: String,
-    pub database_mode: String,
-    pub database_url: String,
-    pub scheduler_tick_ms: u64,
     pub default_mention_mode: String,
 }
 
@@ -21,22 +21,29 @@ impl Default for AppConfig {
         Self {
             app_name: "ennoia".to_string(),
             mode: "development".to_string(),
-            database_mode: "sqlite".to_string(),
-            database_url: "sqlite://~/.ennoia/data/sqlite/ennoia.db".to_string(),
-            scheduler_tick_ms: 1_000,
             default_mention_mode: "configured".to_string(),
         }
     }
 }
 
 /// ServerConfig stores network and runtime settings loaded from `config/server.toml`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ServerConfig {
     pub host: String,
     pub port: u16,
-    pub log_level: String,
-    pub allow_origins: Vec<String>,
     pub enable_ws: bool,
+    #[serde(default)]
+    pub rate_limit: RateLimitConfig,
+    #[serde(default)]
+    pub cors: CorsConfig,
+    #[serde(default)]
+    pub timeout: TimeoutConfig,
+    #[serde(default)]
+    pub logging: LoggingConfig,
+    #[serde(default)]
+    pub body_limit: BodyLimitConfig,
+    #[serde(default)]
+    pub bootstrap: BootstrapState,
 }
 
 impl Default for ServerConfig {
@@ -44,9 +51,16 @@ impl Default for ServerConfig {
         Self {
             host: "127.0.0.1".to_string(),
             port: 3710,
-            log_level: "info".to_string(),
-            allow_origins: default_local_dev_origins(),
             enable_ws: true,
+            rate_limit: RateLimitConfig::default(),
+            cors: CorsConfig {
+                origins: default_local_dev_origins(),
+                ..CorsConfig::default()
+            },
+            timeout: TimeoutConfig::default(),
+            logging: LoggingConfig::default(),
+            body_limit: BodyLimitConfig::default(),
+            bootstrap: BootstrapState::default(),
         }
     }
 }

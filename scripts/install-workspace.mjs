@@ -129,8 +129,8 @@ if (!commandExists("bun")) {
 
 runStep("安装根目录依赖", "bun", ["install"]);
 
-const shellDir = resolve(rootDir, "web");
-if (!existsSync(shellDir)) {
+const webDir = resolve(rootDir, "web");
+if (!existsSync(webDir)) {
   console.error("[install:workspace] 缺少 web 目录，无法继续。");
   process.exit(1);
 }

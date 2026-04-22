@@ -1,0 +1,26 @@
+id = "session"
+name = "Session"
+kind = "extension"
+version = "0.1.0"
+
+[source]
+mode = "package"
+root = "."
+dev = false
+
+[backend]
+runtime = "rust"
+base_url = "http://127.0.0.1:3901"
+command = "cargo run --manifest-path \"plugins/session-service/Cargo.toml\" --bin ennoia-session-extension -- --home \"${ENNOIA_HOME}\" --port 3901"
+healthcheck = "/health"
+
+[capabilities]
+pages = true
+hooks = true
+
+[contributes]
+pages = [{ id = "session.page", title = { key = "web.nav.conversations", fallback = "会话" }, route = "/conversations", mount = "session.page", icon = "message-square" }]
+hooks = [
+  { event = "session.conversation.created", handler = "/hooks/conversation-created" },
+  { event = "session.message.created", handler = "/hooks/message-created" },
+]

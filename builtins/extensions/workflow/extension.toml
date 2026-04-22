@@ -1,0 +1,23 @@
+id = "workflow"
+name = "Workflow"
+kind = "extension"
+version = "0.1.0"
+
+[source]
+mode = "package"
+root = "."
+dev = false
+
+[backend]
+runtime = "rust"
+base_url = "http://127.0.0.1:3921"
+command = "cargo run --manifest-path \"plugins/workflow-service/Cargo.toml\" --bin ennoia-workflow-extension -- --home \"${ENNOIA_HOME}\" --port 3921"
+healthcheck = "/health"
+
+[capabilities]
+hooks = true
+
+[contributes]
+hooks = [
+  { event = "conversation.message.created", handler = "/hooks/conversation-message-created" }
+]

@@ -11,7 +11,7 @@ use crate::app::AppState;
 /// cors_middleware injects CORS headers from the live CorsConfig and short-circuits
 /// OPTIONS preflight requests.
 pub async fn cors_middleware(State(state): State<AppState>, req: Request, next: Next) -> Response {
-    let cfg = state.system_config.cors.load();
+    let cfg = &state.server_config.cors;
     if !cfg.enabled {
         return next.run(req).await;
     }

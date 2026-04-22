@@ -16,7 +16,7 @@ pub async fn timeout_middleware(
     req: Request,
     next: Next,
 ) -> Response {
-    let cfg = state.system_config.timeout.load();
+    let cfg = &state.server_config.timeout;
     if !cfg.enabled {
         return next.run(req).await;
     }

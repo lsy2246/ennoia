@@ -17,9 +17,18 @@ export default defineConfig({
       "@ennoia/observability": path.resolve(__dirname, "./packages/observability/src"),
       "@ennoia/theme-runtime": path.resolve(__dirname, "./packages/theme-runtime/src"),
       "@ennoia/ui-sdk": path.resolve(__dirname, "./packages/ui-sdk/src"),
+      react: path.resolve(__dirname, "./node_modules/react"),
+      "react/jsx-runtime": path.resolve(__dirname, "./node_modules/react/jsx-runtime.js"),
+      "react-dom": path.resolve(__dirname, "./node_modules/react-dom"),
     },
   },
   server: {
     port: devPort,
+    fs: {
+      allow: [
+        path.resolve(__dirname),
+        path.resolve(__dirname, ".."),
+      ],
+    },
   },
 });

@@ -1,4 +1,10 @@
 use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
+
+use crate::{
+    ArtifactSpec, ConversationSpec, Decision, GateVerdict, LaneSpec, MessageSpec, OwnerRef,
+    RunContext, RunSpec, RunStageEvent, TaskSpec,
+};
 
 use crate::ui::{LocalizedText, ThemeAppearance};
 
@@ -106,6 +112,72 @@ pub struct HookContribution {
     pub handler: Option<String>,
 }
 
+pub const HOOK_EVENT_CONVERSATION_CREATED: &str = "conversation.created";
+pub const HOOK_EVENT_CONVERSATION_MESSAGE_CREATED: &str = "conversation.message.created";
+pub const HOOK_EVENT_RUN_REQUESTED: &str = "run.requested";
+pub const HOOK_EVENT_RUN_STAGE_CHANGED: &str = "run.stage.changed";
+pub const HOOK_EVENT_ARTIFACT_CREATED: &str = "artifact.created";
+pub const HOOK_EVENT_JOB_DUE: &str = "job.due";
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HookResourceRef {
+    pub kind: String,
+    pub id: String,
+    #[serde(default)]
+    pub conversation_id: Option<String>,
+    #[serde(default)]
+    pub lane_id: Option<String>,
+    #[serde(default)]
+    pub run_id: Option<String>,
+    #[serde(default)]
+    pub task_id: Option<String>,
+    #[serde(default)]
+    pub artifact_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct HookEventEnvelope {
+    pub event: String,
+    pub occurred_at: String,
+    #[serde(default)]
+    pub owner: Option<OwnerRef>,
+    pub resource: HookResourceRef,
+    #[serde(default)]
+    pub payload: JsonValue,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct HookDispatchResponse {
+    #[serde(default)]
+    pub handled: bool,
+    #[serde(default)]
+    pub result: Option<JsonValue>,
+    #[serde(default)]
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ConversationMessageHookPayload {
+    pub conversation: ConversationSpec,
+    pub lane: LaneSpec,
+    pub message: MessageSpec,
+    pub goal: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ConversationWorkflowOutput {
+    pub conversation: ConversationSpec,
+    pub lane: LaneSpec,
+    pub message: MessageSpec,
+    pub run: RunSpec,
+    pub tasks: Vec<TaskSpec>,
+    pub artifacts: Vec<ArtifactSpec>,
+    pub context: RunContext,
+    pub gate_verdicts: Vec<GateVerdict>,
+    pub stage_event: RunStageEvent,
+    pub decision: Decision,
+}
+
 /// ContributionSet groups all extension contributions in one place.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ContributionSet {
@@ -185,6 +257,10 @@ pub struct ExtensionBackendSpec {
     pub runtime: Option<String>,
     #[serde(default)]
     pub entry: Option<String>,
+    #[serde(default)]
+    pub base_url: Option<String>,
+    #[serde(default)]
+    pub command: Option<String>,
     #[serde(default)]
     pub dev_command: Option<String>,
     #[serde(default)]
@@ -323,6 +399,8 @@ pub struct ResolvedBackendEntry {
     pub kind: String,
     pub runtime: String,
     pub entry: String,
+    #[serde(default)]
+    pub base_url: Option<String>,
     #[serde(default)]
     pub command: Option<String>,
     #[serde(default)]

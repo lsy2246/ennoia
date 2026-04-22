@@ -16,7 +16,7 @@ pub async fn logging_middleware(
     req: Request,
     next: Next,
 ) -> Response {
-    let cfg = state.system_config.logging.load();
+    let cfg = &state.server_config.logging;
     if !cfg.enabled {
         return next.run(req).await;
     }

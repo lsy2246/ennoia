@@ -1,0 +1,21 @@
+id = "memory"
+name = "Memory"
+kind = "extension"
+version = "0.1.0"
+
+[source]
+mode = "package"
+root = "."
+dev = false
+
+[backend]
+runtime = "rust"
+base_url = "http://127.0.0.1:3911"
+command = "cargo run --manifest-path \"plugins/memory-service/Cargo.toml\" --bin ennoia-memory-extension -- --home \"${ENNOIA_HOME}\" --port 3911"
+healthcheck = "/health"
+
+[capabilities]
+pages = true
+
+[contributes]
+pages = [{ id = "memory.page", title = { key = "web.nav.memory", fallback = "记忆" }, route = "/memory", mount = "memory.page", icon = "memory" }]

@@ -3,8 +3,6 @@ import { useEffect, useMemo, useState } from "react";
 import {
   listExtensionEvents,
   listLogs,
-  listRuns,
-  type ExecutionRun,
   type ExtensionRuntimeEvent,
   type SystemLog,
 } from "@ennoia/api-client";
@@ -20,19 +18,6 @@ type UnifiedLogItem = {
   summary: string;
   details?: string | null;
 };
-
-function toRunLog(run: ExecutionRun): UnifiedLogItem {
-  return {
-    id: `run:${run.id}`,
-    at: run.updated_at,
-    level: "info",
-    source: "run",
-    kind: "run",
-    title: run.goal || run.trigger,
-    summary: `${run.stage} · ${run.conversation_id}`,
-    details: run.id,
-  };
-}
 
 function toExtensionEventLog(event: ExtensionRuntimeEvent): UnifiedLogItem {
   return {
@@ -53,7 +38,7 @@ function toSystemLog(log: SystemLog): UnifiedLogItem {
     at: log.at,
     level: log.level,
     source: log.source,
-    kind: log.kind,
+    kind: log.kind ?? "system",
     title: log.title,
     summary: log.summary,
     details: log.details,
@@ -77,15 +62,13 @@ export function Logs() {
   async function refresh() {
     setError(null);
     try {
-      const [logs, extensionEvents, runs] = await Promise.all([
+      const [logs, extensionEvents] = await Promise.all([
         listLogs(150),
         listExtensionEvents(80),
-        listRuns(),
       ]);
       const next = [
         ...logs.map(toSystemLog),
         ...extensionEvents.map(toExtensionEventLog),
-        ...runs.slice(0, 50).map(toRunLog),
       ].sort((left, right) => String(right.at).localeCompare(String(left.at)));
       setItems(next);
     } catch (err) {

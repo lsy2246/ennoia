@@ -1,4 +1,4 @@
-//! Middleware stack — each layer reads the latest config from SystemConfigRuntime.
+//! Middleware stack — each layer reads the latest file-backed server config.
 
 pub mod body_limit;
 pub mod cors;

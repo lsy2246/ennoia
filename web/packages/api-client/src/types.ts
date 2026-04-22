@@ -85,10 +85,43 @@ export type RuntimeProfile = {
 export type AppConfig = {
   app_name: string;
   mode: string;
-  database_mode: string;
-  database_url: string;
-  scheduler_tick_ms: number;
   default_mention_mode: string;
+};
+
+export type ServerConfig = {
+  host: string;
+  port: number;
+  rate_limit: {
+    enabled: boolean;
+    per_ip_rpm: number;
+    per_user_rpm: number;
+    burst: number;
+    exempt_paths: string[];
+  };
+  cors: {
+    enabled: boolean;
+    origins: string[];
+    methods: string[];
+    credentials: boolean;
+    max_age_seconds: number;
+  };
+  timeout: {
+    enabled: boolean;
+    default_ms: number;
+    per_path_ms: Record<string, number>;
+  };
+  logging: {
+    enabled: boolean;
+    level: string;
+    sample_rate: number;
+    redact_headers: string[];
+  };
+  body_limit: {
+    enabled: boolean;
+    max_bytes: number;
+    per_path_max: Record<string, number>;
+  };
+  bootstrap: BootstrapState;
 };
 
 export type BootstrapSetupResponse = {
@@ -147,50 +180,6 @@ export type ProviderModelsResponse = {
   recommended_model?: string | null;
   manual_allowed: boolean;
   generation_options: ExtensionProviderContribution["provider"]["generation_options"];
-};
-
-export type MemorySource = {
-  kind: string;
-  reference: string;
-};
-
-export type MemoryRecord = {
-  id: string;
-  owner: { kind: string; id: string };
-  namespace: string;
-  memory_kind: string;
-  stability: string;
-  status: string;
-  superseded_by?: string | null;
-  title?: string | null;
-  content: string;
-  summary?: string | null;
-  confidence: number;
-  importance: number;
-  valid_from?: string | null;
-  valid_to?: string | null;
-  sources: MemorySource[];
-  tags: string[];
-  entities: string[];
-  created_at: string;
-  updated_at: string;
-};
-
-export type RecallResult = {
-  memories: MemoryRecord[];
-  receipt_id: string;
-  mode: string;
-  total_chars: number;
-};
-
-export type ReviewReceipt = {
-  receipt_id: string;
-  target_memory_id: string;
-  action: string;
-  old_status?: string | null;
-  new_status: string;
-  reviewer: string;
-  created_at: string;
 };
 
 export type ChatThread = {
@@ -278,39 +267,10 @@ export type ChatSendResponse = {
   conversation: ChatThread;
   lane: ChatLane;
   message: ChatMessage;
-  run: ExecutionRun;
+  run?: ExecutionRun;
+  runs?: ExecutionRun[];
   tasks: ExecutionStep[];
   artifacts: RunOutput[];
-};
-
-export type TaskJob = {
-  id: string;
-  owner_kind: string;
-  owner_id: string;
-  job_kind: string;
-  schedule_kind: string;
-  schedule_value: string;
-  status: string;
-  next_run_at?: string | null;
-  created_at: string;
-};
-
-export type TaskJobDetail = {
-  id: string;
-  owner_kind: string;
-  owner_id: string;
-  job_kind: string;
-  schedule_kind: string;
-  schedule_value: string;
-  payload_json: string;
-  status: string;
-  retry_count: number;
-  max_retries: number;
-  last_run_at?: string | null;
-  next_run_at?: string | null;
-  error?: string | null;
-  created_at: string;
-  updated_at: string;
 };
 
 export type ExtensionRuntimeState = {
@@ -357,6 +317,7 @@ export type ExtensionDetail = {
     kind: string;
     runtime: string;
     entry: string;
+    base_url?: string | null;
     command?: string | null;
     healthcheck?: string | null;
     status: string;
@@ -366,7 +327,7 @@ export type ExtensionDetail = {
 
 export type SystemLog = {
   id: string;
-  kind: string;
+  kind?: string;
   source: string;
   level: string;
   title: string;
@@ -377,55 +338,4 @@ export type SystemLog = {
   at: string;
 };
 
-export type RuntimeConfigEntry = {
-  key: string;
-  payload_json: string;
-  enabled: boolean;
-  version: number;
-  updated_by?: string | null;
-  updated_at: string;
-};
-
-export type ConfigChangeRecord = {
-  id: string;
-  config_key: string;
-  old_payload_json?: string | null;
-  new_payload_json: string;
-  changed_by?: string | null;
-  changed_at: string;
-};
-
-export type SystemConfig = {
-  rate_limit: {
-    enabled: boolean;
-    per_ip_rpm: number;
-    per_user_rpm: number;
-    burst: number;
-    exempt_paths: string[];
-  };
-  cors: {
-    enabled: boolean;
-    origins: string[];
-    methods: string[];
-    credentials: boolean;
-    max_age_seconds: number;
-  };
-  timeout: {
-    enabled: boolean;
-    default_ms: number;
-    per_path_ms: Record<string, number>;
-  };
-  logging: {
-    enabled: boolean;
-    level: string;
-    sample_rate: number;
-    redact_headers: string[];
-  };
-  body_limit: {
-    enabled: boolean;
-    max_bytes: number;
-    per_path_max: Record<string, number>;
-  };
-  bootstrap: BootstrapState;
-};
 

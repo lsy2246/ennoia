@@ -30,7 +30,7 @@ try {
   assertExists(join(runtimeDir, "config", "extensions.toml"), "extensions registry");
   assertExists(join(runtimeDir, "config", "skills.toml"), "skills registry");
   assertExists(
-    join(runtimeDir, "extensions", "observatory", "ennoia.extension.toml"),
+    join(runtimeDir, "extensions", "observatory", "extension.toml"),
     "observatory manifest",
   );
 
@@ -54,7 +54,8 @@ try {
     baseUrl,
     "/api/v1/ui/messages?locale=zh-CN&namespaces=web,settings,ext.observatory",
   );
-  const createdConversation = await fetchJson(baseUrl, "/api/v1/conversations", {
+  await ensureAgent(baseUrl, "coder", "Coder");
+  const createdConversation = await fetchJson(baseUrl, "/api/ext/session/conversations", {
     method: "POST",
     body: JSON.stringify({
       topology: "direct",
@@ -63,7 +64,7 @@ try {
   });
   const envelope = await fetchJson(
     baseUrl,
-    `/api/v1/conversations/${createdConversation.conversation.id}/messages`,
+    `/api/ext/session/conversations/${createdConversation.conversation.id}/messages`,
     {
       method: "POST",
       body: JSON.stringify({
@@ -73,18 +74,14 @@ try {
       }),
     },
   );
-  const conversations = await fetchJson(baseUrl, "/api/v1/conversations");
+  const conversations = await fetchJson(baseUrl, "/api/ext/session/conversations");
   const messages = await fetchJson(
     baseUrl,
-    `/api/v1/conversations/${createdConversation.conversation.id}/messages`,
+    `/api/ext/session/conversations/${createdConversation.conversation.id}/messages`,
   );
-  const conversationRuns = await fetchJson(
-    baseUrl,
-    `/api/v1/conversations/${createdConversation.conversation.id}/runs`,
-  );
-  const runTasks = await fetchJson(baseUrl, `/api/v1/runs/${envelope.run.id}/tasks`);
-  const runArtifacts = await fetchJson(baseUrl, `/api/v1/runs/${envelope.run.id}/artifacts`);
-  const memories = await fetchJson(baseUrl, "/api/v1/memories");
+  const memoryExtension = await fetchJson(baseUrl, "/api/v1/extensions/memory");
+  const sessionExtension = await fetchJson(baseUrl, "/api/v1/extensions/session");
+  const workflowExtension = await fetchJson(baseUrl, "/api/v1/extensions/workflow");
 
   assert(health.status === "ok", "health status should be ok");
   assert(bootstrap.is_initialized === false, "bootstrap should start as uninitialized");
@@ -98,13 +95,11 @@ try {
   );
   assert(conversations.length >= 1, "conversations should not be empty");
   assert(messages.length === 1, "conversation should contain the created message");
-  assert(conversationRuns.length === 1, "conversation runs should contain the created run");
-  assert(runTasks.length === 1, "direct conversation should create one response task");
-  assert(runArtifacts.length === 1, "run should expose one persisted artifact");
-  assert(
-    memories.some((memory) => memory.namespace.includes(createdConversation.conversation.id)),
-    "memory should retain conversation ledger",
-  );
+  assert(envelope.message.id, "session extension should return the persisted message");
+  assert(memoryExtension.id === "memory", "memory extension should be registered");
+  assert(sessionExtension.id === "session", "session extension should be registered");
+  assert(workflowExtension.id === "workflow", "workflow extension should be registered");
+  assert(memoryExtension.backend?.base_url, "memory extension should expose backend proxy info");
 
   console.log("[integration] runtime smoke passed");
 } finally {
@@ -112,4 +107,21 @@ try {
     await stopServer(serverHandle);
   }
   cleanupRuntimeFixture(runtimeDir);
+}
+
+async function ensureAgent(baseUrl, id, displayName) {
+  return fetchJson(baseUrl, "/api/v1/agents", {
+    method: "POST",
+    body: JSON.stringify({
+      id,
+      display_name: displayName,
+      description: "",
+      system_prompt: "",
+      provider_id: "",
+      model_id: "",
+      generation_options: {},
+      skills: [],
+      enabled: true,
+    }),
+  });
 }

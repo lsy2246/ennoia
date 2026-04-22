@@ -1,15 +1,16 @@
 //! Kernel defines Ennoia's shared cross-module domain model and shared configuration.
 
 pub mod config;
+pub mod context;
 pub mod decision;
 pub mod domain;
 pub mod extension;
 pub mod gate;
 pub mod overview;
 pub mod policy;
+pub mod server_settings;
 pub mod signals;
 pub mod stage;
-pub mod system_config;
 pub mod ui;
 
 // ========== Re-exports ==========
@@ -19,6 +20,7 @@ pub use config::{
     ProviderModelDiscoveryConfig, ServerConfig, SkillConfig, SkillRegistryEntry, SkillRegistryFile,
     UiConfig,
 };
+pub use context::{ContextFrame, ContextLayer, RunContext};
 pub use decision::{Decision, DecisionSnapshot, NextAction};
 pub use domain::{
     AgentSpec, ArtifactKind, ArtifactSpec, ConversationSpec, ConversationTopology, HandoffSpec,
@@ -26,26 +28,27 @@ pub use domain::{
     RunSpec, RuntimeProfile, SpaceSpec, TaskKind, TaskSpec, TaskStatus,
 };
 pub use extension::{
-    CommandContribution, ContributionSet, ExtensionAssetsSpec, ExtensionBackendSpec,
-    ExtensionCapabilities, ExtensionDiagnostic, ExtensionFrontendSpec, ExtensionHealth,
-    ExtensionKind, ExtensionManifest, ExtensionRuntimeEvent, ExtensionSourceMode,
-    ExtensionSourceSpec, ExtensionWatchSpec, HookContribution, LocaleContribution,
+    CommandContribution, ContributionSet, ConversationMessageHookPayload,
+    ConversationWorkflowOutput, ExtensionAssetsSpec, ExtensionBackendSpec, ExtensionCapabilities,
+    ExtensionDiagnostic, ExtensionFrontendSpec, ExtensionHealth, ExtensionKind, ExtensionManifest,
+    ExtensionRuntimeEvent, ExtensionSourceMode, ExtensionSourceSpec, ExtensionWatchSpec,
+    HookContribution, HookDispatchResponse, HookEventEnvelope, HookResourceRef, LocaleContribution,
     PageContribution, PanelContribution, ProviderContribution, ProviderGenerationOption,
-    ResolvedBackendEntry, ResolvedFrontendEntry, ThemeContribution,
+    ResolvedBackendEntry, ResolvedFrontendEntry, ThemeContribution, HOOK_EVENT_ARTIFACT_CREATED,
+    HOOK_EVENT_CONVERSATION_CREATED, HOOK_EVENT_CONVERSATION_MESSAGE_CREATED, HOOK_EVENT_JOB_DUE,
+    HOOK_EVENT_RUN_REQUESTED, HOOK_EVENT_RUN_STAGE_CHANGED,
 };
 pub use gate::{GateRecord, GateSeverity, GateVerdict};
 pub use overview::{core_modules, PlatformOverview};
 pub use policy::{
     GlobPattern, MemoryPolicy, RuntimeRule, RuntimeRuleCondition, RuntimeRuleTarget, StagePolicy,
 };
+pub use server_settings::{
+    default_local_dev_origins, BodyLimitConfig, BootstrapState, CorsConfig, LoggingConfig,
+    RateLimitConfig, TimeoutConfig,
+};
 pub use signals::{EvidenceSignals, ExecutionSignals, IntentSignals, Signals};
 pub use stage::{RunStage, RunStageEvent, StageTransition};
-pub use system_config::{
-    default_local_dev_origins, BodyLimitConfig, BootstrapState, ConfigChangeRecord, ConfigEntry,
-    ConfigError, ConfigStore, CorsConfig, LoggingConfig, RateLimitConfig, SystemConfig,
-    TimeoutConfig, ALL_CONFIG_KEYS, CONFIG_KEY_BODY_LIMIT, CONFIG_KEY_BOOTSTRAP, CONFIG_KEY_CORS,
-    CONFIG_KEY_LOGGING, CONFIG_KEY_RATE_LIMIT, CONFIG_KEY_TIMEOUT,
-};
 pub use ui::{LocalizedText, ThemeAppearance, UiPreference, UiPreferenceRecord};
 
 /// Returns the current kernel module name.

@@ -4,16 +4,16 @@
 
 - 多语言与多主题是实例级正式能力
 - 首屏优先读取浏览器本地缓存
-- 服务端保存实例级与空间级偏好
+- 服务端把实例级与空间级偏好保存为文件
 - 扩展通过 registry 贡献 `theme` 与 `locale`
 - 前端消息按 feature / namespace 分模块组织
 
 ## 持久化
 
-SQLite 中的正式偏好表：
+运行目录中的正式偏好文件：
 
-- `instance_ui_preferences`
-- `space_ui_preferences`
+- `config/preferences/instance.toml`
+- `config/preferences/spaces/<space_id>.toml`
 
 字段覆盖：
 

@@ -10,7 +10,7 @@
 
 ## 当前协议
 
-Extension 使用 `ennoia.extension.toml` 描述系统插件能力。Skill 使用 `skill.toml` 描述 Agent 能力包，两者互不兼容、互不混用。
+Extension 使用 `extension.toml` 描述系统插件能力。Skill 使用 `skill.toml` 描述 Agent 能力包，两者互不兼容、互不混用。
 
 Extension descriptor 包含：
 
@@ -34,6 +34,8 @@ Extension descriptor 包含：
 5. Extension Host 启动后端 dev command 并采集事件。
 6. Server 暴露 runtime snapshot、事件、诊断、日志和资源贡献接口。
 7. Web 工作台通过 runtime snapshot 动态挂载扩展贡献。
+
+扩展源码推荐目录为 `plugins/`、`hooks/`、`timers/`、`ui/`、`data/`。这些目录不是必备项，但表达 Hook 决定时机、Timer 决定时间触发、Plugin 决定执行动作、Extension 负责组织接入系统。
 
 ## API
 

@@ -4,11 +4,9 @@ import { App } from "@/App";
 import { Agents } from "@/pages/agents";
 import { Extensions } from "@/pages/extensions";
 import { Logs } from "@/pages/logs";
-import { Memory } from "@/pages/memory";
 import { Providers } from "@/pages/providers";
 import { Settings } from "@/pages/settings";
 import { Skills } from "@/pages/skills";
-import { Tasks } from "@/pages/tasks";
 import { Welcome } from "@/pages/welcome";
 import { Conversations } from "@/pages/conversations";
 import { ExtensionPageView } from "@/views/extensions/Page";
@@ -88,22 +86,10 @@ const extensionsRoute = createRoute({
   component: Extensions,
 });
 
-const tasksRoute = createRoute({
-  getParentRoute: () => webRoute,
-  path: "/tasks",
-  component: Tasks,
-});
-
 const logsRoute = createRoute({
   getParentRoute: () => webRoute,
   path: "/logs",
   component: Logs,
-});
-
-const memoryRoute = createRoute({
-  getParentRoute: () => webRoute,
-  path: "/memory",
-  component: Memory,
 });
 
 const settingsRoute = createRoute({
@@ -122,8 +108,6 @@ const routeTree = rootRoute.addChildren([
     providersRoute,
     extensionPageRoute,
     extensionsRoute,
-    memoryRoute,
-    tasksRoute,
     logsRoute,
     settingsRoute,
   ]),

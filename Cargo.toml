@@ -3,17 +3,15 @@ members = [
   "crates/assets",
   "crates/kernel",
   "crates/policy",
-  "crates/config",
-  "crates/memory",
-  "crates/runtime",
-  "crates/orchestrator",
-  "crates/scheduler",
   "crates/extension-host",
   "crates/paths",
   "crates/observability",
   "crates/contract",
   "crates/server",
   "crates/cli",
+  "builtins/extensions/session/plugins/session-service",
+  "builtins/extensions/memory/plugins/memory-service",
+  "builtins/extensions/workflow/plugins/workflow-service",
 ]
 resolver = "2"
 

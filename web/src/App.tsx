@@ -4,7 +4,6 @@ import { DockviewDefaultTab, DockviewReact, type IDockviewPanelProps } from "doc
 
 import { getApiBaseUrl } from "@ennoia/api-client";
 import { builtinExtensionPanels } from "@ennoia/builtins";
-import { Memory } from "@/pages/memory";
 import { useRuntimeStore } from "@/stores/runtime";
 import { useUiHelpers, useUiStore } from "@/stores/ui";
 import { AgentEditorView } from "@/views/agents/Editor";
@@ -32,8 +31,6 @@ const BUILTIN_NAV = [
   { id: "channels", href: "/upstreams", icon: "C", labelKey: "web.nav.channels", fallback: "API 上游渠道", hintKey: "web.nav.channels_hint", hint: "管理渠道实例与接口类型" },
   { id: "extensions", href: "/extensions", icon: "E", labelKey: "web.nav.extensions", fallback: "扩展", hintKey: "web.nav.extensions_hint", hint: "系统插件与贡献能力" },
   { id: "logs", href: "/logs", icon: "L", labelKey: "web.nav.logs", fallback: "日志", hintKey: "web.nav.logs_hint", hint: "统一观测台" },
-  { id: "memory", href: "/memory", icon: "M", labelKey: "web.nav.memory", fallback: "记忆", hintKey: "web.nav.memory_hint", hint: "记忆可视化与审核" },
-  { id: "tasks", href: "/tasks", icon: "T", labelKey: "web.nav.tasks", fallback: "任务", hintKey: "web.nav.tasks_hint", hint: "AI Prompt 与命令任务" },
   { id: "settings", href: "/settings", icon: "⚙", labelKey: "web.nav.settings", fallback: "设置", hintKey: "web.nav.settings_hint", hint: "运行时配置表单" },
 ] as const;
 
@@ -135,12 +132,6 @@ function ResourceViewPanel(props: IDockviewPanelProps<ResourcePanelParams>) {
       return (
         <div className="resource-panel">
           <SessionView sessionId={descriptor.entityId} />
-        </div>
-      );
-    case "memory":
-      return (
-        <div className="resource-panel">
-          <Memory />
         </div>
       );
     default:
@@ -346,19 +337,6 @@ export function App() {
             <strong>{t("web.workbench.view_panel", "视图面板")}</strong>
             <p className="helper-text">{t("web.workbench.view_panel_help", "此面板不可删除；它负责打开新窗口、恢复关闭窗口和切换布局样式。")}</p>
             <div className="button-row button-row--wrap">
-              <button
-                type="button"
-                className="secondary"
-                onClick={() =>
-                  openView({
-                    kind: "memory",
-                    entityId: "memory",
-                    title: t("web.nav.memory", "记忆"),
-                    subtitle: t("web.memory.title", "记忆系统可视化"),
-                  })}
-              >
-                {t("web.workbench.open_memory_window", "打开记忆窗口")}
-              </button>
               <button type="button" className="secondary" onClick={() => resetLayout()}>
                 {t("web.workbench.close_all", "关闭资源窗口")}
               </button>

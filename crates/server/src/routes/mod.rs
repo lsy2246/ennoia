@@ -10,7 +10,7 @@ use axum::{
     middleware as axum_middleware,
     response::sse::{Event, KeepAlive, Sse},
     response::IntoResponse,
-    routing::{delete, get, post, put},
+    routing::{any, delete, get, post, put},
     Extension, Json, Router,
 };
 use chrono::Utc;
@@ -22,20 +22,11 @@ use ennoia_extension_host::{
     ResolvedExtensionSnapshot,
 };
 use ennoia_kernel::{
-    AgentConfig, AppConfig, ArtifactKind, ArtifactSpec, BootstrapState, ConfigChangeRecord,
-    ConfigEntry, ConfigStore, ConversationSpec, ConversationTopology, ExtensionDiagnostic,
-    ExtensionRuntimeEvent, HandoffSpec, LaneSpec, LocalizedText, MessageRole, MessageSpec,
-    OwnerKind, OwnerRef, ProviderConfig, RunSpec, RuntimeProfile, SkillConfig, SystemConfig,
-    TaskSpec, UiConfig, UiPreference, UiPreferenceRecord, ALL_CONFIG_KEYS, CONFIG_KEY_BOOTSTRAP,
-};
-use ennoia_memory::{
-    AssembleRequest, ContextView, EpisodeKind, EpisodeRequest, MemoryKind, MemoryRecord,
-    MemorySource, RecallMode, RecallQuery, RecallResult, RememberReceipt, RememberRequest,
-    ReviewAction, ReviewActionKind, ReviewReceipt, Stability,
+    AgentConfig, AppConfig, BootstrapState, ExtensionDiagnostic, ExtensionRuntimeEvent,
+    HookEventEnvelope, LocalizedText, ProviderConfig, RuntimeProfile, ServerConfig, SkillConfig,
+    UiConfig, UiPreference, UiPreferenceRecord,
 };
 use ennoia_observability::RequestContext;
-use ennoia_orchestrator::{RunRequest, RunTrigger};
-use ennoia_scheduler::{JobKind, JobRecord, ScheduleKind};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use uuid::Uuid;
@@ -44,29 +35,18 @@ use crate::app::{
     delete_config_from_dir, delete_skill_package, load_agent_configs, load_provider_configs,
     load_skill_configs, normalize_app_config, upsert_skill_package, write_config_to_dir, AppState,
 };
-use crate::db::{self, JobDetailRow, JobRow, LogRecordRow};
 use crate::middleware::{
     body_limit_middleware, cors_middleware, logging_middleware, rate_limit_middleware,
     request_context_middleware, timeout_middleware,
 };
 
-mod config;
-mod conversations;
-mod execution;
 mod extensions;
-mod jobs;
 mod logs;
-mod memories;
 mod resources;
 mod runtime;
 
-use config::*;
-use conversations::*;
-use execution::*;
 use extensions::*;
-use jobs::*;
 use logs::*;
-use memories::*;
 use resources::*;
 use runtime::*;
 
@@ -90,42 +70,13 @@ pub fn build_router(state: AppState) -> Router {
             "/api/v1/runtime/preferences",
             get(runtime_preferences).put(runtime_preferences_put),
         )
-        .route("/api/v1/runtime/config", get(config_list))
         .route(
             "/api/v1/runtime/app-config",
             get(runtime_app_config).put(runtime_app_config_put),
         )
-        .route("/api/v1/runtime/config/snapshot", get(config_snapshot))
         .route(
-            "/api/v1/runtime/config/{key}",
-            get(config_get).put(config_put),
-        )
-        .route("/api/v1/runtime/config/{key}/history", get(config_history));
-
-    let conversations = Router::new()
-        .route(
-            "/api/v1/conversations",
-            get(conversations_list).post(conversations_create),
-        )
-        .route(
-            "/api/v1/conversations/{conversation_id}",
-            get(conversation_detail).delete(conversation_delete),
-        )
-        .route(
-            "/api/v1/conversations/{conversation_id}/messages",
-            get(conversation_messages).post(conversation_messages_create),
-        )
-        .route(
-            "/api/v1/conversations/{conversation_id}/runs",
-            get(conversation_runs),
-        )
-        .route(
-            "/api/v1/conversations/{conversation_id}/lanes",
-            get(conversation_lanes),
-        )
-        .route(
-            "/api/v1/lanes/{lane_id}/handoffs",
-            get(lane_handoffs).post(lane_handoffs_create),
+            "/api/v1/runtime/server-config",
+            get(runtime_server_config).put(runtime_server_config_put),
         );
 
     Router::new()
@@ -176,6 +127,7 @@ pub fn build_router(state: AppState) -> Router {
             "/api/v1/extensions/{extension_id}/reload",
             post(extension_reload),
         )
+        .route("/api/ext/{extension_id}/{*path}", any(extension_api_proxy))
         .route(
             "/api/v1/extensions/{extension_id}/restart",
             post(extension_restart),
@@ -206,30 +158,10 @@ pub fn build_router(state: AppState) -> Router {
             get(provider_models),
         )
         .route("/api/v1/spaces", get(spaces))
-        .route("/api/v1/runs", get(runs))
-        .route("/api/v1/runs/{run_id}/tasks", get(run_tasks))
-        .route("/api/v1/runs/{run_id}/artifacts", get(run_artifacts))
-        .route("/api/v1/runs/{run_id}/stages", get(run_stages))
-        .route("/api/v1/runs/{run_id}/decisions", get(run_decisions))
-        .route("/api/v1/runs/{run_id}/gates", get(run_gates))
-        .route("/api/v1/tasks", get(tasks))
-        .route("/api/v1/artifacts", get(artifacts))
         .route("/api/v1/logs", get(logs_list))
         .route("/api/v1/logs/frontend", post(frontend_log_create))
-        .route("/api/v1/memories", get(memories_list).post(memories_create))
-        .route("/api/v1/memories/recall", post(memories_recall))
-        .route("/api/v1/memories/review", post(memories_review))
-        .route("/api/v1/jobs", get(jobs_list).post(jobs_create))
-        .route(
-            "/api/v1/jobs/{job_id}",
-            get(job_detail).put(job_update).delete(job_delete),
-        )
-        .route("/api/v1/jobs/{job_id}/run", post(job_run_now))
-        .route("/api/v1/jobs/{job_id}/enable", post(job_enable))
-        .route("/api/v1/jobs/{job_id}/disable", post(job_disable))
         .merge(bootstrap)
         .merge(runtime)
-        .merge(conversations)
         .layer(axum_middleware::from_fn_with_state(
             state.clone(),
             rate_limit_middleware,
@@ -374,91 +306,6 @@ struct RuntimeProfilePayload {
 }
 
 #[derive(Debug, Deserialize)]
-struct CreateConversationPayload {
-    topology: String,
-    #[serde(default)]
-    title: Option<String>,
-    #[serde(default)]
-    space_id: Option<String>,
-    #[serde(default)]
-    agent_ids: Vec<String>,
-    #[serde(default)]
-    lane_name: Option<String>,
-    #[serde(default)]
-    lane_type: Option<String>,
-    #[serde(default)]
-    lane_goal: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-struct ConversationCreateResponse {
-    conversation: ConversationSpec,
-    default_lane: LaneSpec,
-}
-
-#[derive(Debug, Serialize)]
-struct ConversationDetailResponse {
-    conversation: ConversationSpec,
-    lanes: Vec<LaneSpec>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ConversationMessagePayload {
-    body: String,
-    #[serde(default)]
-    goal: Option<String>,
-    #[serde(default)]
-    lane_id: Option<String>,
-    #[serde(default)]
-    addressed_agents: Vec<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct HandoffPayload {
-    to_lane_id: String,
-    #[serde(default)]
-    from_agent_id: Option<String>,
-    #[serde(default)]
-    to_agent_id: Option<String>,
-    summary: String,
-    instructions: String,
-    #[serde(default)]
-    status: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct CreateJobRequest {
-    owner_kind: String,
-    owner_id: String,
-    #[serde(default)]
-    job_kind: Option<String>,
-    schedule_kind: String,
-    schedule_value: String,
-    #[serde(default)]
-    payload: Option<JsonValue>,
-    #[serde(default)]
-    max_retries: Option<u32>,
-    #[serde(default)]
-    run_at: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct UpdateJobRequest {
-    #[serde(default)]
-    job_kind: Option<String>,
-    #[serde(default)]
-    schedule_kind: Option<String>,
-    #[serde(default)]
-    schedule_value: Option<String>,
-    #[serde(default)]
-    payload: Option<JsonValue>,
-    #[serde(default)]
-    max_retries: Option<u32>,
-    #[serde(default)]
-    run_at: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
 struct ExtensionEnabledPayload {
     enabled: bool,
 }
@@ -475,79 +322,6 @@ struct ExtensionWorkbenchRecord {
     install_dir: String,
     source_root: String,
     diagnostics: Vec<ExtensionDiagnostic>,
-}
-
-#[derive(Debug, Deserialize)]
-struct RememberPayload {
-    owner_kind: String,
-    owner_id: String,
-    namespace: String,
-    memory_kind: String,
-    stability: String,
-    #[serde(default)]
-    title: Option<String>,
-    content: String,
-    #[serde(default)]
-    summary: Option<String>,
-    #[serde(default)]
-    confidence: Option<f32>,
-    #[serde(default)]
-    importance: Option<f32>,
-    #[serde(default)]
-    sources: Vec<MemorySource>,
-    #[serde(default)]
-    tags: Vec<String>,
-    #[serde(default)]
-    entities: Vec<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct RecallPayload {
-    owner_kind: String,
-    owner_id: String,
-    #[serde(default)]
-    query_text: Option<String>,
-    #[serde(default)]
-    namespace_prefix: Option<String>,
-    #[serde(default)]
-    memory_kind: Option<String>,
-    #[serde(default)]
-    mode: Option<String>,
-    #[serde(default)]
-    limit: Option<u32>,
-    #[serde(default)]
-    conversation_id: Option<String>,
-    #[serde(default)]
-    run_id: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ReviewPayload {
-    target_memory_id: String,
-    reviewer: String,
-    action: String,
-    #[serde(default)]
-    notes: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-struct ConversationEnvelope {
-    conversation: ConversationSpec,
-    lane: LaneSpec,
-    message: MessageSpec,
-    run: RunSpec,
-    tasks: Vec<TaskSpec>,
-    artifacts: Vec<ArtifactSpec>,
-    context: ContextView,
-    gate_verdicts: Vec<ennoia_kernel::GateVerdict>,
-    stage_event: ennoia_kernel::RunStageEvent,
-    decision: ennoia_kernel::Decision,
-}
-
-#[derive(Debug, Deserialize)]
-struct ConfigPutPayload {
-    payload: JsonValue,
-    updated_by: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -608,30 +382,6 @@ async fn overview(State(state): State<AppState>) -> Json<OverviewResponse> {
     let agent_count = load_agent_configs(&state.runtime_paths)
         .map(|items| items.len())
         .unwrap_or(state.agents.len());
-    let conversation_count = db::count_rows(&state.pool, db::CountTable::Conversations)
-        .await
-        .unwrap_or(0);
-    let message_count = db::count_rows(&state.pool, db::CountTable::Messages)
-        .await
-        .unwrap_or(0);
-    let run_count = db::count_rows(&state.pool, db::CountTable::Runs)
-        .await
-        .unwrap_or(0);
-    let task_count = db::count_rows(&state.pool, db::CountTable::Tasks)
-        .await
-        .unwrap_or(0);
-    let artifact_count = db::count_rows(&state.pool, db::CountTable::Artifacts)
-        .await
-        .unwrap_or(0);
-    let memory_count = db::count_rows(&state.pool, db::CountTable::Memories)
-        .await
-        .unwrap_or(0);
-    let job_count = db::count_rows(&state.pool, db::CountTable::Jobs)
-        .await
-        .unwrap_or(0);
-    let decision_count = db::count_rows(&state.pool, db::CountTable::Decisions)
-        .await
-        .unwrap_or(0);
 
     Json(OverviewResponse {
         app_name: state.overview.app_name,
@@ -641,40 +391,21 @@ async fn overview(State(state): State<AppState>) -> Json<OverviewResponse> {
         counts: serde_json::json!({
             "agents": agent_count,
             "spaces": state.spaces.len(),
-            "extensions": extension_snapshot.extensions.len(),
-            "conversations": conversation_count,
-            "messages": message_count,
-            "runs": run_count,
-            "tasks": task_count,
-            "artifacts": artifact_count,
-            "memories": memory_count,
-            "jobs": job_count,
-            "decisions": decision_count
+            "extensions": extension_snapshot.extensions.len()
         }),
     })
 }
 
 async fn ui_runtime(State(state): State<AppState>) -> Json<UiRuntimeResponse> {
     let snapshot = state.extensions.snapshot();
-    let instance_preference = db::get_instance_ui_preference(&state.pool)
-        .await
-        .ok()
-        .flatten()
-        .map(to_preference_record);
-    let space_preferences = db::list_space_ui_preferences(&state.pool)
-        .await
-        .unwrap_or_default()
-        .into_iter()
-        .map(to_preference_record)
-        .collect::<Vec<_>>();
+    let instance_preference = read_instance_ui_preference_from_disk(&state);
+    let space_preferences = list_space_ui_preferences_from_disk(&state);
     let registry_version = (snapshot.pages.len()
         + snapshot.panels.len()
         + snapshot.themes.len()
         + snapshot.locales.len()
         + snapshot.providers.len()) as u64;
-    let preference_version = db::max_ui_preference_version(&state.pool)
-        .await
-        .unwrap_or(0);
+    let preference_version = ui_preference_version_from_disk(&state);
 
     Json(UiRuntimeResponse {
         ui_config: state.ui_config.clone(),
@@ -729,242 +460,6 @@ async fn ui_messages(
         fallback_locale: state.ui_config.fallback_locale.clone(),
         bundles,
     })
-}
-
-async fn drive_run(
-    state: &AppState,
-    conversation: ConversationSpec,
-    lane: LaneSpec,
-    body: &str,
-    goal: &str,
-    addressed_agents: Vec<String>,
-) -> Result<ConversationEnvelope, String> {
-    let now = now_iso();
-    let target_agents = resolve_addressed_agents(&conversation, &lane, addressed_agents);
-    if target_agents.is_empty() {
-        return Err("no addressed agents resolved for this message".to_string());
-    }
-
-    let message = MessageSpec {
-        id: format!("msg-{}", Uuid::new_v4()),
-        conversation_id: conversation.id.clone(),
-        lane_id: Some(lane.id.clone()),
-        sender: "operator".to_string(),
-        role: MessageRole::Operator,
-        body: body.to_string(),
-        mentions: target_agents.clone(),
-        created_at: now.clone(),
-    };
-
-    db::insert_message(&state.pool, &message)
-        .await
-        .map_err(|error| error.to_string())?;
-    db::upsert_conversation(
-        &state.pool,
-        &ConversationSpec {
-            updated_at: now.clone(),
-            ..conversation.clone()
-        },
-    )
-    .await
-    .map_err(|error| error.to_string())?;
-    db::insert_lane(
-        &state.pool,
-        &LaneSpec {
-            updated_at: now.clone(),
-            goal: if lane.goal.is_empty() {
-                goal.to_string()
-            } else {
-                lane.goal.clone()
-            },
-            ..lane.clone()
-        },
-    )
-    .await
-    .map_err(|error| error.to_string())?;
-
-    let recent_messages = db::list_messages_for_conversation(&state.pool, &conversation.id)
-        .await
-        .map_err(|error| error.to_string())?
-        .into_iter()
-        .rev()
-        .take(12)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .map(|item| format!("{}: {}", item.sender, item.body))
-        .collect::<Vec<_>>();
-
-    let context = state
-        .memory_store
-        .assemble_context(AssembleRequest {
-            owner: conversation.owner.clone(),
-            conversation_id: Some(conversation.id.clone()),
-            run_id: None,
-            recent_messages,
-            active_tasks: Vec::new(),
-            budget_chars: None,
-        })
-        .await
-        .map_err(|error| error.to_string())?;
-
-    let available_agents: Vec<String> = load_agent_configs(&state.runtime_paths)
-        .unwrap_or_else(|_| state.agents.clone())
-        .into_iter()
-        .map(|agent| agent.id)
-        .collect();
-    let request = RunRequest {
-        owner: conversation.owner.clone(),
-        conversation: conversation.clone(),
-        message: message.clone(),
-        trigger: match conversation.topology {
-            ConversationTopology::Direct => RunTrigger::DirectConversation,
-            ConversationTopology::Group => RunTrigger::GroupConversation,
-        },
-        goal: goal.to_string(),
-        addressed_agents: target_agents,
-    };
-    let plan = state
-        .orchestrator
-        .plan_run(request, context.clone(), available_agents)
-        .await;
-
-    db::upsert_run(&state.pool, &plan.run)
-        .await
-        .map_err(|error| error.to_string())?;
-    for task in &plan.tasks {
-        db::upsert_task(&state.pool, task)
-            .await
-            .map_err(|error| error.to_string())?;
-    }
-
-    state
-        .runtime_store
-        .log_stage_event(&plan.stage_event)
-        .await
-        .map_err(|error| error.to_string())?;
-    state
-        .runtime_store
-        .log_decision(&plan.decision_snapshot)
-        .await
-        .map_err(|error| error.to_string())?;
-    for record in &plan.gate_records {
-        state
-            .runtime_store
-            .log_gate_verdict(record)
-            .await
-            .map_err(|error| error.to_string())?;
-    }
-
-    let _ = state
-        .memory_store
-        .record_episode(EpisodeRequest {
-            owner: conversation.owner.clone(),
-            namespace: format!("conversations/{}", conversation.id),
-            conversation_id: Some(conversation.id.clone()),
-            run_id: Some(plan.run.id.clone()),
-            episode_kind: EpisodeKind::Message,
-            role: Some("operator".to_string()),
-            content: message.body.clone(),
-            content_type: None,
-            source_uri: None,
-            entities: Vec::new(),
-            tags: lane.participants.clone(),
-            importance: Some(0.4),
-            occurred_at: Some(message.created_at.clone()),
-        })
-        .await;
-
-    let _ = state
-        .memory_store
-        .remember(RememberRequest {
-            owner: conversation.owner.clone(),
-            namespace: format!("conversations/{}/ledger", conversation.id),
-            memory_kind: MemoryKind::Context,
-            stability: Stability::Working,
-            title: Some(goal.to_string()),
-            content: format!("lane={} operator_request={body}", lane.name),
-            summary: Some(goal.to_string()),
-            confidence: Some(0.6),
-            importance: Some(0.4),
-            valid_from: None,
-            valid_to: None,
-            sources: Vec::new(),
-            tags: lane.participants.clone(),
-            entities: Vec::new(),
-        })
-        .await;
-
-    let artifact = persist_run_artifact(state, &plan.run, &conversation.owner, goal);
-    db::insert_artifact(&state.pool, &artifact)
-        .await
-        .map_err(|error| error.to_string())?;
-
-    Ok(ConversationEnvelope {
-        conversation: plan.conversation,
-        lane,
-        message: plan.message,
-        run: plan.run,
-        tasks: plan.tasks,
-        artifacts: vec![artifact],
-        context: plan.context,
-        gate_verdicts: plan.gate_verdicts,
-        stage_event: plan.stage_event,
-        decision: plan.decision,
-    })
-}
-
-fn persist_run_artifact(
-    state: &AppState,
-    run: &RunSpec,
-    owner: &OwnerRef,
-    goal: &str,
-) -> ArtifactSpec {
-    let owner_root = state.runtime_paths.owner_run_artifact_dir(owner, &run.id);
-    let _ = fs::create_dir_all(&owner_root);
-    let relative_path = state
-        .runtime_paths
-        .owner_run_artifact_relative_path(owner, &run.id);
-
-    let _ = fs::write(
-        owner_root.join("summary.json"),
-        serde_json::to_string_pretty(&serde_json::json!({
-            "run_id": run.id,
-            "conversation_id": run.conversation_id,
-            "lane_id": run.lane_id,
-            "owner": owner,
-            "goal": goal
-        }))
-        .unwrap_or_default(),
-    );
-
-    ArtifactSpec {
-        id: format!("art-{}", Uuid::new_v4()),
-        owner: owner.clone(),
-        run_id: run.id.clone(),
-        conversation_id: Some(run.conversation_id.clone()),
-        lane_id: run.lane_id.clone(),
-        kind: ArtifactKind::Summary,
-        relative_path,
-        created_at: now_iso(),
-    }
-}
-
-fn resolve_owner(
-    topology: &ConversationTopology,
-    space_id: Option<&str>,
-    agent_ids: &[String],
-) -> OwnerRef {
-    match topology {
-        ConversationTopology::Direct => OwnerRef::agent(agent_ids[0].clone()),
-        ConversationTopology::Group => {
-            if let Some(space_id) = space_id {
-                OwnerRef::space(space_id.to_string())
-            } else {
-                OwnerRef::global("global")
-            }
-        }
-    }
 }
 
 type StaticMessages = &'static [(&'static str, &'static str)];
@@ -1173,132 +668,6 @@ fn select_messages_for_locale(
         .unwrap_or(("en-US", &[]))
 }
 
-fn resolve_addressed_agents(
-    conversation: &ConversationSpec,
-    lane: &LaneSpec,
-    addressed_agents: Vec<String>,
-) -> Vec<String> {
-    if !addressed_agents.is_empty() {
-        return addressed_agents;
-    }
-
-    let source = if !lane.participants.is_empty() {
-        &lane.participants
-    } else {
-        &conversation.participants
-    };
-    source
-        .iter()
-        .filter(|participant| participant.as_str() != "operator")
-        .cloned()
-        .collect()
-}
-
-fn build_participants(agent_ids: &[String]) -> Vec<String> {
-    let mut participants = vec!["operator".to_string()];
-    participants.extend(agent_ids.iter().cloned());
-    participants
-}
-
-fn default_conversation_title(paths: &ennoia_paths::RuntimePaths, agent_ids: &[String]) -> String {
-    let known_agents = load_agent_configs(paths).unwrap_or_default();
-    if agent_ids.len() == 1 {
-        let agent_id = &agent_ids[0];
-        let label = known_agents
-            .into_iter()
-            .find(|agent| agent.id == *agent_id)
-            .map(|agent| agent.display_name)
-            .unwrap_or_else(|| agent_id.clone());
-        return format!("与 {label} 的会话");
-    }
-
-    let labels = agent_ids
-        .iter()
-        .take(3)
-        .map(|agent_id| {
-            known_agents
-                .iter()
-                .find(|agent| agent.id == *agent_id)
-                .map(|agent| agent.display_name.clone())
-                .unwrap_or_else(|| agent_id.clone())
-        })
-        .collect::<Vec<_>>();
-    if labels.is_empty() {
-        "多 Agent 协作会话".to_string()
-    } else if agent_ids.len() > 3 {
-        format!("{} 等 {} 个 Agent", labels.join("、"), agent_ids.len())
-    } else {
-        format!("{} 协作会话", labels.join("、"))
-    }
-}
-
-fn normalize_agent_ids(paths: &ennoia_paths::RuntimePaths, requested: &[String]) -> Vec<String> {
-    let known: HashSet<String> = load_agent_configs(paths)
-        .unwrap_or_default()
-        .into_iter()
-        .map(|agent| agent.id)
-        .collect();
-    requested
-        .iter()
-        .filter(|agent_id| known.contains(agent_id.as_str()))
-        .cloned()
-        .collect()
-}
-
-fn infer_topology_from_agent_count(
-    topology: ConversationTopology,
-    agent_ids: &[String],
-) -> ConversationTopology {
-    if agent_ids.len() <= 1 {
-        ConversationTopology::Direct
-    } else {
-        match topology {
-            ConversationTopology::Direct | ConversationTopology::Group => {
-                ConversationTopology::Group
-            }
-        }
-    }
-}
-
-fn build_default_lane_name(agent_ids: &[String]) -> String {
-    if agent_ids.len() <= 1 {
-        "私聊".to_string()
-    } else {
-        "群聊".to_string()
-    }
-}
-
-fn build_default_lane_goal(agent_ids: &[String]) -> String {
-    if agent_ids.len() <= 1 {
-        "与目标 Agent 持续推进当前问题".to_string()
-    } else {
-        "在多 Agent 协作中持续推进当前问题".to_string()
-    }
-}
-
-fn select_lane<'a>(lanes: &'a [LaneSpec], lane_id: Option<&str>) -> Option<LaneSpec> {
-    if let Some(lane_id) = lane_id {
-        return lanes.iter().find(|lane| lane.id == lane_id).cloned();
-    }
-    lanes.first().cloned()
-}
-
-fn owner_kind_from(value: &str) -> OwnerKind {
-    match value {
-        "agent" => OwnerKind::Agent,
-        "space" => OwnerKind::Space,
-        _ => OwnerKind::Global,
-    }
-}
-
-fn conversation_topology_from_value(value: &str) -> Option<ConversationTopology> {
-    match value {
-        "direct" => Some(ConversationTopology::Direct),
-        "group" => Some(ConversationTopology::Group),
-        _ => None,
-    }
-}
-
 fn now_iso() -> String {
     Utc::now().to_rfc3339()
 }
@@ -1380,13 +749,6 @@ fn resolve_safe_extension_asset(root: &StdPath, entry: &str) -> std::io::Result<
     Ok(canonical_asset)
 }
 
-fn to_preference_record(row: db::UiPreferenceRow) -> UiPreferenceRecord {
-    UiPreferenceRecord {
-        subject_id: row.subject_id,
-        preference: row.preference,
-    }
-}
-
 fn merge_ui_preference(
     current: Option<&UiPreference>,
     payload: UiPreferencePayload,
@@ -1413,24 +775,6 @@ fn merge_ui_preference(
         version: current.map(|item| item.version + 1).unwrap_or(1),
         updated_at: now_iso(),
     }
-}
-
-fn ensure_full_config_set(mut rows: Vec<ConfigEntry>) -> Vec<ConfigEntry> {
-    let have: HashSet<String> = rows.iter().map(|row| row.key.clone()).collect();
-    for key in ALL_CONFIG_KEYS {
-        if !have.contains(*key) {
-            rows.push(ConfigEntry {
-                key: key.to_string(),
-                payload_json: "{}".to_string(),
-                enabled: true,
-                version: 0,
-                updated_by: None,
-                updated_at: String::new(),
-            });
-        }
-    }
-    rows.sort_by(|left, right| left.key.cmp(&right.key));
-    rows
 }
 
 fn list_extension_workbench_records(state: &AppState) -> Vec<ExtensionWorkbenchRecord> {

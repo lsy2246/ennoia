@@ -1,6 +1,3 @@
 app_name = "ennoia"
 mode = "development"
-database_mode = "sqlite"
-database_url = "sqlite://~/.ennoia/data/sqlite/ennoia.db"
-scheduler_tick_ms = 1000
 default_mention_mode = "configured"

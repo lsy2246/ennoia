@@ -3,19 +3,15 @@
 ## 核心模型
 
 - `RuntimeProfile`
-- `ConversationSpec`
-- `LaneSpec`
-- `MessageSpec`
-- `RunSpec / TaskSpec / ArtifactSpec`
 - `AgentConfig`
 - `SkillConfig`
 - `ProviderConfig`
 - `ExtensionRuntimeState`
-- `MemoryRecord`
-- `Job`
 - `SystemLog`
 
-## Conversation 域
+核心模型只表达系统配置、扩展运行态和宿主协议。Conversation、Message、Memory、Run、Task、Artifact、Timer/Job 等业务数据由对应扩展在私有边界内管理。
+
+## Session 扩展域
 
 `ConversationSpec` 字段：
 
@@ -33,7 +29,7 @@
 
 - `agent_ids.len() == 1` 创建 `direct`。
 - `agent_ids.len() >= 2` 创建 `group`。
-- 产品文案可以称为“会话”，代码与数据库统一使用 `conversation`。
+- 产品文案可以称为“会话”，session 扩展 API 和私有数据库使用 `conversation`。
 
 ## Message 域
 
@@ -78,7 +74,9 @@
 
 扩展运行态以 `ExtensionRuntimeState` 为准，扩展包通过 manifest 贡献页面、面板、主题、语言、命令、Hook 和 Provider 实现。
 
-## 数据库快照
+## 存储快照
 
-- `assets/db.sql`：新库初始化入口，记录当前完整结构，完整、可执行、自包含。
-- `assets/migrations/`：已有库结构演进脚本目录；当前为空，后续结构变更时新增 migration。
+- 核心系统配置：`~/.ennoia/config/*.toml`。
+- 核心前端日志：`~/.ennoia/logs/frontend.jsonl`。
+- 扩展私有数据：`~/.ennoia/data/extensions/{extension_id}/`。
+- 核心不维护主业务数据库快照。

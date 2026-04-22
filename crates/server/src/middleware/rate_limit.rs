@@ -54,7 +54,7 @@ pub async fn rate_limit_middleware(
     req: Request,
     next: Next,
 ) -> Response {
-    let cfg = state.system_config.rate_limit.load();
+    let cfg = &state.server_config.rate_limit;
     if !cfg.enabled {
         return next.run(req).await;
     }
@@ -71,10 +71,7 @@ pub async fn rate_limit_middleware(
     let ip = extract_client_ip(&req).unwrap_or_else(|| "unknown".to_string());
     let key = format!("ip:{ip}");
 
-    let allowed = state
-        .system_config
-        .rate_limit_state
-        .check(&key, cfg.per_ip_rpm);
+    let allowed = state.rate_limit_state.check(&key, cfg.per_ip_rpm);
 
     if !allowed {
         let error = request_id

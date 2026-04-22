@@ -2,6 +2,7 @@ import { useRouterState } from "@tanstack/react-router";
 
 import { builtinExtensionPages, builtinExtensionPanels } from "@ennoia/builtins";
 import { useUiHelpers } from "@/stores/ui";
+import { extensionPageComponents } from "@/views/extensions/registry";
 
 function pageIdFromPath(pathname: string) {
   const match = pathname.match(/^\/extension-pages\/([^/]+)$/);
@@ -21,7 +22,12 @@ export function ExtensionPageView() {
       !item.page.mount.startsWith("observatory."),
   );
   const descriptor = page ? builtinExtensionPages[page.page.mount] : undefined;
+  const PageComponent = page ? extensionPageComponents[page.page.mount] : undefined;
   const panels = runtime?.registry.panels.filter((item) => item.extension_id === page?.extension_id) ?? [];
+
+  if (page && PageComponent) {
+    return <PageComponent />;
+  }
 
   return (
     <div className="extension-view">

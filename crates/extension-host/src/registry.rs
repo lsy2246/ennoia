@@ -128,6 +128,7 @@ pub struct ExtensionRuntimeSnapshot {
 pub struct ExtensionRuntimeConfig {
     pub registry_file: PathBuf,
     pub logs_dir: PathBuf,
+    pub home_dir: PathBuf,
 }
 
 #[derive(Debug, Clone)]
@@ -202,6 +203,14 @@ impl ExtensionRuntime {
         self.get(extension_id)
             .map(|item| item.diagnostics)
             .unwrap_or_default()
+    }
+
+    pub fn hooks_for_event(&self, event: &str) -> Vec<RegisteredHookContribution> {
+        self.snapshot()
+            .hooks
+            .into_iter()
+            .filter(|item| item.hook.event == event)
+            .collect()
     }
 
     pub fn refresh_from_disk(&self, summary: &str) -> io::Result<Option<ExtensionRuntimeSnapshot>> {
@@ -527,8 +536,7 @@ fn reconcile_runners(
         .collect::<Vec<_>>();
     for id in stale {
         if let Some(mut runner) = runners.remove(&id) {
-            let _ = runner.child.kill();
-            let _ = runner.child.wait();
+            terminate_runner(&mut runner.child);
         }
     }
 
@@ -563,8 +571,7 @@ fn reconcile_runners(
 
         if restart_needed {
             if let Some(mut old) = runners.remove(&extension.id) {
-                let _ = old.child.kill();
-                let _ = old.child.wait();
+                terminate_runner(&mut old.child);
             }
             match spawn_runner(
                 config,
@@ -608,6 +615,10 @@ fn spawn_runner(
         .append(true)
         .open(&log_path)?;
 
+    let expanded_command = command
+        .replace("${ENNOIA_HOME}", &normalize_display_path(&config.home_dir))
+        .replace("${EXTENSION_ROOT}", &normalize_display_path(cwd));
+
     let mut process = if cfg!(windows) {
         let mut item = Command::new("powershell.exe");
         item.arg("-NoProfile")
@@ -615,16 +626,18 @@ fn spawn_runner(
             .arg("-ExecutionPolicy")
             .arg("Bypass")
             .arg("-Command")
-            .arg(command);
+            .arg(&expanded_command);
         item
     } else {
         let mut item = Command::new("sh");
-        item.arg("-lc").arg(command);
+        item.arg("-lc").arg(&expanded_command);
         item
     };
 
     let child = process
         .current_dir(cwd)
+        .env("ENNOIA_HOME", &config.home_dir)
+        .env("ENNOIA_EXTENSION_ROOT", cwd)
         .stdout(Stdio::from(stdout))
         .stderr(Stdio::from(stderr))
         .spawn()?;
@@ -638,10 +651,27 @@ fn spawn_runner(
 impl Drop for ExtensionRuntimeState {
     fn drop(&mut self) {
         for (_, mut runner) in std::mem::take(&mut self.runners) {
-            let _ = runner.child.kill();
-            let _ = runner.child.wait();
+            terminate_runner(&mut runner.child);
         }
     }
+}
+
+fn terminate_runner(child: &mut Child) {
+    #[cfg(windows)]
+    {
+        let _ = Command::new("taskkill")
+            .args(["/PID", &child.id().to_string(), "/T", "/F"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+
+    #[cfg(not(windows))]
+    {
+        let _ = child.kill();
+    }
+
+    let _ = child.wait();
 }
 
 fn source_priority(extension: &ResolvedExtensionSnapshot) -> u8 {
@@ -815,6 +845,29 @@ fn resolve_backend(
                     .clone()
                     .unwrap_or_else(|| "node".to_string()),
                 entry,
+                base_url: manifest.backend.base_url.clone(),
+                command: Some(command),
+                healthcheck: manifest.backend.healthcheck.clone(),
+                status: "ready".to_string(),
+                pid: None,
+            }));
+        }
+        if let Some(command) = manifest.backend.command.clone() {
+            let entry = manifest
+                .backend
+                .entry
+                .clone()
+                .map(|item| normalize_display_path(&root.join(item)))
+                .unwrap_or_else(|| normalize_display_path(root));
+            return Ok(Some(ResolvedBackendEntry {
+                kind: "process".to_string(),
+                runtime: manifest
+                    .backend
+                    .runtime
+                    .clone()
+                    .unwrap_or_else(|| "node".to_string()),
+                entry,
+                base_url: manifest.backend.base_url.clone(),
                 command: Some(command),
                 healthcheck: manifest.backend.healthcheck.clone(),
                 status: "ready".to_string(),
@@ -830,12 +883,41 @@ fn resolve_backend(
                     .clone()
                     .unwrap_or_else(|| "node".to_string()),
                 entry: normalize_display_path(&root.join(entry)),
+                base_url: manifest.backend.base_url.clone(),
                 command: None,
                 healthcheck: manifest.backend.healthcheck.clone(),
                 status: "ready".to_string(),
                 pid: None,
             }));
         }
+    }
+
+    if let Some(command) = manifest
+        .backend
+        .command
+        .clone()
+        .or_else(|| manifest.backend.dev_command.clone())
+    {
+        let entry = manifest
+            .backend
+            .entry
+            .clone()
+            .map(|item| normalize_display_path(&root.join(item)))
+            .unwrap_or_else(|| normalize_display_path(root));
+        return Ok(Some(ResolvedBackendEntry {
+            kind: "process".to_string(),
+            runtime: manifest
+                .backend
+                .runtime
+                .clone()
+                .unwrap_or_else(|| "node".to_string()),
+            entry,
+            base_url: manifest.backend.base_url.clone(),
+            command: Some(command),
+            healthcheck: manifest.backend.healthcheck.clone(),
+            status: "ready".to_string(),
+            pid: None,
+        }));
     }
 
     if let Some(bundle) = manifest
@@ -854,6 +936,7 @@ fn resolve_backend(
             kind: "file".to_string(),
             runtime: runtime.clone(),
             entry: resolved_entry.clone(),
+            base_url: manifest.backend.base_url.clone(),
             command: Some(match runtime.as_str() {
                 "bun" => format!("bun \"{}\"", resolved_entry),
                 "deno" => format!("deno run \"{}\"", resolved_entry),
@@ -919,12 +1002,8 @@ fn read_manifest_from_root(root: &Path) -> io::Result<ExtensionManifest> {
 }
 
 fn descriptor_path(root: &Path) -> Option<PathBuf> {
-    [
-        root.join("ennoia.extension.toml"),
-        root.join("manifest.toml"),
-    ]
-    .into_iter()
-    .find(|path| path.exists())
+    let path = root.join("extension.toml");
+    path.exists().then_some(path)
 }
 
 pub fn read_registry_file(path: &Path) -> io::Result<ExtensionRegistryFile> {
@@ -1048,12 +1127,12 @@ mod tests {
         let root = unique_test_dir("runtime-snapshot");
         let ext_dir = root.join("observatory");
         fs::create_dir_all(&ext_dir).expect("create extension dir");
-        fs::write(ext_dir.join("ennoia.extension.toml"), sample_descriptor())
-            .expect("write descriptor");
+        fs::write(ext_dir.join("extension.toml"), sample_descriptor()).expect("write descriptor");
 
         let config = ExtensionRuntimeConfig {
             registry_file: root.join("config/extensions.toml"),
             logs_dir: root.join("logs"),
+            home_dir: root.clone(),
         };
         write_registry_file(
             &config.registry_file,
@@ -1088,15 +1167,13 @@ mod tests {
         let root = unique_test_dir("runtime-attach");
         let ext_dir = root.join("foo");
         fs::create_dir_all(&ext_dir).expect("create extension dir");
-        fs::write(
-            ext_dir.join("ennoia.extension.toml"),
-            sample_descriptor_for("foo"),
-        )
-        .expect("write descriptor");
+        fs::write(ext_dir.join("extension.toml"), sample_descriptor_for("foo"))
+            .expect("write descriptor");
 
         let config = ExtensionRuntimeConfig {
             registry_file: root.join("config/extensions.toml"),
             logs_dir: root.join("logs"),
+            home_dir: root.clone(),
         };
         let runtime = ExtensionRuntime::bootstrap(config).expect("bootstrap runtime");
         let attached = runtime
@@ -1127,7 +1204,7 @@ dev = true
 
 [frontend]
 runtime = "browser-esm"
-entry = "./src/frontend/index.ts"
+entry = "./ui/index.ts"
 dev_url = "http://127.0.0.1:4201/src/index.ts"
 hmr = true
 
@@ -1149,8 +1226,8 @@ hooks = true
 [contributes]
 pages = [{{ id = "{id}.events", title = {{ key = "ext.{id}.page.events", fallback = "Observatory" }}, route = "/{id}", mount = "{id}.events.page", icon = "activity" }}]
 panels = [{{ id = "{id}.timeline", title = {{ key = "ext.{id}.panel.timeline", fallback = "Event Timeline" }}, mount = "{id}.timeline.panel", slot = "right", icon = "panel-right" }}]
-themes = [{{ id = "{id}.daybreak", label = {{ key = "ext.{id}.theme.daybreak", fallback = "Daybreak" }}, appearance = "Light", tokens_entry = "frontend/themes/daybreak.css", preview_color = "#F4A261", extends = "system", category = "extension" }}]
-locales = [{{ locale = "zh-CN", namespace = "ext.{id}", entry = "frontend/locales/zh-CN.json", version = "1" }}, {{ locale = "en-US", namespace = "ext.{id}", entry = "frontend/locales/en-US.json", version = "1" }}]
+themes = [{{ id = "{id}.daybreak", label = {{ key = "ext.{id}.theme.daybreak", fallback = "Daybreak" }}, appearance = "Light", tokens_entry = "ui/themes/daybreak.css", preview_color = "#F4A261", extends = "system", category = "extension" }}]
+locales = [{{ locale = "zh-CN", namespace = "ext.{id}", entry = "ui/locales/zh-CN.json", version = "1" }}, {{ locale = "en-US", namespace = "ext.{id}", entry = "ui/locales/en-US.json", version = "1" }}]
 commands = [{{ id = "{id}.open", title = {{ key = "ext.{id}.command.open", fallback = "Open Observatory" }}, action = "open-page", shortcut = "Ctrl+Shift+O" }}]
 providers = [{{ id = "{id}.feed", kind = "activity-feed", entry = "backend/providers/activity-feed.js" }}]
 hooks = [{{ event = "run.completed", handler = "backend/hooks/run-completed.js" }}]

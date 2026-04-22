@@ -4,30 +4,18 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use ennoia_assets::builtins;
-use ennoia_config::SqliteConfigStore;
 use ennoia_extension_host::{ExtensionRuntime, ExtensionRuntimeConfig};
 use ennoia_kernel::{
     AgentConfig, AppConfig, PlatformOverview, ProviderConfig, ServerConfig, SkillConfig,
     SkillRegistryEntry, SkillRegistryFile, SpaceSpec, UiConfig,
 };
-use ennoia_memory::{MemoryStore, SqliteMemoryStore};
 use ennoia_observability::{self, ObservabilityGuard};
-use ennoia_orchestrator::OrchestratorService;
 use ennoia_paths::{default_home_dir, RuntimePaths};
-use ennoia_policy::PolicySet;
-use ennoia_runtime::{
-    builtin_pipeline, GatePipeline, PolicyStageMachine, RuntimeStore, SqliteRuntimeStore,
-    StageMachine,
-};
-use ennoia_scheduler::{SchedulerStore, SqliteSchedulerStore, Worker};
-use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
-use sqlx::SqlitePool;
 use tokio::net::TcpListener;
 use tracing::info;
 
-use crate::db;
+use crate::middleware::RateLimitState;
 use crate::routes::build_router;
-use crate::system_config::SystemConfigRuntime;
 
 type AppError = Box<dyn std::error::Error + Send + Sync>;
 
@@ -43,20 +31,12 @@ pub struct AppState {
     pub ui_config: UiConfig,
     pub overview: PlatformOverview,
     pub runtime_paths: Arc<RuntimePaths>,
-    pub pool: SqlitePool,
     pub extensions: ExtensionRuntime,
     pub agents: Vec<AgentConfig>,
     pub skills: Vec<SkillConfig>,
     pub providers: Vec<ProviderConfig>,
     pub spaces: Vec<SpaceSpec>,
-    pub policies: Arc<PolicySet>,
-    pub memory_store: Arc<dyn MemoryStore>,
-    pub runtime_store: Arc<dyn RuntimeStore>,
-    pub scheduler_store: Arc<dyn SchedulerStore>,
-    pub stage_machine: Arc<dyn StageMachine>,
-    pub gate_pipeline: GatePipeline,
-    pub orchestrator: OrchestratorService,
-    pub system_config: SystemConfigRuntime,
+    pub rate_limit_state: RateLimitState,
     pub observability_guard: Option<Arc<ObservabilityGuard>>,
 }
 
@@ -65,25 +45,6 @@ pub fn default_app_state() -> AppState {
     let app_config = normalize_app_config(&bootstrap_paths, AppConfig::default());
     let runtime_paths = Arc::new(bootstrap_paths.clone());
     runtime_paths.ensure_layout().expect("runtime layout");
-    let pool = SqlitePoolOptions::new()
-        .max_connections(1)
-        .connect_lazy("sqlite::memory:")
-        .expect("memory pool");
-
-    let policies = Arc::new(PolicySet::builtin());
-    let memory_store: Arc<dyn MemoryStore> = Arc::new(SqliteMemoryStore::new(
-        pool.clone(),
-        Arc::new(policies.memory.clone()),
-    ));
-    let runtime_store: Arc<dyn RuntimeStore> = Arc::new(SqliteRuntimeStore::new(pool.clone()));
-    let scheduler_store: Arc<dyn SchedulerStore> =
-        Arc::new(SqliteSchedulerStore::new(pool.clone()));
-    let stage_machine: Arc<dyn StageMachine> =
-        Arc::new(PolicyStageMachine::new(Arc::new(policies.stage.clone())));
-    let gate_pipeline = builtin_pipeline();
-    let orchestrator = OrchestratorService::new(stage_machine.clone(), gate_pipeline.clone());
-    let config_store = Arc::new(SqliteConfigStore::new(pool.clone()));
-    let system_config = SystemConfigRuntime::defaulted(config_store);
     let extensions =
         ExtensionRuntime::bootstrap(extension_runtime_config(&runtime_paths)).expect("runtime");
 
@@ -93,20 +54,12 @@ pub fn default_app_state() -> AppState {
         ui_config: UiConfig::default(),
         overview: PlatformOverview::default(),
         runtime_paths: runtime_paths.clone(),
-        pool,
         extensions,
         agents: Vec::new(),
         skills: builtin_skill_configs(),
         providers: Vec::new(),
         spaces: default_spaces(),
-        policies,
-        memory_store,
-        runtime_store,
-        scheduler_store,
-        stage_machine,
-        gate_pipeline,
-        orchestrator,
-        system_config,
+        rate_limit_state: RateLimitState::new(),
         observability_guard: None,
     }
 }
@@ -125,7 +78,7 @@ pub async fn bootstrap_app_state(home_dir: impl AsRef<Path>) -> Result<AppState,
     let ui_config: UiConfig = read_toml_or_default(runtime_paths.ui_config_file())?;
     let observability_guard = Some(Arc::new(ennoia_observability::init(
         OBSERVABILITY_TARGET,
-        &server_config.log_level,
+        &server_config.logging.level,
         runtime_paths.server_logs_dir(),
     )?));
     info!(home = %runtime_paths.home().display(), "bootstrapping app state");
@@ -135,36 +88,6 @@ pub async fn bootstrap_app_state(home_dir: impl AsRef<Path>) -> Result<AppState,
     let providers = load_provider_configs(&runtime_paths)?;
     let spaces = default_spaces();
     let extensions = ExtensionRuntime::bootstrap(extension_runtime_config(&runtime_paths))?;
-    let policies = Arc::new(PolicySet::load(runtime_paths.policies_dir())?);
-
-    let database_path = runtime_paths.sqlite_db();
-    let connect_options = SqliteConnectOptions::new()
-        .filename(&database_path)
-        .create_if_missing(true);
-    let pool = SqlitePoolOptions::new()
-        .max_connections(5)
-        .connect_with(connect_options)
-        .await?;
-
-    db::initialize_schema(&pool).await?;
-    db::upsert_agents(&pool, &agents).await?;
-    db::upsert_spaces(&pool, &spaces).await?;
-    db::upsert_extensions_runtime(&pool, &extensions.snapshot()).await?;
-
-    let memory_store: Arc<dyn MemoryStore> = Arc::new(SqliteMemoryStore::new(
-        pool.clone(),
-        Arc::new(policies.memory.clone()),
-    ));
-    let runtime_store: Arc<dyn RuntimeStore> = Arc::new(SqliteRuntimeStore::new(pool.clone()));
-    let scheduler_store: Arc<dyn SchedulerStore> =
-        Arc::new(SqliteSchedulerStore::new(pool.clone()));
-    let stage_machine: Arc<dyn StageMachine> =
-        Arc::new(PolicyStageMachine::new(Arc::new(policies.stage.clone())));
-    let gate_pipeline = builtin_pipeline();
-    let orchestrator = OrchestratorService::new(stage_machine.clone(), gate_pipeline.clone());
-    let config_store = Arc::new(SqliteConfigStore::new(pool.clone()));
-    let system_config = SystemConfigRuntime::defaulted(config_store);
-    system_config.load_from_store().await?;
 
     Ok(AppState {
         app_config,
@@ -172,20 +95,12 @@ pub async fn bootstrap_app_state(home_dir: impl AsRef<Path>) -> Result<AppState,
         ui_config,
         overview: PlatformOverview::default(),
         runtime_paths,
-        pool,
         extensions,
         agents,
         skills,
         providers,
         spaces,
-        policies,
-        memory_store,
-        runtime_store,
-        scheduler_store,
-        stage_machine,
-        gate_pipeline,
-        orchestrator,
-        system_config,
+        rate_limit_state: RateLimitState::new(),
         observability_guard,
     })
 }
@@ -193,25 +108,15 @@ pub async fn bootstrap_app_state(home_dir: impl AsRef<Path>) -> Result<AppState,
 pub async fn run_server(home_dir: impl AsRef<Path>) -> Result<(), AppError> {
     let state = bootstrap_app_state(home_dir).await?;
 
-    let scheduler_store = state.scheduler_store.clone();
-    let tick_ms = state.app_config.scheduler_tick_ms;
     let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
-    let worker = Worker::new(scheduler_store, tick_ms);
-    tokio::spawn(async move {
-        worker.run_forever(cancel_rx).await;
-    });
-
     let extensions = state.extensions.clone();
-    let pool = state.pool.clone();
-    let mut extension_cancel = cancel_tx.subscribe();
+    let mut extension_cancel = cancel_rx.clone();
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(2));
         loop {
             tokio::select! {
                 _ = interval.tick() => {
-                    if let Ok(Some(snapshot)) = extensions.refresh_from_disk(EXTENSION_REFRESH_SUMMARY) {
-                        let _ = db::upsert_extensions_runtime(&pool, &snapshot).await;
-                    }
+                    let _ = extensions.refresh_from_disk(EXTENSION_REFRESH_SUMMARY);
                 }
                 changed = extension_cancel.changed() => {
                     if changed.is_err() || *extension_cancel.borrow() {
@@ -367,17 +272,12 @@ fn extension_runtime_config(paths: &RuntimePaths) -> ExtensionRuntimeConfig {
     ExtensionRuntimeConfig {
         registry_file: paths.extensions_registry_file(),
         logs_dir: paths.extensions_logs_dir(),
+        home_dir: paths.home().to_path_buf(),
     }
 }
 
-pub fn normalize_app_config(paths: &RuntimePaths, mut config: AppConfig) -> AppConfig {
-    if let Some(database_path) = config.database_url.strip_prefix("sqlite://") {
-        config.database_url = format!(
-            "sqlite://{}",
-            paths.display_for_user(paths.expand_home_token(database_path)),
-        );
-    }
-
+pub fn normalize_app_config(paths: &RuntimePaths, config: AppConfig) -> AppConfig {
+    let _ = paths;
     config
 }
 

@@ -144,6 +144,7 @@ export type ResolvedBackendEntry = {
   kind: string;
   runtime: string;
   entry: string;
+  base_url?: string | null;
   command?: string | null;
   healthcheck?: string | null;
   status: string;

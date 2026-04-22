@@ -3,6 +3,10 @@
 ## [0.1.5] - 2026-04-22
 
 ### 重构
+- **[extension-core-split]**: 核心收敛为扩展宿主，移除主业务 SQL/调度/SDK，会话、记忆、编排改为内置扩展私有存储 — by Codex
+  - 方案: [202604221537_pipeline-extension-core-split](plan/202604221537_pipeline-extension-core-split/)
+  - 验证: `cargo check --workspace`, `cargo test --workspace`, `bun run --cwd web typecheck`, `bun run --cwd web build`, integration/e2e smoke
+
 - **[workspace-scripts]**: 重命名安装与打包脚本，收敛根目录脚本为安装、热开发、Web 构建/检查、npm 打包和 Docker 构建入口 — by Codex
   - 方案: 快速修改（无方案包）
   - 决策: 使用 `install:workspace` 避免 `install` 生命周期脚本歧义

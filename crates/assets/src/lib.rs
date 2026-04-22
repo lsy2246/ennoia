@@ -1,8 +1,8 @@
 //! Ennoia compile-time assets registry.
 //!
-//! This crate is the single source of truth for built-in templates,
-//! migrations and database snapshots. Runtime crates must consume assets through these APIs instead of
-//! referencing repository paths directly.
+//! This crate is the single source of truth for built-in templates and packages.
+//! Runtime crates must consume assets through these APIs instead of referencing
+//! repository paths directly.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TextAsset {
@@ -11,10 +11,6 @@ pub struct TextAsset {
 }
 
 include!(concat!(env!("OUT_DIR"), "/generated_assets.rs"));
-
-pub fn db_sql() -> &'static str {
-    DB_SQL
-}
 
 fn lookup(assets: &'static [(&'static str, &'static str)], path: &str) -> Option<&'static str> {
     assets
@@ -53,18 +49,6 @@ pub mod templates {
 
     pub fn ui_config() -> &'static str {
         get("config/ui.toml").expect("ui config template")
-    }
-}
-
-pub mod migrations {
-    use super::{lookup, wrap_assets, TextAsset, MIGRATION_ASSETS};
-
-    pub fn all() -> Vec<TextAsset> {
-        wrap_assets(MIGRATION_ASSETS)
-    }
-
-    pub fn get(path: &str) -> Option<&'static str> {
-        lookup(MIGRATION_ASSETS, path)
     }
 }
 

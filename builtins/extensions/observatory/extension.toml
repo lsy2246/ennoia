@@ -1,0 +1,37 @@
+id = "observatory"
+name = "Observatory"
+kind = "extension"
+version = "0.1.0"
+
+[source]
+mode = "package"
+root = "."
+dev = false
+
+[frontend]
+runtime = "browser-esm"
+hmr = false
+
+[build]
+frontend_bundle = "dist/frontend.js"
+
+[assets]
+locales_dir = "ui/locales"
+themes_dir = "ui/themes"
+
+[capabilities]
+pages = true
+panels = true
+themes = true
+locales = true
+commands = true
+
+[contributes]
+pages = [{ id = "observatory.events", title = { key = "ext.observatory.page.events", fallback = "Observatory" }, route = "/observatory", mount = "observatory.events.page", icon = "activity" }]
+panels = [{ id = "observatory.timeline", title = { key = "ext.observatory.panel.timeline", fallback = "Event Timeline" }, mount = "observatory.timeline.panel", slot = "right", icon = "panel-right" }]
+themes = [{ id = "observatory.daybreak", label = { key = "ext.observatory.theme.daybreak", fallback = "Daybreak" }, appearance = "Light", tokens_entry = "ui/themes/daybreak.css", preview_color = "#F4A261", extends = "system", category = "extension" }]
+locales = [
+  { locale = "zh-CN", namespace = "ext.observatory", entry = "ui/locales/zh-CN.json", version = "1" },
+  { locale = "en-US", namespace = "ext.observatory", entry = "ui/locales/en-US.json", version = "1" },
+]
+commands = [{ id = "observatory.open", title = { key = "ext.observatory.command.open", fallback = "Open Observatory" }, action = "open-page", shortcut = "Ctrl+Shift+O" }]

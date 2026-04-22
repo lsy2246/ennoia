@@ -7,17 +7,21 @@ import { fileURLToPath } from "node:url";
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const isWindows = process.platform === "win32";
 const cargoExecutable = resolveCargoExecutable();
+const cliExecutable = resolveCliExecutable();
+let cliBuilt = false;
 
 export function createRuntimeFixture(prefix) {
   return mkdtempSync(join(tmpdir(), `ennoia-${prefix}-`));
 }
 
 export function cleanupRuntimeFixture(runtimeDir) {
-  rmSync(runtimeDir, { recursive: true, force: true });
+  killProcessesForRuntime(runtimeDir);
+  retrySync(() => rmSync(runtimeDir, { recursive: true, force: true }));
 }
 
 export function initRuntime(runtimeDir) {
-  runCargo(["run", "-p", "ennoia-cli", "--bin", "ennoia", "--", "init", runtimeDir], "runtime init");
+  ensureCliBuilt();
+  runCli(["init", runtimeDir], "runtime init");
 }
 
 export function configureRuntimePort(runtimeDir, port) {
@@ -28,16 +32,8 @@ export function configureRuntimePort(runtimeDir, port) {
 }
 
 export function startServer(runtimeDir) {
-  const child = spawn(...spawnOptionsForCargo([
-    "run",
-    "-p",
-    "ennoia-cli",
-    "--bin",
-    "ennoia",
-    "--",
-    "start",
-    runtimeDir,
-  ], {
+  ensureCliBuilt();
+  const child = spawn(...spawnOptionsForCli(["start", runtimeDir], {
     cwd: repoRoot,
     stdio: ["ignore", "pipe", "pipe"],
     env: process.env,
@@ -93,11 +89,19 @@ export async function stopServer(handle) {
   }
 
   handle.child.kill("SIGTERM");
-  await sleep(500);
+  await waitForChildExit(handle.child, 2000);
 
   if (handle.child.exitCode === null) {
-    handle.child.kill("SIGKILL");
-    await sleep(500);
+    if (isWindows && handle.child.pid) {
+      spawnSync("taskkill", ["/PID", String(handle.child.pid), "/T", "/F"], {
+        stdio: "ignore",
+        shell: false,
+      });
+    } else {
+      handle.child.kill("SIGKILL");
+    }
+
+    await waitForChildExit(handle.child, 3000);
   }
 }
 
@@ -152,12 +156,67 @@ function runCargo(args, label) {
   }
 }
 
+function runCli(args, label) {
+  const result = spawnSync(...spawnOptionsForCli(args, {
+    cwd: repoRoot,
+    stdio: "inherit",
+    env: process.env,
+    shell: false,
+  }));
+
+  if (result.error) {
+    throw new Error(`${label} failed: ${result.error.message}`);
+  }
+
+  if (result.status !== 0) {
+    throw new Error(`${label} failed with exit code ${result.status ?? 1}`);
+  }
+}
+
 function sleep(ms) {
   return new Promise((resolvePromise) => setTimeout(resolvePromise, ms));
 }
 
+function waitForChildExit(child, timeoutMs) {
+  if (child.exitCode !== null) {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolvePromise) => {
+    const timer = setTimeout(() => {
+      child.off("exit", onExit);
+      resolvePromise();
+    }, timeoutMs);
+
+    function onExit() {
+      clearTimeout(timer);
+      resolvePromise();
+    }
+
+    child.once("exit", onExit);
+  });
+}
+
 function spawnOptionsForCargo(args, options) {
   return [cargoExecutable, args, options];
+}
+
+function spawnOptionsForCli(args, options) {
+  return [cliExecutable, args, options];
+}
+
+function ensureCliBuilt() {
+  if (cliBuilt) {
+    return;
+  }
+
+  if (existsSync(cliExecutable)) {
+    cliBuilt = true;
+    return;
+  }
+
+  runCargo(["build", "-p", "ennoia-cli", "--bin", "ennoia"], "build ennoia cli");
+  cliBuilt = true;
 }
 
 function resolveCargoExecutable() {
@@ -171,4 +230,49 @@ function resolveCargoExecutable() {
   }
 
   return "cargo";
+}
+
+function resolveCliExecutable() {
+  return join(repoRoot, "target", "debug", isWindows ? "ennoia.exe" : "ennoia");
+}
+
+function retrySync(action, attempts = 10, delayMs = 200) {
+  let lastError;
+
+  for (let index = 0; index < attempts; index += 1) {
+    try {
+      action();
+      return;
+    } catch (error) {
+      lastError = error;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delayMs);
+    }
+  }
+
+  throw lastError;
+}
+
+function killProcessesForRuntime(runtimeDir) {
+  if (!isWindows) {
+    return;
+  }
+
+  spawnSync(
+    "powershell.exe",
+    [
+      "-NoProfile",
+      "-NonInteractive",
+      "-Command",
+      "$needle = $env:ENNOIA_CLEANUP_DIR; $alt = $env:ENNOIA_CLEANUP_DIR_ALT; Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like \"*$needle*\" -or $_.CommandLine -like \"*$alt*\" } | ForEach-Object { taskkill /PID $_.ProcessId /T /F | Out-Null }",
+    ],
+    {
+      env: {
+        ...process.env,
+        ENNOIA_CLEANUP_DIR: runtimeDir,
+        ENNOIA_CLEANUP_DIR_ALT: runtimeDir.replaceAll("\\", "/"),
+      },
+      stdio: "ignore",
+      shell: false,
+    },
+  );
 }

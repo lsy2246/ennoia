@@ -68,9 +68,10 @@
 
 ### 5.1 代码组织
 
-- `kernel` 承载跨模块共享领域模型与共享配置协议
-- `memory`、`runtime`、`scheduler` 各自承载本模块的协议、错误、存储接口与实现
-- `server` 承载装配、API 暴露、状态接线与启动流程
+- `kernel` 承载共享协议、配置结构和扩展 manifest 模型
+- `extension-host` 承载扩展扫描、attach、reload、restart、诊断与后端进程托管
+- `server` 承载 API 暴露、TOML 配置文件、日志、Hook 派发、扩展代理与启动流程
+- 内置扩展实现放在 `builtins/extensions/<extension_id>/plugins|hooks|timers|ui|data`，不得把 session、memory、workflow、任务编排等业务实现混回核心 crate
 - 公共转换逻辑提取为函数或模块级 helper
 
 ### 5.2 命名
@@ -101,27 +102,23 @@
 - 运行时扩展接入统一走 `web/packages/ui-sdk`
 - 全局状态、路由、扩展刷新机制必须保持单一路径
 
-## 7. SQL 与迁移规范
+## 7. 存储与迁移规范
 
-这是本仓库最重要的边界之一。
+系统级配置只走 TOML 文件。核心不维护主业务 SQLite；扩展按自己的私有数据目录管理存储与迁移。
 
-### 7.1 必须写入 migration 的内容
+### 7.1 扩展私有迁移
 
-后续数据库结构变更必须进入 `assets/migrations/` 下的新 migration：
+扩展后端如果使用数据库，schema、迁移和初始化入口必须放在该扩展自己的 `data/` 或 `plugins/*/src/` 边界内，例如：
 
-- `CREATE TABLE`
-- `ALTER TABLE`
-- 索引
-- 触发器
-- `PRAGMA`
-- FTS、虚拟表、约束、默认值变更
-- 任何影响持久化结构的内容
+- `builtins/extensions/session/data/schema.sql`
+- `builtins/extensions/memory/data/schema.sql`
+- `builtins/extensions/workflow/data/schema.sql`
 
-`assets/db.sql` 是新库初始化入口，保持完整、可执行、自包含。`assets/migrations/` 承载后续数据库结构变更。初始化执行 `db.sql`，已有库在存在新增 migration 时执行迁移，二者按生命周期各自工作。
+核心仓库根目录不再提供主库基线文件。
 
 ### 7.2 运行时查询规范
 
-运行时数据库读写默认遵循：
+扩展内数据库读写默认遵循：
 
 - 使用结构化查询生成器构建 SQL
 - SQLite 执行层使用 `sqlx`
@@ -151,7 +148,7 @@
 - 表结构定义在 migration
 - 运行时 CRUD 在 Rust 结构化查询层
 - 业务代码采用统一的结构化查询表达
-- `db/` 模块承载运行时数据访问层与初始化 / 迁移执行入口
+- `facts` crate 承载主系统事实数据访问层与初始化 / 迁移执行入口
 
 ## 8. 配置与路径约定
 

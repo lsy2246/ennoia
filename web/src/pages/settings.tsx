@@ -2,12 +2,12 @@ import { useEffect, useState, type FormEvent } from "react";
 
 import {
   fetchAppConfig,
-  getConfigSnapshot,
-  putConfig,
+  fetchServerConfig,
   saveAppConfig,
   saveRuntimeProfile,
+  saveServerConfig,
   type AppConfig,
-  type SystemConfig,
+  type ServerConfig,
 } from "@ennoia/api-client";
 import { buildTimeZoneOptionGroups } from "@/lib/timeZones";
 import { useRuntimeStore } from "@/stores/runtime";
@@ -196,7 +196,7 @@ export function Settings() {
   const profile = useRuntimeStore((state) => state.profile);
   const hydrateRuntime = useRuntimeStore((state) => state.hydrate);
   const { t } = useUiHelpers();
-  const [config, setConfig] = useState<SystemConfig | null>(null);
+  const [config, setConfig] = useState<ServerConfig | null>(null);
   const [appConfig, setAppConfig] = useState<AppConfig | null>(null);
   const [profileName, setProfileName] = useState(profile?.display_name ?? "Operator");
   const [timeZone, setTimeZone] = useState(profile?.time_zone ?? "Asia/Shanghai");
@@ -219,7 +219,10 @@ export function Settings() {
   }, [profile]);
 
   async function hydrate() {
-    const [snapshot, nextAppConfig] = await Promise.all([getConfigSnapshot(), fetchAppConfig()]);
+    const [snapshot, nextAppConfig] = await Promise.all([
+      fetchServerConfig(),
+      fetchAppConfig(),
+    ]);
     setConfig(snapshot);
     setAppConfig(nextAppConfig);
     setCorsOrigins(toStringEntries(snapshot.cors.origins));
@@ -253,39 +256,25 @@ export function Settings() {
     try {
       await Promise.all([
         saveAppConfig(appConfig),
-        putConfig("rate_limit", config.rate_limit, "web"),
-        putConfig(
-          "cors",
-          {
+        saveServerConfig({
+          ...config,
+          cors: {
             ...config.cors,
             origins: collectStringEntries(corsOrigins),
           },
-          "web",
-        ),
-        putConfig(
-          "timeout",
-          {
+          timeout: {
             ...config.timeout,
             per_path_ms: collectMapEntries(timeoutOverrides),
           },
-          "web",
-        ),
-        putConfig(
-          "logging",
-          {
+          logging: {
             ...config.logging,
             redact_headers: collectStringEntries(redactHeaders),
           },
-          "web",
-        ),
-        putConfig(
-          "body_limit",
-          {
+          body_limit: {
             ...config.body_limit,
             per_path_max: collectMapEntries(bodyLimitOverrides),
           },
-          "web",
-        ),
+        }),
       ]);
       await hydrate();
       setMessage(t("web.settings.runtime_saved", "运行时配置已保存。"));
@@ -330,7 +319,7 @@ export function Settings() {
           <p>
             {t(
               "web.settings.runtime_description",
-              "覆盖数据库、调度节拍、中间件开关、跨域、超时、日志脱敏与请求体大小。",
+              "覆盖系统配置文件、中间件开关、跨域、超时、日志脱敏与请求体大小。",
             )}
           </p>
         </div>
@@ -340,26 +329,21 @@ export function Settings() {
           <>
             <div className="config-sections">
               <div className="mini-card">
-                <div className="panel-title">{t("web.settings.app_config", "应用与调度")}</div>
+                <div className="panel-title">{t("web.settings.app_config", "应用配置")}</div>
                 <div className="form-grid">
                   <label>
-                    {t("web.settings.database_url", "数据库地址")}
+                    {t("web.settings.server_host", "服务主机")}
                     <input
-                      value={appConfig.database_url}
-                      onChange={(event) =>
-                        setAppConfig({ ...appConfig, database_url: event.target.value })
-                      }
+                      value={config.host}
+                      onChange={(event) => setConfig({ ...config, host: event.target.value })}
                     />
                   </label>
                   <label>
-                    {t("web.settings.scheduler_tick", "调度器轮询毫秒")}
+                    {t("web.settings.server_port", "服务端口")}
                     <input
-                      value={appConfig.scheduler_tick_ms}
+                      value={config.port}
                       onChange={(event) =>
-                        setAppConfig({
-                          ...appConfig,
-                          scheduler_tick_ms: Number(event.target.value),
-                        })
+                        setConfig({ ...config, port: Number(event.target.value) })
                       }
                     />
                   </label>

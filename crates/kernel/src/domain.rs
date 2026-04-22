@@ -164,7 +164,7 @@ pub struct LaneSpec {
     pub updated_at: String,
 }
 
-/// MessageSpec is the normalized message input shape for orchestrator flows.
+/// MessageSpec is the normalized message input shape for workflow extension flows.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MessageSpec {
     pub id: String,

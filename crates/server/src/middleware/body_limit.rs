@@ -16,7 +16,7 @@ pub async fn body_limit_middleware(
     req: Request,
     next: Next,
 ) -> Response {
-    let cfg = state.system_config.body_limit.load();
+    let cfg = &state.server_config.body_limit;
     if !cfg.enabled {
         return next.run(req).await;
     }
