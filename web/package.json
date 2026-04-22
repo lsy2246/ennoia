@@ -4,10 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "panda:codegen": "panda codegen --clean",
-    "build": "bun run panda:codegen && vite build",
-    "typecheck": "bun run panda:codegen && tsc --noEmit",
+    "dev": "node ../node_modules/vite/bin/vite.js",
+    "panda:codegen": "node ../node_modules/@pandacss/dev/bin.js codegen --clean",
+    "build": "bun run panda:codegen && node ../node_modules/vite/bin/vite.js build",
+    "typecheck": "bun run panda:codegen && node ../node_modules/typescript/bin/tsc --noEmit",
     "test:smoke": "bun run build",
     "prepare": "bun run panda:codegen"
   },

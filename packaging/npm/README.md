@@ -11,7 +11,7 @@
 
 本地联调方式：
 
-1. 在仓库根目录执行 `bun run install:workspace`
+1. 在仓库根目录执行 `bun install`
 2. 进入 `packaging/npm/`
 3. 执行 `node ./bin/ennoia.js init`
 4. 执行 `node ./bin/ennoia.js start`

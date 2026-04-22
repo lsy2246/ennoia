@@ -22,7 +22,7 @@ if (!executablePath) {
   console.error(
     [
       "[ennoia] 当前未找到可执行 CLI。",
-      "请先执行仓库根目录的 `bun run install:workspace`，或通过 ENNOIA_CLI_BIN 指向已构建的 ennoia 可执行文件。",
+      "请先执行仓库根目录的 `bun install`，或通过 ENNOIA_CLI_BIN 指向已构建的 ennoia 可执行文件。",
     ].join(" "),
   );
   process.exit(1);

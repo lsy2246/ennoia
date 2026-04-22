@@ -51,6 +51,16 @@
 
 ## 启动方式
 
+安装依赖：
+
+```bash
+bun install
+```
+
+安装阶段会自动执行 `web` typecheck，并在本机具备 Rust toolchain 时执行 `cargo check --workspace`。
+
+启动开发环境：
+
 ```bash
 cargo run -p ennoia-cli -- dev
 ```

@@ -9,7 +9,7 @@
     "web/packages/*"
   ],
   "scripts": {
-    "install:workspace": "node ./scripts/install-workspace.mjs",
+    "install": "node ./scripts/install-workspace.mjs",
     "dev": "cargo run -p ennoia-cli -- dev",
     "build:web": "bun run --cwd web build",
     "check:web": "bun run --cwd web typecheck",

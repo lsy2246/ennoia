@@ -3,6 +3,7 @@ import react from "@vitejs/plugin-react";
 import path from "node:path";
 
 const devPort = Number(process.env.ENNOIA_WEB_DEV_PORT ?? process.env.VITE_PORT ?? 5173);
+const rootNodeModules = path.resolve(__dirname, "../node_modules");
 
 export default defineConfig({
   envDir: path.resolve(__dirname, ".."),
@@ -17,9 +18,9 @@ export default defineConfig({
       "@ennoia/observability": path.resolve(__dirname, "./packages/observability/src"),
       "@ennoia/theme-runtime": path.resolve(__dirname, "./packages/theme-runtime/src"),
       "@ennoia/ui-sdk": path.resolve(__dirname, "./packages/ui-sdk/src"),
-      react: path.resolve(__dirname, "./node_modules/react"),
-      "react/jsx-runtime": path.resolve(__dirname, "./node_modules/react/jsx-runtime.js"),
-      "react-dom": path.resolve(__dirname, "./node_modules/react-dom"),
+      react: path.resolve(rootNodeModules, "react"),
+      "react/jsx-runtime": path.resolve(rootNodeModules, "react/jsx-runtime.js"),
+      "react-dom": path.resolve(rootNodeModules, "react-dom"),
     },
   },
   server: {

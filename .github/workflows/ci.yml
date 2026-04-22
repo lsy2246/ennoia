@@ -25,7 +25,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: oven-sh/setup-bun@v2
       - name: install workspace
-        run: bun run install:workspace
+        run: bun install
       - name: web build
         run: bun run build:web
       - name: integration smoke

@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 
-import { existsSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -24,8 +24,9 @@ function commandExists(command) {
 }
 
 function runStep(label, command, args) {
-  console.log(`\n[install:workspace] ${label}`);
-  const result = spawnSync(command, args, {
+  console.log(`\n[install] ${label}`);
+  const { launchCommand, launchArgs } = resolveCommand(command, args);
+  const result = spawnSync(launchCommand, launchArgs, {
     cwd: rootDir,
     stdio: "inherit",
     shell: false,
@@ -34,6 +35,22 @@ function runStep(label, command, args) {
   if (result.status !== 0) {
     process.exit(result.status ?? 1);
   }
+}
+
+function resolveCommand(command, args) {
+  if (process.platform !== "win32") {
+    return { launchCommand: command, launchArgs: args };
+  }
+
+  if (command === "cargo" && existsSync(localCargoPath)) {
+    return { launchCommand: localCargoPath, launchArgs: args };
+  }
+
+  if (command === "bun") {
+    return { launchCommand: "cmd", launchArgs: ["/c", "bun", ...args] };
+  }
+
+  return { launchCommand: command, launchArgs: args };
 }
 
 function detectVsDevCmd() {
@@ -99,7 +116,7 @@ function runWindowsCargoCheck() {
 
   if (!vsDevCmd) {
     console.warn(
-      "[install:workspace] 未检测到 Visual Studio Build Tools，已跳过 Rust 校验。安装 C++ Build Tools 后可重新执行 `cargo check --workspace`。",
+      "[install] 未检测到 Visual Studio Build Tools，已跳过 Rust 校验。安装 C++ Build Tools 后可重新执行 `cargo check --workspace`。",
     );
     return;
   }
@@ -114,28 +131,20 @@ function runWindowsCargoCheck() {
   ].join("\r\n");
 
   writeFileSync(scriptPath, script, "ascii");
-
-  try {
-    runStep("执行 Rust workspace 检查", "cmd", ["/c", scriptPath]);
-  } finally {
-    rmSync(scriptPath, { force: true });
-  }
+  runStep("执行 Rust workspace 检查", "cmd", ["/c", scriptPath]);
 }
 
 if (!commandExists("bun")) {
-  console.error("[install:workspace] 未检测到 bun，请先安装 Bun 后再执行。");
+  console.error("[install] 未检测到 bun，请先安装 Bun 后再执行。");
   process.exit(1);
 }
-
-runStep("安装根目录依赖", "bun", ["install"]);
 
 const webDir = resolve(rootDir, "web");
 if (!existsSync(webDir)) {
-  console.error("[install:workspace] 缺少 web 目录，无法继续。");
+  console.error("[install] 缺少 web 目录，无法继续。");
   process.exit(1);
 }
 
-runStep("安装 web 依赖", "bun", ["install", "--cwd", "web"]);
 runStep("执行 web typecheck", "bun", ["run", "--cwd", "web", "typecheck"]);
 
 if (commandExists("cargo")) {
@@ -146,6 +155,6 @@ if (commandExists("cargo")) {
   }
 } else {
   console.warn(
-    "[install:workspace] 未检测到 cargo，已跳过 Rust 校验。安装 Rust toolchain 后可执行 `cargo check --workspace`。",
+    "[install] 未检测到 cargo，已跳过 Rust 校验。安装 Rust toolchain 后可执行 `cargo check --workspace`。",
   );
 }
