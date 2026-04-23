@@ -12,7 +12,6 @@ export default defineConfig({
     alias: {
       "@": path.resolve(__dirname, "./src"),
       "@ennoia/api-client": path.resolve(__dirname, "./packages/api-client/src"),
-      "@ennoia/builtins": path.resolve(__dirname, "./packages/builtins/src"),
       "@ennoia/contract": path.resolve(__dirname, "./packages/contract/src"),
       "@ennoia/i18n": path.resolve(__dirname, "./packages/i18n/src"),
       "@ennoia/observability": path.resolve(__dirname, "./packages/observability/src"),

@@ -23,9 +23,9 @@ use ennoia_extension_host::{
     RegisteredScheduleActionContribution, RegisteredThemeContribution, ResolvedExtensionSnapshot,
 };
 use ennoia_kernel::{
-    AgentConfig, AppConfig, BehaviorConfig, BootstrapState, ExtensionDiagnostic,
-    ExtensionRuntimeEvent, HookEventEnvelope, LocalizedText, MemoryConfig, ProviderConfig,
-    RuntimeProfile, ServerConfig, SkillConfig, UiConfig, UiPreference, UiPreferenceRecord,
+    AgentConfig, AppConfig, BootstrapState, ExtensionDiagnostic, ExtensionRuntimeEvent,
+    HookEventEnvelope, LocalizedText, ProviderConfig, RuntimeProfile, ServerConfig, SkillConfig,
+    UiConfig, UiPreference, UiPreferenceRecord,
 };
 use ennoia_observability::RequestContext;
 use serde::{Deserialize, Serialize};
@@ -90,14 +90,6 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/api/runtime/server-config",
             get(runtime_server_config).put(runtime_server_config_put),
-        )
-        .route(
-            "/api/runtime/behavior-config",
-            get(runtime_behavior_config).put(runtime_behavior_config_put),
-        )
-        .route(
-            "/api/runtime/memory-config",
-            get(runtime_memory_config).put(runtime_memory_config_put),
         );
 
     Router::new()
@@ -571,11 +563,7 @@ fn parse_namespaces(value: &str) -> Vec<String> {
 }
 
 fn builtin_message_namespaces() -> Vec<String> {
-    vec![
-        "web".to_string(),
-        "settings".to_string(),
-        "ext.observatory".to_string(),
-    ]
+    vec!["web".to_string(), "settings".to_string()]
 }
 
 fn builtin_message_bundle(
@@ -587,18 +575,6 @@ fn builtin_message_bundle(
     const WEB_EN_US: StaticMessages = &[("web.title", "Ennoia")];
     const SETTINGS_ZH_CN: StaticMessages = &[("settings.personal.saved", "偏好已保存。")];
     const SETTINGS_EN_US: StaticMessages = &[("settings.personal.saved", "Preferences saved.")];
-    const OBSERVATORY_ZH_CN: StaticMessages = &[
-        ("ext.observatory.page.events", "观测台"),
-        ("ext.observatory.panel.timeline", "事件时间线"),
-        ("ext.observatory.theme.daybreak", "Daybreak"),
-        ("ext.observatory.command.open", "打开观测台"),
-    ];
-    const OBSERVATORY_EN_US: StaticMessages = &[
-        ("ext.observatory.page.events", "Observatory"),
-        ("ext.observatory.panel.timeline", "Event Timeline"),
-        ("ext.observatory.theme.daybreak", "Daybreak"),
-        ("ext.observatory.command.open", "Open Observatory"),
-    ];
 
     let (source, version, catalogs): (&str, &str, StaticCatalog) = match namespace {
         "web" => (
@@ -610,11 +586,6 @@ fn builtin_message_bundle(
             "builtin:settings",
             "1",
             &[("zh-CN", SETTINGS_ZH_CN), ("en-US", SETTINGS_EN_US)],
-        ),
-        "ext.observatory" => (
-            "builtin:ext.observatory",
-            "1",
-            &[("zh-CN", OBSERVATORY_ZH_CN), ("en-US", OBSERVATORY_EN_US)],
         ),
         _ => return None,
     };
@@ -766,7 +737,6 @@ const BUILTIN_THEME_IDS: &[&str] = &[
     "apple.dark",
     "ennoia.midnight",
     "ennoia.paper",
-    "observatory.daybreak",
 ];
 
 fn ensure_supported_locale(

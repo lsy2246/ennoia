@@ -1,5 +1,3 @@
-use std::fs;
-
 use axum::body::Bytes;
 use axum::http::Method;
 use axum::response::{IntoResponse, Response};
@@ -26,7 +24,6 @@ pub(super) struct MemoryProviderRecord {
 pub(super) async fn extension_memories(
     State(state): State<AppState>,
 ) -> Json<Vec<MemoryProviderRecord>> {
-    let config = current_memory_config(&state);
     Json(
         state
             .extensions
@@ -34,25 +31,24 @@ pub(super) async fn extension_memories(
             .memories
             .into_iter()
             .map(|item| {
-                let memory_id = item.memory.id.clone();
                 let extension_id = item.extension_id.clone();
+                let status = state
+                    .extensions
+                    .get(&extension_id)
+                    .map(|extension| extension.health);
                 MemoryProviderRecord {
-                    id: memory_id.clone(),
+                    id: item.memory.id.clone(),
                     source_kind: "extension".to_string(),
                     extension_id: Some(extension_id.clone()),
                     version: item.memory.version,
                     interfaces: item.memory.interfaces,
                     entry: item.memory.entry,
-                    enabled: config
-                        .enabled
-                        .iter()
-                        .any(|id| id == &extension_id || id == &memory_id),
-                    healthy: state
-                        .extensions
-                        .get(&extension_id)
-                        .is_some_and(|extension| {
-                            matches!(extension.health, ennoia_kernel::ExtensionHealth::Ready)
-                        }),
+                    enabled: status.as_ref().is_some_and(|health| {
+                        !matches!(health, ennoia_kernel::ExtensionHealth::Stopped)
+                    }),
+                    healthy: status.is_some_and(|health| {
+                        matches!(health, ennoia_kernel::ExtensionHealth::Ready)
+                    }),
                 }
             })
             .collect(),
@@ -67,8 +63,7 @@ pub(super) async fn active_memory(
     State(state): State<AppState>,
     Extension(request): Extension<RequestContext>,
 ) -> ApiResult<MemoryProviderRecord> {
-    let config = current_memory_config(&state);
-    resolve_memory_record(&state, &config.preferred_read, &request).map(Json)
+    resolve_active_memory_record(&state, &request).map(Json)
 }
 
 pub(super) async fn memory_status(
@@ -103,16 +98,8 @@ pub(super) async fn active_memory_api_proxy(
     method: Method,
     body: Bytes,
 ) -> Result<impl IntoResponse, ApiError> {
-    let config = current_memory_config(&state);
-    dispatch_memory_request(
-        &state,
-        &request,
-        &config.preferred_read,
-        &path,
-        method,
-        body,
-    )
-    .await
+    let record = resolve_active_memory_record(&state, &request)?;
+    dispatch_memory_request(&state, &request, &record.id, &path, method, body).await
 }
 
 async fn dispatch_memory_request(
@@ -151,42 +138,32 @@ async fn dispatch_memory_request(
 }
 
 fn list_memory_records(state: &AppState) -> Vec<MemoryProviderRecord> {
-    let config = current_memory_config(state);
     state
         .extensions
         .snapshot()
         .memories
         .into_iter()
         .map(|item| {
-            let memory_id = item.memory.id.clone();
             let extension_id = item.extension_id.clone();
+            let status = state
+                .extensions
+                .get(&extension_id)
+                .map(|extension| extension.health);
             MemoryProviderRecord {
-                id: memory_id.clone(),
+                id: item.memory.id.clone(),
                 source_kind: "extension".to_string(),
                 extension_id: Some(extension_id.clone()),
                 version: item.memory.version,
                 interfaces: item.memory.interfaces,
                 entry: item.memory.entry,
-                enabled: config
-                    .enabled
-                    .iter()
-                    .any(|id| id == &extension_id || id == &memory_id),
-                healthy: state
-                    .extensions
-                    .get(&extension_id)
-                    .is_some_and(|extension| {
-                        matches!(extension.health, ennoia_kernel::ExtensionHealth::Ready)
-                    }),
+                enabled: status.as_ref().is_some_and(|health| {
+                    !matches!(health, ennoia_kernel::ExtensionHealth::Stopped)
+                }),
+                healthy: status
+                    .is_some_and(|health| matches!(health, ennoia_kernel::ExtensionHealth::Ready)),
             }
         })
         .collect()
-}
-
-fn current_memory_config(state: &AppState) -> ennoia_kernel::MemoryConfig {
-    fs::read_to_string(state.runtime_paths.memory_config_file())
-        .ok()
-        .and_then(|contents| toml::from_str(&contents).ok())
-        .unwrap_or_else(|| state.memory_config.clone())
 }
 
 fn resolve_memory_record(
@@ -219,4 +196,25 @@ fn resolve_memory_record(
                 request,
             )
         })
+}
+
+fn resolve_active_memory_record(
+    state: &AppState,
+    request: &RequestContext,
+) -> Result<MemoryProviderRecord, ApiError> {
+    let records = list_memory_records(state)
+        .into_iter()
+        .filter(|item| item.enabled)
+        .collect::<Vec<_>>();
+
+    match records.as_slice() {
+        [only] => Ok(only.clone()),
+        [] => Err(scoped(ApiError::not_found("active memory not found"), request)),
+        _ => Err(scoped(
+            ApiError::conflict(
+                "multiple memory implementations found; use explicit memory ids or interface bindings",
+            ),
+            request,
+        )),
+    }
 }

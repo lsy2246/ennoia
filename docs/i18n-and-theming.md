@@ -67,7 +67,6 @@
 
 - `web`
 - `settings`
-- `ext.observatory`
 
 每个模块独立维护自己的 namespace 与文案表，统一由 registry 注册。
 Web 启动后会按当前 locale 请求 `/api/ui/messages`，把服务端返回的 bundle 注册到前端 runtime registry。

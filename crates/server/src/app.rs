@@ -6,8 +6,8 @@ use std::time::Duration;
 use ennoia_assets::builtins;
 use ennoia_extension_host::{ExtensionRuntime, ExtensionRuntimeConfig};
 use ennoia_kernel::{
-    AgentConfig, AppConfig, BehaviorConfig, MemoryConfig, PlatformOverview, ProviderConfig,
-    ServerConfig, SkillConfig, SkillRegistryEntry, SkillRegistryFile, SpaceSpec, UiConfig,
+    AgentConfig, AppConfig, PlatformOverview, ProviderConfig, ServerConfig, SkillConfig,
+    SkillRegistryEntry, SkillRegistryFile, SpaceSpec, UiConfig,
 };
 use ennoia_observability::{self, ObservabilityGuard};
 use ennoia_paths::{default_home_dir, RuntimePaths};
@@ -32,8 +32,6 @@ pub struct AppState {
     pub app_config: AppConfig,
     pub server_config: ServerConfig,
     pub ui_config: UiConfig,
-    pub behavior_config: BehaviorConfig,
-    pub memory_config: MemoryConfig,
     pub overview: PlatformOverview,
     pub runtime_paths: Arc<RuntimePaths>,
     pub extensions: ExtensionRuntime,
@@ -60,8 +58,6 @@ pub fn default_app_state() -> AppState {
         app_config,
         server_config: ServerConfig::default(),
         ui_config: UiConfig::default(),
-        behavior_config: BehaviorConfig::default(),
-        memory_config: MemoryConfig::default(),
         overview: PlatformOverview::default(),
         runtime_paths: runtime_paths.clone(),
         extensions,
@@ -88,9 +84,6 @@ pub async fn bootstrap_app_state(home_dir: impl AsRef<Path>) -> Result<AppState,
     runtime_paths.ensure_layout()?;
     let server_config: ServerConfig = read_toml_or_default(runtime_paths.server_config_file())?;
     let ui_config: UiConfig = read_toml_or_default(runtime_paths.ui_config_file())?;
-    let behavior_config: BehaviorConfig =
-        read_toml_or_default(runtime_paths.behavior_config_file())?;
-    let memory_config: MemoryConfig = read_toml_or_default(runtime_paths.memory_config_file())?;
     let observability_guard = Some(Arc::new(ennoia_observability::init(
         OBSERVABILITY_TARGET,
         &server_config.logging.level,
@@ -109,8 +102,6 @@ pub async fn bootstrap_app_state(home_dir: impl AsRef<Path>) -> Result<AppState,
         app_config,
         server_config,
         ui_config,
-        behavior_config,
-        memory_config,
         overview: PlatformOverview::default(),
         runtime_paths,
         extensions,

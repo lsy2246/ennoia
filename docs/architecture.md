@@ -45,6 +45,7 @@ Web
 - `/api/conversations`、`/api/conversations/{id}/messages` 等稳定入口通过接口层路由，不直接绑定某个 memory 大能力。
 - 内置 `memory` 扩展当前声明会话、线路、消息和记忆接口；其他扩展可以替换其中任意一个细粒度接口。
 - `GET /api/memories`、`ANY /api/memory/...` 作为兼容能力入口保留，用于访问扩展自己的 memory API。
+- 兼容能力入口不读取系统级 `memory.toml`；只有一个可用 memory 实现时可自动选择，存在多个实现时要求调用方显式指定 memory id 或改走接口绑定。
 - Conversation、Message、Memory Graph、Review 等业务数据组织属于扩展私有责任，不属于系统日志。
 
 ## 运行与定时边界
@@ -89,6 +90,7 @@ Web
 - UI 工作台读取扩展快照时，同时获得接口实现和定时动作清单。
 - `workflow` 和 `memory` 都只是内置扩展实现；系统依赖接口键和动作 ID，不反向依赖具体扩展。
 - 扩展不自行开放端口；Provider、Behavior、Memory、Hook、Interface 和 Schedule Action 的执行统一走宿主 Worker RPC。
+- 扩展 UI、语言、主题和业务配置归扩展包所有；Web 主壳只按 runtime snapshot 发现并挂载，不在系统前端包中静态注册某个扩展页面或文案。
 
 ## 存储划分
 
@@ -97,4 +99,5 @@ Web
 - 系统级日志：`~/.ennoia/data/system/sqlite/system-log.db`
 - 系统定时计划：`~/.ennoia/data/system/schedules.json`
 - 扩展私有数据：`~/.ennoia/data/extensions/{extension_id}/`
+- 扩展私有配置：`~/.ennoia/data/extensions/{extension_id}/` 下由扩展自行定义
 - 核心不维护主业务总库；会话、运行数据和完整记忆数据都放在各自扩展边界内。

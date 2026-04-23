@@ -18,13 +18,21 @@ storage = "extension"
 sqlite = true
 events = ["publish", "subscribe"]
 
+[assets]
+locales_dir = "ui/locales"
+
 [capabilities]
 pages = true
+locales = true
 memories = true
 interfaces = true
 
 [contributes]
-pages = [{ id = "memory.page", title = { key = "web.nav.memory", fallback = "记忆" }, route = "/memory", mount = "memory.page", icon = "memory", nav = { default_pinned = true, order = 30 } }]
+pages = [{ id = "memory.page", title = { key = "ext.memory.page", fallback = "记忆" }, route = "/memory", mount = "memory.page", icon = "memory", nav = { default_pinned = true, order = 30 } }]
+locales = [
+  { locale = "zh-CN", namespace = "ext.memory", entry = "ui/locales/zh-CN.json", version = "1" },
+  { locale = "en-US", namespace = "ext.memory", entry = "ui/locales/en-US.json", version = "1" },
+]
 memories = [
   { id = "memory", extension_id = "memory", interfaces = ["workspace", "conversations", "messages", "lanes", "handoffs", "truth", "context", "review", "graph"], entry = "memory", version = "1" }
 ]

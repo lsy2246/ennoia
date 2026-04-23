@@ -16,10 +16,9 @@ pub mod ui;
 // ========== Re-exports ==========
 
 pub use config::{
-    AgentConfig, AppConfig, BehaviorConfig, ExtensionRegistryEntry, ExtensionRegistryFile,
-    InterfaceBindingConfig, InterfaceBindingsConfig, MemoryConfig, ProviderConfig,
-    ProviderModelDiscoveryConfig, ServerConfig, SkillConfig, SkillRegistryEntry, SkillRegistryFile,
-    UiConfig,
+    AgentConfig, AppConfig, ExtensionRegistryEntry, ExtensionRegistryFile, InterfaceBindingConfig,
+    InterfaceBindingsConfig, ProviderConfig, ProviderModelDiscoveryConfig, ServerConfig,
+    SkillConfig, SkillRegistryEntry, SkillRegistryFile, UiConfig,
 };
 pub use context::{ContextFrame, ContextLayer, RunContext};
 pub use decision::{Decision, DecisionSnapshot, NextAction};

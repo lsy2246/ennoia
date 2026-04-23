@@ -1,5 +1,3 @@
-use std::fs;
-
 use axum::body::Bytes;
 use axum::http::Method;
 use axum::response::{IntoResponse, Response};
@@ -123,33 +121,29 @@ pub(super) fn resolve_active_behavior(
     state: &AppState,
     request: &RequestContext,
 ) -> Result<RegisteredBehaviorContribution, ApiError> {
-    let config = current_behavior_config(state);
-    let behavior = state
-        .extensions
-        .snapshot()
-        .behaviors
-        .into_iter()
-        .find(|item| {
-            item.extension_id == config.active_extension
-                && item.behavior.id == config.active_behavior
-        })
-        .ok_or_else(|| {
+    let behaviors = state.extensions.snapshot().behaviors;
+    match behaviors.as_slice() {
+        [only] => Ok(only.clone()),
+        [] => {
             let _ = state.system_log.append(SystemLogWrite {
                 event: "runtime.behavior.resolve_failed".to_string(),
                 level: "warn".to_string(),
                 component: SYSTEM_LOG_COMPONENT_BEHAVIOR.to_string(),
                 source_kind: "system".to_string(),
-                source_id: Some(config.active_extension.clone()),
+                source_id: None,
                 summary: "active behavior not found".to_string(),
-                payload: serde_json::json!({
-                    "active_extension": config.active_extension,
-                    "active_behavior": config.active_behavior,
-                }),
+                payload: serde_json::json!({ "reason": "no behavior contribution" }),
                 created_at: None,
             });
-            scoped(ApiError::not_found("active behavior not found"), request)
-        })?;
-    Ok(behavior)
+            Err(scoped(ApiError::not_found("active behavior not found"), request))
+        }
+        _ => Err(scoped(
+            ApiError::conflict(
+                "multiple behavior implementations found; use interface bindings or explicit extension endpoints",
+            ),
+            request,
+        )),
+    }
 }
 
 pub(super) async fn dispatch_worker_capability_request(
@@ -231,11 +225,4 @@ fn join_entry_path(entry: Option<&str>, path: &str) -> String {
         (None, false) => normalized_path.to_string(),
         (None, true) => String::new(),
     }
-}
-
-fn current_behavior_config(state: &AppState) -> ennoia_kernel::BehaviorConfig {
-    fs::read_to_string(state.runtime_paths.behavior_config_file())
-        .ok()
-        .and_then(|contents| toml::from_str(&contents).ok())
-        .unwrap_or_else(|| state.behavior_config.clone())
 }

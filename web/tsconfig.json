@@ -17,7 +17,6 @@
     "paths": {
       "@/*": ["src/*"],
       "@ennoia/api-client": ["./packages/api-client/src/index.ts"],
-      "@ennoia/builtins": ["./packages/builtins/src/index.ts"],
       "@ennoia/contract": ["./packages/contract/src/index.ts"],
       "@ennoia/i18n": ["./packages/i18n/src/index.ts"],
       "@ennoia/observability": ["./packages/observability/src/index.ts"],
@@ -35,7 +34,6 @@
   "include": [
     "src",
     "./packages/api-client/src",
-    "./packages/builtins/src",
     "./packages/contract/src",
     "./packages/i18n/src",
     "./packages/observability/src",

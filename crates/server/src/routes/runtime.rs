@@ -164,14 +164,6 @@ pub(super) async fn runtime_server_config(State(state): State<AppState>) -> Json
     Json(read_server_config_from_disk(&state).unwrap_or_else(|| state.server_config.clone()))
 }
 
-pub(super) async fn runtime_behavior_config(State(state): State<AppState>) -> Json<BehaviorConfig> {
-    Json(read_behavior_config_from_disk(&state).unwrap_or_else(|| state.behavior_config.clone()))
-}
-
-pub(super) async fn runtime_memory_config(State(state): State<AppState>) -> Json<MemoryConfig> {
-    Json(read_memory_config_from_disk(&state).unwrap_or_else(|| state.memory_config.clone()))
-}
-
 pub(super) async fn runtime_app_config_put(
     State(state): State<AppState>,
     Extension(request): Extension<RequestContext>,
@@ -195,26 +187,6 @@ pub(super) async fn runtime_server_config_put(
     Ok(Json(payload))
 }
 
-pub(super) async fn runtime_behavior_config_put(
-    State(state): State<AppState>,
-    Extension(request): Extension<RequestContext>,
-    Json(payload): Json<BehaviorConfig>,
-) -> ApiResult<BehaviorConfig> {
-    persist_behavior_config(&state, &payload)
-        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?;
-    Ok(Json(payload))
-}
-
-pub(super) async fn runtime_memory_config_put(
-    State(state): State<AppState>,
-    Extension(request): Extension<RequestContext>,
-    Json(payload): Json<MemoryConfig>,
-) -> ApiResult<MemoryConfig> {
-    persist_memory_config(&state, &payload)
-        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?;
-    Ok(Json(payload))
-}
-
 pub(super) fn read_app_config_from_disk(state: &AppState) -> Option<AppConfig> {
     let contents = fs::read_to_string(state.runtime_paths.app_config_file()).ok()?;
     toml::from_str(&contents).ok()
@@ -225,38 +197,12 @@ fn read_server_config_from_disk(state: &AppState) -> Option<ServerConfig> {
     toml::from_str(&contents).ok()
 }
 
-fn read_behavior_config_from_disk(state: &AppState) -> Option<BehaviorConfig> {
-    let contents = fs::read_to_string(state.runtime_paths.behavior_config_file()).ok()?;
-    toml::from_str(&contents).ok()
-}
-
-fn read_memory_config_from_disk(state: &AppState) -> Option<MemoryConfig> {
-    let contents = fs::read_to_string(state.runtime_paths.memory_config_file()).ok()?;
-    toml::from_str(&contents).ok()
-}
-
 fn persist_server_config(state: &AppState, config: &ServerConfig) -> std::io::Result<()> {
     if let Some(parent) = state.runtime_paths.server_config_file().parent() {
         fs::create_dir_all(parent)?;
     }
     let contents = toml::to_string_pretty(config).map_err(std::io::Error::other)?;
     fs::write(state.runtime_paths.server_config_file(), contents)
-}
-
-fn persist_behavior_config(state: &AppState, config: &BehaviorConfig) -> std::io::Result<()> {
-    if let Some(parent) = state.runtime_paths.behavior_config_file().parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let contents = toml::to_string_pretty(config).map_err(std::io::Error::other)?;
-    fs::write(state.runtime_paths.behavior_config_file(), contents)
-}
-
-fn persist_memory_config(state: &AppState, config: &MemoryConfig) -> std::io::Result<()> {
-    if let Some(parent) = state.runtime_paths.memory_config_file().parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let contents = toml::to_string_pretty(config).map_err(std::io::Error::other)?;
-    fs::write(state.runtime_paths.memory_config_file(), contents)
 }
 
 pub(super) async fn space_ui_preferences(

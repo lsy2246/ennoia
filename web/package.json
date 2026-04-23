@@ -14,7 +14,6 @@
   },
   "dependencies": {
     "@ennoia/api-client": "workspace:*",
-    "@ennoia/builtins": "workspace:*",
     "@ennoia/contract": "workspace:*",
     "@ennoia/i18n": "workspace:*",
     "@ennoia/observability": "workspace:*",

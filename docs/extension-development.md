@@ -103,6 +103,7 @@ schedule_actions = [
 ```
 
 Provider、Behavior、Memory、Hook、Interface 和 Schedule Action 贡献只声明能力入口；实际执行统一通过宿主 Worker RPC 分发，不允许扩展自行开放端口。
+扩展自己的配置、UI 文案、主题、页面实现和业务运行态都属于扩展边界，不得放入 Web 主壳的系统模块、核心配置模型或 `config/` 根目录。
 
 ## 推荐目录
 
@@ -191,3 +192,4 @@ Skill 目录独立：
 - 扩展私有数据目录：`<ENNOIA_HOME>/data/extensions/<extension_id>/`
 
 扩展自己的数据库、缓存和私有运行态文件都应放在扩展私有数据目录。核心不提供主业务 SQLite；扩展通过 Worker capability 使用宿主授予的存储、SQLite、网络、事件和日志能力。
+扩展私有业务配置也应放在扩展私有数据目录，并由扩展自行解释；核心只负责扩展生命周期、能力发现和 Worker RPC 分发。

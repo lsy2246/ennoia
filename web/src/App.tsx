@@ -11,7 +11,6 @@ import {
 } from "dockview";
 
 import { getApiBaseUrl } from "@ennoia/api-client";
-import { builtinExtensionPanels } from "@ennoia/builtins";
 import { useRuntimeStore } from "@/stores/runtime";
 import { useUiHelpers, useUiStore } from "@/stores/ui";
 import { AgentEditorView } from "@/views/agents/Editor";
@@ -121,9 +120,6 @@ const BUILTIN_NAV = [
   { id: "settings", href: "/settings", icon: "⚙", labelKey: "web.nav.settings", fallback: "设置", hintKey: "web.nav.settings_hint", hint: "运行时配置表单" },
 ] as const;
 
-const HIDDEN_EXTENSION_IDS = new Set(["observatory", "ext.observatory"]);
-const HIDDEN_EXTENSION_ROUTES = new Set(["/observatory"]);
-
 function RuntimeInspectorPanel() {
   const profile = useRuntimeStore((state) => state.profile);
   const locale = useUiStore((state) => state.locale);
@@ -153,12 +149,7 @@ function RuntimeInspectorPanel() {
 
 function ExtensionPanelDeck() {
   const { runtime, resolveText, t } = useUiHelpers();
-  const panels =
-    runtime?.registry.panels.filter(
-      (panel) =>
-        !HIDDEN_EXTENSION_IDS.has(panel.extension_id) &&
-        !panel.panel.mount.startsWith("observatory."),
-    ) ?? [];
+  const panels = runtime?.registry.panels ?? [];
 
   return (
     <div className="dock-panel-content dock-panel-content--horizontal">
@@ -166,12 +157,11 @@ function ExtensionPanelDeck() {
         <div className="empty-card">{t("web.panel.no_extensions", "暂无扩展面板贡献。")}</div>
       ) : (
         panels.map((panel) => {
-          const descriptor = builtinExtensionPanels[panel.panel.mount];
           return (
             <article key={`${panel.extension_id}:${panel.panel.id}`} className="mini-card">
               <strong>{resolveText(panel.panel.title)}</strong>
               <span>{panel.panel.slot} · {panel.extension_id}</span>
-              <span>{descriptor?.summary ?? panel.panel.mount}</span>
+              <span>{panel.panel.mount}</span>
             </article>
           );
         })
@@ -362,13 +352,7 @@ export function App() {
     }));
     const extensionItems =
       runtime?.registry.pages
-        .filter(
-          (page) =>
-            page.page.nav?.default_pinned &&
-            !HIDDEN_EXTENSION_IDS.has(page.extension_id) &&
-            !HIDDEN_EXTENSION_ROUTES.has(page.page.route) &&
-            !page.page.mount.startsWith("observatory."),
-        )
+        .filter((page) => page.page.nav?.default_pinned)
         .sort((left, right) => (left.page.nav?.order ?? 1000) - (right.page.nav?.order ?? 1000))
         .map((page) => ({
           id: page.page.id,

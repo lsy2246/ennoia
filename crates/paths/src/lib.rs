@@ -71,14 +71,6 @@ impl RuntimePaths {
         self.config_dir().join("profile.toml")
     }
 
-    pub fn behavior_config_file(&self) -> PathBuf {
-        self.config_dir().join("behavior.toml")
-    }
-
-    pub fn memory_config_file(&self) -> PathBuf {
-        self.config_dir().join("memory.toml")
-    }
-
     pub fn interfaces_config_file(&self) -> PathBuf {
         self.config_dir().join("interfaces.toml")
     }

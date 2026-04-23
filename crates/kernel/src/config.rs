@@ -65,45 +65,6 @@ impl Default for ServerConfig {
     }
 }
 
-/// BehaviorConfig stores the active behavior implementation selection.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct BehaviorConfig {
-    #[serde(default = "default_workflow_extension")]
-    pub active_extension: String,
-    #[serde(default = "default_behavior_id")]
-    pub active_behavior: String,
-}
-
-impl Default for BehaviorConfig {
-    fn default() -> Self {
-        Self {
-            active_extension: default_workflow_extension(),
-            active_behavior: default_behavior_id(),
-        }
-    }
-}
-
-/// MemoryConfig is retained for compatibility with older runtime files.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct MemoryConfig {
-    #[serde(default = "default_enabled_memories")]
-    pub enabled: Vec<String>,
-    #[serde(default = "default_memory_read")]
-    pub preferred_read: String,
-    #[serde(default = "default_memory_workspace")]
-    pub preferred_workspace: String,
-}
-
-impl Default for MemoryConfig {
-    fn default() -> Self {
-        Self {
-            enabled: default_enabled_memories(),
-            preferred_read: default_memory_read(),
-            preferred_workspace: default_memory_workspace(),
-        }
-    }
-}
-
 /// InterfaceBindingsConfig stores fine-grained system action bindings.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct InterfaceBindingsConfig {
@@ -283,26 +244,6 @@ fn default_skill_source() -> String {
 
 fn default_registry_source() -> String {
     "builtin".to_string()
-}
-
-fn default_workflow_extension() -> String {
-    "workflow".to_string()
-}
-
-fn default_behavior_id() -> String {
-    "default".to_string()
-}
-
-fn default_enabled_memories() -> Vec<String> {
-    vec!["memory".to_string()]
-}
-
-fn default_memory_read() -> String {
-    "memory".to_string()
-}
-
-fn default_memory_workspace() -> String {
-    "memory".to_string()
 }
 
 fn default_model_discovery_mode() -> String {

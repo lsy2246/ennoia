@@ -22,8 +22,6 @@
 │  ├─ server.toml              # HTTP、中间件、系统内置组件配置
 │  ├─ ui.toml                  # Web 标题、语言、主题、Dockview 偏好
 │  ├─ profile.toml             # 实例资料（显示名、locale、时区、默认空间）
-│  ├─ behavior.toml            # 行为层选择：当前激活的 behavior 实现
-│  ├─ memory.toml              # 记忆层选择：启用列表、读取偏好、工作区偏好
 │  ├─ interfaces.toml          # 细粒度系统动作到扩展 Worker 方法的显式绑定
 │  ├─ preferences/
 │  │  ├─ instance.toml         # 实例级 UI 偏好
@@ -52,13 +50,6 @@
 
 - `config/ennoia.toml`：应用级公共配置。
 - `config/server.toml`：HTTP、中间件、日志级别和 bootstrap 状态等系统配置。
-- `config/behavior.toml`：行为层选择配置。
-  - `active_extension`
-  - `active_behavior`
-- `config/memory.toml`：记忆层选择配置。
-  - `enabled`
-  - `preferred_read`
-  - `preferred_workspace`
 - `config/interfaces.toml`：接口绑定配置。
   - `bindings.<interface_key>.extension_id`
   - `bindings.<interface_key>.method`
@@ -70,6 +61,7 @@
 - `data/system/sqlite/system-log.db`：系统日志库，只记录系统组件观测事件，不记录会话 history。
 - `data/system/schedules.json`：scheduler 计划列表，记录 trigger、target、params、启用状态和最近执行结果；target 可以是扩展动作或本机命令。
 - `data/extensions/{extension_id}/`：扩展私有运行数据根目录。
+  - 扩展私有配置、数据库、缓存和业务运行态都应保留在自己的扩展目录内，不再上浮到 `config/` 根目录。
   - `memory` 扩展在自己的目录中维护完整记忆系统数据。
   - `workflow` 扩展在自己的目录中维护 run / task / artifact / handoff 等运行数据。
 

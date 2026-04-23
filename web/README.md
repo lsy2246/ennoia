@@ -8,16 +8,17 @@
 - `@ennoia/contract`
 - `@ennoia/observability`
 - `@ennoia/ui-sdk`
-- `@ennoia/builtins`
 
 当前阶段提供：
 
 - 主壳布局
 - 路由页面与资源视图拆分
 - 面板区域与多视图工作台
-- Extension Registry 挂载
+- Extension Registry 运行时挂载
 - Bun + Vite + React 构建入口
 - Panda CSS 样式系统与 `styled-system` 代码生成
+
+扩展页面组件、文案和主题归扩展包所有。Web 主壳只通过运行时快照发现扩展贡献，并通过扩展目录自动挂载内置扩展 UI。
 
 常用命令：
 

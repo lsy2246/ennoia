@@ -343,17 +343,6 @@ export type SystemLog = {
   at: string;
 };
 
-export type RuntimeBehaviorConfig = {
-  active_extension: string;
-  active_behavior: string;
-};
-
-export type RuntimeMemoryConfig = {
-  enabled: string[];
-  preferred_read: string;
-  preferred_workspace: string;
-};
-
 export type InterfaceImplementation = {
   extension_id: string;
   method: string;

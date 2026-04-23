@@ -1017,7 +1017,7 @@ mod tests {
     #[test]
     fn runtime_snapshot_flattens_contributions() {
         let root = unique_test_dir("runtime-snapshot");
-        let ext_dir = root.join("observatory");
+        let ext_dir = root.join("sample");
         fs::create_dir_all(&ext_dir).expect("create extension dir");
         fs::write(ext_dir.join("extension.toml"), sample_descriptor()).expect("write descriptor");
 
@@ -1030,7 +1030,7 @@ mod tests {
             &config.registry_file,
             &ExtensionRegistryFile {
                 extensions: vec![ExtensionRegistryEntry {
-                    id: "observatory".to_string(),
+                    id: "sample".to_string(),
                     source: "dev".to_string(),
                     enabled: true,
                     removed: false,
@@ -1078,7 +1078,7 @@ mod tests {
     }
 
     fn sample_descriptor() -> String {
-        sample_descriptor_for("observatory")
+        sample_descriptor_for("sample")
     }
 
     fn sample_descriptor_for(id: &str) -> String {

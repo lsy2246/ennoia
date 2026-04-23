@@ -1,0 +1,6 @@
+{
+  "ext.memory.page": "记忆",
+  "ext.memory.eyebrow": "Memory",
+  "ext.memory.title": "记忆",
+  "ext.memory.description": "记忆页只负责记忆检索、上下文装配、审查和图谱概览；会话的新建、打开和消息发送由系统会话页承载。"
+}

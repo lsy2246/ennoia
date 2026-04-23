@@ -12,7 +12,7 @@ import {
 
 type MemoryTab = "truth" | "context" | "review" | "graph";
 
-export function MemoryExtensionPage() {
+export default function MemoryExtensionPage() {
   const { formatDateTime, t } = useUiHelpers();
   const [workspace, setWorkspace] = useState<WorkspaceSummary | null>(null);
   const [memories, setMemories] = useState<MemoryRecord[]>([]);
@@ -130,11 +130,11 @@ export function MemoryExtensionPage() {
     <div className="resource-layout" style={{ gridTemplateColumns: "320px minmax(0,1fr)" }}>
       <section className="work-panel">
         <div className="page-heading">
-          <span>{t("web.memory.eyebrow", "Memory")}</span>
-          <h1>{t("web.memory.title", "记忆")}</h1>
+          <span>{t("ext.memory.eyebrow", "Memory")}</span>
+          <h1>{t("ext.memory.title", "记忆")}</h1>
           <p>
             {t(
-              "web.memory.description",
+              "ext.memory.description",
               "记忆页只负责记忆检索、上下文装配、审查和图谱概览；会话的新建、打开和消息发送由系统会话页承载。",
             )}
           </p>

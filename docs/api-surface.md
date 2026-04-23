@@ -107,6 +107,7 @@ Conversation API 是稳定产品入口，实际由以下接口键解析到扩展
 - `ANY /api/memory/active/{*path}`
 
 Memory 能力通过扩展 Worker RPC 分发。Memory 扩展拥有自己的私有存储；核心不再提供内置 Journal 存储。
+`/api/memory/active/*` 仅在当前只有一个启用的 Memory 实现时自动选择；存在多个实现时调用方应使用显式 `{memory_id}` 或稳定接口绑定。
 
 ### Conversation 约定
 
@@ -172,6 +173,7 @@ Scheduler 只保存计划并触发目标。当前触发器支持 `once`、`inter
 - `ANY /api/behavior/{*path}`
 
 Behavior 能力入口保留用于兼容和扩展自有 API。系统级运行入口优先使用更细粒度的 run/task/artifact 接口绑定。
+`/api/behavior/*` 不再读取系统级 behavior 配置；存在多个 Behavior 实现时调用方应使用稳定接口绑定或显式扩展 RPC。
 
 ## 日志
 
