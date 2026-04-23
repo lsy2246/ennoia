@@ -316,20 +316,16 @@ export type ExtensionDetail = {
   generation: number;
   health: string;
   diagnostics: ExtensionDiagnostic[];
-  frontend?: {
+  ui?: {
     kind: string;
     entry: string;
     hmr: boolean;
   } | null;
-  backend?: {
+  worker?: {
     kind: string;
-    runtime: string;
     entry: string;
-    base_url?: string | null;
-    command?: string | null;
-    healthcheck?: string | null;
+    abi: string;
     status: string;
-    pid?: number | null;
   } | null;
 };
 

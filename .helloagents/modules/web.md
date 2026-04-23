@@ -17,6 +17,7 @@
 - 共享 API 访问统一收口到 `web/packages/api-client/src/index.ts`
 - 工作台支持 `@agent` 消息路由，不再使用“目标”输入框
 - 内置前端 i18n namespace 使用 `web`
+- 扩展 UI 模块加载使用 `/api/extensions/{extension_id}/ui/module`
 
 ## 依赖关系
 

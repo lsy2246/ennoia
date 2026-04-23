@@ -168,21 +168,17 @@ export type ExtensionMemoryContribution = {
   };
 };
 
-export type ResolvedFrontendEntry = {
+export type ResolvedUiEntry = {
   kind: string;
   entry: string;
   hmr: boolean;
 };
 
-export type ResolvedBackendEntry = {
+export type ResolvedWorkerEntry = {
   kind: string;
-  runtime: string;
   entry: string;
-  base_url?: string | null;
-  command?: string | null;
-  healthcheck?: string | null;
+  abi: string;
   status: string;
-  pid?: number | null;
 };
 
 export type ExtensionDiagnostic = {
@@ -202,8 +198,8 @@ export type ExtensionRuntimeExtension = {
   install_dir: string;
   generation: number;
   health: string;
-  frontend?: ResolvedFrontendEntry | null;
-  backend?: ResolvedBackendEntry | null;
+  ui?: ResolvedUiEntry | null;
+  worker?: ResolvedWorkerEntry | null;
   capabilities: {
     pages: boolean;
     panels: boolean;

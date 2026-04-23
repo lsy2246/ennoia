@@ -43,11 +43,11 @@ export type WorkspaceSummary = {
 };
 
 export async function listMemoryRecords() {
-  return fetchJson<MemoryRecord[]>("/api/ext/memory/memories");
+  return fetchJson<MemoryRecord[]>("/api/memory/active/memories");
 }
 
 export async function getMemoryWorkspaceSummary() {
-  return fetchJson<WorkspaceSummary>("/api/ext/memory/workspace");
+  return fetchJson<WorkspaceSummary>("/api/memory/active/workspace");
 }
 
 export async function recallMemoryRecords(payload: {
@@ -61,7 +61,7 @@ export async function recallMemoryRecords(payload: {
   conversation_id?: string;
   run_id?: string;
 }) {
-  return fetchJson<RecallResult>("/api/ext/memory/memories/recall", {
+  return fetchJson<RecallResult>("/api/memory/active/memories/recall", {
     method: "POST",
     body: JSON.stringify(payload),
   });
@@ -73,7 +73,7 @@ export async function reviewMemoryRecord(payload: {
   action: string;
   notes?: string;
 }) {
-  return fetchJson("/api/ext/memory/memories/review", {
+  return fetchJson("/api/memory/active/memories/review", {
     method: "POST",
     body: JSON.stringify(payload),
   });

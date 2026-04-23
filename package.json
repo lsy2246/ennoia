@@ -11,6 +11,7 @@
   "scripts": {
     "install": "node ./scripts/install-workspace.mjs",
     "dev": "cargo run -p ennoia-cli -- dev",
+    "build:workers": "node ./scripts/build-workers.mjs",
     "build:web": "bun run --cwd web build",
     "check:web": "bun run --cwd web typecheck",
     "pack:npm": "node ./scripts/pack-npm.mjs",

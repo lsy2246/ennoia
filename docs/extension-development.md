@@ -1,8 +1,8 @@
-﻿# Ennoia 扩展开发指南
+# Ennoia 扩展开发指南
 
 ## 定位
 
-Extension 是系统插件包，Skill 是 Agent 可引用的能力包。两者目录、生命周期和 manifest 语义分离。
+Extension 是系统能力包，Skill 是 Agent 可引用的能力包。Extension 不再表示“前端 + 独立后端服务”，而是由宿主装配的一组可选贡献：`ui`、`worker`、主题、语言、命令、Provider、Behavior、Memory 和 Hook。
 
 ## 源码放置
 
@@ -16,13 +16,41 @@ Extension 是系统插件包，Skill 是 Agent 可引用的能力包。两者目
 系统扩展只使用 `extension.toml`。推荐字段：
 
 - `source`
-- `frontend`
-- `backend`
+- `ui`
+- `worker`
+- `permissions`
+- `runtime`
 - `build`
 - `assets`
 - `watch`
 - `capabilities`
 - `contributes`
+
+`ui` 和 `worker` 都是可选声明。纯 UI 扩展不需要 `worker`，纯能力扩展不需要 `ui`。
+
+```toml
+[ui]
+runtime = "browser-esm"
+entry = "ui/entry.js"
+
+[worker]
+kind = "wasm"
+entry = "worker/plugin.wasm"
+abi = "ennoia.worker.v1"
+
+[permissions]
+storage = "extension"
+sqlite = true
+network = []
+events = ["publish", "subscribe"]
+fs = []
+env = []
+
+[runtime]
+startup = "lazy"
+timeout_ms = 30000
+memory_limit_mb = 128
+```
 
 `contributes` 可包含：
 
@@ -32,57 +60,36 @@ Extension 是系统插件包，Skill 是 Agent 可引用的能力包。两者目
 - `locales[]`
 - `commands[]`
 - `providers[]`
+- `behaviors[]`
+- `memories[]`
 - `hooks[]`
 
-`pages[]` 是可选 UI 贡献。声明页面后，Web 的扩展详情页会提供“打开视图”；只有页面额外声明 `nav.default_pinned = true` 时才默认进入主导航：
-
-```toml
-[capabilities]
-pages = true
-
-[contributes]
-pages = [
-  { id = "memory.page", title = { key = "web.nav.memory", fallback = "记忆" }, route = "/memory", mount = "memory.page", icon = "memory", nav = { default_pinned = true, order = 30 } }
-]
-```
+`pages[]` 是可选 UI 贡献。声明页面后，Web 的扩展详情页会提供“打开视图”；只有页面额外声明 `nav.default_pinned = true` 时才默认进入主导航。
 
 Hook 贡献声明扩展要接收的系统时机：
 
 ```toml
-[capabilities]
-hooks = true
-
 [contributes]
 hooks = [
-  { event = "conversation.message.created", handler = "/hooks/conversation-message-created" }
+  { event = "conversation.message.created", handler = "hooks/conversation-message-created" }
 ]
 ```
 
-系统会把 `HookEventEnvelope` POST 到 `handler`。扩展返回 `HookDispatchResponse`：
+系统把 Hook 事件转换为 Worker RPC 调用。扩展返回 `HookDispatchResponse`：
 
 - `handled=true`：扩展已处理该事件。
 - `result`：可选结构化结果，供调用方继续返回或落库。
 - `message`：可选诊断说明。
 
-系统只保证事件协议和触发时机；memory、workflow、任务规划、上下文组装等业务语义由扩展实现。
-
-后端扩展建议补充：
-
-- `backend.base_url`：主系统代理扩展后端时使用的目标地址
-- `backend.command`：扩展运行时托管的长期后端命令
-- `backend.dev_command`：开发模式覆盖命令
-
-Provider 贡献用于声明上游接口实现。实现扩展声明 `kind`、`interfaces`、`model_discovery`、`recommended_model` 和 `manual_model`，渠道实例在 `config/providers/*.toml` 中保存用户确认后的 `default_model`。若扩展希望初始化时提供默认渠道实例，可在扩展包内放置 `provider-presets/*.toml`，由 CLI 通用扫描并写入 `config/providers/`。
+Provider、Behavior 和 Memory 贡献只声明能力入口；实际执行统一通过宿主 Worker RPC 分发，不允许扩展自行开放端口。
 
 ## 推荐目录
 
 ```text
 <extension_id>/
 ├─ extension.toml
-├─ plugins/          # 可选：触发后执行什么
-├─ hooks/            # 可选：系统时机触发声明/适配
-├─ timers/           # 可选：时间触发声明/适配
 ├─ ui/               # 可选：页面、面板、主题、语言
+├─ worker/           # 可选：Wasm Worker
 ├─ data/             # 可选：schema、私有模型、资源
 └─ provider-presets/ # 可选：初始化上游渠道实例
 ```
@@ -102,11 +109,57 @@ Skill 目录独立：
 2. CLI 把内置扩展同步到 `<ENNOIA_HOME>/extensions/<extension_id>/`，并更新 `config/extensions.toml`。
 3. CLI 扫描内置扩展中的 `provider-presets/*.toml`，把默认渠道实例写入 `config/providers/`。
 4. CLI 把仓库内 `builtins/extensions/*` 追加为开发来源，供开发模式覆盖安装目录。
-5. CLI 启动 Web dev server 和扩展前端 dev command。
-6. Extension Host 托管扩展后端命令，并向命令注入 `ENNOIA_HOME` / `ENNOIA_EXTENSION_ROOT`。
-7. Server 暴露 runtime snapshot、事件流、诊断、日志、资源贡献接口，以及 `/api/ext/{extension_id}/{*path}` 代理入口。
-8. Core 只在自身生命周期时机派发 Hook；扩展内部也可按同一规范组织自己的 Hook/Plugin。
-9. Web 工作台根据 runtime snapshot 挂载页面、面板、主题、语言和命令；如果某个 mount 在本地 registry 中存在实现，则直接渲染真实组件。
+5. Extension Host 扫描扩展包，解析 `ui`、`worker` 和贡献能力，不启动扩展私有进程。
+6. Server 暴露 runtime snapshot、事件流、诊断、日志、资源贡献接口，以及 `/api/extensions/{extension_id}/rpc/{method}` Worker RPC 入口。
+7. Core 只在自身生命周期时机派发 Hook；扩展内部按 Worker ABI 和 capability 组织自己的业务逻辑。
+8. Web 工作台根据 runtime snapshot 挂载页面、面板、主题、语言和命令；如果某个 mount 在本地 registry 中存在实现，则直接渲染真实组件。
+
+## 开发热加载
+
+- `ennoia dev` 监听 `crates/`、`assets/`、`builtins/extensions/`、`Cargo.toml` 和 `Cargo.lock`。
+- `builtins/extensions/` 下的 `extension.toml`、UI 资源和 `.wasm` 变更会触发 Host 重新构建并重启 API 进程。
+- Server 运行时每 2 秒刷新一次扩展注册表与 manifest，用于让扩展启停、贡献声明和入口路径变化尽快反映到 runtime snapshot。
+- Worker runtime 会缓存编译后的 Wasm Module；`.wasm` mtime 或文件大小变化后，下一次 RPC 调用会自动重新编译。
+- 每次 RPC 调用都会创建新的 Wasm 实例，避免线性内存状态跨请求泄漏。
+
+## Worker ABI
+
+当前宿主支持 `ennoia.worker.v1`，Worker 需要导出：
+
+- `memory`
+- `ennoia_worker_alloc(len: i32) -> i32`
+- `ennoia_worker_dealloc(ptr: i32, len: i32)`
+- `ennoia_worker_handle(ptr: i32, len: i32) -> i64`
+
+宿主传入的缓冲区是 UTF-8 JSON：
+
+```json
+{
+  "method": "memory/recall",
+  "params": {},
+  "context": {}
+}
+```
+
+`ennoia_worker_handle` 返回高 32 位为 `ptr`、低 32 位为 `len` 的打包值。返回缓冲区应是 `ExtensionRpcResponse` JSON；如果返回普通 JSON，宿主会包装为成功响应。
+
+内置 `memory` 与 `workflow` Worker 分别位于：
+
+- `builtins/extensions/memory/worker`
+- `builtins/extensions/workflow/worker`
+
+执行 `bun run build:workers` 会编译 `wasm32-unknown-unknown` release 产物，并复制到：
+
+- `builtins/extensions/memory/worker/memory.wasm`
+- `builtins/extensions/workflow/worker/workflow.wasm`
+
+## 沙箱与权限
+
+- Host 默认不注入 WASI，也不允许任意 import。
+- RPC 方法必须匹配 manifest 中 Provider、Behavior、Memory 或 Hook 贡献声明的 `entry` / `handler` 前缀；纯 Worker 扩展没有贡献前缀时允许调用安全方法名。
+- `runtime.memory_limit_mb` 控制 Wasm store 内存上限。
+- `runtime.timeout_ms` 控制 Wasm fuel 预算，防止无限循环长期占用 Host。
+- `permissions` 是后续 host capability bridge 的唯一声明来源；在 bridge 接入前，Worker 没有文件、网络、环境变量或数据库的宿主访问能力。
 
 ## 安装与扫描目录
 
@@ -116,4 +169,4 @@ Skill 目录独立：
 - 技能包目录：`<ENNOIA_HOME>/skills/<skill_id>/`
 - 扩展私有数据目录：`<ENNOIA_HOME>/data/extensions/<extension_id>/`
 
-扩展自己的数据库、缓存和私有运行态文件都应放在扩展私有数据目录。核心不提供主业务 SQLite，也不提供 Rust SDK；扩展通过 HTTP API、Hook envelope、配置文件和 `ENNOIA_HOME` / `ENNOIA_EXTENSION_ROOT` 接入系统。
+扩展自己的数据库、缓存和私有运行态文件都应放在扩展私有数据目录。核心不提供主业务 SQLite；扩展通过 Worker capability 使用宿主授予的存储、SQLite、网络、事件和日志能力。

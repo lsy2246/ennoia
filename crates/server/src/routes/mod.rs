@@ -66,148 +66,142 @@ fn scoped(error: ApiError, request: &RequestContext) -> ApiError {
 
 pub fn build_router(state: AppState) -> Router {
     let bootstrap = Router::new()
-        .route("/api/v1/bootstrap/status", get(bootstrap_status))
-        .route("/api/v1/bootstrap/setup", post(bootstrap_setup));
+        .route("/api/bootstrap/status", get(bootstrap_status))
+        .route("/api/bootstrap/setup", post(bootstrap_setup));
 
     let runtime = Router::new()
         .route(
-            "/api/v1/runtime/profile",
+            "/api/runtime/profile",
             get(runtime_profile).put(runtime_profile_put),
         )
         .route(
-            "/api/v1/runtime/preferences",
+            "/api/runtime/preferences",
             get(runtime_preferences).put(runtime_preferences_put),
         )
         .route(
-            "/api/v1/runtime/app-config",
+            "/api/runtime/app-config",
             get(runtime_app_config).put(runtime_app_config_put),
         )
         .route(
-            "/api/v1/runtime/server-config",
+            "/api/runtime/server-config",
             get(runtime_server_config).put(runtime_server_config_put),
         )
         .route(
-            "/api/v1/runtime/behavior-config",
+            "/api/runtime/behavior-config",
             get(runtime_behavior_config).put(runtime_behavior_config_put),
         )
         .route(
-            "/api/v1/runtime/memory-config",
+            "/api/runtime/memory-config",
             get(runtime_memory_config).put(runtime_memory_config_put),
         );
 
     Router::new()
         .route("/health", get(health))
-        .route("/api/v1/overview", get(overview))
-        .route("/api/v1/ui/runtime", get(ui_runtime))
-        .route("/api/v1/ui/messages", get(ui_messages))
+        .route("/api/overview", get(overview))
+        .route("/api/ui/runtime", get(ui_runtime))
+        .route("/api/ui/messages", get(ui_messages))
         .route(
-            "/api/v1/spaces/{space_id}/ui-preferences",
+            "/api/spaces/{space_id}/ui-preferences",
             get(space_ui_preferences).put(space_ui_preferences_put),
         )
-        .route("/api/v1/extensions", get(extensions))
+        .route("/api/extensions", get(extensions))
         .route(
-            "/api/v1/extensions/{extension_id}/enabled",
+            "/api/extensions/{extension_id}/enabled",
             put(extension_enabled_put),
         )
-        .route("/api/v1/extensions/runtime", get(extensions_runtime))
-        .route("/api/v1/extensions/events", get(extension_events))
+        .route("/api/extensions/runtime", get(extensions_runtime))
+        .route("/api/extensions/events", get(extension_events))
         .route(
-            "/api/v1/extensions/events/stream",
+            "/api/extensions/events/stream",
             get(extension_events_stream),
         )
-        .route("/api/v1/extensions/registry", get(extensions_runtime))
-        .route("/api/v1/extensions/pages", get(extension_pages))
-        .route("/api/v1/extensions/panels", get(extension_panels))
-        .route("/api/v1/extensions/commands", get(extension_commands))
-        .route("/api/v1/extensions/providers", get(extension_providers))
-        .route("/api/v1/extensions/behaviors", get(extension_behaviors))
-        .route("/api/v1/extensions/memories", get(extension_memories))
-        .route("/api/v1/extensions/hooks", get(extension_hooks))
-        .route("/api/v1/extensions/attach", post(extension_attach))
-        .route("/api/v1/extensions/{extension_id}", get(extension_detail))
+        .route("/api/extensions/registry", get(extensions_runtime))
+        .route("/api/extensions/pages", get(extension_pages))
+        .route("/api/extensions/panels", get(extension_panels))
+        .route("/api/extensions/commands", get(extension_commands))
+        .route("/api/extensions/providers", get(extension_providers))
+        .route("/api/extensions/behaviors", get(extension_behaviors))
+        .route("/api/extensions/memories", get(extension_memories))
+        .route("/api/extensions/hooks", get(extension_hooks))
+        .route("/api/extensions/attach", post(extension_attach))
+        .route("/api/extensions/{extension_id}", get(extension_detail))
         .route(
-            "/api/v1/extensions/{extension_id}/diagnostics",
+            "/api/extensions/{extension_id}/diagnostics",
             get(extension_diagnostics),
         )
         .route(
-            "/api/v1/extensions/{extension_id}/frontend/module",
-            get(extension_frontend_module),
+            "/api/extensions/{extension_id}/ui/module",
+            get(extension_ui_module),
         )
         .route(
-            "/api/v1/extensions/{extension_id}/themes/{theme_id}/stylesheet",
+            "/api/extensions/{extension_id}/rpc/{method}",
+            post(extension_rpc),
+        )
+        .route(
+            "/api/extensions/{extension_id}/themes/{theme_id}/stylesheet",
             get(extension_theme_stylesheet),
         )
+        .route("/api/extensions/{extension_id}/logs", get(extension_logs))
         .route(
-            "/api/v1/extensions/{extension_id}/logs",
-            get(extension_logs),
-        )
-        .route(
-            "/api/v1/extensions/{extension_id}/reload",
+            "/api/extensions/{extension_id}/reload",
             post(extension_reload),
         )
-        .route("/api/ext/{extension_id}/{*path}", any(extension_api_proxy))
-        .route("/api/v1/behaviors", get(behaviors))
-        .route("/api/v1/behaviors/active", get(active_behavior))
-        .route("/api/v1/behavior/status", get(behavior_status))
-        .route("/api/v1/behavior/{*path}", any(behavior_api_proxy))
-        .route("/api/v1/memories", get(memories))
-        .route("/api/v1/memories/active", get(active_memory))
-        .route("/api/v1/memories/{memory_id}/status", get(memory_status))
-        .route("/api/v1/memory/{memory_id}/{*path}", any(memory_api_proxy))
+        .route("/api/behaviors", get(behaviors))
+        .route("/api/behaviors/active", get(active_behavior))
+        .route("/api/behavior/status", get(behavior_status))
+        .route("/api/behavior/{*path}", any(behavior_api_proxy))
+        .route("/api/memories", get(memories))
+        .route("/api/memories/active", get(active_memory))
+        .route("/api/memories/{memory_id}/status", get(memory_status))
+        .route("/api/memory/{memory_id}/{*path}", any(memory_api_proxy))
+        .route("/api/memory/active/{*path}", any(active_memory_api_proxy))
         .route(
-            "/api/v1/memory/active/{*path}",
-            any(active_memory_api_proxy),
-        )
-        .route(
-            "/api/v1/extensions/{extension_id}/restart",
+            "/api/extensions/{extension_id}/restart",
             post(extension_restart),
         )
         .route(
-            "/api/v1/extensions/attach/{extension_id}",
+            "/api/extensions/attach/{extension_id}",
             delete(extension_detach),
         )
         .route(
-            "/api/v1/conversations",
+            "/api/conversations",
             get(conversations_list).post(conversations_create),
         )
         .route(
-            "/api/v1/conversations/{conversation_id}",
+            "/api/conversations/{conversation_id}",
             get(conversation_detail).delete(conversation_delete),
         )
         .route(
-            "/api/v1/conversations/{conversation_id}/messages",
+            "/api/conversations/{conversation_id}/messages",
             get(conversation_messages).post(conversation_messages_create),
         )
         .route(
-            "/api/v1/conversations/{conversation_id}/lanes",
+            "/api/conversations/{conversation_id}/lanes",
             get(conversation_lanes),
         )
-        .route("/api/v1/agents", get(agents).post(agent_create))
+        .route("/api/agents", get(agents).post(agent_create))
         .route(
-            "/api/v1/agents/{agent_id}",
+            "/api/agents/{agent_id}",
             get(agent_detail).put(agent_update).delete(agent_delete),
         )
-        .route("/api/v1/skills", get(skills).post(skill_create))
+        .route("/api/skills", get(skills).post(skill_create))
         .route(
-            "/api/v1/skills/{skill_id}",
+            "/api/skills/{skill_id}",
             get(skill_detail).put(skill_update).delete(skill_delete),
         )
-        .route("/api/v1/providers", get(providers).post(provider_create))
+        .route("/api/providers", get(providers).post(provider_create))
         .route(
-            "/api/v1/providers/{provider_id}",
+            "/api/providers/{provider_id}",
             get(provider_detail)
                 .put(provider_update)
                 .delete(provider_delete),
         )
-        .route(
-            "/api/v1/providers/{provider_id}/models",
-            get(provider_models),
-        )
-        .route("/api/v1/spaces", get(spaces))
-        .route("/api/v1/logs", get(logs_list))
-        .route("/api/v1/system/logs", get(system_logs))
-        .route("/api/v1/system/logs/{log_id}", get(system_log_detail))
-        .route("/api/v1/logs/frontend", post(frontend_log_create))
+        .route("/api/providers/{provider_id}/models", get(provider_models))
+        .route("/api/spaces", get(spaces))
+        .route("/api/logs", get(logs_list))
+        .route("/api/system/logs", get(system_logs))
+        .route("/api/system/logs/{log_id}", get(system_log_detail))
+        .route("/api/logs/frontend", post(frontend_log_create))
         .merge(bootstrap)
         .merge(runtime)
         .layer(axum_middleware::from_fn_with_state(

@@ -8,16 +8,20 @@ mode = "package"
 root = "."
 dev = false
 
-[backend]
-runtime = "rust"
-base_url = "http://127.0.0.1:3921"
-command = "cargo run --manifest-path \"plugins/workflow-service/Cargo.toml\" --bin ennoia-workflow-extension -- --home \"${ENNOIA_HOME}\" --port 3921"
-healthcheck = "/health"
+[worker]
+kind = "wasm"
+entry = "worker/workflow.wasm"
+abi = "ennoia.worker.v1"
+
+[permissions]
+storage = "extension"
+sqlite = true
+events = ["publish", "subscribe"]
 
 [capabilities]
 behaviors = true
 
 [contributes]
 behaviors = [
-  { id = "default", extension_id = "workflow", interfaces = ["runs", "tasks", "artifacts", "handoffs", "status"], entry = "/", version = "1" }
+  { id = "default", extension_id = "workflow", interfaces = ["runs", "tasks", "artifacts", "handoffs", "status"], entry = "behavior", version = "1" }
 ]

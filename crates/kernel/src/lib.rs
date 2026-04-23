@@ -29,14 +29,16 @@ pub use domain::{
 };
 pub use extension::{
     BehaviorContribution, CommandContribution, ContributionSet, ExtensionAssetsSpec,
-    ExtensionBackendSpec, ExtensionCapabilities, ExtensionDiagnostic, ExtensionFrontendSpec,
-    ExtensionHealth, ExtensionKind, ExtensionManifest, ExtensionRuntimeEvent, ExtensionSourceMode,
-    ExtensionSourceSpec, ExtensionWatchSpec, HookContribution, HookDispatchResponse,
-    HookEventEnvelope, HookResourceRef, LocaleContribution, MemoryContribution, PageContribution,
-    PanelContribution, ProviderContribution, ProviderGenerationOption, ResolvedBackendEntry,
-    ResolvedFrontendEntry, ThemeContribution, HOOK_EVENT_ARTIFACT_CREATED,
-    HOOK_EVENT_CONVERSATION_CREATED, HOOK_EVENT_CONVERSATION_MESSAGE_CREATED, HOOK_EVENT_JOB_DUE,
-    HOOK_EVENT_RUN_REQUESTED, HOOK_EVENT_RUN_STAGE_CHANGED,
+    ExtensionCapabilities, ExtensionDiagnostic, ExtensionHealth, ExtensionKind, ExtensionManifest,
+    ExtensionPermissionSpec, ExtensionRpcError, ExtensionRpcRequest, ExtensionRpcResponse,
+    ExtensionRuntimeEvent, ExtensionRuntimeSpec, ExtensionSourceMode, ExtensionSourceSpec,
+    ExtensionUiSpec, ExtensionWatchSpec, ExtensionWorkerSpec, HookContribution,
+    HookDispatchResponse, HookEventEnvelope, HookResourceRef, LocaleContribution,
+    MemoryContribution, PageContribution, PanelContribution, ProviderContribution,
+    ProviderGenerationOption, ResolvedUiEntry, ResolvedWorkerEntry, ThemeContribution,
+    HOOK_EVENT_ARTIFACT_CREATED, HOOK_EVENT_CONVERSATION_CREATED,
+    HOOK_EVENT_CONVERSATION_MESSAGE_CREATED, HOOK_EVENT_JOB_DUE, HOOK_EVENT_RUN_REQUESTED,
+    HOOK_EVENT_RUN_STAGE_CHANGED,
 };
 pub use gate::{GateRecord, GateSeverity, GateVerdict};
 pub use overview::{core_modules, PlatformOverview};

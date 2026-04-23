@@ -182,7 +182,7 @@ async fn extension_command(
     Ok(())
 }
 
-const BACKEND_RELOAD_DEBOUNCE: Duration = Duration::from_millis(800);
+const HOST_RELOAD_DEBOUNCE: Duration = Duration::from_millis(800);
 const WATCH_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const API_READY_TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -193,22 +193,24 @@ async fn run_dev_supervisor(
     let repo_root = env::current_dir()?;
     let mut dev_processes = DevProcessGroup::new();
     dev_processes.start_web(&paths, &server_config)?;
-    dev_processes.start_extension_frontends(&paths)?;
+    dev_processes.report_extension_ui_sources(&paths)?;
 
     let mut api = ApiDevProcess::new(repo_root.clone(), paths.clone(), server_config.clone());
     api.start_initial().await?;
 
     let (watch_tx, watch_rx) = mpsc::channel();
-    let _watcher = start_backend_watcher(&repo_root, watch_tx)?;
+    let _watcher = start_host_watcher(&repo_root, watch_tx)?;
 
     println!("Ennoia dev runtime starting at {}", paths.home().display());
     println!("Web: http://{WEB_DEV_HOST}:{WEB_DEV_PORT}");
     println!("API: http://{}:{}", server_config.host, server_config.port);
-    println!("Backend hot reload: watching crates/, assets/, Cargo.toml and Cargo.lock.");
-    println!("Press Ctrl+C to stop API, Web and extension dev processes.");
+    println!(
+        "Host hot reload: watching crates/, assets/, builtins/extensions/, Cargo.toml and Cargo.lock."
+    );
+    println!("Press Ctrl+C to stop API and Web processes.");
 
     let mut ticker = tokio::time::interval(WATCH_POLL_INTERVAL);
-    let mut pending_backend_change: Option<Instant> = None;
+    let mut pending_host_change: Option<Instant> = None;
 
     loop {
         tokio::select! {
@@ -223,15 +225,15 @@ async fn run_dev_supervisor(
                     saw_change = true;
                 }
                 if saw_change {
-                    pending_backend_change = Some(Instant::now());
+                    pending_host_change = Some(Instant::now());
                 }
-                if pending_backend_change
-                    .map(|changed_at| changed_at.elapsed() >= BACKEND_RELOAD_DEBOUNCE)
+                if pending_host_change
+                    .map(|changed_at| changed_at.elapsed() >= HOST_RELOAD_DEBOUNCE)
                     .unwrap_or(false)
                 {
-                    pending_backend_change = None;
+                    pending_host_change = None;
                     if let Err(error) = api.rebuild_and_restart().await {
-                        eprintln!("backend hot reload failed: {error}");
+                        eprintln!("host hot reload failed: {error}");
                     }
                 }
             }
@@ -278,12 +280,12 @@ impl ApiDevProcess {
     }
 
     async fn rebuild_and_restart(&mut self) -> io::Result<()> {
-        println!("backend change detected; rebuilding API...");
+        println!("host change detected; rebuilding API...");
         let built = match self.build_api_binary() {
             Ok(path) => path,
             Err(error) => {
                 eprintln!(
-                    "backend build failed; keeping previous API process alive; log={}",
+                    "host build failed; keeping previous API process alive; log={}",
                     self.build_log_path().display()
                 );
                 return Err(error);
@@ -463,7 +465,7 @@ impl DevProcessGroup {
         self.spawn("web", command, &log_path)
     }
 
-    fn start_extension_frontends(&mut self, paths: &RuntimePaths) -> io::Result<()> {
+    fn report_extension_ui_sources(&mut self, paths: &RuntimePaths) -> io::Result<()> {
         for source_root in attached_dev_source_roots(paths)? {
             let Some(descriptor_path) = descriptor_path(&source_root) else {
                 continue;
@@ -474,21 +476,12 @@ impl DevProcessGroup {
             if manifest.source.mode != ExtensionSourceMode::Dev {
                 continue;
             }
-            let Some(dev_command) = manifest.frontend.dev_command.clone() else {
-                if let Some(dev_url) = manifest.frontend.dev_url {
-                    println!(
-                        "extension {} frontend uses external dev_url: {}",
-                        manifest.id, dev_url
-                    );
-                }
-                continue;
-            };
-
-            let log_path = paths
-                .extensions_logs_dir()
-                .join(format!("{}.frontend.log", manifest.id));
-            let command = shell_command(&dev_command, &source_root);
-            self.spawn(&format!("{} frontend", manifest.id), command, &log_path)?;
+            if let Some(dev_url) = manifest.ui.dev_url {
+                println!(
+                    "extension {} ui uses external dev_url: {}",
+                    manifest.id, dev_url
+                );
+            }
         }
         Ok(())
     }
@@ -528,7 +521,7 @@ impl Drop for DevProcessGroup {
     }
 }
 
-fn start_backend_watcher(repo_root: &Path, tx: mpsc::Sender<()>) -> io::Result<RecommendedWatcher> {
+fn start_host_watcher(repo_root: &Path, tx: mpsc::Sender<()>) -> io::Result<RecommendedWatcher> {
     let filter_root = repo_root.to_path_buf();
     let mut watcher = RecommendedWatcher::new(
         move |result: Result<notify::Event, notify::Error>| {
@@ -536,7 +529,7 @@ fn start_backend_watcher(repo_root: &Path, tx: mpsc::Sender<()>) -> io::Result<R
                 if event
                     .paths
                     .iter()
-                    .any(|path| is_backend_reload_path(&filter_root, path))
+                    .any(|path| is_host_reload_path(&filter_root, path))
                 {
                     let _ = tx.send(());
                 }
@@ -554,6 +547,11 @@ fn start_backend_watcher(repo_root: &Path, tx: mpsc::Sender<()>) -> io::Result<R
     watch_if_exists(
         &mut watcher,
         &repo_root.join("assets"),
+        RecursiveMode::Recursive,
+    )?;
+    watch_if_exists(
+        &mut watcher,
+        &repo_root.join("builtins").join("extensions"),
         RecursiveMode::Recursive,
     )?;
     watch_if_exists(
@@ -581,7 +579,7 @@ fn watch_if_exists(
     Ok(())
 }
 
-fn is_backend_reload_path(repo_root: &Path, path: &Path) -> bool {
+fn is_host_reload_path(repo_root: &Path, path: &Path) -> bool {
     let Ok(relative) = path.strip_prefix(repo_root) else {
         return false;
     };
@@ -591,11 +589,14 @@ fn is_backend_reload_path(repo_root: &Path, path: &Path) -> bool {
     if relative == Path::new("Cargo.toml") || relative == Path::new("Cargo.lock") {
         return true;
     }
-    if !(relative.starts_with("crates") || relative.starts_with("assets")) {
+    if !(relative.starts_with("crates")
+        || relative.starts_with("assets")
+        || relative.starts_with(Path::new("builtins").join("extensions")))
+    {
         return false;
     }
     match path.extension().and_then(|value| value.to_str()) {
-        Some("rs" | "toml" | "sql" | "json" | "js" | "ts" | "css" | "html") => true,
+        Some("rs" | "toml" | "sql" | "json" | "js" | "ts" | "css" | "html" | "wasm") => true,
         None => true,
         _ => false,
     }
@@ -822,6 +823,15 @@ fn materialize_builtin_packages(paths: &RuntimePaths) -> io::Result<()> {
         }
         write_text_asset(paths.home(), asset.logical_path, asset.contents)?;
     }
+    for asset in builtins::extension_binaries() {
+        let Some(id) = builtin_package_id(asset.logical_path) else {
+            continue;
+        };
+        if is_removed_builtin_extension(&extension_registry, id) {
+            continue;
+        }
+        write_binary_asset(paths.home(), asset.logical_path, asset.contents)?;
+    }
 
     for asset in builtins::skills() {
         let Some(id) = builtin_package_id(asset.logical_path) else {
@@ -916,6 +926,14 @@ fn is_removed_builtin_skill(registry: &SkillRegistryFile, id: &str) -> bool {
 }
 
 fn write_text_asset(root: &Path, logical_path: &str, contents: &str) -> io::Result<()> {
+    let path = root.join(logical_path);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(path, contents)
+}
+
+fn write_binary_asset(root: &Path, logical_path: &str, contents: &[u8]) -> io::Result<()> {
     let path = root.join(logical_path);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;

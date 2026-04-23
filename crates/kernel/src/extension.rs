@@ -89,7 +89,7 @@ pub struct ProviderGenerationOption {
     pub allowed_values: Vec<String>,
 }
 
-/// ProviderContribution describes a backend or frontend provider entry.
+/// ProviderContribution describes a provider capability entry.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProviderContribution {
     pub id: String,
@@ -251,9 +251,9 @@ pub struct ExtensionSourceSpec {
     pub dev: bool,
 }
 
-/// ExtensionFrontendSpec describes the logical frontend entry.
+/// ExtensionUiSpec describes an optional UI module contributed by an extension package.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ExtensionFrontendSpec {
+pub struct ExtensionUiSpec {
     #[serde(default)]
     pub runtime: Option<String>,
     #[serde(default)]
@@ -261,28 +261,68 @@ pub struct ExtensionFrontendSpec {
     #[serde(default)]
     pub dev_url: Option<String>,
     #[serde(default)]
-    pub dev_command: Option<String>,
-    #[serde(default)]
     pub hmr: bool,
 }
 
-/// ExtensionBackendSpec describes the logical backend entry.
+/// ExtensionWorkerSpec describes an optional sandboxed execution unit.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ExtensionBackendSpec {
+pub struct ExtensionWorkerSpec {
     #[serde(default)]
-    pub runtime: Option<String>,
+    pub kind: Option<String>,
     #[serde(default)]
     pub entry: Option<String>,
     #[serde(default)]
-    pub base_url: Option<String>,
+    pub abi: Option<String>,
+}
+
+/// ExtensionPermissionSpec declares host capabilities an extension may request.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ExtensionPermissionSpec {
     #[serde(default)]
-    pub command: Option<String>,
+    pub storage: Option<String>,
     #[serde(default)]
-    pub dev_command: Option<String>,
+    pub sqlite: bool,
     #[serde(default)]
-    pub healthcheck: Option<String>,
+    pub network: Vec<String>,
     #[serde(default)]
-    pub restart: Option<String>,
+    pub events: Vec<String>,
+    #[serde(default)]
+    pub fs: Vec<String>,
+    #[serde(default)]
+    pub env: Vec<String>,
+}
+
+/// ExtensionRuntimeSpec describes worker lifecycle limits owned by the host.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ExtensionRuntimeSpec {
+    #[serde(default = "default_worker_startup")]
+    pub startup: String,
+    #[serde(default = "default_worker_timeout_ms")]
+    pub timeout_ms: u64,
+    #[serde(default = "default_worker_memory_limit_mb")]
+    pub memory_limit_mb: u32,
+}
+
+impl Default for ExtensionRuntimeSpec {
+    fn default() -> Self {
+        Self {
+            startup: default_worker_startup(),
+            timeout_ms: default_worker_timeout_ms(),
+            memory_limit_mb: default_worker_memory_limit_mb(),
+        }
+    }
+}
+
+fn default_worker_startup() -> String {
+    "lazy".to_string()
+}
+
+fn default_worker_timeout_ms() -> u64 {
+    30_000
+}
+
+fn default_worker_memory_limit_mb() -> u32 {
+    128
 }
 
 /// ExtensionBuildSpec describes build outputs for release packaging.
@@ -291,9 +331,9 @@ pub struct ExtensionBuildSpec {
     #[serde(default)]
     pub out_dir: Option<String>,
     #[serde(default)]
-    pub frontend_bundle: Option<String>,
+    pub ui_bundle: Option<String>,
     #[serde(default)]
-    pub backend_bundle: Option<String>,
+    pub worker_bundle: Option<String>,
 }
 
 /// ExtensionAssetsSpec describes asset roots.
@@ -366,9 +406,13 @@ pub struct ExtensionManifest {
     #[serde(default)]
     pub source: ExtensionSourceSpec,
     #[serde(default)]
-    pub frontend: ExtensionFrontendSpec,
+    pub ui: ExtensionUiSpec,
     #[serde(default)]
-    pub backend: ExtensionBackendSpec,
+    pub worker: ExtensionWorkerSpec,
+    #[serde(default)]
+    pub permissions: ExtensionPermissionSpec,
+    #[serde(default)]
+    pub runtime: ExtensionRuntimeSpec,
     #[serde(default)]
     pub build: ExtensionBuildSpec,
     #[serde(default)]
@@ -378,9 +422,9 @@ pub struct ExtensionManifest {
     #[serde(default)]
     pub capabilities: ExtensionCapabilities,
     #[serde(default)]
-    pub frontend_bundle: Option<String>,
+    pub ui_bundle: Option<String>,
     #[serde(default)]
-    pub backend_entry: Option<String>,
+    pub worker_entry: Option<String>,
     #[serde(default)]
     pub contributes: ContributionSet,
 }
@@ -407,31 +451,67 @@ impl ExtensionManifest {
     }
 }
 
-/// ResolvedFrontendEntry is the runtime-facing frontend result after Ennoia has
+/// ResolvedUiEntry is the runtime-facing UI result after Ennoia has
 /// interpreted the descriptor.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ResolvedFrontendEntry {
+pub struct ResolvedUiEntry {
     pub kind: String,
     pub entry: String,
     pub hmr: bool,
 }
 
-/// ResolvedBackendEntry is the runtime-facing backend result after Ennoia has
+/// ResolvedWorkerEntry is the runtime-facing Worker result after Ennoia has
 /// interpreted the descriptor.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ResolvedBackendEntry {
+pub struct ResolvedWorkerEntry {
     pub kind: String,
-    pub runtime: String,
     pub entry: String,
-    #[serde(default)]
-    pub base_url: Option<String>,
-    #[serde(default)]
-    pub command: Option<String>,
-    #[serde(default)]
-    pub healthcheck: Option<String>,
+    pub abi: String,
     pub status: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct ExtensionRpcRequest {
     #[serde(default)]
-    pub pid: Option<u32>,
+    pub params: JsonValue,
+    #[serde(default)]
+    pub context: JsonValue,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ExtensionRpcResponse {
+    pub ok: bool,
+    #[serde(default)]
+    pub data: JsonValue,
+    #[serde(default)]
+    pub error: Option<ExtensionRpcError>,
+}
+
+impl ExtensionRpcResponse {
+    pub fn success(data: JsonValue) -> Self {
+        Self {
+            ok: true,
+            data,
+            error: None,
+        }
+    }
+
+    pub fn failure(code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            ok: false,
+            data: JsonValue::Null,
+            error: Some(ExtensionRpcError {
+                code: code.into(),
+                message: message.into(),
+            }),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ExtensionRpcError {
+    pub code: String,
+    pub message: String,
 }
 
 /// ExtensionDiagnostic records one resolution or runtime observation.

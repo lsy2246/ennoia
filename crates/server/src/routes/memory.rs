@@ -1,11 +1,11 @@
 use std::fs;
 
 use axum::body::Bytes;
-use axum::http::{HeaderMap, Method, Uri};
+use axum::http::Method;
 use axum::response::{IntoResponse, Response};
 use ennoia_contract::memory::MemoryStatusResponse;
 
-use super::behavior::proxy_capability_request;
+use super::behavior::dispatch_worker_capability_request;
 use super::*;
 use crate::system_log::{SystemLogWrite, SYSTEM_LOG_COMPONENT_MEMORY};
 
@@ -91,14 +91,9 @@ pub(super) async fn memory_api_proxy(
     Extension(request): Extension<RequestContext>,
     Path((memory_id, path)): Path<(String, String)>,
     method: Method,
-    headers: HeaderMap,
-    uri: Uri,
     body: Bytes,
 ) -> Result<impl IntoResponse, ApiError> {
-    dispatch_memory_request(
-        &state, &request, &memory_id, &path, method, headers, uri, body,
-    )
-    .await
+    dispatch_memory_request(&state, &request, &memory_id, &path, method, body).await
 }
 
 pub(super) async fn active_memory_api_proxy(
@@ -106,8 +101,6 @@ pub(super) async fn active_memory_api_proxy(
     Extension(request): Extension<RequestContext>,
     Path(path): Path<String>,
     method: Method,
-    headers: HeaderMap,
-    uri: Uri,
     body: Bytes,
 ) -> Result<impl IntoResponse, ApiError> {
     let config = current_memory_config(&state);
@@ -117,8 +110,6 @@ pub(super) async fn active_memory_api_proxy(
         &config.preferred_read,
         &path,
         method,
-        headers,
-        uri,
         body,
     )
     .await
@@ -130,8 +121,6 @@ async fn dispatch_memory_request(
     memory_id: &str,
     path: &str,
     method: Method,
-    headers: HeaderMap,
-    uri: Uri,
     body: Bytes,
 ) -> Result<Response, ApiError> {
     let record = resolve_memory_record(state, memory_id, request)?;
@@ -150,15 +139,13 @@ async fn dispatch_memory_request(
             request,
         )
     })?;
-    proxy_capability_request(
+    dispatch_worker_capability_request(
         state,
         request,
         extension_id,
         record.entry.as_deref(),
         path,
         method,
-        headers,
-        uri,
         body,
         SYSTEM_LOG_COMPONENT_MEMORY,
     )

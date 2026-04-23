@@ -132,12 +132,12 @@ export function Extensions() {
             <div className="extension-summary-grid">
               <article className="memory-lane">
                 <span>{t("web.extensions.contributes_ui", "贡献 UI")}</span>
-                <strong>{detail?.frontend ? "frontend" : "—"}</strong>
+                <strong>{detail?.ui ? "ui" : "—"}</strong>
                 <small>{t("web.extensions.contributes_ui_help", "扩展可贡献页面、面板、主题和语言包。")}</small>
               </article>
               <article className="memory-lane">
                 <span>{t("web.extensions.contributes_api", "贡献 API 上游接口")}</span>
-                <strong>{detail?.backend?.status ?? "—"}</strong>
+                <strong>{detail?.worker?.status ?? "—"}</strong>
                 <small>{t("web.extensions.contributes_api_help", "API 上游接口实现属于扩展能力，但这里只展示扩展包状态。")}</small>
               </article>
               <article className="memory-lane">

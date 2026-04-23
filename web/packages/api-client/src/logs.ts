@@ -10,7 +10,7 @@ export async function listLogs(
   },
 ) {
   return fetchJson<SystemLog[]>(
-    `/api/v1/logs${toQueryString({
+    `/api/logs${toQueryString({
       limit,
       q: filters?.q,
       level: filters?.level,
@@ -27,7 +27,7 @@ export async function reportFrontendLog(payload: {
   details?: string;
   at?: string;
 }) {
-  return fetchJson<void>("/api/v1/logs/frontend", {
+  return fetchJson<void>("/api/logs/frontend", {
     method: "POST",
     body: JSON.stringify(payload),
   });

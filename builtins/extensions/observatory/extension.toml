@@ -8,12 +8,12 @@ mode = "package"
 root = "."
 dev = false
 
-[frontend]
+[ui]
 runtime = "browser-esm"
 hmr = false
 
 [build]
-frontend_bundle = "dist/frontend.js"
+ui_bundle = "dist/ui.js"
 
 [assets]
 locales_dir = "ui/locales"

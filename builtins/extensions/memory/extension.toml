@@ -8,11 +8,15 @@ mode = "package"
 root = "."
 dev = false
 
-[backend]
-runtime = "rust"
-base_url = "http://127.0.0.1:3911"
-command = "cargo run --manifest-path \"plugins/memory-service/Cargo.toml\" --bin ennoia-memory-extension -- --home \"${ENNOIA_HOME}\" --port 3911"
-healthcheck = "/health"
+[worker]
+kind = "wasm"
+entry = "worker/memory.wasm"
+abi = "ennoia.worker.v1"
+
+[permissions]
+storage = "extension"
+sqlite = true
+events = ["publish", "subscribe"]
 
 [capabilities]
 pages = true
@@ -21,5 +25,5 @@ memories = true
 [contributes]
 pages = [{ id = "memory.page", title = { key = "web.nav.memory", fallback = "记忆" }, route = "/memory", mount = "memory.page", icon = "memory", nav = { default_pinned = true, order = 30 } }]
 memories = [
-  { id = "memory", extension_id = "memory", interfaces = ["workspace", "conversations", "messages", "lanes", "handoffs", "truth", "context", "review", "graph"], entry = "/", version = "1" }
+  { id = "memory", extension_id = "memory", interfaces = ["workspace", "conversations", "messages", "lanes", "handoffs", "truth", "context", "review", "graph"], entry = "memory", version = "1" }
 ]

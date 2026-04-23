@@ -38,8 +38,8 @@ try {
   await waitForServer(baseUrl, serverHandle);
 
   const health = await fetchJson(baseUrl, "/health");
-  const bootstrap = await fetchJson(baseUrl, "/api/v1/bootstrap/status");
-  const setup = await fetchJson(baseUrl, "/api/v1/bootstrap/setup", {
+  const bootstrap = await fetchJson(baseUrl, "/api/bootstrap/status");
+  const setup = await fetchJson(baseUrl, "/api/bootstrap/setup", {
     method: "POST",
     body: JSON.stringify({
       display_name: "Operator",
@@ -48,14 +48,14 @@ try {
       theme_id: "system",
     }),
   });
-  const profile = await fetchJson(baseUrl, "/api/v1/runtime/profile");
-  const preferences = await fetchJson(baseUrl, "/api/v1/runtime/preferences");
+  const profile = await fetchJson(baseUrl, "/api/runtime/profile");
+  const preferences = await fetchJson(baseUrl, "/api/runtime/preferences");
   const uiMessages = await fetchJson(
     baseUrl,
-    "/api/v1/ui/messages?locale=zh-CN&namespaces=web,settings,ext.observatory",
+    "/api/ui/messages?locale=zh-CN&namespaces=web,settings,ext.observatory",
   );
   await ensureAgent(baseUrl, "coder", "Coder");
-  const createdConversation = await fetchJson(baseUrl, "/api/v1/conversations", {
+  const createdConversation = await fetchJson(baseUrl, "/api/conversations", {
     method: "POST",
     body: JSON.stringify({
       topology: "direct",
@@ -64,7 +64,7 @@ try {
   });
   const envelope = await fetchJson(
     baseUrl,
-    `/api/v1/conversations/${createdConversation.conversation.id}/messages`,
+    `/api/conversations/${createdConversation.conversation.id}/messages`,
     {
       method: "POST",
       body: JSON.stringify({
@@ -74,13 +74,13 @@ try {
       }),
     },
   );
-  const conversations = await fetchJson(baseUrl, "/api/v1/conversations");
+  const conversations = await fetchJson(baseUrl, "/api/conversations");
   const messages = await fetchJson(
     baseUrl,
-    `/api/v1/conversations/${createdConversation.conversation.id}/messages`,
+    `/api/conversations/${createdConversation.conversation.id}/messages`,
   );
-  const memoryExtension = await fetchJson(baseUrl, "/api/v1/extensions/memory");
-  const workflowExtension = await fetchJson(baseUrl, "/api/v1/extensions/workflow");
+  const memoryExtension = await fetchJson(baseUrl, "/api/extensions/memory");
+  const workflowExtension = await fetchJson(baseUrl, "/api/extensions/workflow");
 
   assert(health.status === "ok", "health status should be ok");
   assert(bootstrap.is_initialized === false, "bootstrap should start as uninitialized");
@@ -97,7 +97,7 @@ try {
   assert(envelope.message.id, "journal should return the persisted message");
   assert(memoryExtension.id === "memory", "memory extension should be registered");
   assert(workflowExtension.id === "workflow", "workflow extension should be registered");
-  assert(memoryExtension.backend?.base_url, "memory extension should expose backend proxy info");
+  assert(memoryExtension.worker?.entry, "memory extension should expose worker entry info");
 
   console.log("[integration] runtime smoke passed");
 } finally {
@@ -108,7 +108,7 @@ try {
 }
 
 async function ensureAgent(baseUrl, id, displayName) {
-  return fetchJson(baseUrl, "/api/v1/agents", {
+  return fetchJson(baseUrl, "/api/agents", {
     method: "POST",
     body: JSON.stringify({
       id,

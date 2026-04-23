@@ -69,9 +69,10 @@
 ### 5.1 代码组织
 
 - `kernel` 承载共享协议、配置结构和扩展 manifest 模型
-- `extension-host` 承载扩展扫描、attach、reload、restart、诊断与后端进程托管
-- `server` 承载 API 暴露、TOML 配置文件、日志、Hook 派发、扩展代理与启动流程
-- 内置扩展实现放在 `builtins/extensions/<extension_id>/plugins|hooks|timers|ui|data`，不得把 session、memory、workflow、任务编排等业务实现混回核心 crate
+- `extension-host` 承载扩展扫描、attach、reload、restart、诊断、Worker 解析与 Worker RPC 分发
+- `server` 承载 API 暴露、TOML 配置文件、日志、Hook 派发、能力路由与启动流程
+- 内置扩展实现放在 `builtins/extensions/<extension_id>/ui|worker|data`，不得把 session、memory、workflow、任务编排等业务实现混回核心 crate
+- Wasm Worker 使用 `ennoia.worker.v1` ABI，宿主默认不注入 WASI/import；需要宿主能力时必须先在 `permissions` 中声明，并通过统一 capability bridge 接入
 - 公共转换逻辑提取为函数或模块级 helper
 
 ### 5.2 命名
@@ -108,7 +109,7 @@
 
 ### 7.1 扩展私有迁移
 
-扩展后端如果使用数据库，schema、迁移和初始化入口必须放在该扩展自己的 `data/` 或 `plugins/*/src/` 边界内，例如：
+扩展 Worker 如果使用数据库，schema、迁移和初始化入口必须放在该扩展自己的 `data/` 或 `worker/` 边界内，例如：
 
 - `builtins/extensions/memory/data/schema.sql`
 - `builtins/extensions/workflow/data/schema.sql`
@@ -160,7 +161,7 @@
 
 - 扩展扫描、attach、reload、restart 必须统一走 Extension Runtime
 - 开发来源扩展与已安装扩展共用统一描述协议
-- 前端 dev server、扩展前端 dev command、扩展后端 dev command 的行为必须纳入一键开发链路
+- Web dev server、Extension Runtime 扫描和 Worker RPC 行为必须纳入一键开发链路
 - 热加载相关问题必须以真实启动链路验证
 
 ## 10. 测试与校验

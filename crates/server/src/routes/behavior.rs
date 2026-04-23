@@ -1,16 +1,14 @@
 use std::fs;
 
-use axum::body::{Body, Bytes};
-use axum::http::{HeaderMap, Method, Uri};
+use axum::body::Bytes;
+use axum::http::Method;
 use axum::response::{IntoResponse, Response};
 use ennoia_contract::behavior::BehaviorStatusResponse;
 use ennoia_extension_host::RegisteredBehaviorContribution;
 use ennoia_observability::RequestContext;
 
 use super::*;
-use crate::system_log::{
-    SystemLogWrite, SYSTEM_LOG_COMPONENT_BEHAVIOR, SYSTEM_LOG_COMPONENT_PROXY,
-};
+use crate::system_log::{SystemLogWrite, SYSTEM_LOG_COMPONENT_BEHAVIOR};
 
 #[derive(Debug, Serialize)]
 pub(super) struct BehaviorProviderRecord {
@@ -104,21 +102,17 @@ pub(super) async fn behavior_api_proxy(
     Extension(request): Extension<RequestContext>,
     Path(path): Path<String>,
     method: Method,
-    headers: HeaderMap,
-    uri: Uri,
     body: Bytes,
 ) -> Result<impl IntoResponse, ApiError> {
     let resolved = resolve_active_behavior(&state, &request)?;
     let extension_id = resolved.extension_id.clone();
-    proxy_capability_request(
+    dispatch_worker_capability_request(
         &state,
         &request,
         &extension_id,
         resolved.behavior.entry.as_deref(),
         &path,
         method,
-        headers,
-        uri,
         body,
         SYSTEM_LOG_COMPONENT_BEHAVIOR,
     )
@@ -158,15 +152,13 @@ pub(super) fn resolve_active_behavior(
     Ok(behavior)
 }
 
-pub(super) async fn proxy_capability_request(
+pub(super) async fn dispatch_worker_capability_request(
     state: &AppState,
     request: &RequestContext,
     extension_id: &str,
     entry: Option<&str>,
     path: &str,
     method: Method,
-    headers: HeaderMap,
-    uri: Uri,
     body: Bytes,
     component: &str,
 ) -> Result<Response, ApiError> {
@@ -177,7 +169,7 @@ pub(super) async fn proxy_capability_request(
             component: component.to_string(),
             source_kind: "extension".to_string(),
             source_id: Some(extension_id.to_string()),
-            summary: "extension not found for capability proxy".to_string(),
+            summary: "extension not found for capability request".to_string(),
             payload: serde_json::json!({ "path": path }),
             created_at: None,
         });
@@ -186,80 +178,46 @@ pub(super) async fn proxy_capability_request(
             request,
         )
     })?;
-    let backend = extension.backend.ok_or_else(|| {
-        scoped(
-            ApiError::not_found(format!("extension '{extension_id}' has no backend entry")),
+
+    if extension.worker.is_none() {
+        return Err(scoped(
+            ApiError::not_found(format!("extension '{extension_id}' has no worker entry")),
             request,
-        )
-    })?;
-    let base_url = backend.base_url.ok_or_else(|| {
-        scoped(
-            ApiError::bad_request(format!(
-                "extension '{extension_id}' backend does not declare a base_url"
-            )),
-            request,
-        )
-    })?;
+        ));
+    }
 
     let routed_path = join_entry_path(entry, path);
-    let target_url = build_extension_proxy_url(&base_url, &routed_path, uri.query());
-    let client = reqwest::Client::new();
-    let reqwest_method = reqwest::Method::from_bytes(method.as_str().as_bytes())
-        .map_err(|error| scoped(ApiError::bad_request(error.to_string()), request))?;
-    let response = match send_extension_proxy_request(
-        &client,
-        reqwest_method,
-        &target_url,
-        &headers,
-        body,
-        request,
-    )
-    .await
-    {
-        Ok(response) => response,
-        Err(error) => {
-            let _ = state.system_log.append(SystemLogWrite {
-                event: "runtime.extension.proxy.failed".to_string(),
-                level: "warn".to_string(),
-                component: SYSTEM_LOG_COMPONENT_PROXY.to_string(),
-                source_kind: "extension".to_string(),
-                source_id: Some(extension_id.to_string()),
-                summary: "capability proxy failed".to_string(),
-                payload: serde_json::json!({
-                    "path": routed_path,
-                    "component": component,
-                }),
-                created_at: None,
-            });
-            return Err(error);
-        }
+    let params = if body.is_empty() {
+        JsonValue::Null
+    } else {
+        serde_json::from_slice(&body).unwrap_or_else(
+            |_| serde_json::json!({ "raw": String::from_utf8_lossy(&body).to_string() }),
+        )
     };
-    let status = response.status();
-    let response_headers = response.headers().clone();
-    let response_body = response
-        .bytes()
-        .await
+    let rpc_request = ennoia_kernel::ExtensionRpcRequest {
+        params,
+        context: serde_json::json!({
+            "component": component,
+            "method": method.as_str(),
+            "path": path,
+            "routed_path": routed_path,
+        }),
+    };
+
+    let response = state
+        .extensions
+        .dispatch_rpc(extension_id, &routed_path, rpc_request)
         .map_err(|error| scoped(ApiError::internal(error.to_string()), request))?;
 
-    let mut builder = axum::response::Response::builder().status(status);
-    if let Some(content_type) = response_headers.get(reqwest::header::CONTENT_TYPE) {
-        if let Ok(value) = content_type.to_str() {
-            builder = builder.header("content-type", value);
-        }
+    if response.ok {
+        return Ok(Json(response.data).into_response());
     }
-    if let Some(cache_control) = response_headers.get(reqwest::header::CACHE_CONTROL) {
-        if let Ok(value) = cache_control.to_str() {
-            builder = builder.header("cache-control", value);
-        }
-    }
-    if let Some(content_disposition) = response_headers.get(reqwest::header::CONTENT_DISPOSITION) {
-        if let Ok(value) = content_disposition.to_str() {
-            builder = builder.header("content-disposition", value);
-        }
-    }
-    builder
-        .body(Body::from(response_body))
-        .map_err(|error| scoped(ApiError::internal(error.to_string()), request))
+
+    let error = response
+        .error
+        .map(|item| format!("{}: {}", item.code, item.message))
+        .unwrap_or_else(|| "worker request failed".to_string());
+    Err(scoped(ApiError::bad_request(error), request))
 }
 
 fn join_entry_path(entry: Option<&str>, path: &str) -> String {

@@ -1,18 +1,17 @@
 use std::collections::BTreeMap;
 use std::fs;
-use std::fs::OpenOptions;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use ennoia_kernel::{
     BehaviorContribution, CommandContribution, ExtensionCapabilities, ExtensionDiagnostic,
-    ExtensionFrontendSpec, ExtensionHealth, ExtensionKind, ExtensionManifest,
-    ExtensionRegistryEntry, ExtensionRegistryFile, ExtensionRuntimeEvent, ExtensionSourceMode,
+    ExtensionHealth, ExtensionKind, ExtensionManifest, ExtensionPermissionSpec,
+    ExtensionRegistryEntry, ExtensionRegistryFile, ExtensionRpcRequest, ExtensionRpcResponse,
+    ExtensionRuntimeEvent, ExtensionRuntimeSpec, ExtensionSourceMode, ExtensionUiSpec,
     HookContribution, LocaleContribution, MemoryContribution, PageContribution, PanelContribution,
-    ProviderContribution, ResolvedBackendEntry, ResolvedFrontendEntry, ThemeContribution,
+    ProviderContribution, ResolvedUiEntry, ResolvedWorkerEntry, ThemeContribution,
 };
 use serde::Serialize;
 
@@ -27,8 +26,10 @@ pub struct ResolvedExtensionSnapshot {
     pub install_dir: String,
     pub generation: u64,
     pub health: ExtensionHealth,
-    pub frontend: Option<ResolvedFrontendEntry>,
-    pub backend: Option<ResolvedBackendEntry>,
+    pub ui: Option<ResolvedUiEntry>,
+    pub worker: Option<ResolvedWorkerEntry>,
+    pub permissions: ExtensionPermissionSpec,
+    pub runtime: ExtensionRuntimeSpec,
     pub capabilities: ExtensionCapabilities,
     pub pages: Vec<PageContribution>,
     pub panels: Vec<PanelContribution>,
@@ -159,25 +160,19 @@ pub struct ExtensionRuntimeConfig {
 pub struct ExtensionRuntime {
     config: ExtensionRuntimeConfig,
     state: Arc<RwLock<ExtensionRuntimeState>>,
+    worker_runtime: Arc<crate::worker::WorkerRuntime>,
 }
 
 #[derive(Debug)]
 struct ExtensionRuntimeState {
     snapshot: ExtensionRuntimeSnapshot,
     events: Vec<ExtensionRuntimeEvent>,
-    runners: BTreeMap<String, RunnerProcess>,
 }
 
 #[derive(Debug, Clone)]
 struct RuntimeSource {
     root: PathBuf,
     source_mode: ExtensionSourceMode,
-}
-
-#[derive(Debug)]
-struct RunnerProcess {
-    command: String,
-    child: Child,
 }
 
 impl ExtensionRuntime {
@@ -190,15 +185,14 @@ impl ExtensionRuntime {
         let mut state = ExtensionRuntimeState {
             snapshot: empty_snapshot(),
             events: Vec::new(),
-            runners: BTreeMap::new(),
         };
-        let mut next = build_snapshot(&config, state.snapshot.generation + 1)?;
-        reconcile_runners(&config, &mut state.runners, &mut next);
+        let next = build_snapshot(&config, state.snapshot.generation + 1)?;
         state.push_replace(next, "runtime bootstrap");
 
         Ok(Self {
             config,
             state: Arc::new(RwLock::new(state)),
+            worker_runtime: Arc::new(crate::worker::WorkerRuntime::new()?),
         })
     }
 
@@ -229,6 +223,21 @@ impl ExtensionRuntime {
             .unwrap_or_default()
     }
 
+    pub fn dispatch_rpc(
+        &self,
+        extension_id: &str,
+        method: &str,
+        request: ExtensionRpcRequest,
+    ) -> io::Result<ExtensionRpcResponse> {
+        let extension = self.get(extension_id).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("extension {extension_id} not found"),
+            )
+        })?;
+        self.worker_runtime.dispatch(&extension, method, request)
+    }
+
     pub fn hooks_for_event(&self, event: &str) -> Vec<RegisteredHookContribution> {
         self.snapshot()
             .hooks
@@ -239,13 +248,14 @@ impl ExtensionRuntime {
 
     pub fn refresh_from_disk(&self, summary: &str) -> io::Result<Option<ExtensionRuntimeSnapshot>> {
         let current = self.snapshot();
-        let mut next = build_snapshot(&self.config, current.generation + 1)?;
+        let next = build_snapshot(&self.config, current.generation + 1)?;
         let mut state = self.state.write().expect("extension runtime write lock");
-        reconcile_runners(&self.config, &mut state.runners, &mut next);
         if equivalent_snapshots(&current, &next) {
             return Ok(None);
         }
 
+        self.worker_runtime
+            .invalidate_missing_or_changed(&next.extensions);
         state.push_replace(next.clone(), summary);
         Ok(Some(next))
     }
@@ -571,169 +581,6 @@ fn build_snapshot(
     })
 }
 
-fn reconcile_runners(
-    config: &ExtensionRuntimeConfig,
-    runners: &mut BTreeMap<String, RunnerProcess>,
-    snapshot: &mut ExtensionRuntimeSnapshot,
-) {
-    let desired = snapshot
-        .extensions
-        .iter()
-        .filter_map(|extension| {
-            extension.backend.as_ref().and_then(|backend| {
-                backend
-                    .command
-                    .clone()
-                    .map(|command| (extension.id.clone(), command))
-            })
-        })
-        .collect::<BTreeMap<_, _>>();
-
-    let stale = runners
-        .keys()
-        .filter(|id| !desired.contains_key(*id))
-        .cloned()
-        .collect::<Vec<_>>();
-    for id in stale {
-        if let Some(mut runner) = runners.remove(&id) {
-            terminate_runner(&mut runner.child);
-        }
-    }
-
-    for extension in &mut snapshot.extensions {
-        let Some(backend) = extension.backend.as_mut() else {
-            continue;
-        };
-        let Some(command) = backend.command.clone() else {
-            continue;
-        };
-
-        let restart_needed = match runners.get_mut(&extension.id) {
-            Some(runner) if runner.command == command => match runner.child.try_wait() {
-                Ok(Some(_)) => true,
-                Ok(None) => {
-                    backend.pid = Some(runner.child.id());
-                    backend.status = "ready".to_string();
-                    false
-                }
-                Err(error) => {
-                    extension.diagnostics.push(diagnostic(
-                        "warn",
-                        "runner state check failed",
-                        Some(error.to_string()),
-                    ));
-                    true
-                }
-            },
-            Some(_) => true,
-            None => true,
-        };
-
-        if restart_needed {
-            if let Some(mut old) = runners.remove(&extension.id) {
-                terminate_runner(&mut old.child);
-            }
-            match spawn_runner(
-                config,
-                &extension.id,
-                &command,
-                Path::new(&extension.source_root),
-            ) {
-                Ok(runner) => {
-                    backend.pid = Some(runner.child.id());
-                    backend.status = "ready".to_string();
-                    runners.insert(extension.id.clone(), runner);
-                }
-                Err(error) => {
-                    backend.status = "failed".to_string();
-                    extension.health = ExtensionHealth::Failed;
-                    extension.diagnostics.push(diagnostic(
-                        "error",
-                        "runner start failed",
-                        Some(error.to_string()),
-                    ));
-                }
-            }
-        }
-    }
-}
-
-fn spawn_runner(
-    config: &ExtensionRuntimeConfig,
-    extension_id: &str,
-    command: &str,
-    cwd: &Path,
-) -> io::Result<RunnerProcess> {
-    fs::create_dir_all(&config.logs_dir)?;
-    let log_path = config.logs_dir.join(format!("{extension_id}.log"));
-    let stdout = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&log_path)?;
-    let stderr = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&log_path)?;
-
-    let expanded_command = command
-        .replace("${ENNOIA_HOME}", &normalize_display_path(&config.home_dir))
-        .replace("${EXTENSION_ROOT}", &normalize_display_path(cwd));
-
-    let mut process = if cfg!(windows) {
-        let mut item = Command::new("powershell.exe");
-        item.arg("-NoProfile")
-            .arg("-NonInteractive")
-            .arg("-ExecutionPolicy")
-            .arg("Bypass")
-            .arg("-Command")
-            .arg(&expanded_command);
-        item
-    } else {
-        let mut item = Command::new("sh");
-        item.arg("-lc").arg(&expanded_command);
-        item
-    };
-
-    let child = process
-        .current_dir(cwd)
-        .env("ENNOIA_HOME", &config.home_dir)
-        .env("ENNOIA_EXTENSION_ROOT", cwd)
-        .stdout(Stdio::from(stdout))
-        .stderr(Stdio::from(stderr))
-        .spawn()?;
-
-    Ok(RunnerProcess {
-        command: command.to_string(),
-        child,
-    })
-}
-
-impl Drop for ExtensionRuntimeState {
-    fn drop(&mut self) {
-        for (_, mut runner) in std::mem::take(&mut self.runners) {
-            terminate_runner(&mut runner.child);
-        }
-    }
-}
-
-fn terminate_runner(child: &mut Child) {
-    #[cfg(windows)]
-    {
-        let _ = Command::new("taskkill")
-            .args(["/PID", &child.id().to_string(), "/T", "/F"])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
-    }
-
-    #[cfg(not(windows))]
-    {
-        let _ = child.kill();
-    }
-
-    let _ = child.wait();
-}
-
 fn source_priority(extension: &ResolvedExtensionSnapshot) -> u8 {
     match extension.source_mode {
         ExtensionSourceMode::Dev => 2,
@@ -779,36 +626,31 @@ fn resolve_manifest(
     let source_root = install_dir.clone();
     let capabilities = manifest.effective_capabilities();
     let mut diagnostics = Vec::new();
-    let frontend = resolve_frontend(
-        &source.root,
-        &source.source_mode,
-        &manifest.frontend,
-        &manifest,
-    )
-    .map_err(|error| {
-        diagnostics.push(diagnostic(
-            "warn",
-            "frontend resolution failed",
-            Some(error.to_string()),
-        ));
-    })
-    .ok()
-    .flatten();
-    let backend = resolve_backend(&source.root, &source.source_mode, &manifest)
+    let ui = resolve_ui(&source.root, &source.source_mode, &manifest.ui, &manifest)
         .map_err(|error| {
             diagnostics.push(diagnostic(
                 "warn",
-                "backend resolution failed",
+                "ui resolution failed",
+                Some(error.to_string()),
+            ));
+        })
+        .ok()
+        .flatten();
+    let worker = resolve_worker(&source.root, &manifest)
+        .map_err(|error| {
+            diagnostics.push(diagnostic(
+                "warn",
+                "worker resolution failed",
                 Some(error.to_string()),
             ));
         })
         .ok()
         .flatten();
 
-    if frontend.is_none() && backend.is_none() && capabilities == ExtensionCapabilities::default() {
+    if ui.is_none() && worker.is_none() && capabilities == ExtensionCapabilities::default() {
         diagnostics.push(diagnostic(
             "warn",
-            "extension has no resolved frontend or backend entry",
+            "extension has no resolved ui or worker entry",
             None,
         ));
     }
@@ -831,8 +673,10 @@ fn resolve_manifest(
         install_dir,
         generation,
         health,
-        frontend,
-        backend,
+        ui,
+        worker,
+        permissions: manifest.permissions,
+        runtime: manifest.runtime,
         capabilities,
         pages: manifest.contributes.pages,
         panels: manifest.contributes.panels,
@@ -847,170 +691,81 @@ fn resolve_manifest(
     }
 }
 
-fn resolve_frontend(
+fn resolve_ui(
     root: &Path,
     source_mode: &ExtensionSourceMode,
-    frontend: &ExtensionFrontendSpec,
+    ui: &ExtensionUiSpec,
     manifest: &ExtensionManifest,
-) -> io::Result<Option<ResolvedFrontendEntry>> {
+) -> io::Result<Option<ResolvedUiEntry>> {
     if *source_mode == ExtensionSourceMode::Dev {
-        if let Some(dev_url) = frontend.dev_url.clone() {
-            return Ok(Some(ResolvedFrontendEntry {
+        if let Some(dev_url) = ui.dev_url.clone() {
+            return Ok(Some(ResolvedUiEntry {
                 kind: "url".to_string(),
                 entry: dev_url,
-                hmr: frontend.hmr,
+                hmr: ui.hmr,
             }));
         }
-        if let Some(entry) = frontend.entry.clone() {
-            return Ok(Some(ResolvedFrontendEntry {
+        if let Some(entry) = ui.entry.clone() {
+            return Ok(Some(ResolvedUiEntry {
                 kind: "module".to_string(),
                 entry: normalize_display_path(&root.join(entry)),
-                hmr: frontend.hmr,
+                hmr: ui.hmr,
             }));
         }
     }
 
     if let Some(bundle) = manifest
         .build
-        .frontend_bundle
+        .ui_bundle
         .clone()
-        .or_else(|| manifest.frontend_bundle.clone())
+        .or_else(|| manifest.ui_bundle.clone())
     {
-        return Ok(Some(ResolvedFrontendEntry {
+        return Ok(Some(ResolvedUiEntry {
             kind: "file".to_string(),
             entry: normalize_display_path(&root.join(bundle)),
-            hmr: frontend.hmr,
+            hmr: ui.hmr,
         }));
     }
 
     Ok(None)
 }
 
-fn resolve_backend(
+fn resolve_worker(
     root: &Path,
-    source_mode: &ExtensionSourceMode,
     manifest: &ExtensionManifest,
-) -> io::Result<Option<ResolvedBackendEntry>> {
-    if *source_mode == ExtensionSourceMode::Dev {
-        if let Some(command) = manifest.backend.dev_command.clone() {
-            let entry = manifest
-                .backend
-                .entry
-                .clone()
-                .map(|item| normalize_display_path(&root.join(item)))
-                .unwrap_or_else(|| normalize_display_path(root));
-            return Ok(Some(ResolvedBackendEntry {
-                kind: "process".to_string(),
-                runtime: manifest
-                    .backend
-                    .runtime
-                    .clone()
-                    .unwrap_or_else(|| "node".to_string()),
-                entry,
-                base_url: manifest.backend.base_url.clone(),
-                command: Some(command),
-                healthcheck: manifest.backend.healthcheck.clone(),
-                status: "ready".to_string(),
-                pid: None,
-            }));
-        }
-        if let Some(command) = manifest.backend.command.clone() {
-            let entry = manifest
-                .backend
-                .entry
-                .clone()
-                .map(|item| normalize_display_path(&root.join(item)))
-                .unwrap_or_else(|| normalize_display_path(root));
-            return Ok(Some(ResolvedBackendEntry {
-                kind: "process".to_string(),
-                runtime: manifest
-                    .backend
-                    .runtime
-                    .clone()
-                    .unwrap_or_else(|| "node".to_string()),
-                entry,
-                base_url: manifest.backend.base_url.clone(),
-                command: Some(command),
-                healthcheck: manifest.backend.healthcheck.clone(),
-                status: "ready".to_string(),
-                pid: None,
-            }));
-        }
-        if let Some(entry) = manifest.backend.entry.clone() {
-            return Ok(Some(ResolvedBackendEntry {
-                kind: "module".to_string(),
-                runtime: manifest
-                    .backend
-                    .runtime
-                    .clone()
-                    .unwrap_or_else(|| "node".to_string()),
-                entry: normalize_display_path(&root.join(entry)),
-                base_url: manifest.backend.base_url.clone(),
-                command: None,
-                healthcheck: manifest.backend.healthcheck.clone(),
-                status: "ready".to_string(),
-                pid: None,
-            }));
-        }
-    }
-
-    if let Some(command) = manifest
-        .backend
-        .command
+) -> io::Result<Option<ResolvedWorkerEntry>> {
+    let Some(entry) = manifest
+        .worker
+        .entry
         .clone()
-        .or_else(|| manifest.backend.dev_command.clone())
-    {
-        let entry = manifest
-            .backend
-            .entry
-            .clone()
-            .map(|item| normalize_display_path(&root.join(item)))
-            .unwrap_or_else(|| normalize_display_path(root));
-        return Ok(Some(ResolvedBackendEntry {
-            kind: "process".to_string(),
-            runtime: manifest
-                .backend
-                .runtime
-                .clone()
-                .unwrap_or_else(|| "node".to_string()),
-            entry,
-            base_url: manifest.backend.base_url.clone(),
-            command: Some(command),
-            healthcheck: manifest.backend.healthcheck.clone(),
-            status: "ready".to_string(),
-            pid: None,
-        }));
-    }
+        .or_else(|| manifest.build.worker_bundle.clone())
+        .or_else(|| manifest.worker_entry.clone())
+    else {
+        return Ok(None);
+    };
 
-    if let Some(bundle) = manifest
-        .build
-        .backend_bundle
+    let kind = manifest
+        .worker
+        .kind
         .clone()
-        .or_else(|| manifest.backend_entry.clone())
-    {
-        let resolved_entry = normalize_display_path(&root.join(bundle));
-        let runtime = manifest
-            .backend
-            .runtime
-            .clone()
-            .unwrap_or_else(|| "node".to_string());
-        return Ok(Some(ResolvedBackendEntry {
-            kind: "file".to_string(),
-            runtime: runtime.clone(),
-            entry: resolved_entry.clone(),
-            base_url: manifest.backend.base_url.clone(),
-            command: Some(match runtime.as_str() {
-                "bun" => format!("bun \"{}\"", resolved_entry),
-                "deno" => format!("deno run \"{}\"", resolved_entry),
-                _ => format!("node \"{}\"", resolved_entry),
-            }),
-            healthcheck: manifest.backend.healthcheck.clone(),
-            status: "ready".to_string(),
-            pid: None,
-        }));
+        .unwrap_or_else(|| "wasm".to_string());
+    if kind != "wasm" {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("unsupported worker kind '{kind}'"),
+        ));
     }
 
-    Ok(None)
+    Ok(Some(ResolvedWorkerEntry {
+        kind,
+        entry: normalize_display_path(&root.join(entry)),
+        abi: manifest
+            .worker
+            .abi
+            .clone()
+            .unwrap_or_else(|| "ennoia.worker.v1".to_string()),
+        status: "ready".to_string(),
+    }))
 }
 
 fn failed_extension_snapshot(
@@ -1034,8 +789,10 @@ fn failed_extension_snapshot(
         install_dir: source_root,
         generation,
         health: ExtensionHealth::Failed,
-        frontend: None,
-        backend: None,
+        ui: None,
+        worker: None,
+        permissions: ExtensionPermissionSpec::default(),
+        runtime: ExtensionRuntimeSpec::default(),
         capabilities: ExtensionCapabilities::default(),
         pages: Vec::new(),
         panels: Vec::new(),
@@ -1270,17 +1027,16 @@ mode = "dev"
 root = "."
 dev = true
 
-[frontend]
+[ui]
 runtime = "browser-esm"
 entry = "./ui/index.ts"
 dev_url = "http://127.0.0.1:4201/src/index.ts"
 hmr = true
 
-[backend]
-runtime = "node"
-entry = "./src/backend/index.ts"
-healthcheck = "/health"
-restart = "hot"
+[worker]
+kind = "wasm"
+entry = "./worker/plugin.wasm"
+abi = "ennoia.worker.v1"
 
 [capabilities]
 pages = true
@@ -1297,8 +1053,8 @@ panels = [{{ id = "{id}.timeline", title = {{ key = "ext.{id}.panel.timeline", f
 themes = [{{ id = "{id}.daybreak", label = {{ key = "ext.{id}.theme.daybreak", fallback = "Daybreak" }}, appearance = "Light", tokens_entry = "ui/themes/daybreak.css", preview_color = "#F4A261", extends = "system", category = "extension" }}]
 locales = [{{ locale = "zh-CN", namespace = "ext.{id}", entry = "ui/locales/zh-CN.json", version = "1" }}, {{ locale = "en-US", namespace = "ext.{id}", entry = "ui/locales/en-US.json", version = "1" }}]
 commands = [{{ id = "{id}.open", title = {{ key = "ext.{id}.command.open", fallback = "Open Observatory" }}, action = "open-page", shortcut = "Ctrl+Shift+O" }}]
-providers = [{{ id = "{id}.feed", kind = "activity-feed", entry = "backend/providers/activity-feed.js" }}]
-hooks = [{{ event = "run.completed", handler = "backend/hooks/run-completed.js" }}]
+providers = [{{ id = "{id}.feed", kind = "activity-feed", entry = "worker/providers/activity-feed.js" }}]
+hooks = [{{ event = "run.completed", handler = "worker/hooks/run-completed.js" }}]
 "##
         )
     }

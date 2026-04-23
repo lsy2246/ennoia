@@ -1,5 +1,15 @@
 # 变更日志
 
+## [0.2.0] - 2026-04-23
+
+### 重构
+- **[extension-runtime]**: 一次性切换为扩展能力包模型，使用可选 `ui`、可选 Wasm `worker` 与宿主 Worker RPC，移除端口型扩展后端主路径 — by lsy
+  - 方案: [202604231111_wasm-extension-runtime](archive/2026-04/202604231111_wasm-extension-runtime/)
+  - 决策: wasm-extension-runtime#D001(采用 Rust Host + Wasm Worker 能力包模型)
+- **[api-surface]**: 移除 REST 路径中的 `/v1` 前缀，统一使用 `/api/*`，并把扩展开发监听覆盖到 `builtins/extensions/` 与 `.wasm` 文件 — by Codex
+- **[extension-runtime]**: 接入 `wasmtime` Worker runtime，支持 `ennoia.worker.v1` ABI、Module 缓存热失效、每次 RPC 隔离实例、方法前缀权限校验、内存与 fuel 预算限制 — by Codex
+- **[builtin-workers]**: 为 `memory` 与 `workflow` 新增内置 Wasm Worker crate，编译生成 `memory.wasm` 与 `workflow.wasm`，并补充 `bun run build:workers` 构建入口 — by Codex
+
 ## [0.1.5] - 2026-04-22
 
 ### 重构

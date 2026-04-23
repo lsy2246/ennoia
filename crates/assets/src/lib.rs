@@ -10,6 +10,12 @@ pub struct TextAsset {
     pub contents: &'static str,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BinaryAsset {
+    pub logical_path: &'static str,
+    pub contents: &'static [u8],
+}
+
 include!(concat!(env!("OUT_DIR"), "/generated_assets.rs"));
 
 fn lookup(assets: &'static [(&'static str, &'static str)], path: &str) -> Option<&'static str> {
@@ -22,6 +28,16 @@ fn wrap_assets(assets: &'static [(&'static str, &'static str)]) -> Vec<TextAsset
     assets
         .iter()
         .map(|(logical_path, contents)| TextAsset {
+            logical_path,
+            contents,
+        })
+        .collect()
+}
+
+fn wrap_binary_assets(assets: &'static [(&'static str, &'static [u8])]) -> Vec<BinaryAsset> {
+    assets
+        .iter()
+        .map(|(logical_path, contents)| BinaryAsset {
             logical_path,
             contents,
         })
@@ -53,10 +69,17 @@ pub mod templates {
 }
 
 pub mod builtins {
-    use super::{lookup, wrap_assets, TextAsset, BUILTIN_ASSETS};
+    use super::{
+        lookup, wrap_assets, wrap_binary_assets, BinaryAsset, TextAsset, BUILTIN_ASSETS,
+        BUILTIN_BINARY_ASSETS,
+    };
 
     pub fn all() -> Vec<TextAsset> {
         wrap_assets(BUILTIN_ASSETS)
+    }
+
+    pub fn all_binary() -> Vec<BinaryAsset> {
+        wrap_binary_assets(BUILTIN_BINARY_ASSETS)
     }
 
     pub fn get(path: &str) -> Option<&'static str> {
@@ -69,6 +92,17 @@ pub mod builtins {
 
     pub fn skills() -> Vec<TextAsset> {
         filter_prefix("skills/")
+    }
+
+    pub fn extension_binaries() -> Vec<BinaryAsset> {
+        BUILTIN_BINARY_ASSETS
+            .iter()
+            .filter(|(logical_path, _)| logical_path.starts_with("extensions/"))
+            .map(|(logical_path, contents)| BinaryAsset {
+                logical_path,
+                contents,
+            })
+            .collect()
     }
 
     fn filter_prefix(prefix: &str) -> Vec<TextAsset> {

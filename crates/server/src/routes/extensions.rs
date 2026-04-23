@@ -1,8 +1,5 @@
 use super::*;
-use axum::body::{Body, Bytes};
-use axum::http::{HeaderMap, Method, Uri};
-use ennoia_kernel::HookDispatchResponse;
-use tracing::warn;
+use ennoia_kernel::{ExtensionRpcRequest, ExtensionRpcResponse, HookDispatchResponse};
 
 use crate::system_log::{SystemLogWrite, SYSTEM_LOG_COMPONENT_EXTENSION_HOST};
 
@@ -10,8 +7,6 @@ use crate::system_log::{SystemLogWrite, SYSTEM_LOG_COMPONENT_EXTENSION_HOST};
 const HOOK_DISPATCH_ATTEMPTS: usize = 20;
 #[allow(dead_code)]
 const HOOK_DISPATCH_RETRY_DELAY_MS: u64 = 250;
-const EXTENSION_PROXY_ATTEMPTS: usize = 40;
-const EXTENSION_PROXY_RETRY_DELAY_MS: u64 = 250;
 
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
@@ -116,7 +111,7 @@ pub(super) async fn extension_diagnostics(
     Json(state.extensions.diagnostics(&extension_id))
 }
 
-pub(super) async fn extension_frontend_module(
+pub(super) async fn extension_ui_module(
     State(state): State<AppState>,
     Extension(request): Extension<RequestContext>,
     Path(extension_id): Path<String>,
@@ -127,23 +122,23 @@ pub(super) async fn extension_frontend_module(
             &request,
         )
     })?;
-    let frontend = extension.frontend.ok_or_else(|| {
+    let ui = extension.ui.ok_or_else(|| {
         scoped(
-            ApiError::not_found(format!("extension '{extension_id}' has no frontend entry")),
+            ApiError::not_found(format!("extension '{extension_id}' has no ui entry")),
             &request,
         )
     })?;
 
-    let body = match frontend.kind.as_str() {
+    let body = match ui.kind.as_str() {
         "url" => format!(
             "export {{ default }} from {url:?}; export * from {url:?};",
-            url = frontend.entry
+            url = ui.entry
         ),
-        "file" | "module" => fs::read_to_string(&frontend.entry)
+        "file" | "module" => fs::read_to_string(&ui.entry)
             .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?,
         _ => {
             return Err(scoped(
-                ApiError::bad_request(format!("unsupported frontend kind '{}'", frontend.kind)),
+                ApiError::bad_request(format!("unsupported ui kind '{}'", ui.kind)),
                 &request,
             ))
         }
@@ -186,22 +181,39 @@ pub(super) async fn extension_theme_stylesheet(
 
 pub(super) async fn extension_logs(
     State(state): State<AppState>,
-    Extension(request): Extension<RequestContext>,
     Path(extension_id): Path<String>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let log_path = state
-        .runtime_paths
-        .extensions_logs_dir()
-        .join(format!("{extension_id}.log"));
-    let body = if log_path.exists() {
-        fs::read_to_string(&log_path)
-            .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?
-    } else {
-        String::new()
-    };
+    let diagnostics = state.extensions.diagnostics(&extension_id);
+    let body = diagnostics
+        .into_iter()
+        .map(|item| {
+            format!(
+                "{} [{}] {}{}",
+                item.at,
+                item.level,
+                item.summary,
+                item.detail
+                    .map(|detail| format!(": {detail}"))
+                    .unwrap_or_default()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
     Ok(([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], body))
 }
 
+pub(super) async fn extension_rpc(
+    State(state): State<AppState>,
+    Extension(request): Extension<RequestContext>,
+    Path((extension_id, method)): Path<(String, String)>,
+    Json(payload): Json<ExtensionRpcRequest>,
+) -> ApiResult<ExtensionRpcResponse> {
+    state
+        .extensions
+        .dispatch_rpc(&extension_id, &method, payload)
+        .map(Json)
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))
+}
 pub(super) async fn extension_reload(
     State(state): State<AppState>,
     Extension(request): Extension<RequestContext>,
@@ -359,122 +371,6 @@ pub(super) async fn extension_enabled_put(
     Ok(Json(updated))
 }
 
-pub(super) async fn extension_api_proxy(
-    State(state): State<AppState>,
-    Extension(request): Extension<RequestContext>,
-    Path((extension_id, path)): Path<(String, String)>,
-    method: Method,
-    headers: HeaderMap,
-    uri: Uri,
-    body: Bytes,
-) -> Result<impl IntoResponse, ApiError> {
-    let extension = state.extensions.get(&extension_id).ok_or_else(|| {
-        scoped(
-            ApiError::not_found(format!("extension '{extension_id}' not found")),
-            &request,
-        )
-    })?;
-    let backend = extension.backend.ok_or_else(|| {
-        scoped(
-            ApiError::not_found(format!("extension '{extension_id}' has no backend entry")),
-            &request,
-        )
-    })?;
-    let base_url = backend.base_url.ok_or_else(|| {
-        scoped(
-            ApiError::bad_request(format!(
-                "extension '{extension_id}' backend does not declare a base_url"
-            )),
-            &request,
-        )
-    })?;
-
-    let target_url = build_extension_proxy_url(&base_url, &path, uri.query());
-    let client = reqwest::Client::new();
-    let reqwest_method = reqwest::Method::from_bytes(method.as_str().as_bytes())
-        .map_err(|error| scoped(ApiError::bad_request(error.to_string()), &request))?;
-    let response = send_extension_proxy_request(
-        &client,
-        reqwest_method,
-        &target_url,
-        &headers,
-        body,
-        &request,
-    )
-    .await?;
-    let status = response.status();
-    let response_headers = response.headers().clone();
-    let response_body = response
-        .bytes()
-        .await
-        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?;
-
-    let mut builder = axum::response::Response::builder().status(status);
-    if let Some(content_type) = response_headers.get(reqwest::header::CONTENT_TYPE) {
-        if let Ok(value) = content_type.to_str() {
-            builder = builder.header("content-type", value);
-        }
-    }
-    if let Some(cache_control) = response_headers.get(reqwest::header::CACHE_CONTROL) {
-        if let Ok(value) = cache_control.to_str() {
-            builder = builder.header("cache-control", value);
-        }
-    }
-    if let Some(content_disposition) = response_headers.get(reqwest::header::CONTENT_DISPOSITION) {
-        if let Ok(value) = content_disposition.to_str() {
-            builder = builder.header("content-disposition", value);
-        }
-    }
-
-    builder
-        .body(Body::from(response_body))
-        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))
-}
-
-pub(crate) async fn send_extension_proxy_request(
-    client: &reqwest::Client,
-    method: reqwest::Method,
-    target_url: &str,
-    headers: &HeaderMap,
-    body: Bytes,
-    request: &RequestContext,
-) -> Result<reqwest::Response, ApiError> {
-    let mut last_error = None;
-    for attempt in 1..=EXTENSION_PROXY_ATTEMPTS {
-        let mut proxied = client.request(method.clone(), target_url);
-        for (name, value) in headers {
-            if name.as_str().eq_ignore_ascii_case("host")
-                || name.as_str().eq_ignore_ascii_case("content-length")
-            {
-                continue;
-            }
-            proxied = proxied.header(name, value);
-        }
-        if !body.is_empty() {
-            proxied = proxied.body(body.to_vec());
-        }
-
-        match proxied.send().await {
-            Ok(response) => return Ok(response),
-            Err(error) => {
-                last_error = Some(error);
-                if attempt < EXTENSION_PROXY_ATTEMPTS {
-                    tokio::time::sleep(Duration::from_millis(EXTENSION_PROXY_RETRY_DELAY_MS)).await;
-                }
-            }
-        }
-    }
-
-    Err(scoped(
-        ApiError::internal(
-            last_error
-                .map(|error| error.to_string())
-                .unwrap_or_else(|| "extension proxy request failed".to_string()),
-        ),
-        request,
-    ))
-}
-
 #[allow(dead_code)]
 pub(crate) async fn dispatch_extension_hooks(
     state: &AppState,
@@ -485,95 +381,38 @@ pub(crate) async fn dispatch_extension_hooks(
         return Vec::new();
     }
 
-    let client = reqwest::Client::new();
     let mut outcomes = Vec::new();
     for hook in hooks {
-        let Some(extension) = state.extensions.get(&hook.extension_id) else {
-            continue;
-        };
-        let Some(backend) = extension.backend else {
-            continue;
-        };
-        let Some(base_url) = backend.base_url else {
-            continue;
-        };
         let handler = hook
             .hook
             .handler
             .clone()
             .unwrap_or_else(|| default_hook_handler_path(&hook.hook.event));
-        let target_url = build_extension_proxy_url(&base_url, &handler, None);
-        let Some(response) = dispatch_hook_request(&client, &target_url, &hook, event).await else {
+        let request = ExtensionRpcRequest {
+            params: serde_json::to_value(event).unwrap_or(JsonValue::Null),
+            context: serde_json::json!({
+                "event": hook.hook.event,
+                "handler": handler,
+            }),
+        };
+        let Ok(response) = state
+            .extensions
+            .dispatch_rpc(&hook.extension_id, &handler, request)
+        else {
             continue;
         };
-        match response.json::<HookDispatchResponse>().await {
-            Ok(payload) => outcomes.push(HookDispatchOutcome {
+        if !response.ok {
+            continue;
+        }
+        if let Ok(payload) = serde_json::from_value::<HookDispatchResponse>(response.data) {
+            outcomes.push(HookDispatchOutcome {
                 extension_id: hook.extension_id,
                 response: payload,
-            }),
-            Err(error) => warn!(
-                extension_id = %hook.extension_id,
-                event = %event.event,
-                error = %error,
-                "extension hook response decode failed"
-            ),
+            });
         }
     }
 
     outcomes
-}
-
-#[allow(dead_code)]
-async fn dispatch_hook_request(
-    client: &reqwest::Client,
-    target_url: &str,
-    hook: &RegisteredHookContribution,
-    event: &HookEventEnvelope,
-) -> Option<reqwest::Response> {
-    for attempt in 1..=HOOK_DISPATCH_ATTEMPTS {
-        match client.post(target_url).json(event).send().await {
-            Ok(response) if response.status().is_success() => return Some(response),
-            Ok(response) => {
-                if attempt == HOOK_DISPATCH_ATTEMPTS {
-                    warn!(
-                        extension_id = %hook.extension_id,
-                        event = %event.event,
-                        status = %response.status(),
-                        "extension hook returned non-success status"
-                    );
-                    return None;
-                }
-            }
-            Err(error) => {
-                if attempt == HOOK_DISPATCH_ATTEMPTS {
-                    warn!(
-                        extension_id = %hook.extension_id,
-                        event = %event.event,
-                        error = %error,
-                        "extension hook dispatch failed"
-                    );
-                    return None;
-                }
-            }
-        }
-
-        tokio::time::sleep(Duration::from_millis(HOOK_DISPATCH_RETRY_DELAY_MS)).await;
-    }
-
-    None
-}
-
-pub(crate) fn build_extension_proxy_url(base_url: &str, path: &str, query: Option<&str>) -> String {
-    let mut url = format!(
-        "{}/{}",
-        base_url.trim_end_matches('/'),
-        path.trim_start_matches('/')
-    );
-    if let Some(query) = query.filter(|value| !value.is_empty()) {
-        url.push('?');
-        url.push_str(query);
-    }
-    url
 }
 
 #[allow(dead_code)]

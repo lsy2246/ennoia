@@ -516,7 +516,7 @@ export function Settings() {
                   helper={t("web.settings.path_overrides_help", "逐项填写路径和超时毫秒值。")}
                   entries={timeoutOverrides}
                   emptyText={t("web.settings.path_overrides_empty", "还没有路径覆盖规则。")}
-                  pathPlaceholder={t("web.settings.path_placeholder", "例如 /api/v1/logs")}
+                  pathPlaceholder={t("web.settings.path_placeholder", "例如 /api/logs")}
                   valuePlaceholder={t("web.settings.ms_placeholder", "毫秒")}
                   addLabel={addRuleLabel}
                   deleteLabel={deleteLabel}
@@ -624,7 +624,7 @@ export function Settings() {
                   )}
                   entries={bodyLimitOverrides}
                   emptyText={t("web.settings.path_overrides_empty", "还没有路径覆盖规则。")}
-                  pathPlaceholder={t("web.settings.path_placeholder", "例如 /api/v1/messages")}
+                  pathPlaceholder={t("web.settings.path_placeholder", "例如 /api/messages")}
                   valuePlaceholder={t("web.settings.bytes_placeholder", "字节数")}
                   addLabel={addRuleLabel}
                   deleteLabel={deleteLabel}

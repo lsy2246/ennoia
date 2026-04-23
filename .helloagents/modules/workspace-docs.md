@@ -10,4 +10,5 @@
 - `README.md` 必须反映当前一级导航、Web 术语和产品模型
 - `docs/architecture.md` 必须反映 Agent / Skill / Provider / Extension 边界与工作区根路径模型
 - `docs/runtime-layout.md` 必须反映 `config/skills`、`config/providers`、`workspace_root` 派生规则与平台路径展示
-- `docs/api-surface.md` 必须反映 Agent / Skill / Provider CRUD 与前端日志写入接口
+- `docs/api-surface.md` 必须反映 Agent / Skill / Provider CRUD、Worker RPC 与 Web 日志写入接口
+- `docs/extension-development.md` 与 `docs/extension-runtime-rfc.md` 必须反映能力包协议，不再描述端口型扩展后端

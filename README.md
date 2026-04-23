@@ -4,13 +4,13 @@
 
 ## 产品结构
 
-- 工作台：核心只提供宿主、配置、路径、日志和扩展代理；业务能力由扩展提供。
+- 工作台：核心只提供宿主、配置、路径、日志和 Worker RPC；业务能力由扩展提供。
 - Agents：维护协作者档案、上游渠道、模型、技能和启用状态。
 - 技能：Agent 可引用的能力包，和扩展严格分离。
 - API 上游渠道：Agent 绑定的具体模型访问实例。
 - 扩展：系统插件包，可贡献页面、面板、主题、语言、命令、Hook 和上游实现。
 - 会话：系统内置 `journal` 文件记录层提供一套 Conversation、Lane、Message 与事件原文能力，默认关闭。
-- 记忆：以内置 `memory` 扩展形式提供另一套独立前后端、私有数据库与 Web 页面；它与 journal 可并存，不自动消费或关闭 journal。
+- 记忆：以内置 `memory` 扩展形式提供独立能力包、私有数据库与 Web 页面；它与 journal 可并存，不自动消费或关闭 journal。
 - 编排：以内置 `workflow` 扩展承载运行编排、stage、decision、gate 与 artifact 产出。
 - 日志：聚合前端日志和扩展运行事件。
 - 设置：通过表单直接编辑 `app/server` 文件配置、`config/profile.toml` 和 `config/preferences/*.toml`。
@@ -26,13 +26,13 @@
 ## 核心模块
 
 - `crates/kernel`：共享协议、配置和扩展 manifest 模型
-- `crates/extension-host`：扩展运行时、热刷新、诊断和后端进程托管
-- `crates/server`：HTTP API、系统配置文件、日志、扩展代理与运行时装配
+- `crates/extension-host`：扩展运行时、热刷新、诊断和 Worker RPC 分发
+- `crates/server`：HTTP API、系统配置文件、日志、能力路由与运行时装配
 - `crates/cli`：初始化、开发与启动入口
 - `web`：Ennoia Web 工作台
 - `web/packages/api-client`：前端统一 API 访问层
 - `builtins/extensions/memory`：内置记忆扩展，包含上下文、审查与图谱能力
-- `builtins/extensions/workflow`：内置编排扩展，包含 `plugins/`、`hooks/`、`timers/`、`data/`
+- `builtins/extensions/workflow`：内置编排扩展，包含 Worker、Hook 约定与 `data/`
 
 ## 内置能力源码
 
@@ -81,6 +81,7 @@ cargo run -p ennoia-cli -- init
 - `cargo fmt --all`
 - `cargo check --workspace`
 - `cargo test --workspace`
+- `bun run build:workers`
 - `bun run --cwd web typecheck`
 - `bun run --cwd web build`
 

@@ -63,6 +63,10 @@ fn render_assets_module(
     template_assets: &[(String, String)],
     builtin_assets: &[(String, String)],
 ) -> String {
+    let (builtin_text_assets, builtin_binary_assets): (Vec<_>, Vec<_>) = builtin_assets
+        .iter()
+        .cloned()
+        .partition(|(relative, _)| !is_binary_asset(relative));
     let mut code = String::new();
     code.push_str("pub static TEMPLATE_ASSETS: &[(&str, &str)] = &[\n");
     for (relative, absolute) in template_assets {
@@ -73,11 +77,23 @@ fn render_assets_module(
     code.push_str("];\n");
 
     code.push_str("\npub static BUILTIN_ASSETS: &[(&str, &str)] = &[\n");
-    for (relative, absolute) in builtin_assets {
+    for (relative, absolute) in &builtin_text_assets {
         code.push_str(&format!(
             "    ({relative:?}, include_str!(r#\"{absolute}\"#)),\n"
         ));
     }
     code.push_str("];\n");
+
+    code.push_str("\npub static BUILTIN_BINARY_ASSETS: &[(&str, &[u8])] = &[\n");
+    for (relative, absolute) in &builtin_binary_assets {
+        code.push_str(&format!(
+            "    ({relative:?}, include_bytes!(r#\"{absolute}\"#)),\n"
+        ));
+    }
+    code.push_str("];\n");
     code
+}
+
+fn is_binary_asset(path: &str) -> bool {
+    path.ends_with(".wasm")
 }

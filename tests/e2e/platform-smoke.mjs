@@ -25,7 +25,7 @@ try {
   serverHandle = startServer(runtimeDir);
   await waitForServer(baseUrl, serverHandle);
 
-  await fetchJson(baseUrl, "/api/v1/bootstrap/setup", {
+  await fetchJson(baseUrl, "/api/bootstrap/setup", {
     method: "POST",
     body: JSON.stringify({
       display_name: "Operator",
@@ -37,14 +37,14 @@ try {
   await ensureAgent(baseUrl, "coder", "Coder");
   await ensureAgent(baseUrl, "planner", "Planner");
 
-  const directConversation = await fetchJson(baseUrl, "/api/v1/conversations", {
+  const directConversation = await fetchJson(baseUrl, "/api/conversations", {
     method: "POST",
     body: JSON.stringify({
       topology: "direct",
       agent_ids: ["coder"],
     }),
   });
-  const groupConversation = await fetchJson(baseUrl, "/api/v1/conversations", {
+  const groupConversation = await fetchJson(baseUrl, "/api/conversations", {
     method: "POST",
     body: JSON.stringify({
       topology: "group",
@@ -55,7 +55,7 @@ try {
 
   const directEnvelope = await fetchJson(
     baseUrl,
-    `/api/v1/conversations/${directConversation.conversation.id}/messages`,
+    `/api/conversations/${directConversation.conversation.id}/messages`,
     {
       method: "POST",
       body: JSON.stringify({
@@ -67,7 +67,7 @@ try {
   );
   const groupEnvelope = await fetchJson(
     baseUrl,
-    `/api/v1/conversations/${groupConversation.conversation.id}/messages`,
+    `/api/conversations/${groupConversation.conversation.id}/messages`,
     {
       method: "POST",
       body: JSON.stringify({
@@ -78,22 +78,22 @@ try {
     },
   );
 
-  const overview = await fetchJson(baseUrl, "/api/v1/overview");
+  const overview = await fetchJson(baseUrl, "/api/overview");
   const uiMessages = await fetchJson(
     baseUrl,
-    "/api/v1/ui/messages?locale=zh-CN&namespaces=web,ext.observatory",
+    "/api/ui/messages?locale=zh-CN&namespaces=web,ext.observatory",
   );
-  const conversations = await fetchJson(baseUrl, "/api/v1/conversations");
+  const conversations = await fetchJson(baseUrl, "/api/conversations");
   const directMessages = await fetchJson(
     baseUrl,
-    `/api/v1/conversations/${directConversation.conversation.id}/messages`,
+    `/api/conversations/${directConversation.conversation.id}/messages`,
   );
   const groupMessages = await fetchJson(
     baseUrl,
-    `/api/v1/conversations/${groupConversation.conversation.id}/messages`,
+    `/api/conversations/${groupConversation.conversation.id}/messages`,
   );
-  const memoryExtension = await fetchJson(baseUrl, "/api/v1/extensions/memory");
-  const workflowExtension = await fetchJson(baseUrl, "/api/v1/extensions/workflow");
+  const memoryExtension = await fetchJson(baseUrl, "/api/extensions/memory");
+  const workflowExtension = await fetchJson(baseUrl, "/api/extensions/workflow");
 
   assert(overview.counts.extensions >= 1, "overview should expose extensions count");
   assert(uiMessages.bundles.length === 2, "ui messages should include requested builtin bundles");
@@ -105,7 +105,7 @@ try {
   assert(groupMessages.length === 1, "group conversation should contain one message");
   assert(memoryExtension.id === "memory", "memory extension should be registered");
   assert(workflowExtension.id === "workflow", "workflow extension should be registered");
-  assert(memoryExtension.backend?.base_url, "memory extension should expose backend proxy info");
+  assert(memoryExtension.worker?.entry, "memory extension should expose worker entry info");
 
   console.log("[e2e] platform smoke passed");
 } finally {
@@ -116,7 +116,7 @@ try {
 }
 
 async function ensureAgent(baseUrl, id, displayName) {
-  return fetchJson(baseUrl, "/api/v1/agents", {
+  return fetchJson(baseUrl, "/api/agents", {
     method: "POST",
     body: JSON.stringify({
       id,

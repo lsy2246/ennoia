@@ -1,6 +1,7 @@
 //! Extension host loads system extensions and skills from disk.
 
 pub mod registry;
+pub mod worker;
 
 pub use registry::{
     read_registry_file, write_registry_file, ExtensionRuntime, ExtensionRuntimeConfig,

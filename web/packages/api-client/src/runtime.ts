@@ -11,7 +11,7 @@ import type {
 } from "./types";
 
 export async function fetchBootstrapStatus() {
-  return fetchJson<BootstrapState>("/api/v1/bootstrap/status");
+  return fetchJson<BootstrapState>("/api/bootstrap/status");
 }
 
 export async function bootstrapSetup(payload: {
@@ -24,14 +24,14 @@ export async function bootstrapSetup(payload: {
   density?: string;
   motion?: string;
 }) {
-  return fetchJson<BootstrapSetupResponse>("/api/v1/bootstrap/setup", {
+  return fetchJson<BootstrapSetupResponse>("/api/bootstrap/setup", {
     method: "POST",
     body: JSON.stringify(payload),
   });
 }
 
 export async function fetchUiRuntime() {
-  return fetchJson<UiRuntime>("/api/v1/ui/runtime");
+  return fetchJson<UiRuntime>("/api/ui/runtime");
 }
 
 export async function fetchUiMessages(locale: string, namespaces: string[] = []) {
@@ -39,11 +39,11 @@ export async function fetchUiMessages(locale: string, namespaces: string[] = [])
   if (namespaces.length > 0) {
     params.set("namespaces", namespaces.join(","));
   }
-  return fetchJson<UiMessagesResponse>(`/api/v1/ui/messages?${params.toString()}`);
+  return fetchJson<UiMessagesResponse>(`/api/ui/messages?${params.toString()}`);
 }
 
 export async function fetchRuntimeProfile() {
-  return fetchJson<RuntimeProfile | null>("/api/v1/runtime/profile");
+  return fetchJson<RuntimeProfile | null>("/api/runtime/profile");
 }
 
 export async function saveRuntimeProfile(payload: {
@@ -52,14 +52,14 @@ export async function saveRuntimeProfile(payload: {
   time_zone?: string | null;
   default_space_id?: string | null;
 }) {
-  return fetchJson<RuntimeProfile>("/api/v1/runtime/profile", {
+  return fetchJson<RuntimeProfile>("/api/runtime/profile", {
     method: "PUT",
     body: JSON.stringify(payload),
   });
 }
 
 export async function fetchRuntimePreferences() {
-  return fetchJson<UiPreferenceRecord | null>("/api/v1/runtime/preferences");
+  return fetchJson<UiPreferenceRecord | null>("/api/runtime/preferences");
 }
 
 export async function saveInstanceUiPreferences(payload: {
@@ -70,29 +70,29 @@ export async function saveInstanceUiPreferences(payload: {
   density?: string | null;
   motion?: string | null;
 }) {
-  return fetchJson<UiPreferenceRecord>("/api/v1/runtime/preferences", {
+  return fetchJson<UiPreferenceRecord>("/api/runtime/preferences", {
     method: "PUT",
     body: JSON.stringify(payload),
   });
 }
 
 export async function fetchAppConfig() {
-  return fetchJson<AppConfig>("/api/v1/runtime/app-config");
+  return fetchJson<AppConfig>("/api/runtime/app-config");
 }
 
 export async function saveAppConfig(payload: AppConfig) {
-  return fetchJson<AppConfig>("/api/v1/runtime/app-config", {
+  return fetchJson<AppConfig>("/api/runtime/app-config", {
     method: "PUT",
     body: JSON.stringify(payload),
   });
 }
 
 export async function fetchServerConfig() {
-  return fetchJson<ServerConfig>("/api/v1/runtime/server-config");
+  return fetchJson<ServerConfig>("/api/runtime/server-config");
 }
 
 export async function saveServerConfig(payload: ServerConfig) {
-  return fetchJson<ServerConfig>("/api/v1/runtime/server-config", {
+  return fetchJson<ServerConfig>("/api/runtime/server-config", {
     method: "PUT",
     body: JSON.stringify(payload),
   });

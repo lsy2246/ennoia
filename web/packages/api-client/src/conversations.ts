@@ -1,7 +1,7 @@
 ﻿import { fetchJson } from "./core";
 import type { ChatLane, ChatMessage, ChatSendResponse, ChatThread, ChatThreadDetail } from "./types";
 
-const CONVERSATIONS_API = "/api/v1/conversations";
+const CONVERSATIONS_API = "/api/conversations";
 
 export async function listChats() {
   return fetchJson<ChatThread[]>(CONVERSATIONS_API);
