@@ -50,6 +50,8 @@
 约定：
 
 - `target.extension_id` 和 `target.action_id` 指向扩展声明的 `schedule_actions`。
+- `target.kind = "extension"` 时，scheduler 调用扩展 Wasm Worker。
+- `target.kind = "command"` 时，scheduler 直接运行本机 shell 命令，字段为 `command.command`、`command.cwd`、`command.timeout_ms`。
 - `params` 原样传给扩展 Worker，业务含义由扩展定义。
 - Scheduler 只负责计划与触发，不解释业务语义。
 

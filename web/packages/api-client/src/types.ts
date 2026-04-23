@@ -383,10 +383,22 @@ export type ScheduleTrigger =
   | { kind: "interval"; every_seconds: number }
   | { kind: "cron"; expression: string; next_run_at: string };
 
-export type ScheduleTarget = {
+export type ExtensionScheduleTarget = {
+  kind?: "extension";
   extension_id: string;
   action_id: string;
 };
+
+export type CommandScheduleTarget = {
+  kind: "command";
+  command: {
+    command: string;
+    cwd?: string | null;
+    timeout_ms?: number | null;
+  };
+};
+
+export type ScheduleTarget = ExtensionScheduleTarget | CommandScheduleTarget;
 
 export type ScheduleRecord = {
   id: string;

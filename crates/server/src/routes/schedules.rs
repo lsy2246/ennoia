@@ -1,4 +1,9 @@
+use std::process::Stdio;
+use std::time::Duration as StdDuration;
+
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
+use tokio::process::Command;
+use tokio::time::timeout;
 
 use super::*;
 
@@ -40,8 +45,30 @@ pub(super) enum ScheduleTrigger {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(super) struct ScheduleTarget {
-    pub extension_id: String,
-    pub action_id: String,
+    #[serde(default = "default_schedule_target_kind")]
+    pub kind: ScheduleTargetKind,
+    #[serde(default)]
+    pub extension_id: Option<String>,
+    #[serde(default)]
+    pub action_id: Option<String>,
+    #[serde(default)]
+    pub command: Option<CommandScheduleTarget>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum ScheduleTargetKind {
+    Extension,
+    Command,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(super) struct CommandScheduleTarget {
+    pub command: String,
+    #[serde(default)]
+    pub cwd: Option<String>,
+    #[serde(default)]
+    pub timeout_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -86,7 +113,7 @@ pub(super) async fn schedule_create(
     Extension(request): Extension<RequestContext>,
     Json(payload): Json<SchedulePayload>,
 ) -> ApiResult<ScheduleRecord> {
-    ensure_schedule_action(&state, &payload.target, &request)?;
+    ensure_schedule_target(&state, &payload.target, &request)?;
     let _guard = state.schedule_lock.lock().await;
     let now = now_iso();
     let mut schedules = read_schedules(&state).unwrap_or_default();
@@ -116,7 +143,7 @@ pub(super) async fn schedule_update(
     Path(schedule_id): Path<String>,
     Json(payload): Json<SchedulePayload>,
 ) -> ApiResult<ScheduleRecord> {
-    ensure_schedule_action(&state, &payload.target, &request)?;
+    ensure_schedule_target(&state, &payload.target, &request)?;
     let _guard = state.schedule_lock.lock().await;
     let mut schedules = read_schedules(&state).unwrap_or_default();
     let Some(schedule) = schedules.iter_mut().find(|item| item.id == schedule_id) else {
@@ -240,32 +267,15 @@ async fn run_schedule_by_id(
         .position(|item| item.id == schedule_id)
         .ok_or_else(|| scoped(ApiError::not_found("schedule not found"), request))?;
     let mut schedule = schedules[index].clone();
-    let action = ensure_schedule_action(state, &schedule.target, request)?;
-    let response = state
-        .extensions
-        .dispatch_rpc(
-            &schedule.target.extension_id,
-            &action.schedule_action.method,
-            ennoia_kernel::ExtensionRpcRequest {
-                params: schedule.params.clone(),
-                context: serde_json::json!({
-                    "schedule_id": schedule.id,
-                    "action_id": schedule.target.action_id,
-                    "owner": schedule.owner
-                }),
-            },
-        )
-        .map_err(|error| scoped(ApiError::internal(error.to_string()), request))?;
+    let execution = run_schedule_target(state, &schedule, request).await?;
 
     schedule.last_run_at = Some(now_iso());
-    if response.ok {
+    if execution.ok {
         schedule.last_status = Some("completed".to_string());
         schedule.last_error = None;
     } else {
         schedule.last_status = Some("failed".to_string());
-        schedule.last_error = response
-            .error
-            .map(|error| format!("{}: {}", error.code, error.message));
+        schedule.last_error = execution.error;
     }
     advance_schedule(&mut schedule, Utc::now());
     schedule.updated_at = now_iso();
@@ -273,14 +283,164 @@ async fn run_schedule_by_id(
     write_schedules(state, &schedules)
         .map_err(|error| scoped(ApiError::internal(error.to_string()), request))?;
 
-    if response.ok {
-        Ok(response.data)
+    if execution.ok {
+        Ok(execution.data)
     } else {
         Err(scoped(
-            ApiError::bad_request("schedule action failed"),
+            ApiError::bad_request("schedule target failed"),
             request,
         ))
     }
+}
+
+struct ScheduleExecution {
+    ok: bool,
+    data: JsonValue,
+    error: Option<String>,
+}
+
+async fn run_schedule_target(
+    state: &AppState,
+    schedule: &ScheduleRecord,
+    request: &RequestContext,
+) -> Result<ScheduleExecution, ApiError> {
+    match schedule.target.kind {
+        ScheduleTargetKind::Extension => run_extension_schedule_target(state, schedule, request),
+        ScheduleTargetKind::Command => run_command_schedule_target(schedule, request).await,
+    }
+}
+
+fn run_extension_schedule_target(
+    state: &AppState,
+    schedule: &ScheduleRecord,
+    request: &RequestContext,
+) -> Result<ScheduleExecution, ApiError> {
+    let action = ensure_schedule_action(state, &schedule.target, request)?;
+    let extension_id = schedule_extension_id(&schedule.target, request)?;
+    let action_id = schedule_action_id(&schedule.target, request)?;
+    let response = state
+        .extensions
+        .dispatch_rpc(
+            &extension_id,
+            &action.schedule_action.method,
+            ennoia_kernel::ExtensionRpcRequest {
+                params: schedule.params.clone(),
+                context: serde_json::json!({
+                    "schedule_id": schedule.id,
+                    "action_id": action_id,
+                    "owner": schedule.owner
+                }),
+            },
+        )
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), request))?;
+
+    Ok(ScheduleExecution {
+        ok: response.ok,
+        data: response.data,
+        error: response
+            .error
+            .map(|error| format!("{}: {}", error.code, error.message)),
+    })
+}
+
+async fn run_command_schedule_target(
+    schedule: &ScheduleRecord,
+    request: &RequestContext,
+) -> Result<ScheduleExecution, ApiError> {
+    let command = schedule_command_target(&schedule.target, request)?;
+    let timeout_ms = command
+        .timeout_ms
+        .unwrap_or(120_000)
+        .clamp(1_000, 3_600_000);
+    let mut process = shell_command(&command.command);
+    process.stdout(Stdio::piped()).stderr(Stdio::piped());
+    if let Some(cwd) = command
+        .cwd
+        .as_deref()
+        .filter(|item| !item.trim().is_empty())
+    {
+        process.current_dir(cwd);
+    }
+
+    let output = timeout(StdDuration::from_millis(timeout_ms), process.output())
+        .await
+        .map_err(|_| scoped(ApiError::bad_request("command schedule timed out"), request))?
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), request))?;
+
+    let stdout = truncate_output(&String::from_utf8_lossy(&output.stdout));
+    let stderr = truncate_output(&String::from_utf8_lossy(&output.stderr));
+    let status_code = output.status.code();
+    let data = serde_json::json!({
+        "kind": "command",
+        "command": command.command,
+        "cwd": command.cwd,
+        "timeout_ms": timeout_ms,
+        "status_code": status_code,
+        "stdout": stdout,
+        "stderr": stderr
+    });
+
+    Ok(ScheduleExecution {
+        ok: output.status.success(),
+        data,
+        error: if output.status.success() {
+            None
+        } else {
+            Some(format!(
+                "command exited with status {}",
+                status_code
+                    .map(|code| code.to_string())
+                    .unwrap_or_else(|| "unknown".to_string())
+            ))
+        },
+    })
+}
+
+#[cfg(windows)]
+fn shell_command(command: &str) -> Command {
+    let mut process = Command::new("powershell");
+    process.args([
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        command,
+    ]);
+    process
+}
+
+#[cfg(not(windows))]
+fn shell_command(command: &str) -> Command {
+    let mut process = Command::new("sh");
+    process.args(["-lc", command]);
+    process
+}
+
+fn truncate_output(value: &str) -> String {
+    const MAX_OUTPUT_CHARS: usize = 8192;
+    value.chars().take(MAX_OUTPUT_CHARS).collect()
+}
+
+fn ensure_schedule_target(
+    state: &AppState,
+    target: &ScheduleTarget,
+    request: &RequestContext,
+) -> Result<(), ApiError> {
+    match target.kind {
+        ScheduleTargetKind::Extension => {
+            ensure_schedule_action(state, target, request)?;
+        }
+        ScheduleTargetKind::Command => {
+            let command = schedule_command_target(target, request)?;
+            if command.command.trim().is_empty() {
+                return Err(scoped(
+                    ApiError::bad_request("command is required"),
+                    request,
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn ensure_schedule_action(
@@ -288,15 +448,47 @@ fn ensure_schedule_action(
     target: &ScheduleTarget,
     request: &RequestContext,
 ) -> Result<RegisteredScheduleActionContribution, ApiError> {
+    let extension_id = schedule_extension_id(target, request)?;
+    let action_id = schedule_action_id(target, request)?;
     state
         .extensions
         .snapshot()
         .schedule_actions
         .into_iter()
-        .find(|item| {
-            item.extension_id == target.extension_id && item.schedule_action.id == target.action_id
-        })
+        .find(|item| item.extension_id == extension_id && item.schedule_action.id == action_id)
         .ok_or_else(|| scoped(ApiError::not_found("schedule action not found"), request))
+}
+
+fn schedule_extension_id(
+    target: &ScheduleTarget,
+    request: &RequestContext,
+) -> Result<String, ApiError> {
+    target
+        .extension_id
+        .clone()
+        .filter(|item| !item.trim().is_empty())
+        .ok_or_else(|| scoped(ApiError::bad_request("extension_id is required"), request))
+}
+
+fn schedule_action_id(
+    target: &ScheduleTarget,
+    request: &RequestContext,
+) -> Result<String, ApiError> {
+    target
+        .action_id
+        .clone()
+        .filter(|item| !item.trim().is_empty())
+        .ok_or_else(|| scoped(ApiError::bad_request("action_id is required"), request))
+}
+
+fn schedule_command_target(
+    target: &ScheduleTarget,
+    request: &RequestContext,
+) -> Result<CommandScheduleTarget, ApiError> {
+    target
+        .command
+        .clone()
+        .ok_or_else(|| scoped(ApiError::bad_request("command target is required"), request))
 }
 
 fn read_schedules(state: &AppState) -> std::io::Result<Vec<ScheduleRecord>> {
@@ -348,4 +540,8 @@ fn parse_time(value: &str) -> Option<DateTime<Utc>> {
 
 fn default_enabled() -> bool {
     true
+}
+
+fn default_schedule_target_kind() -> ScheduleTargetKind {
+    ScheduleTargetKind::Extension
 }

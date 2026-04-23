@@ -4,7 +4,7 @@ import { App } from "@/App";
 import { Agents } from "@/pages/agents";
 import { Extensions } from "@/pages/extensions";
 import { Logs } from "@/pages/logs";
-import { Providers } from "@/pages/providers";
+import { Schedules } from "@/pages/schedules";
 import { Settings } from "@/pages/settings";
 import { Skills } from "@/pages/skills";
 import { Welcome } from "@/pages/welcome";
@@ -93,10 +93,10 @@ const skillsRoute = createRoute({
   component: Skills,
 });
 
-const providersRoute = createRoute({
+const schedulesRoute = createRoute({
   getParentRoute: () => webRoute,
-  path: "/upstreams",
-  component: Providers,
+  path: "/schedules",
+  component: Schedules,
 });
 
 const extensionPageRoute = createRoute({
@@ -130,7 +130,7 @@ const routeTree = rootRoute.addChildren([
     conversationsRoute,
     agentsRoute,
     skillsRoute,
-    providersRoute,
+    schedulesRoute,
     extensionPageRoute,
     extensionsRoute,
     logsRoute,

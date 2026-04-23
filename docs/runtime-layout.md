@@ -68,7 +68,7 @@
 ## 数据职责
 
 - `data/system/sqlite/system-log.db`：系统日志库，只记录系统组件观测事件，不记录会话 history。
-- `data/system/schedules.json`：scheduler 计划列表，记录 trigger、target、params、启用状态和最近执行结果。
+- `data/system/schedules.json`：scheduler 计划列表，记录 trigger、target、params、启用状态和最近执行结果；target 可以是扩展动作或本机命令。
 - `data/extensions/{extension_id}/`：扩展私有运行数据根目录。
   - `memory` 扩展在自己的目录中维护完整记忆系统数据。
   - `workflow` 扩展在自己的目录中维护 run / task / artifact / handoff 等运行数据。

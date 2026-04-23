@@ -4,6 +4,8 @@
 
 - 提供 VSCode 风格的 Web 工作台与多面板布局
 - 提供工作台、Agent、技能、上游、扩展、任务、日志、设置页面
+- API 上游渠道不再作为主导航独立视图，改为设置页中的配置区
+- 定时器作为主导航独立视图，管理扩展 `schedule_actions` 对应的 schedule
 - 统一承载 direct/group 会话创建与消息流展示
 - 通过 registry 合并内建视图与扩展视图，并用 `dockview` 提供拖拽停靠布局
 - Observatory 已作为正式 Web 视图接入真实运行数据
@@ -17,6 +19,7 @@
 - 共享 API 访问统一收口到 `web/packages/api-client/src/index.ts`
 - API client 已提供 interface binding 与 scheduler 封装：`interfaces.ts`、`schedules.ts`
 - `web` 提供 `bun run --cwd web lint`，基于 ESLint flat config 检查 `src` 与 `packages`
+- 定时器视图位于 `web/src/pages/schedules.tsx`，依赖 `listScheduleActions` / `listSchedules` 等 API client 方法；创建时支持“交给 AI 执行”和“直接运行命令”
 - 工作台支持 `@agent` 消息路由，不再使用“目标”输入框
 - 内置前端 i18n namespace 使用 `web`
 - 扩展 UI 模块加载使用 `/api/extensions/{extension_id}/ui/module`

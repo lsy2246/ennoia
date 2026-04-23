@@ -52,7 +52,10 @@ Web
 - `workflow` 是一个内置扩展实现，声明 run/task/artifact 接口和 `workflow.run` 定时动作。
 - `/api/runs`、`/api/runs/{id}/tasks`、`/api/conversations/{id}/runs` 等稳定入口通过接口层路由到扩展。
 - 系统 scheduler 只负责保存计划、计算到期、串行触发和记录最近一次执行状态。
-- 定时业务语义由扩展的 `contributes.schedule_actions` 声明并通过 Wasm Worker 执行。
+- 定时目标支持两类：
+  - `extension`：调用扩展的 `contributes.schedule_actions`，用于“交给 AI / Workflow 执行”。
+  - `command`：直接在本机 shell 中运行命令，用于脚本和本地自动化。
+- `command` 目标支持 `command`、`cwd`、`timeout_ms`，并记录 stdout / stderr 摘要；业务风险由本机操作者自行控制。
 - 当前定时入口包括：
   - `GET /api/schedule-actions`
   - `GET /api/schedules`

@@ -142,7 +142,27 @@ Memory 能力通过扩展 Worker RPC 分发。Memory 扩展拥有自己的私有
 - `POST /api/schedules/{schedule_id}/pause`
 - `POST /api/schedules/{schedule_id}/resume`
 
-Scheduler 只保存计划并触发扩展声明的 `schedule_actions`。当前触发器支持 `once`、`interval` 和带外部 `next_run_at` 的 `cron`。
+Scheduler 只保存计划并触发目标。当前触发器支持 `once`、`interval` 和带外部 `next_run_at` 的 `cron`。
+
+目标支持两种：
+
+- `extension`：调用扩展声明的 `schedule_actions`，适合把定时任务交给 AI / Workflow 执行。
+- `command`：直接在本机 shell 中运行命令，适合脚本和本地自动化。
+
+`command` target 示例：
+
+```json
+{
+  "target": {
+    "kind": "command",
+    "command": {
+      "command": "bun run --cwd web build",
+      "cwd": "C:/Users/Administrator/Desktop/code/ennoia",
+      "timeout_ms": 120000
+    }
+  }
+}
+```
 
 ## Workflow / Behavior Capability
 

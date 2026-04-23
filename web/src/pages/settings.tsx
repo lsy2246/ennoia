@@ -10,6 +10,7 @@ import {
   type ServerConfig,
 } from "@ennoia/api-client";
 import { buildTimeZoneOptionGroups } from "@/lib/timeZones";
+import { Providers } from "@/pages/providers";
 import { useRuntimeStore } from "@/stores/runtime";
 import { useUiHelpers } from "@/stores/ui";
 
@@ -311,6 +312,10 @@ export function Settings() {
         </label>
         <button type="submit">{t("web.settings.save_personal", "保存个人设置")}</button>
       </form>
+
+      <section className="settings-wide">
+        <Providers />
+      </section>
 
       <section className="work-panel editor-form settings-wide">
         <div className="page-heading">

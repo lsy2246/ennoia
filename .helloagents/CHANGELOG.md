@@ -7,6 +7,8 @@
   - 方案: [202604231535_wasm-action-interface-scheduler](plan/202604231535_wasm-action-interface-scheduler/)
   - 决策: wasm-action-interface-scheduler#D001(采用薄系统接口绑定 + Wasm Worker 动作实现)
 - **[web-tooling]**: 为 Web workspace 接入 ESLint flat config 与 `bun run --cwd web lint` 脚本 — by Codex
+- **[web]**: 移除 API 上游渠道主导航入口，将渠道管理嵌入设置页，并新增定时器视图用于创建、暂停、恢复、删除和手动运行 schedule actions — by Codex
+- **[scheduler]**: 参考 OpenClaw “何时运行 + 做什么”的 cron 模型，定时目标扩展为 AI/Workflow 动作与本机命令两类 — by Codex
 - **[extension-runtime]**: 一次性切换为扩展能力包模型，使用可选 `ui`、可选 Wasm `worker` 与宿主 Worker RPC，移除端口型扩展后端主路径 — by lsy
   - 方案: [202604231111_wasm-extension-runtime](archive/2026-04/202604231111_wasm-extension-runtime/)
   - 决策: wasm-extension-runtime#D001(采用 Rust Host + Wasm Worker 能力包模型)
