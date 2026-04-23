@@ -2,6 +2,52 @@ export type ThemeAppearance = "light" | "dark" | "system" | "high-contrast";
 
 export type ThemeSource = "builtin" | "extension";
 
+export const THEME_CONTRACT = "ennoia.theme";
+
+export const REQUIRED_THEME_TOKENS = [
+  "--color-bg",
+  "--color-surface",
+  "--color-surface-2",
+  "--color-border",
+  "--color-text",
+  "--color-text-muted",
+  "--color-primary",
+  "--color-primary-hover",
+] as const;
+
+export const DOCKVIEW_THEME_TOKENS = [
+  "--dockview-header-surface",
+  "--dockview-header-border",
+  "--dockview-tab-surface",
+  "--dockview-tab-hover",
+  "--dockview-tab-border",
+  "--dockview-tab-accent",
+  "--dockview-drop-surface",
+  "--dockview-tab-shadow",
+  "--dockview-divider-shadow",
+  "--dockview-splitter-line",
+  "--dockview-splitter-track",
+  "--dockview-splitter-hover",
+  "--dockview-empty-surface",
+  "--dockview-empty-border",
+  "--dockview-empty-accent",
+  "--dockview-empty-card",
+  "--dockview-empty-card-hover",
+] as const;
+
+export const WEB_ALIAS_THEME_TOKENS = [
+  "--bg",
+  "--bg-elevated",
+  "--bg-soft",
+  "--bg-panel",
+  "--line",
+  "--line-strong",
+  "--text",
+  "--text-muted",
+  "--accent",
+  "--accent-soft",
+] as const;
+
 export type ThemeDefinition = {
   id: string;
   label: string;
@@ -9,9 +55,15 @@ export type ThemeDefinition = {
   previewColor: string;
   variables?: Record<string, string>;
   source: ThemeSource;
+  contract?: string | null;
   cssUrl?: string | null;
   extends?: string | null;
   category?: string | null;
+};
+
+export type ThemeValidationResult = {
+  valid: boolean;
+  diagnostics: string[];
 };
 
 export type UiBootstrapCache = {
@@ -25,7 +77,7 @@ export type UiBootstrapCache = {
 
 export const UI_BOOTSTRAP_CACHE_KEY = "ennoia.ui.bootstrap";
 const ACTIVE_THEME_LINK_ID = "ennoia-runtime-theme-link";
-const WEB_THEME_VARIABLE_BRIDGE: Record<string, string> = {
+export const WEB_THEME_VARIABLE_BRIDGE: Record<string, string> = {
   "--bg": "--color-bg",
   "--bg-elevated": "--color-surface",
   "--bg-soft": "--color-surface-2",
@@ -52,6 +104,41 @@ const WEB_THEME_VARIABLE_BRIDGE: Record<string, string> = {
   "--dockview-empty-card": "--color-surface",
   "--dockview-empty-card-hover": "--color-surface-2",
 };
+
+export function isSupportedThemeContract(contract?: string | null) {
+  return !contract || contract === THEME_CONTRACT;
+}
+
+export function validateThemeDefinition(theme: ThemeDefinition): ThemeValidationResult {
+  const diagnostics: string[] = [];
+  if (!isSupportedThemeContract(theme.contract)) {
+    diagnostics.push(`unsupported theme contract '${theme.contract}'`);
+  }
+  if (theme.source === "extension" && !theme.cssUrl) {
+    diagnostics.push("extension theme must provide cssUrl");
+  }
+  if (theme.variables) {
+    for (const token of REQUIRED_THEME_TOKENS) {
+      const value = theme.variables[token];
+      if (!value || !value.trim()) {
+        diagnostics.push(`theme variables missing required token '${token}'`);
+      }
+    }
+  }
+  return {
+    valid: diagnostics.length === 0,
+    diagnostics,
+  };
+}
+
+export function listThemeContractTokens() {
+  return {
+    contract: THEME_CONTRACT,
+    required: [...REQUIRED_THEME_TOKENS],
+    dockview: [...DOCKVIEW_THEME_TOKENS],
+    aliases: [...WEB_ALIAS_THEME_TOKENS],
+  };
+}
 
 const LIGHT_DOCKVIEW_TOKENS = {
   "--dockview-header-surface": "rgba(255, 255, 255, 0.84)",
@@ -101,6 +188,7 @@ export const BUILTIN_THEMES: ThemeDefinition[] = [
     previewColor: "#007aff",
     variables: {},
     source: "builtin",
+    contract: THEME_CONTRACT,
   },
   {
     id: "apple.light",
@@ -119,6 +207,7 @@ export const BUILTIN_THEMES: ThemeDefinition[] = [
       ...LIGHT_DOCKVIEW_TOKENS,
     },
     source: "builtin",
+    contract: THEME_CONTRACT,
   },
   {
     id: "apple.dark",
@@ -137,6 +226,7 @@ export const BUILTIN_THEMES: ThemeDefinition[] = [
       ...DARK_DOCKVIEW_TOKENS,
     },
     source: "builtin",
+    contract: THEME_CONTRACT,
   },
   {
     id: "ennoia.midnight",
@@ -171,6 +261,7 @@ export const BUILTIN_THEMES: ThemeDefinition[] = [
       "--dockview-empty-card-hover": "rgba(255, 255, 255, 0.06)",
     },
     source: "builtin",
+    contract: THEME_CONTRACT,
   },
   {
     id: "ennoia.paper",
@@ -205,6 +296,7 @@ export const BUILTIN_THEMES: ThemeDefinition[] = [
       "--dockview-empty-card-hover": "rgba(255, 255, 255, 0.94)",
     },
     source: "builtin",
+    contract: THEME_CONTRACT,
   },
 ];
 
@@ -267,6 +359,11 @@ function removeThemeLink() {
 export function registerRuntimeThemes(themes: ThemeDefinition[]) {
   runtimeThemeMap = new Map(BUILTIN_THEMES.map((theme) => [theme.id, theme]));
   for (const theme of themes) {
+    const validation = validateThemeDefinition(theme);
+    if (!validation.valid) {
+      console.warn(`[theme-runtime] skipped theme '${theme.id}': ${validation.diagnostics.join("; ")}`);
+      continue;
+    }
     runtimeThemeMap.set(theme.id, theme);
   }
 }
@@ -333,6 +430,7 @@ export function applyTheme(themeId?: string | null) {
   const baseTheme = resolveAppliedThemeDefinition(themeId);
 
   root.dataset.theme = theme.id;
+  root.dataset.themeContract = theme.contract ?? THEME_CONTRACT;
   for (const key of themeVariableKeys()) {
     root.style.removeProperty(key);
   }

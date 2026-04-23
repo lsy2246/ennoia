@@ -11,7 +11,7 @@ dev = false
 [worker]
 kind = "wasm"
 entry = "worker/workflow.wasm"
-abi = "ennoia.worker.v1"
+abi = "ennoia.worker"
 
 [permissions]
 storage = "extension"

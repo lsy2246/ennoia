@@ -72,7 +72,7 @@
 - `extension-host` 承载扩展扫描、attach、reload、restart、诊断、Worker 解析与 Worker RPC 分发
 - `server` 承载 API 暴露、TOML 配置文件、日志、Hook 派发、能力路由与启动流程
 - 内置扩展实现放在 `builtins/extensions/<extension_id>/ui|worker|data`，不得把 session、memory、workflow、任务编排等业务实现混回核心 crate
-- Wasm Worker 使用 `ennoia.worker.v1` ABI，宿主默认不注入 WASI/import；需要宿主能力时必须先在 `permissions` 中声明，并通过统一 capability bridge 接入
+- Wasm Worker 使用 `ennoia.worker` ABI，宿主默认不注入 WASI/import；需要宿主能力时必须先在 `permissions` 中声明，并通过统一 capability bridge 接入
 - 公共转换逻辑提取为函数或模块级 helper
 
 ### 5.2 命名
@@ -98,6 +98,7 @@
 - 扩展页面、面板、导航注册统一通过运行时快照接入
 - 扩展 UI 实现、文案、主题和页面描述必须保留在扩展包内；Web 主壳不得静态注册某个扩展的页面组件、主题或 i18n namespace
 - Web 主壳加载扩展 UI 时只使用 runtime snapshot 与 `/api/extensions/{extension_id}/ui/module`，不得重新引入 `import.meta.glob` 或源码路径白名单来绑定具体扩展
+- 扩展主题必须遵循 `ennoia.theme`，只通过稳定 CSS 变量贡献观感，不得覆盖主壳内部 class 或 DOM 结构
 
 ### 6.2 状态与 API
 

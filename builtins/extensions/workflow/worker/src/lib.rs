@@ -73,7 +73,7 @@ fn handle(invocation: Invocation) -> String {
                 "decision": {
                     "id": "wasm-decision-1",
                     "summary": "Workflow Worker accepted the run request.",
-                    "rationale": "Handled inside ennoia.worker.v1 sandbox.",
+                    "rationale": "Handled inside ennoia.worker sandbox.",
                     "created_at": "0"
                 },
                 "gate_verdicts": []
@@ -118,7 +118,7 @@ fn sample_run_bundle(goal: &str) -> Value {
         "decision": {
             "id": "wasm-decision-1",
             "summary": goal,
-            "rationale": "Handled inside ennoia.worker.v1 sandbox.",
+            "rationale": "Handled inside ennoia.worker sandbox.",
             "created_at": "0"
         },
         "gate_verdicts": []

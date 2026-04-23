@@ -52,6 +52,8 @@ pub struct ThemeContribution {
     pub label: LocalizedText,
     pub appearance: ThemeAppearance,
     pub tokens_entry: String,
+    #[serde(default)]
+    pub contract: Option<String>,
     pub preview_color: Option<String>,
     pub extends: Option<String>,
     pub category: Option<String>,

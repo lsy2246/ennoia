@@ -71,7 +71,7 @@ schedule_actions = [
 
 ## Worker ABI
 
-当前宿主支持 `ennoia.worker.v1`。Wasm Worker 必须导出：
+当前宿主支持 `ennoia.worker`。Wasm Worker 必须导出：
 
 - `memory`：线性内存。
 - `ennoia_worker_alloc(len: i32) -> i32`：分配输入/输出缓冲区。
@@ -100,7 +100,7 @@ schedule_actions = [
 
 如果 Worker 返回普通 JSON，宿主会把它包装为 `ok=true` 的 `data`。
 
-内置 `memory` 与 `workflow` 都提供 `ennoia.worker.v1` Worker crate。执行 `bun run build:workers` 会构建两个 release Wasm，并写入 manifest 中声明的 `worker/memory.wasm` 与 `worker/workflow.wasm`。
+内置 `memory` 与 `workflow` 都提供 `ennoia.worker` Worker crate。执行 `bun run build:workers` 会构建两个 release Wasm，并写入 manifest 中声明的 `worker/memory.wasm` 与 `worker/workflow.wasm`。
 
 ## 沙箱与权限
 

@@ -857,7 +857,7 @@ fn resolve_worker(
             .worker
             .abi
             .clone()
-            .unwrap_or_else(|| "ennoia.worker.v1".to_string()),
+            .unwrap_or_else(|| "ennoia.worker".to_string()),
         status: "ready".to_string(),
     }))
 }
@@ -1134,7 +1134,7 @@ hmr = true
 [worker]
 kind = "wasm"
 entry = "./worker/plugin.wasm"
-abi = "ennoia.worker.v1"
+abi = "ennoia.worker"
 
 [capabilities]
 pages = true

@@ -50,6 +50,7 @@ export type ExtensionThemeContribution = {
     label: LocalizedText;
     appearance: ThemeAppearance;
     tokens_entry: string;
+    contract?: string | null;
     preview_color?: string | null;
     extends?: string | null;
     category?: string | null;

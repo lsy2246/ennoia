@@ -15,7 +15,7 @@ use wasmtime::{
 
 use crate::registry::ResolvedExtensionSnapshot;
 
-const SUPPORTED_WORKER_ABI: &str = "ennoia.worker.v1";
+const SUPPORTED_WORKER_ABI: &str = "ennoia.worker";
 const MAX_RPC_BYTES: usize = 4 * 1024 * 1024;
 const FUEL_PER_TIMEOUT_MS: u64 = 10_000;
 

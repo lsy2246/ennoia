@@ -39,7 +39,7 @@ ui_bundle = "ui/dist/entry.js"
 [worker]
 kind = "wasm"
 entry = "worker/plugin.wasm"
-abi = "ennoia.worker.v1"
+abi = "ennoia.worker"
 
 [permissions]
 storage = "extension"
@@ -70,6 +70,15 @@ memory_limit_mb = 128
 - `schedule_actions[]`
 
 `pages[]` 是可选 UI 贡献。声明页面后，Web 的扩展详情页会提供“打开视图”；只有页面额外声明 `nav.default_pinned = true` 时才默认进入主导航。
+
+`themes[]` 是可选主题贡献。扩展主题遵循 `ennoia.theme`，通过 `tokens_entry` 提供 CSS 变量文件，详细 token 规范见 [主题协议](theme-contract.md)。
+
+```toml
+[contributes]
+themes = [
+  { id = "acme.sunrise", contract = "ennoia.theme", label = { key = "ext.acme.theme.sunrise", fallback = "Sunrise" }, appearance = "light", tokens_entry = "ui/themes/sunrise.css", preview_color = "#f59e0b", extends = "system", category = "extension" }
+]
+```
 
 Hook 贡献声明扩展要接收的系统时机：
 
@@ -174,7 +183,7 @@ export default ui;
 
 ## Worker ABI
 
-当前宿主支持 `ennoia.worker.v1`，Worker 需要导出：
+当前宿主支持 `ennoia.worker`，Worker 需要导出：
 
 - `memory`
 - `ennoia_worker_alloc(len: i32) -> i32`

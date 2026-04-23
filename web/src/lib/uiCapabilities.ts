@@ -44,6 +44,7 @@ export function buildRuntimeThemeDefinitions(runtime: UiRuntime | null | undefin
       appearance: normalizeAppearance(item.theme.appearance),
       previewColor: item.theme.preview_color ?? "#5b8def",
       source: "extension" as const,
+      contract: item.theme.contract,
       cssUrl: getExtensionThemeStylesheetUrl(item.extension_id, item.theme.id),
       extends: item.theme.extends,
       category: item.theme.category,
