@@ -49,7 +49,7 @@
 ## 配置职责
 
 - `config/ennoia.toml`：应用级公共配置。
-- `config/server.toml`：HTTP、中间件、日志级别和 bootstrap 状态等系统配置。
+- `config/server.toml`：HTTP、中间件、日志级别、开发模式控制台日志镜像和 bootstrap 状态等系统配置。
 - `config/interfaces.toml`：接口绑定配置。
   - `bindings.<interface_key>.extension_id`
   - `bindings.<interface_key>.method`

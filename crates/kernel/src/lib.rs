@@ -46,8 +46,8 @@ pub use policy::{
     GlobPattern, MemoryPolicy, RuntimeRule, RuntimeRuleCondition, RuntimeRuleTarget, StagePolicy,
 };
 pub use server_settings::{
-    default_local_dev_origins, BodyLimitConfig, BootstrapState, CorsConfig, LoggingConfig,
-    RateLimitConfig, TimeoutConfig,
+    apply_server_log_env_overrides, default_local_dev_origins, BodyLimitConfig, BootstrapState,
+    CorsConfig, DevConsoleLogConfig, LoggingConfig, RateLimitConfig, TimeoutConfig,
 };
 pub use signals::{EvidenceSignals, ExecutionSignals, IntentSignals, Signals};
 pub use stage::{RunStage, RunStageEvent, StageTransition};

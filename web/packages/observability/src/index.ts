@@ -9,7 +9,35 @@ export interface Logger {
   error(message: string, fields?: LoggerFields): void;
 }
 
+function resolveMinLevel(): LogLevel {
+  const value =
+    import.meta.env.VITE_ENNOIA_LOG_LEVEL ??
+    import.meta.env.VITE_LOG_LEVEL ??
+    import.meta.env.ENNOIA_LOG_LEVEL ??
+    "info";
+  switch (String(value).trim().toLowerCase()) {
+    case "debug":
+      return "debug";
+    case "warn":
+      return "warn";
+    case "error":
+      return "error";
+    default:
+      return "info";
+  }
+}
+
+const LOG_LEVEL_ORDER: Record<LogLevel, number> = {
+  debug: 10,
+  info: 20,
+  warn: 30,
+  error: 40,
+};
+
 function emit(level: LogLevel, scope: string, message: string, fields?: LoggerFields) {
+  if (LOG_LEVEL_ORDER[level] < LOG_LEVEL_ORDER[resolveMinLevel()]) {
+    return;
+  }
   const payload = {
     timestamp: new Date().toISOString(),
     level,

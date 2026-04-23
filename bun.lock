@@ -10,7 +10,6 @@
       "version": "0.1.0",
       "dependencies": {
         "@ennoia/api-client": "workspace:*",
-        "@ennoia/builtins": "workspace:*",
         "@ennoia/contract": "workspace:*",
         "@ennoia/i18n": "workspace:*",
         "@ennoia/observability": "workspace:*",
@@ -49,13 +48,6 @@
         "@ennoia/ui-sdk": "workspace:*",
       },
     },
-    "web/packages/builtins": {
-      "name": "@ennoia/builtins",
-      "version": "0.1.0",
-      "dependencies": {
-        "@ennoia/ui-sdk": "workspace:*",
-      },
-    },
     "web/packages/contract": {
       "name": "@ennoia/contract",
       "version": "0.1.0",
@@ -74,6 +66,9 @@
     "web/packages/theme-runtime": {
       "name": "@ennoia/theme-runtime",
       "version": "0.1.0",
+      "dependencies": {
+        "@ennoia/observability": "workspace:*",
+      },
     },
     "web/packages/ui-sdk": {
       "name": "@ennoia/ui-sdk",
@@ -128,8 +123,6 @@
     "@csstools/selector-specificity": ["@csstools/selector-specificity@6.0.0", "", { "peerDependencies": { "postcss-selector-parser": "^7.1.1" } }, "sha512-4sSgl78OtOXEX/2d++8A83zHNTgwCJMaR24FvsYL7Uf/VS8HZk9PTwR51elTbGqMuwH3szLvvOXEaVnqn0Z3zA=="],
 
     "@ennoia/api-client": ["@ennoia/api-client@workspace:web/packages/api-client"],
-
-    "@ennoia/builtins": ["@ennoia/builtins@workspace:web/packages/builtins"],
 
     "@ennoia/contract": ["@ennoia/contract@workspace:web/packages/contract"],
 

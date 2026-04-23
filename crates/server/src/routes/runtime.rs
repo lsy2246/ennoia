@@ -1,4 +1,5 @@
 use super::*;
+use ennoia_kernel::apply_server_log_env_overrides;
 
 pub(super) async fn bootstrap_status(State(state): State<AppState>) -> Json<BootstrapState> {
     Json(
@@ -161,7 +162,10 @@ pub(super) async fn runtime_app_config(State(state): State<AppState>) -> Json<Ap
 }
 
 pub(super) async fn runtime_server_config(State(state): State<AppState>) -> Json<ServerConfig> {
-    Json(read_server_config_from_disk(&state).unwrap_or_else(|| state.server_config.clone()))
+    let mut config =
+        read_server_config_from_disk(&state).unwrap_or_else(|| state.server_config.clone());
+    apply_server_log_env_overrides(&mut config.logging);
+    Json(config)
 }
 
 pub(super) async fn runtime_app_config_put(

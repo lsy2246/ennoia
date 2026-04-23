@@ -1,18 +1,20 @@
 use std::env;
 use std::fs;
 use std::fs::OpenOptions;
-use std::io::{self, Read, Write};
+use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
-use std::sync::mpsc;
+use std::process::{Child, Command, ExitStatus, Stdio};
+use std::sync::{mpsc, Mutex, OnceLock};
+use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use ennoia_assets::{builtins, templates};
 use ennoia_kernel::{
-    ExtensionManifest, ExtensionRegistryEntry, ExtensionRegistryFile, ExtensionSourceMode,
-    ServerConfig, SkillRegistryEntry, SkillRegistryFile,
+    apply_server_log_env_overrides, ExtensionManifest, ExtensionRegistryEntry,
+    ExtensionRegistryFile, ExtensionSourceMode, LoggingConfig, ServerConfig, SkillRegistryEntry,
+    SkillRegistryFile,
 };
 use ennoia_paths::RuntimePaths;
 use ennoia_server::{bootstrap_app_state, default_app_state, run_server};
@@ -21,6 +23,50 @@ use notify::{Config as NotifyConfig, RecommendedWatcher, RecursiveMode, Watcher}
 const WEB_DIR: &str = "web";
 const WEB_DEV_HOST: &str = "127.0.0.1";
 const WEB_DEV_PORT: u16 = 5173;
+static DEV_CONSOLE_OUTPUT_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum ConsoleLogLevel {
+    Debug,
+    Info,
+    Warn,
+    Error,
+}
+
+#[derive(Debug, Clone)]
+struct DevConsoleMirrorConfig {
+    enabled: bool,
+    min_level: ConsoleLogLevel,
+}
+
+impl DevConsoleMirrorConfig {
+    fn from_logging(config: &LoggingConfig) -> Self {
+        Self {
+            enabled: config.dev_console.enabled,
+            min_level: ConsoleLogLevel::from_str(&config.dev_console.level),
+        }
+    }
+}
+
+impl ConsoleLogLevel {
+    fn from_str(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "debug" => Self::Debug,
+            "warn" | "warning" => Self::Warn,
+            "error" => Self::Error,
+            _ => Self::Info,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Debug => "debug",
+            Self::Info => "info",
+            Self::Warn => "warn",
+            Self::Error => "error",
+        }
+    }
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -38,7 +84,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             let paths = RuntimePaths::resolve(args.get(2).map(String::as_str));
             init_home_template(&paths)?;
             auto_attach_dev_extensions(&paths)?;
-            let server_config: ServerConfig = read_toml_or_default(&paths.server_config_file())?;
+            let mut server_config: ServerConfig =
+                read_toml_or_default(&paths.server_config_file())?;
+            apply_server_log_env_overrides(&mut server_config.logging);
             ensure_port_available(server_config.port, "API")?;
             ensure_port_available(WEB_DEV_PORT, "Web")?;
             run_dev_supervisor(paths, server_config).await?;
@@ -85,7 +133,8 @@ fn print_summary() {
 }
 
 fn print_default_config() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let state = default_app_state();
+    let mut state = default_app_state();
+    apply_server_log_env_overrides(&mut state.server_config.logging);
     println!(
         "[config/ennoia.toml]\n{}",
         toml::to_string_pretty(&state.app_config)?
@@ -191,12 +240,18 @@ async fn run_dev_supervisor(
     server_config: ServerConfig,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let repo_root = env::current_dir()?;
-    let mut dev_processes = DevProcessGroup::new();
+    let console_config = DevConsoleMirrorConfig::from_logging(&server_config.logging);
+    let mut dev_processes = DevProcessGroup::new(console_config.clone());
     dev_processes.start_web(&paths, &server_config)?;
     dev_processes.start_extension_ui_watch(&repo_root, &paths)?;
     dev_processes.report_extension_ui_sources(&paths)?;
 
-    let mut api = ApiDevProcess::new(repo_root.clone(), paths.clone(), server_config.clone());
+    let mut api = ApiDevProcess::new(
+        repo_root.clone(),
+        paths.clone(),
+        server_config.clone(),
+        console_config.clone(),
+    );
     api.start_initial().await?;
 
     let (watch_tx, watch_rx) = mpsc::channel();
@@ -207,6 +262,15 @@ async fn run_dev_supervisor(
     println!("API: http://{}:{}", server_config.host, server_config.port);
     println!(
         "Host hot reload: watching crates/, assets/, builtins/extensions/, Cargo.toml and Cargo.lock."
+    );
+    println!(
+        "Dev console logs: {} (level >= {}).",
+        if console_config.enabled {
+            "enabled"
+        } else {
+            "disabled"
+        },
+        console_config.min_level.as_str()
     );
     println!("Press Ctrl+C to stop API and Web processes.");
 
@@ -250,6 +314,7 @@ struct ApiDevProcess {
     repo_root: PathBuf,
     paths: RuntimePaths,
     server_config: ServerConfig,
+    console_config: DevConsoleMirrorConfig,
     target_dir: PathBuf,
     current: Option<ApiChild>,
 }
@@ -260,12 +325,18 @@ struct ApiChild {
 }
 
 impl ApiDevProcess {
-    fn new(repo_root: PathBuf, paths: RuntimePaths, server_config: ServerConfig) -> Self {
+    fn new(
+        repo_root: PathBuf,
+        paths: RuntimePaths,
+        server_config: ServerConfig,
+        console_config: DevConsoleMirrorConfig,
+    ) -> Self {
         let target_dir = repo_root.join("target").join("ennoia-dev-api");
         Self {
             repo_root,
             paths,
             server_config,
+            console_config,
             target_dir,
             current: None,
         }
@@ -328,23 +399,19 @@ impl ApiDevProcess {
     }
 
     fn build_api_binary(&self) -> io::Result<PathBuf> {
-        if let Some(parent) = self.build_log_path().parent() {
-            fs::create_dir_all(parent)?;
-        }
-        let stdout = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(self.build_log_path())?;
-        let stderr = stdout.try_clone()?;
-        let status = Command::new("cargo")
+        let mut command = Command::new("cargo");
+        command
             .arg("build")
             .arg("-p")
             .arg("ennoia-cli")
             .env("CARGO_TARGET_DIR", &self.target_dir)
-            .current_dir(&self.repo_root)
-            .stdout(Stdio::from(stdout))
-            .stderr(Stdio::from(stderr))
-            .status()?;
+            .current_dir(&self.repo_root);
+        let status = run_logged_command(
+            "api-build",
+            command,
+            &self.build_log_path(),
+            &self.console_config,
+        )?;
 
         if !status.success() {
             return Err(io::Error::other(format!(
@@ -381,18 +448,19 @@ impl ApiDevProcess {
     }
 
     async fn launch_snapshot(&self, snapshot: PathBuf) -> io::Result<ApiChild> {
-        let stdout = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(self.api_log_path())?;
-        let stderr = stdout.try_clone()?;
         let mut child = Command::new(&snapshot)
             .arg("start")
             .arg(self.paths.home())
             .current_dir(&self.repo_root)
-            .stdout(Stdio::from(stdout))
-            .stderr(Stdio::from(stderr))
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
             .spawn()?;
+        attach_child_log_pumps(
+            "api",
+            &mut child,
+            &self.api_log_path(),
+            &self.console_config,
+        )?;
 
         if let Err(error) = wait_for_api_ready(&self.server_config, API_READY_TIMEOUT).await {
             let _ = child.kill();
@@ -433,6 +501,7 @@ impl Drop for ApiDevProcess {
 
 struct DevProcessGroup {
     children: Vec<DevChild>,
+    console_config: DevConsoleMirrorConfig,
 }
 
 struct DevChild {
@@ -441,9 +510,10 @@ struct DevChild {
 }
 
 impl DevProcessGroup {
-    fn new() -> Self {
+    fn new(console_config: DevConsoleMirrorConfig) -> Self {
         Self {
             children: Vec::new(),
+            console_config,
         }
     }
 
@@ -506,18 +576,11 @@ impl DevProcessGroup {
         if let Some(parent) = log_path.parent() {
             fs::create_dir_all(parent)?;
         }
-        let stdout = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(log_path)?;
-        let stderr = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(log_path)?;
-        let child = command
-            .stdout(Stdio::from(stdout))
-            .stderr(Stdio::from(stderr))
+        let mut child = command
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
             .spawn()?;
+        attach_child_log_pumps(label, &mut child, log_path, &self.console_config)?;
         println!("started {label}; log={}", log_path.display());
         self.children.push(DevChild {
             label: label.to_string(),
@@ -535,6 +598,124 @@ impl Drop for DevProcessGroup {
             println!("stopped {}", child.label);
         }
     }
+}
+
+fn run_logged_command(
+    label: &str,
+    mut command: Command,
+    log_path: &Path,
+    console_config: &DevConsoleMirrorConfig,
+) -> io::Result<ExitStatus> {
+    if let Some(parent) = log_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let mut child = command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    attach_child_log_pumps(label, &mut child, log_path, console_config)?;
+    child.wait()
+}
+
+fn attach_child_log_pumps(
+    label: &str,
+    child: &mut Child,
+    log_path: &Path,
+    console_config: &DevConsoleMirrorConfig,
+) -> io::Result<()> {
+    if let Some(parent) = log_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    if let Some(stdout) = child.stdout.take() {
+        spawn_log_pump(
+            stdout,
+            log_path.to_path_buf(),
+            label.to_string(),
+            console_config.clone(),
+            false,
+        );
+    }
+    if let Some(stderr) = child.stderr.take() {
+        spawn_log_pump(
+            stderr,
+            log_path.to_path_buf(),
+            label.to_string(),
+            console_config.clone(),
+            true,
+        );
+    }
+    Ok(())
+}
+
+fn spawn_log_pump<R>(
+    reader: R,
+    log_path: PathBuf,
+    label: String,
+    console_config: DevConsoleMirrorConfig,
+    is_stderr: bool,
+) where
+    R: Read + Send + 'static,
+{
+    thread::spawn(move || {
+        let Ok(mut file) = OpenOptions::new().create(true).append(true).open(log_path) else {
+            return;
+        };
+        for line in BufReader::new(reader).lines() {
+            let Ok(line) = line else {
+                break;
+            };
+            let _ = writeln!(file, "{line}");
+            mirror_dev_console_line(&label, &line, is_stderr, &console_config);
+        }
+    });
+}
+
+fn mirror_dev_console_line(
+    label: &str,
+    line: &str,
+    is_stderr: bool,
+    console_config: &DevConsoleMirrorConfig,
+) {
+    if !console_config.enabled {
+        return;
+    }
+    let level = detect_console_log_level(line, is_stderr);
+    if level < console_config.min_level {
+        return;
+    }
+
+    let lock = DEV_CONSOLE_OUTPUT_LOCK.get_or_init(|| Mutex::new(()));
+    let _guard = lock.lock().ok();
+    if is_stderr || matches!(level, ConsoleLogLevel::Warn | ConsoleLogLevel::Error) {
+        eprintln!("[{label}] {line}");
+    } else {
+        println!("[{label}] {line}");
+    }
+}
+
+fn detect_console_log_level(line: &str, is_stderr: bool) -> ConsoleLogLevel {
+    if is_stderr {
+        return ConsoleLogLevel::Error;
+    }
+    let lower = line.to_ascii_lowercase();
+    if has_level_token(&lower, "error") {
+        return ConsoleLogLevel::Error;
+    }
+    if has_level_token(&lower, "warn") || has_level_token(&lower, "warning") {
+        return ConsoleLogLevel::Warn;
+    }
+    if has_level_token(&lower, "debug") {
+        return ConsoleLogLevel::Debug;
+    }
+    ConsoleLogLevel::Info
+}
+
+fn has_level_token(line: &str, level: &str) -> bool {
+    line.contains(&format!("level={level}"))
+        || line.contains(&format!("[{level}]"))
+        || line
+            .split(|item: char| !item.is_ascii_alphabetic())
+            .any(|token| token == level)
 }
 
 fn start_host_watcher(repo_root: &Path, tx: mpsc::Sender<()>) -> io::Result<RecommendedWatcher> {

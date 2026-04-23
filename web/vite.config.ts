@@ -7,6 +7,7 @@ const rootNodeModules = path.resolve(__dirname, "../node_modules");
 
 export default defineConfig({
   envDir: path.resolve(__dirname, ".."),
+  envPrefix: ["VITE_", "ENNOIA_"],
   plugins: [react()],
   resolve: {
     alias: {

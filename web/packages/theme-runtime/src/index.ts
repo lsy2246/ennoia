@@ -1,3 +1,5 @@
+import { createLogger } from "@ennoia/observability";
+
 export type ThemeAppearance = "light" | "dark" | "system" | "high-contrast";
 
 export type ThemeSource = "builtin" | "extension";
@@ -77,6 +79,7 @@ export type UiBootstrapCache = {
 
 export const UI_BOOTSTRAP_CACHE_KEY = "ennoia.ui.bootstrap";
 const ACTIVE_THEME_LINK_ID = "ennoia-runtime-theme-link";
+const logger = createLogger("theme-runtime");
 export const WEB_THEME_VARIABLE_BRIDGE: Record<string, string> = {
   "--bg": "--color-bg",
   "--bg-elevated": "--color-surface",
@@ -361,7 +364,10 @@ export function registerRuntimeThemes(themes: ThemeDefinition[]) {
   for (const theme of themes) {
     const validation = validateThemeDefinition(theme);
     if (!validation.valid) {
-      console.warn(`[theme-runtime] skipped theme '${theme.id}': ${validation.diagnostics.join("; ")}`);
+      logger.warn("skipped invalid runtime theme", {
+        theme_id: theme.id,
+        diagnostics: validation.diagnostics,
+      });
       continue;
     }
     runtimeThemeMap.set(theme.id, theme);

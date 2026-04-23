@@ -6,8 +6,8 @@ use std::time::Duration;
 use ennoia_assets::builtins;
 use ennoia_extension_host::{ExtensionRuntime, ExtensionRuntimeConfig};
 use ennoia_kernel::{
-    AgentConfig, AppConfig, PlatformOverview, ProviderConfig, ServerConfig, SkillConfig,
-    SkillRegistryEntry, SkillRegistryFile, SpaceSpec, UiConfig,
+    apply_server_log_env_overrides, AgentConfig, AppConfig, PlatformOverview, ProviderConfig,
+    ServerConfig, SkillConfig, SkillRegistryEntry, SkillRegistryFile, SpaceSpec, UiConfig,
 };
 use ennoia_observability::{self, ObservabilityGuard};
 use ennoia_paths::{default_home_dir, RuntimePaths};
@@ -82,7 +82,8 @@ pub async fn bootstrap_app_state(home_dir: impl AsRef<Path>) -> Result<AppState,
     );
     let runtime_paths = Arc::new(bootstrap_paths);
     runtime_paths.ensure_layout()?;
-    let server_config: ServerConfig = read_toml_or_default(runtime_paths.server_config_file())?;
+    let mut server_config: ServerConfig = read_toml_or_default(runtime_paths.server_config_file())?;
+    apply_server_log_env_overrides(&mut server_config.logging);
     let ui_config: UiConfig = read_toml_or_default(runtime_paths.ui_config_file())?;
     let observability_guard = Some(Arc::new(ennoia_observability::init(
         OBSERVABILITY_TARGET,

@@ -124,6 +124,10 @@ export type ServerConfig = {
     level: string;
     sample_rate: number;
     redact_headers: string[];
+    dev_console: {
+      enabled: boolean;
+      level: string;
+    };
   };
   body_limit: {
     enabled: boolean;

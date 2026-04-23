@@ -34,6 +34,7 @@ export default tseslint.config(
       "react-hooks/exhaustive-deps": "warn",
       "react-hooks/rules-of-hooks": "error",
       "react-refresh/only-export-components": ["warn", { allowConstantExport: true }],
+      "no-console": "error",
       "@typescript-eslint/no-explicit-any": "off",
       "@typescript-eslint/no-unused-vars": [
         "error",
@@ -43,6 +44,12 @@ export default tseslint.config(
           varsIgnorePattern: "^_",
         },
       ],
+    },
+  },
+  {
+    files: ["packages/observability/src/index.ts"],
+    rules: {
+      "no-console": "off",
     },
   },
 );

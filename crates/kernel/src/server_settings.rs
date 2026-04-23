@@ -1,6 +1,7 @@
 //! Server-scoped file-backed settings shapes.
 
 use std::collections::HashMap;
+use std::env;
 
 use serde::{Deserialize, Serialize};
 
@@ -87,12 +88,29 @@ impl Default for TimeoutConfig {
 
 // ========== LoggingConfig ==========
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DevConsoleLogConfig {
+    pub enabled: bool,
+    pub level: String,
+}
+
+impl Default for DevConsoleLogConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            level: "error".to_string(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LoggingConfig {
     pub enabled: bool,
     pub level: String,
     pub sample_rate: f32,
     pub redact_headers: Vec<String>,
+    #[serde(default)]
+    pub dev_console: DevConsoleLogConfig,
 }
 
 impl Default for LoggingConfig {
@@ -106,8 +124,22 @@ impl Default for LoggingConfig {
                 "cookie".to_string(),
                 "x-api-key".to_string(),
             ],
+            dev_console: DevConsoleLogConfig::default(),
         }
     }
+}
+
+pub fn apply_server_log_env_overrides(config: &mut LoggingConfig) {
+    if let Some(level) = read_env_trimmed("ENNOIA_LOG_LEVEL") {
+        config.level = level;
+    }
+}
+
+fn read_env_trimmed(key: &str) -> Option<String> {
+    env::var(key)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
 }
 
 // ========== BodyLimitConfig ==========

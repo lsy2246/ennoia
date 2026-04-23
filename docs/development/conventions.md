@@ -88,6 +88,15 @@
 - 错误向上传递时保留底层上下文
 - 对用户可见的错误要可理解，对开发者可见的错误要可定位
 
+### 5.4 日志边界
+
+- 长生命周期后端模块统一使用 `tracing` 记录运行日志，需要进入产品可查询日志时再写入 `system_log`
+- `server` 路由、扩展调度、Hook 派发、Worker RPC 和后台轮询不得使用 `println!`、`eprintln!` 或 `dbg!`
+- `cli` 的 `stdout` / `stderr` 只用于直接面向操作者的终端输出，不把它当作系统日志通道
+- `ennoia dev` 始终把 API、Web 和扩展 UI watcher 输出写入日志文件，并通过 `config/server.toml` 的 `logging.dev_console` 控制是否按级别镜像到命令窗口
+- 需要统一前后端系统日志级别时，优先使用环境变量 `ENNOIA_LOG_LEVEL`；开发态命令窗口镜像继续只走配置文件与可视化面板
+- `build.rs` 只输出 Cargo 约定的构建指令，例如 `cargo:rerun-if-changed=...`
+
 ## 6. 前端约定
 
 ### 6.1 主壳原则
@@ -105,6 +114,14 @@
 - 前端 API 访问统一走 `web/packages/api-client`
 - 运行时扩展接入统一走 `web/packages/ui-sdk`
 - 全局状态、路由、扩展刷新机制必须保持单一路径
+
+### 6.3 前端日志
+
+- 前端运行时代码统一通过 `@ennoia/observability` 的 `createLogger()` 输出日志
+- 业务包、运行时包、扩展 UI 和主题运行时不得直接调用 `console.log/info/warn/error/debug`
+- 浏览器控制台只作为 `web/packages/observability` 的底层适配层，不作为业务代码直接依赖的接口
+- 前端日志级别优先读取 `VITE_ENNOIA_LOG_LEVEL`；若未提供，则回退到统一变量 `ENNOIA_LOG_LEVEL`
+- 需要面向用户展示状态时，使用 UI 提示、状态栏或调试面板；不要用控制台消息代替产品反馈
 
 ## 7. 存储与迁移规范
 
@@ -188,6 +205,13 @@ bun run --cwd web build
 - 前端改动：至少验证 Web 工作台加载、页面挂载、无控制台错误
 - 扩展改动：验证扫描、attach、reload、重启生效链路
 - 开发链路改动：必须实际验证 `cargo run -p ennoia-cli -- dev`
+
+### 10.3 测试放置规则
+
+- 小型纯函数、解析器和局部状态机允许使用 `#[cfg(test)] mod tests` 与源码同文件放置
+- 涉及文件系统、进程、网络、跨模块装配或长样例数据的测试，优先放到 crate 的 `tests/` 集成测试目录或独立测试支持模块
+- 当单个源码文件的测试开始明显挤占实现阅读空间时，应把测试迁出实现文件，避免模块职责混杂
+- 新增测试时优先按“单元测试贴近实现、集成测试贴近系统边界”的原则分层
 
 ## 11. 提交与清理
 

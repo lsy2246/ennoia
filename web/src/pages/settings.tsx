@@ -558,6 +558,48 @@ export function Settings() {
                     }
                   />
                 </label>
+                <label className="check-row">
+                  <input
+                    type="checkbox"
+                    checked={config.logging.dev_console.enabled}
+                    onChange={(event) =>
+                      setConfig({
+                        ...config,
+                        logging: {
+                          ...config.logging,
+                          dev_console: {
+                            ...config.logging.dev_console,
+                            enabled: event.target.checked,
+                          },
+                        },
+                      })
+                    }
+                  />
+                  {t("settings.runtime.dev_console.enabled", "开发模式镜像日志到命令窗口")}
+                </label>
+                <label>
+                  {t("settings.runtime.dev_console.level", "开发模式控制台级别")}
+                  <select
+                    value={config.logging.dev_console.level}
+                    onChange={(event) =>
+                      setConfig({
+                        ...config,
+                        logging: {
+                          ...config.logging,
+                          dev_console: {
+                            ...config.logging.dev_console,
+                            level: event.target.value,
+                          },
+                        },
+                      })
+                    }
+                  >
+                    <option value="debug">debug</option>
+                    <option value="info">info</option>
+                    <option value="warn">warn</option>
+                    <option value="error">error</option>
+                  </select>
+                </label>
                 <StringListEditor
                   title={t("web.settings.redact_headers", "脱敏请求头")}
                   helper={t(
