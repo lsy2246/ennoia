@@ -97,6 +97,7 @@
 - 页面内部资源视图放在 `web/src/views/<page>/`
 - 扩展页面、面板、导航注册统一通过运行时快照接入
 - 扩展 UI 实现、文案、主题和页面描述必须保留在扩展包内；Web 主壳不得静态注册某个扩展的页面组件、主题或 i18n namespace
+- Web 主壳加载扩展 UI 时只使用 runtime snapshot 与 `/api/extensions/{extension_id}/ui/module`，不得重新引入 `import.meta.glob` 或源码路径白名单来绑定具体扩展
 
 ### 6.2 状态与 API
 

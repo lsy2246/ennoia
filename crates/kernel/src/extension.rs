@@ -492,6 +492,7 @@ pub struct ResolvedUiEntry {
     pub kind: String,
     pub entry: String,
     pub hmr: bool,
+    pub version: String,
 }
 
 /// ResolvedWorkerEntry is the runtime-facing Worker result after Ennoia has

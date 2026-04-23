@@ -141,6 +141,10 @@ pub fn build_router(state: AppState) -> Router {
             get(extension_ui_module),
         )
         .route(
+            "/api/extensions/{extension_id}/ui/assets/{*asset_path}",
+            get(extension_ui_asset),
+        )
+        .route(
             "/api/extensions/{extension_id}/rpc/{method}",
             post(extension_rpc),
         )

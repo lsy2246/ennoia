@@ -31,7 +31,10 @@ Extension 是系统能力包，Skill 是 Agent 可引用的能力包。Extension
 ```toml
 [ui]
 runtime = "browser-esm"
-entry = "ui/entry.js"
+hmr = true
+
+[build]
+ui_bundle = "ui/dist/entry.js"
 
 [worker]
 kind = "wasm"
@@ -134,13 +137,38 @@ Skill 目录独立：
 5. Extension Host 扫描扩展包，解析 `ui`、`worker` 和贡献能力，不启动扩展私有进程。
 6. Server 暴露 runtime snapshot、事件流、诊断、日志、资源贡献接口、接口绑定 API、scheduler API，以及 `/api/extensions/{extension_id}/rpc/{method}` Worker RPC 入口。
 7. Core 只维护稳定接口、绑定、计划与 Hook 派发；扩展内部按 Worker ABI 和 capability 组织自己的业务逻辑。
-8. Web 工作台根据 runtime snapshot 挂载页面、面板、主题、语言和命令；如果某个 mount 在本地 registry 中存在实现，则直接渲染真实组件。
+8. Web 工作台根据 runtime snapshot 动态导入扩展 UI 模块，并按 mount id 挂载页面、面板、主题、语言和命令。
+
+## UI Module ABI
+
+- 扩展 UI 源码入口推荐放在 `ui/entry.tsx`
+- 构建产物推荐输出到 `ui/dist/entry.js`
+- UI bundle 必须导出一个 ESM 模块对象，按 mount id 暴露页面和面板挂载器：
+
+```ts
+import type { ExtensionUiModule } from "@ennoia/ui-sdk";
+
+const ui: ExtensionUiModule = {
+  pages: {
+    "memory.page": (container, context) => {
+      return {
+        unmount() {},
+      };
+    },
+  },
+};
+
+export default ui;
+```
+
+- 页面和面板不再向主壳导出 React 组件本身，而是导出 `mount(container, context)` / `unmount()`；这样扩展 UI 可以自带自己的 React runtime，不和主壳 hooks 冲突。
+- `context.helpers` 会提供 `apiBaseUrl`、`locale`、`themeId`、`t()`、`formatDateTime()` 等宿主运行时能力。
 
 ## 开发热加载
 
 - `ennoia dev` 监听 `crates/`、`assets/`、`builtins/extensions/`、`Cargo.toml` 和 `Cargo.lock`。
-- `builtins/extensions/` 下的 `extension.toml`、UI 资源和 `.wasm` 变更会触发 Host 重新构建并重启 API 进程。
-- Server 运行时每 2 秒刷新一次扩展注册表与 manifest，用于让扩展启停、贡献声明和入口路径变化尽快反映到 runtime snapshot。
+- `ennoia dev` 会额外启动扩展 UI watcher，自动把 `ui/entry.*` 构建到 `ui/dist/entry.js`。
+- Server 运行时每 2 秒刷新一次扩展注册表与 manifest；UI bundle 版本变化会进入 runtime snapshot，并通过 `/api/extensions/events/stream` 触发 Web 重新加载当前扩展模块。
 - Worker runtime 会缓存编译后的 Wasm Module；`.wasm` mtime 或文件大小变化后，下一次 RPC 调用会自动重新编译。
 - 每次 RPC 调用都会创建新的 Wasm 实例，避免线性内存状态跨请求泄漏。
 

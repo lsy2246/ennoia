@@ -1,6 +1,7 @@
 import { create } from "zustand";
 
 import {
+  apiUrl,
   fetchUiMessages,
   fetchUiRuntime,
   saveInstanceUiPreferences,
@@ -46,6 +47,7 @@ type UiState = {
   error: string | null;
   hydrate: () => Promise<void>;
   refreshRuntime: () => Promise<void>;
+  connectExtensionEvents: () => () => void;
   previewLocale: (locale: string) => Promise<void>;
   savePreferences: (payload: {
     locale?: string | null;
@@ -179,6 +181,22 @@ export const useUiStore = create<UiState>((set, get) => ({
     } catch (error) {
       set({ error: String(error) });
     }
+  },
+
+  connectExtensionEvents() {
+    if (typeof EventSource === "undefined") {
+      return () => undefined;
+    }
+    const source = new EventSource(apiUrl("/api/extensions/events/stream"));
+    const refresh = () => {
+      void get().refreshRuntime();
+    };
+    source.addEventListener("extension.graph_swapped", refresh);
+    source.onerror = () => undefined;
+    return () => {
+      source.removeEventListener("extension.graph_swapped", refresh);
+      source.close();
+    };
   },
 
   async previewLocale(locale) {

@@ -687,16 +687,22 @@ fn resolve_manifest(
     let source_root = install_dir.clone();
     let capabilities = manifest.effective_capabilities();
     let mut diagnostics = Vec::new();
-    let ui = resolve_ui(&source.root, &source.source_mode, &manifest.ui, &manifest)
-        .map_err(|error| {
-            diagnostics.push(diagnostic(
-                "warn",
-                "ui resolution failed",
-                Some(error.to_string()),
-            ));
-        })
-        .ok()
-        .flatten();
+    let ui = resolve_ui(
+        &source.root,
+        &source.source_mode,
+        &manifest.ui,
+        &manifest,
+        generation,
+    )
+    .map_err(|error| {
+        diagnostics.push(diagnostic(
+            "warn",
+            "ui resolution failed",
+            Some(error.to_string()),
+        ));
+    })
+    .ok()
+    .flatten();
     let worker = resolve_worker(&source.root, &manifest)
         .map_err(|error| {
             diagnostics.push(diagnostic(
@@ -759,6 +765,7 @@ fn resolve_ui(
     source_mode: &ExtensionSourceMode,
     ui: &ExtensionUiSpec,
     manifest: &ExtensionManifest,
+    generation: u64,
 ) -> io::Result<Option<ResolvedUiEntry>> {
     if *source_mode == ExtensionSourceMode::Dev {
         if let Some(dev_url) = ui.dev_url.clone() {
@@ -766,13 +773,17 @@ fn resolve_ui(
                 kind: "url".to_string(),
                 entry: dev_url,
                 hmr: ui.hmr,
+                version: generation.to_string(),
             }));
         }
         if let Some(entry) = ui.entry.clone() {
+            let path = root.join(entry);
+            let version = regular_file_version(&path)?;
             return Ok(Some(ResolvedUiEntry {
                 kind: "module".to_string(),
-                entry: normalize_display_path(&root.join(entry)),
+                entry: normalize_display_path(&path),
                 hmr: ui.hmr,
+                version,
             }));
         }
     }
@@ -783,14 +794,34 @@ fn resolve_ui(
         .clone()
         .or_else(|| manifest.ui_bundle.clone())
     {
+        let path = root.join(bundle);
+        let version = regular_file_version(&path)?;
         return Ok(Some(ResolvedUiEntry {
             kind: "file".to_string(),
-            entry: normalize_display_path(&root.join(bundle)),
+            entry: normalize_display_path(&path),
             hmr: ui.hmr,
+            version,
         }));
     }
 
     Ok(None)
+}
+
+fn regular_file_version(path: &Path) -> io::Result<String> {
+    let metadata = fs::metadata(path)?;
+    if !metadata.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("extension ui entry must be a file: {}", path.display()),
+        ));
+    }
+    let modified = metadata
+        .modified()
+        .ok()
+        .and_then(|value| value.duration_since(UNIX_EPOCH).ok())
+        .map(|value| value.as_millis())
+        .unwrap_or_default();
+    Ok(format!("{modified}-{}", metadata.len()))
 }
 
 fn resolve_worker(

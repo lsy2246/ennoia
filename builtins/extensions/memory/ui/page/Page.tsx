@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
+import type { ExtensionUiRenderHelpers } from "@ennoia/ui-sdk";
 
-import { useUiHelpers } from "@/stores/ui";
 import {
   getMemoryWorkspaceSummary,
   listMemoryRecords,
@@ -12,8 +12,12 @@ import {
 
 type MemoryTab = "truth" | "context" | "review" | "graph";
 
-export default function MemoryExtensionPage() {
-  const { formatDateTime, t } = useUiHelpers();
+type MemoryExtensionPageProps = {
+  helpers: ExtensionUiRenderHelpers;
+};
+
+export default function MemoryExtensionPage({ helpers }: MemoryExtensionPageProps) {
+  const { formatDateTime, t } = helpers;
   const [workspace, setWorkspace] = useState<WorkspaceSummary | null>(null);
   const [memories, setMemories] = useState<MemoryRecord[]>([]);
   const [activeTab, setActiveTab] = useState<MemoryTab>("truth");

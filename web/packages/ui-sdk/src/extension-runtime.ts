@@ -86,6 +86,51 @@ export type ExtensionPanelDescriptor = {
   metricLabel: string;
 };
 
+export type ExtensionUiRenderHelpers = {
+  locale: string;
+  themeId: string;
+  apiBaseUrl: string;
+  t: (key: string, fallback: string) => string;
+  formatDateTime: (value: string | number | Date) => string;
+  formatDate: (value: string | number | Date) => string;
+  formatTime: (value: string | number | Date) => string;
+};
+
+export type ExtensionViewMountContext = {
+  extensionId: string;
+  mount: string;
+  helpers: ExtensionUiRenderHelpers;
+};
+
+export type ExtensionPageMountContext = ExtensionViewMountContext & {
+  kind: "page";
+  page: ExtensionPageContribution;
+};
+
+export type ExtensionPanelMountContext = ExtensionViewMountContext & {
+  kind: "panel";
+  panel: ExtensionPanelContribution;
+};
+
+export type ExtensionViewHandle = {
+  unmount?: () => void | Promise<void>;
+};
+
+export type ExtensionPageMount = (
+  container: HTMLElement,
+  context: ExtensionPageMountContext,
+) => void | ExtensionViewHandle | Promise<void | ExtensionViewHandle>;
+
+export type ExtensionPanelMount = (
+  container: HTMLElement,
+  context: ExtensionPanelMountContext,
+) => void | ExtensionViewHandle | Promise<void | ExtensionViewHandle>;
+
+export type ExtensionUiModule = {
+  pages?: Record<string, ExtensionPageMount>;
+  panels?: Record<string, ExtensionPanelMount>;
+};
+
 export type ExtensionCommandContribution = {
   extension_id: string;
   extension_kind: string;
@@ -201,6 +246,7 @@ export type ResolvedUiEntry = {
   kind: string;
   entry: string;
   hmr: boolean;
+  version: string;
 };
 
 export type ResolvedWorkerEntry = {

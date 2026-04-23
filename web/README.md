@@ -18,7 +18,7 @@
 - Bun + Vite + React 构建入口
 - Panda CSS 样式系统与 `styled-system` 代码生成
 
-扩展页面组件、文案和主题归扩展包所有。Web 主壳只通过运行时快照发现扩展贡献，并通过扩展目录自动挂载内置扩展 UI。
+扩展页面组件、文案和主题归扩展包所有。Web 主壳只通过运行时快照发现扩展贡献，并从 `/api/extensions/{extension_id}/ui/module` 动态加载扩展 UI bundle。
 
 常用命令：
 

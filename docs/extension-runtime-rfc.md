@@ -63,9 +63,9 @@ schedule_actions = [
 
 ## 开发热加载
 
-- CLI 开发模式监听 `crates/`、`assets/`、`builtins/extensions/`、`Cargo.toml` 和 `Cargo.lock`。
-- `builtins/extensions/` 内的 `.wasm`、manifest、UI 与资源文件变化会触发 Host 重新构建并重启 API 进程。
-- Server 运行时按 2 秒轮询刷新扩展注册表和 manifest，更新 runtime snapshot。
+- CLI 开发模式监听 `crates/`、`assets/`、`Cargo.toml` 和 `Cargo.lock`；扩展 UI 由独立 watcher 构建，不再因为 UI 资源变化而重编译 API 二进制。
+- `node scripts/build-extension-ui.mjs --watch` 会把 `builtins/extensions/*/ui/entry.*` 构建到各自的 `ui/dist/entry.js`。
+- Server 运行时按 2 秒轮询刷新扩展注册表和 manifest；UI bundle 文件版本变化会更新 runtime snapshot。
 - Worker runtime 会缓存编译后的 Wasm Module，并在 `.wasm` mtime 或文件大小变化时自动重新编译。
 - 每次 RPC 调用创建新的 Wasm 实例，避免跨请求共享线性内存状态。
 
@@ -127,6 +127,7 @@ schedule_actions = [
 - `GET /api/extensions/{extension_id}`
 - `GET /api/extensions/{extension_id}/diagnostics`
 - `GET /api/extensions/{extension_id}/ui/module`
+- `GET /api/extensions/{extension_id}/ui/assets/{*asset_path}`
 - `POST /api/extensions/{extension_id}/rpc/{method}`
 - `PUT /api/extensions/{extension_id}/enabled`
 - `POST /api/extensions/{extension_id}/reload`

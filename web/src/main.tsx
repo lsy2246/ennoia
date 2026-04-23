@@ -5,13 +5,14 @@ import { RouterProvider } from "@tanstack/react-router";
 import { useEffect } from "react";
 
 import { bootstrapTheme } from "@ennoia/theme-runtime";
-import { reportFrontendLog } from "@ennoia/api-client";
+import { getApiBaseUrl, reportFrontendLog } from "@ennoia/api-client";
 import { router } from "@/router";
 import { useRuntimeStore } from "@/stores/runtime";
 import { useUiHelpers, useUiStore } from "@/stores/ui";
 import "./styles.css";
 
 bootstrapTheme();
+(globalThis as { __ENNOIA_API_BASE_URL__?: string }).__ENNOIA_API_BASE_URL__ = getApiBaseUrl();
 
 function reportRuntimeError(title: string, error: unknown) {
   void reportFrontendLog({
@@ -36,6 +37,7 @@ function App() {
   const runtimeHydrate = useRuntimeStore((state) => state.hydrate);
   const runtimeStatus = useRuntimeStore((state) => state.status);
   const uiHydrate = useUiStore((state) => state.hydrate);
+  const connectExtensionEvents = useUiStore((state) => state.connectExtensionEvents);
   const uiStatus = useUiStore((state) => state.status);
   const { t } = useUiHelpers();
 
@@ -43,6 +45,8 @@ function App() {
     runtimeHydrate();
     uiHydrate();
   }, [runtimeHydrate, uiHydrate]);
+
+  useEffect(() => connectExtensionEvents(), [connectExtensionEvents]);
 
   if (
     runtimeStatus === "idle" ||

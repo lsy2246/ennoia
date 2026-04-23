@@ -50,6 +50,8 @@
 - `GET /api/extensions/registry`
 - `GET /api/extensions/pages`
 - `GET /api/extensions/panels`
+- `GET /api/extensions/{extension_id}/ui/module`
+- `GET /api/extensions/{extension_id}/ui/assets/{*asset_path}`
 - `GET /api/extensions/commands`
 - `GET /api/extensions/providers`
 - `GET /api/extensions/behaviors`

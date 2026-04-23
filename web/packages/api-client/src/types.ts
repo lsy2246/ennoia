@@ -321,6 +321,7 @@ export type ExtensionDetail = {
     kind: string;
     entry: string;
     hmr: boolean;
+    version: string;
   } | null;
   worker?: {
     kind: string;

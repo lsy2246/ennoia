@@ -47,7 +47,11 @@ export async function listExtensionEvents(limit = 100) {
 }
 
 export function getExtensionUiModuleUrl(extensionId: string) {
-  return apiUrl(`/api/extensions/${extensionId}/ui/module`);
+  return apiUrl(`/api/extensions/${encodeURIComponent(extensionId)}/ui/module`);
+}
+
+export function getExtensionUiAssetUrl(extensionId: string, assetPath: string) {
+  return apiUrl(`/api/extensions/${encodeURIComponent(extensionId)}/ui/assets/${assetPath}`);
 }
 
 export function getExtensionThemeStylesheetUrl(extensionId: string, themeId: string) {

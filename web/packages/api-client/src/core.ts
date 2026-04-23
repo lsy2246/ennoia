@@ -4,7 +4,8 @@ import { createLogger } from "@ennoia/observability";
 const logger = createLogger("api-client");
 
 export function getApiBaseUrl() {
-  return import.meta.env.VITE_ENNOIA_API_URL ?? globalThis.location?.origin ?? "";
+  const runtimeBaseUrl = (globalThis as { __ENNOIA_API_BASE_URL__?: string }).__ENNOIA_API_BASE_URL__;
+  return runtimeBaseUrl ?? import.meta.env.VITE_ENNOIA_API_URL ?? globalThis.location?.origin ?? "";
 }
 
 export function apiUrl(path: string) {

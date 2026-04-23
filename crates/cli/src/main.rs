@@ -193,6 +193,7 @@ async fn run_dev_supervisor(
     let repo_root = env::current_dir()?;
     let mut dev_processes = DevProcessGroup::new();
     dev_processes.start_web(&paths, &server_config)?;
+    dev_processes.start_extension_ui_watch(&repo_root, &paths)?;
     dev_processes.report_extension_ui_sources(&paths)?;
 
     let mut api = ApiDevProcess::new(repo_root.clone(), paths.clone(), server_config.clone());
@@ -465,6 +466,21 @@ impl DevProcessGroup {
         self.spawn("web", command, &log_path)
     }
 
+    fn start_extension_ui_watch(
+        &mut self,
+        repo_root: &Path,
+        paths: &RuntimePaths,
+    ) -> io::Result<()> {
+        let script_path = repo_root.join("scripts").join("build-extension-ui.mjs");
+        if !script_path.exists() {
+            println!("Extension UI watcher skipped: scripts/build-extension-ui.mjs not found");
+            return Ok(());
+        }
+        let log_path = paths.server_logs_dir().join("extension-ui-dev.log");
+        let command = shell_command("node scripts/build-extension-ui.mjs --watch", repo_root);
+        self.spawn("extension-ui", command, &log_path)
+    }
+
     fn report_extension_ui_sources(&mut self, paths: &RuntimePaths) -> io::Result<()> {
         for source_root in attached_dev_source_roots(paths)? {
             let Some(descriptor_path) = descriptor_path(&source_root) else {
@@ -586,13 +602,13 @@ fn is_host_reload_path(repo_root: &Path, path: &Path) -> bool {
     if relative.starts_with("target") || relative.starts_with("web") {
         return false;
     }
+    if relative.starts_with(Path::new("builtins").join("extensions")) {
+        return false;
+    }
     if relative == Path::new("Cargo.toml") || relative == Path::new("Cargo.lock") {
         return true;
     }
-    if !(relative.starts_with("crates")
-        || relative.starts_with("assets")
-        || relative.starts_with(Path::new("builtins").join("extensions")))
-    {
+    if !(relative.starts_with("crates") || relative.starts_with("assets")) {
         return false;
     }
     match path.extension().and_then(|value| value.to_str()) {

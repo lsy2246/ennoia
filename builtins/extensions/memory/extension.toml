@@ -8,10 +8,17 @@ mode = "package"
 root = "."
 dev = false
 
+[ui]
+runtime = "browser-esm"
+hmr = true
+
 [worker]
 kind = "wasm"
 entry = "worker/memory.wasm"
 abi = "ennoia.worker.v1"
+
+[build]
+ui_bundle = "ui/dist/entry.js"
 
 [permissions]
 storage = "extension"

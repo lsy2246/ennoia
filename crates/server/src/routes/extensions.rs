@@ -134,8 +134,22 @@ pub(super) async fn extension_ui_module(
             "export {{ default }} from {url:?}; export * from {url:?};",
             url = ui.entry
         ),
-        "file" | "module" => fs::read_to_string(&ui.entry)
-            .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?,
+        "file" | "module" => {
+            let source_root = PathBuf::from(&extension.source_root);
+            let entry_path = PathBuf::from(&ui.entry);
+            let public_path = extension_asset_relative_path(&source_root, &entry_path)
+                .map_err(|error| scoped(ApiError::bad_request(error.to_string()), &request))?;
+            let import_url = format!(
+                "/api/extensions/{}/ui/assets/{}?v={}",
+                extension_id,
+                encode_asset_url_path(&public_path),
+                encode_url_query_component(&ui.version),
+            );
+            format!(
+                "export {{ default }} from {url:?}; export * from {url:?};",
+                url = import_url
+            )
+        }
         _ => {
             return Err(scoped(
                 ApiError::bad_request(format!("unsupported ui kind '{}'", ui.kind)),
@@ -144,7 +158,45 @@ pub(super) async fn extension_ui_module(
         }
     };
 
-    Ok(([(header::CONTENT_TYPE, "application/javascript")], body))
+    Ok((
+        [
+            (
+                header::CONTENT_TYPE,
+                "application/javascript; charset=utf-8",
+            ),
+            (header::CACHE_CONTROL, "no-store"),
+        ],
+        body,
+    ))
+}
+
+pub(super) async fn extension_ui_asset(
+    State(state): State<AppState>,
+    Extension(request): Extension<RequestContext>,
+    Path((extension_id, asset_path)): Path<(String, String)>,
+) -> Result<impl IntoResponse, ApiError> {
+    let extension = state.extensions.get(&extension_id).ok_or_else(|| {
+        scoped(
+            ApiError::not_found(format!("extension '{extension_id}' not found")),
+            &request,
+        )
+    })?;
+    let source_root = PathBuf::from(&extension.source_root);
+    let asset = resolve_safe_extension_asset(&source_root, &asset_path)
+        .map_err(|error| scoped(ApiError::bad_request(error.to_string()), &request))?;
+    let body = fs::read(asset.clone())
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?;
+    let content_type = mime_guess::from_path(asset)
+        .first_or_octet_stream()
+        .to_string();
+
+    Ok((
+        [
+            (header::CONTENT_TYPE, content_type),
+            (header::CACHE_CONTROL, "no-cache".to_string()),
+        ],
+        body,
+    ))
 }
 
 pub(super) async fn extension_theme_stylesheet(
@@ -418,4 +470,38 @@ pub(crate) async fn dispatch_extension_hooks(
 #[allow(dead_code)]
 fn default_hook_handler_path(event: &str) -> String {
     format!("/hooks/{}", event.replace('.', "/"))
+}
+
+fn extension_asset_relative_path(root: &StdPath, path: &StdPath) -> std::io::Result<String> {
+    let canonical_root = fs::canonicalize(root)?;
+    let canonical_asset = fs::canonicalize(path)?;
+    if !canonical_asset.starts_with(&canonical_root) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "extension ui entry must stay inside the extension root",
+        ));
+    }
+    let relative = canonical_asset
+        .strip_prefix(canonical_root)
+        .map_err(std::io::Error::other)?;
+    Ok(relative.to_string_lossy().replace('\\', "/"))
+}
+
+fn encode_asset_url_path(path: &str) -> String {
+    path.split('/')
+        .map(encode_url_query_component)
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+fn encode_url_query_component(value: &str) -> String {
+    value
+        .bytes()
+        .flat_map(|byte| match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                vec![byte as char]
+            }
+            _ => format!("%{byte:02X}").chars().collect::<Vec<_>>(),
+        })
+        .collect()
 }
