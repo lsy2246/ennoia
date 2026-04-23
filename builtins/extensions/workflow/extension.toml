@@ -20,8 +20,20 @@ events = ["publish", "subscribe"]
 
 [capabilities]
 behaviors = true
+interfaces = true
+schedule_actions = true
 
 [contributes]
 behaviors = [
   { id = "default", extension_id = "workflow", interfaces = ["runs", "tasks", "artifacts", "handoffs", "status"], entry = "behavior", version = "1" }
+]
+interfaces = [
+  { key = "run.create", method = "workflow/runs/create", version = "1" },
+  { key = "run.get", method = "workflow/runs/get", version = "1" },
+  { key = "run.list_by_conversation", method = "workflow/runs/list-by-conversation", version = "1" },
+  { key = "task.list_by_run", method = "workflow/tasks/list-by-run", version = "1" },
+  { key = "artifact.list_by_run", method = "workflow/artifacts/list-by-run", version = "1" }
+]
+schedule_actions = [
+  { id = "workflow.run", method = "workflow/schedules/run", version = "1" }
 ]

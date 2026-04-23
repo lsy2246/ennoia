@@ -3,15 +3,15 @@
 ```yaml
 kb_version: 1
 project: Ennoia
-updated_at: 2026-04-22
+updated_at: 2026-04-23
 ```
 
 ## 当前状态
 
-- 首版数据层方案收敛为 `SQLite-first`
-- 前端样式层收敛为 `Panda CSS`
-- 根目录提供 `bun run install:workspace` 作为本地依赖安装与校验入口
-- 根目录提供 `bun run dev` 作为热开发启动入口
+- 系统核心收敛为配置、路径、日志、扩展宿主、接口绑定和 scheduler
+- 扩展执行单元采用 Wasm Worker，能力通过 manifest 贡献声明
+- 会话、运行、任务、产物和定时业务通过细粒度 `interfaces` / `schedule_actions` 路由到扩展
+- 根目录提供 `bun run build:workers`、`bun run --cwd web typecheck`、`cargo check --workspace` 等验证入口
 
 ## 活跃方案包
 

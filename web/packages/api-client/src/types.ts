@@ -1,11 +1,13 @@
 import type {
   ExtensionBehaviorContribution,
   ExtensionDiagnostic,
+  ExtensionInterfaceContribution,
   ExtensionLocaleContribution,
   ExtensionMemoryContribution,
   ExtensionPageContribution,
   ExtensionPanelContribution,
   ExtensionProviderContribution,
+  ExtensionScheduleActionContribution,
   ExtensionThemeContribution,
   LocalizedText,
 } from "@ennoia/ui-sdk";
@@ -52,6 +54,8 @@ export type UiRuntime = {
     providers: ExtensionProviderContribution[];
     behaviors: ExtensionBehaviorContribution[];
     memories: ExtensionMemoryContribution[];
+    interfaces: ExtensionInterfaceContribution[];
+    schedule_actions: ExtensionScheduleActionContribution[];
   };
   instance_preference?: UiPreferenceRecord | null;
   space_preferences: UiPreferenceRecord[];
@@ -96,9 +100,6 @@ export type ServerConfig = {
   host: string;
   port: number;
   enable_ws: boolean;
-  journal: {
-    enabled: boolean;
-  };
   rate_limit: {
     enabled: boolean;
     per_ip_rpm: number;
@@ -351,6 +352,63 @@ export type RuntimeMemoryConfig = {
   enabled: string[];
   preferred_read: string;
   preferred_workspace: string;
+};
+
+export type InterfaceImplementation = {
+  extension_id: string;
+  method: string;
+  version: string;
+  schema?: string | null;
+  extension_status: string;
+};
+
+export type InterfaceStatus = {
+  key: string;
+  implementations: InterfaceImplementation[];
+  active?: InterfaceImplementation | null;
+  status: string;
+};
+
+export type InterfaceBinding = {
+  extension_id: string;
+  method: string;
+};
+
+export type InterfaceBindings = {
+  bindings: Record<string, InterfaceBinding>;
+};
+
+export type ScheduleTrigger =
+  | { kind: "once"; at: string }
+  | { kind: "interval"; every_seconds: number }
+  | { kind: "cron"; expression: string; next_run_at: string };
+
+export type ScheduleTarget = {
+  extension_id: string;
+  action_id: string;
+};
+
+export type ScheduleRecord = {
+  id: string;
+  owner: unknown;
+  trigger: ScheduleTrigger;
+  target: ScheduleTarget;
+  params: unknown;
+  enabled: boolean;
+  next_run_at?: string | null;
+  last_run_at?: string | null;
+  last_status?: string | null;
+  last_error?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type SchedulePayload = {
+  owner?: unknown;
+  trigger: ScheduleTrigger;
+  target: ScheduleTarget;
+  params?: unknown;
+  enabled?: boolean;
 };
 
 export type SystemLogEntry = {

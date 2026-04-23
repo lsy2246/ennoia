@@ -15,7 +15,7 @@ use tokio::net::TcpListener;
 use tracing::info;
 
 use crate::middleware::RateLimitState;
-use crate::routes::build_router;
+use crate::routes::{build_router, run_due_schedules_once};
 use crate::system_log::{
     SystemLogStore, SystemLogWrite, SYSTEM_LOG_COMPONENT_EXTENSION_HOST, SYSTEM_LOG_COMPONENT_HOST,
 };
@@ -42,7 +42,7 @@ pub struct AppState {
     pub providers: Vec<ProviderConfig>,
     pub spaces: Vec<SpaceSpec>,
     pub rate_limit_state: RateLimitState,
-    pub journal_lock: Arc<tokio::sync::Mutex<()>>,
+    pub schedule_lock: Arc<tokio::sync::Mutex<()>>,
     pub system_log: Arc<SystemLogStore>,
     pub observability_guard: Option<Arc<ObservabilityGuard>>,
 }
@@ -70,7 +70,7 @@ pub fn default_app_state() -> AppState {
         providers: Vec::new(),
         spaces: default_spaces(),
         rate_limit_state: RateLimitState::new(),
-        journal_lock: Arc::new(tokio::sync::Mutex::new(())),
+        schedule_lock: Arc::new(tokio::sync::Mutex::new(())),
         system_log,
         observability_guard: None,
     }
@@ -119,7 +119,7 @@ pub async fn bootstrap_app_state(home_dir: impl AsRef<Path>) -> Result<AppState,
         providers,
         spaces,
         rate_limit_state: RateLimitState::new(),
-        journal_lock: Arc::new(tokio::sync::Mutex::new(())),
+        schedule_lock: Arc::new(tokio::sync::Mutex::new(())),
         system_log,
         observability_guard,
     })
@@ -166,6 +166,24 @@ pub async fn run_server(home_dir: impl AsRef<Path>) -> Result<(), AppError> {
                 }
                 changed = extension_cancel.changed() => {
                     if changed.is_err() || *extension_cancel.borrow() {
+                        break;
+                    }
+                }
+            }
+        }
+    });
+
+    let schedule_state = state.clone();
+    let mut schedule_cancel = cancel_rx.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(1));
+        loop {
+            tokio::select! {
+                _ = interval.tick() => {
+                    run_due_schedules_once(&schedule_state).await;
+                }
+                changed = schedule_cancel.changed() => {
+                    if changed.is_err() || *schedule_cancel.borrow() {
                         break;
                     }
                 }

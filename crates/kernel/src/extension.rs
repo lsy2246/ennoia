@@ -146,6 +146,28 @@ pub struct MemoryContribution {
     pub version: String,
 }
 
+/// InterfaceContribution describes one fine-grained system action implemented by an extension.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct InterfaceContribution {
+    pub key: String,
+    pub method: String,
+    pub version: String,
+    #[serde(default)]
+    pub schema: Option<String>,
+}
+
+/// ScheduleActionContribution describes one action that can be invoked by the host scheduler.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ScheduleActionContribution {
+    pub id: String,
+    pub method: String,
+    pub version: String,
+    #[serde(default)]
+    pub title: Option<LocalizedText>,
+    #[serde(default)]
+    pub schema: Option<String>,
+}
+
 pub const HOOK_EVENT_CONVERSATION_CREATED: &str = "conversation.created";
 pub const HOOK_EVENT_CONVERSATION_MESSAGE_CREATED: &str = "conversation.message.created";
 pub const HOOK_EVENT_RUN_REQUESTED: &str = "run.requested";
@@ -211,6 +233,10 @@ pub struct ContributionSet {
     pub memories: Vec<MemoryContribution>,
     #[serde(default)]
     pub hooks: Vec<HookContribution>,
+    #[serde(default)]
+    pub interfaces: Vec<InterfaceContribution>,
+    #[serde(default)]
+    pub schedule_actions: Vec<ScheduleActionContribution>,
 }
 
 /// ExtensionSourceMode identifies whether an extension comes from a development
@@ -376,6 +402,10 @@ pub struct ExtensionCapabilities {
     pub memories: bool,
     #[serde(default)]
     pub hooks: bool,
+    #[serde(default)]
+    pub interfaces: bool,
+    #[serde(default)]
+    pub schedule_actions: bool,
 }
 
 impl ExtensionCapabilities {
@@ -390,6 +420,8 @@ impl ExtensionCapabilities {
             behaviors: !contributes.behaviors.is_empty(),
             memories: !contributes.memories.is_empty(),
             hooks: !contributes.hooks.is_empty(),
+            interfaces: !contributes.interfaces.is_empty(),
+            schedule_actions: !contributes.schedule_actions.is_empty(),
         }
     }
 }
@@ -447,6 +479,8 @@ impl ExtensionManifest {
             behaviors: declared.behaviors || inferred.behaviors,
             memories: declared.memories || inferred.memories,
             hooks: declared.hooks || inferred.hooks,
+            interfaces: declared.interfaces || inferred.interfaces,
+            schedule_actions: declared.schedule_actions || inferred.schedule_actions,
         }
     }
 }

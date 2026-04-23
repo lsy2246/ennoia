@@ -33,8 +33,6 @@ pub struct ServerConfig {
     pub port: u16,
     pub enable_ws: bool,
     #[serde(default)]
-    pub journal: JournalConfig,
-    #[serde(default)]
     pub rate_limit: RateLimitConfig,
     #[serde(default)]
     pub cors: CorsConfig,
@@ -54,7 +52,6 @@ impl Default for ServerConfig {
             host: "127.0.0.1".to_string(),
             port: 3710,
             enable_ws: true,
-            journal: JournalConfig::default(),
             rate_limit: RateLimitConfig::default(),
             cors: CorsConfig {
                 origins: default_local_dev_origins(),
@@ -86,7 +83,7 @@ impl Default for BehaviorConfig {
     }
 }
 
-/// MemoryConfig stores enabled memory implementations and UI read preference.
+/// MemoryConfig is retained for compatibility with older runtime files.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MemoryConfig {
     #[serde(default = "default_enabled_memories")]
@@ -107,16 +104,17 @@ impl Default for MemoryConfig {
     }
 }
 
-/// JournalConfig controls the built-in file-backed raw conversation journal.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct JournalConfig {
-    pub enabled: bool,
+/// InterfaceBindingsConfig stores fine-grained system action bindings.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct InterfaceBindingsConfig {
+    #[serde(default)]
+    pub bindings: BTreeMap<String, InterfaceBindingConfig>,
 }
 
-impl Default for JournalConfig {
-    fn default() -> Self {
-        Self { enabled: false }
-    }
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct InterfaceBindingConfig {
+    pub extension_id: String,
+    pub method: String,
 }
 
 /// UiConfig stores Web workbench settings loaded from `config/ui.toml`.
@@ -296,7 +294,7 @@ fn default_behavior_id() -> String {
 }
 
 fn default_enabled_memories() -> Vec<String> {
-    vec!["journal".to_string(), "memory".to_string()]
+    vec!["memory".to_string()]
 }
 
 fn default_memory_read() -> String {

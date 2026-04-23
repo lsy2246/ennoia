@@ -23,9 +23,12 @@
 - 计划任务分为 `AI 任务` 与 `命令任务`
 - 日志统一聚合 Web 与系统运行事件
 - 扩展系统采用能力包模型：`ui` 与 `worker` 均为可选声明，执行能力统一通过宿主 Worker RPC 分发
+- 核心不再内置 `journal`；会话、消息、运行、任务与产物等稳定 API 通过细粒度接口绑定到扩展 Wasm Worker
+- 系统 scheduler 是薄基础设施，只保存计划并触发扩展声明的 `schedule_actions`，业务语义由扩展实现
 
 ## 开发约定
 
 - 文档与代码保持一致
 - 运行时配置优先表单化，而不是直接编辑 JSON
+- 新增或调整系统稳定动作时，优先设计 `contributes.interfaces` / `config/interfaces.toml` 绑定，而不是新增大块内置业务模块
 

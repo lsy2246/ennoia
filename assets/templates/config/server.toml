@@ -7,6 +7,3 @@ allow_origins = [
   "http://[::1]:5173",
 ]
 enable_ws = true
-
-[journal]
-enabled = false

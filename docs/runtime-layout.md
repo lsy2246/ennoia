@@ -24,6 +24,7 @@
 │  ├─ profile.toml             # 实例资料（显示名、locale、时区、默认空间）
 │  ├─ behavior.toml            # 行为层选择：当前激活的 behavior 实现
 │  ├─ memory.toml              # 记忆层选择：启用列表、读取偏好、工作区偏好
+│  ├─ interfaces.toml          # 细粒度系统动作到扩展 Worker 方法的显式绑定
 │  ├─ preferences/
 │  │  ├─ instance.toml         # 实例级 UI 偏好
 │  │  └─ spaces/               # 空间级 UI 偏好
@@ -35,16 +36,8 @@
 ├─ extensions/                 # 扩展安装内容根目录
 ├─ skills/                     # 技能安装内容根目录
 ├─ data/
-│  ├─ journal/                 # journal 内置记忆实现的数据目录，默认关闭，按需创建
-│  │  ├─ index/
-│  │  │  └─ conversations.json
-│  │  └─ conversations/
-│  │     └─ <conversation_id>/
-│  │        ├─ conversation.json
-│  │        ├─ lanes.json
-│  │        ├─ messages.jsonl
-│  │        └─ events.jsonl
 │  ├─ system/
+│  │  ├─ schedules.json        # 系统 scheduler 的计划记录
 │  │  └─ sqlite/
 │  │     └─ system-log.db      # 系统日志 SQLite
 │  └─ extensions/              # 扩展私有运行数据，例如 memory / workflow 的 sqlite
@@ -58,7 +51,7 @@
 ## 配置职责
 
 - `config/ennoia.toml`：应用级公共配置。
-- `config/server.toml`：HTTP、中间件、日志级别和 `journal.enabled` 等系统内置开关。
+- `config/server.toml`：HTTP、中间件、日志级别和 bootstrap 状态等系统配置。
 - `config/behavior.toml`：行为层选择配置。
   - `active_extension`
   - `active_behavior`
@@ -66,13 +59,16 @@
   - `enabled`
   - `preferred_read`
   - `preferred_workspace`
+- `config/interfaces.toml`：接口绑定配置。
+  - `bindings.<interface_key>.extension_id`
+  - `bindings.<interface_key>.method`
 - `config/extensions.toml`：扩展注册表，记录来源、启用状态、路径和移除意图。
 - `config/skills.toml`：技能注册表，记录来源、启用状态、路径和移除意图。
 
 ## 数据职责
 
-- `data/system/sqlite/system-log.db`：系统日志库，只记录系统组件观测事件，不记录记忆层 history。
-- `data/journal/`：`journal` 内置记忆实现的数据目录；只有启用且实际使用时才写入。
+- `data/system/sqlite/system-log.db`：系统日志库，只记录系统组件观测事件，不记录会话 history。
+- `data/system/schedules.json`：scheduler 计划列表，记录 trigger、target、params、启用状态和最近执行结果。
 - `data/extensions/{extension_id}/`：扩展私有运行数据根目录。
   - `memory` 扩展在自己的目录中维护完整记忆系统数据。
   - `workflow` 扩展在自己的目录中维护 run / task / artifact / handoff 等运行数据。
@@ -92,10 +88,11 @@
 - `spaces/`
 - `policies/`
 - `global/`
-- `data/journal/`
+- `data/system/schedules.json`
+- `data/extensions/<extension_id>/`
 
 ## 初始化行为
 
-`cargo run -p ennoia-cli -- init` 会自动创建运行目录、基础配置、扩展与技能注册表、日志目录，并同步未卸载的内置扩展与技能。初始化不会预先写入会话数据、记忆数据或运行数据。
+`cargo run -p ennoia-cli -- init` 会自动创建运行目录、基础配置、扩展与技能注册表、日志目录，并同步未卸载的内置扩展与技能。初始化不会预先写入会话数据、记忆数据、定时计划或运行数据。
 
-系统配置始终走 TOML；系统日志始终走独立 SQLite；行为层和记忆层的业务数据始终由各自实现维护。
+系统配置始终走 TOML；接口绑定走 `config/interfaces.toml`；系统日志始终走独立 SQLite；定时计划走 `data/system/schedules.json`；会话、记忆和运行等业务数据始终由扩展实现维护。

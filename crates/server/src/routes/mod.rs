@@ -17,9 +17,10 @@ use chrono::Utc;
 use ennoia_contract::ApiError;
 use ennoia_extension_host::{
     read_registry_file, ExtensionRuntimeSnapshot, RegisteredBehaviorContribution,
-    RegisteredCommandContribution, RegisteredHookContribution, RegisteredLocaleContribution,
-    RegisteredMemoryContribution, RegisteredPageContribution, RegisteredPanelContribution,
-    RegisteredProviderContribution, RegisteredThemeContribution, ResolvedExtensionSnapshot,
+    RegisteredCommandContribution, RegisteredHookContribution, RegisteredInterfaceContribution,
+    RegisteredLocaleContribution, RegisteredMemoryContribution, RegisteredPageContribution,
+    RegisteredPanelContribution, RegisteredProviderContribution,
+    RegisteredScheduleActionContribution, RegisteredThemeContribution, ResolvedExtensionSnapshot,
 };
 use ennoia_kernel::{
     AgentConfig, AppConfig, BehaviorConfig, BootstrapState, ExtensionDiagnostic,
@@ -42,21 +43,25 @@ use crate::middleware::{
 
 mod behavior;
 mod extensions;
-mod journal;
+mod interfaces;
 mod logs;
 mod memory;
 mod resources;
 mod runtime;
+mod schedules;
 mod system_logs;
 
 use behavior::*;
 use extensions::*;
-use journal::*;
+use interfaces::*;
 use logs::*;
 use memory::*;
 use resources::*;
 use runtime::*;
+use schedules::*;
 use system_logs::*;
+
+pub(crate) use schedules::run_due_schedules_once;
 
 type ApiResult<T> = Result<Json<T>, ApiError>;
 
@@ -123,6 +128,16 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/extensions/behaviors", get(extension_behaviors))
         .route("/api/extensions/memories", get(extension_memories))
         .route("/api/extensions/hooks", get(extension_hooks))
+        .route("/api/extensions/interfaces", get(extension_interfaces))
+        .route(
+            "/api/extensions/schedule-actions",
+            get(extension_schedule_actions),
+        )
+        .route("/api/interfaces", get(interfaces_status))
+        .route(
+            "/api/interfaces/bindings",
+            get(interface_bindings).put(interface_bindings_put),
+        )
         .route("/api/extensions/attach", post(extension_attach))
         .route("/api/extensions/{extension_id}", get(extension_detail))
         .route(
@@ -179,6 +194,14 @@ pub fn build_router(state: AppState) -> Router {
             "/api/conversations/{conversation_id}/lanes",
             get(conversation_lanes),
         )
+        .route("/api/runs", post(runs_create))
+        .route("/api/runs/{run_id}", get(run_detail))
+        .route(
+            "/api/conversations/{conversation_id}/runs",
+            get(conversation_runs),
+        )
+        .route("/api/runs/{run_id}/tasks", get(run_tasks))
+        .route("/api/runs/{run_id}/artifacts", get(run_artifacts))
         .route("/api/agents", get(agents).post(agent_create))
         .route(
             "/api/agents/{agent_id}",
@@ -197,6 +220,17 @@ pub fn build_router(state: AppState) -> Router {
                 .delete(provider_delete),
         )
         .route("/api/providers/{provider_id}/models", get(provider_models))
+        .route("/api/schedule-actions", get(schedule_actions))
+        .route("/api/schedules", get(schedules_list).post(schedule_create))
+        .route(
+            "/api/schedules/{schedule_id}",
+            get(schedule_detail)
+                .put(schedule_update)
+                .delete(schedule_delete),
+        )
+        .route("/api/schedules/{schedule_id}/run", post(schedule_run))
+        .route("/api/schedules/{schedule_id}/pause", post(schedule_pause))
+        .route("/api/schedules/{schedule_id}/resume", post(schedule_resume))
         .route("/api/spaces", get(spaces))
         .route("/api/logs", get(logs_list))
         .route("/api/system/logs", get(system_logs))
@@ -252,6 +286,8 @@ struct UiRuntimeRegistryResponse {
     providers: Vec<RegisteredProviderContribution>,
     behaviors: Vec<RegisteredBehaviorContribution>,
     memories: Vec<RegisteredMemoryContribution>,
+    interfaces: Vec<RegisteredInterfaceContribution>,
+    schedule_actions: Vec<RegisteredScheduleActionContribution>,
 }
 
 #[derive(Debug, Serialize)]
@@ -450,7 +486,9 @@ async fn ui_runtime(State(state): State<AppState>) -> Json<UiRuntimeResponse> {
         + snapshot.locales.len()
         + snapshot.providers.len()
         + snapshot.behaviors.len()
-        + snapshot.memories.len()) as u64;
+        + snapshot.memories.len()
+        + snapshot.interfaces.len()
+        + snapshot.schedule_actions.len()) as u64;
     let preference_version = ui_preference_version_from_disk(&state);
 
     Json(UiRuntimeResponse {
@@ -463,6 +501,8 @@ async fn ui_runtime(State(state): State<AppState>) -> Json<UiRuntimeResponse> {
             providers: snapshot.providers,
             behaviors: snapshot.behaviors,
             memories: snapshot.memories,
+            interfaces: snapshot.interfaces,
+            schedule_actions: snapshot.schedule_actions,
         },
         instance_preference,
         space_preferences,

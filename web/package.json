@@ -7,6 +7,7 @@
     "dev": "node ../node_modules/vite/bin/vite.js",
     "panda:codegen": "node ../node_modules/@pandacss/dev/bin.js codegen --clean",
     "build": "bun run panda:codegen && node ../node_modules/vite/bin/vite.js build",
+    "lint": "bun run panda:codegen && node ../node_modules/eslint/bin/eslint.js src packages",
     "typecheck": "bun run panda:codegen && node ../node_modules/typescript/bin/tsc --noEmit",
     "test:smoke": "bun run build",
     "prepare": "bun run panda:codegen"
@@ -28,12 +29,18 @@
     "zustand": "^5.0.8"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@pandacss/dev": "^1.9.1",
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.2",
     "@vitejs/plugin-react": "^5.1.0",
+    "eslint": "^10.2.1",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.2",
+    "globals": "^17.5.0",
     "postcss": "^8.5.9",
     "typescript": "^5.9.3",
+    "typescript-eslint": "^8.59.0",
     "vite": "^7.2.0"
   }
 }

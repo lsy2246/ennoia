@@ -25,7 +25,7 @@ Extension descriptor 包含：
 - `capabilities`
 - `contributes`
 
-贡献类型包含：页面、面板、主题、语言包、命令、Provider、Behavior、Memory 和 Hook。
+贡献类型包含：页面、面板、主题、语言包、命令、Provider、Behavior、Memory、Hook、Interface 和 Schedule Action。
 
 `ui` 是可选界面入口；`worker` 是可选 Wasm 执行单元。宿主按声明装配能力，不要求扩展同时包含 UI 和 Worker。
 
@@ -36,8 +36,28 @@ Extension descriptor 包含：
 3. 开发模式下 CLI 把仓库内 `builtins/extensions/*` 追加为开发来源。
 4. Extension Host 扫描 `config/extensions.toml` 中启用且未移除的扩展来源。
 5. Extension Host 解析 `ui`、`worker`、权限和贡献清单，生成 runtime snapshot。
-6. Server 暴露 runtime snapshot、事件、诊断、日志、资源贡献接口和 Worker RPC。
+6. Server 暴露 runtime snapshot、事件、诊断、日志、资源贡献接口、接口绑定 API、scheduler API 和 Worker RPC。
 7. Web 工作台通过 runtime snapshot 动态挂载扩展贡献。
+
+## Interface 与 Schedule Action
+
+`interfaces[]` 用于把系统稳定 `/api/...` 动作绑定到扩展 Worker 方法。典型 key 包括 `conversation.list`、`conversation.create`、`message.append_user`、`run.create`、`task.list_by_run`。
+
+`schedule_actions[]` 用于声明可被系统 scheduler 调用的动作。Scheduler 只保存计划和触发到期动作，不解释业务语义；业务参数通过 `params` 原样传入 Worker。
+
+```toml
+[capabilities]
+interfaces = true
+schedule_actions = true
+
+[contributes]
+interfaces = [
+  { key = "run.create", method = "workflow/runs/create", version = "1" }
+]
+schedule_actions = [
+  { id = "workflow.run", method = "workflow/schedules/run", version = "1" }
+]
+```
 
 扩展源码推荐目录为 `ui/`、`worker/`、`data/` 和 `provider-presets/`。这些目录不是必备项，扩展包只声明实际提供的能力。
 
@@ -85,7 +105,7 @@ Extension descriptor 包含：
 ## 沙箱与权限
 
 - 默认不注入 WASI，也不允许任意 host import；声明了 import 的模块会被拒绝实例化。
-- RPC 方法必须匹配 manifest 中 Provider、Behavior、Memory 或 Hook 贡献声明的 `entry` / `handler` 前缀；没有声明贡献的纯 Worker 扩展允许调用任意安全方法名。
+- RPC 方法必须匹配 manifest 中 Provider、Behavior、Memory、Hook、Interface 或 Schedule Action 贡献声明的 `entry` / `handler` / `method` 前缀；没有声明贡献的纯 Worker 扩展允许调用任意安全方法名。
 - `runtime.memory_limit_mb` 映射为 Wasm store 内存上限。
 - `runtime.timeout_ms` 映射为 Wasm fuel 预算，防止无限循环长期占用 Host。
 - `permissions` 当前作为能力声明和后续 host capability bridge 的唯一来源；在 host capability bridge 接入前，Worker 没有文件、网络、环境变量或数据库的宿主访问能力。
@@ -96,6 +116,14 @@ Extension descriptor 包含：
 - `GET /api/extensions/runtime`
 - `GET /api/extensions/events`
 - `GET /api/extensions/events/stream`
+- `GET /api/extensions/interfaces`
+- `GET /api/extensions/schedule-actions`
+- `GET /api/interfaces`
+- `GET /api/interfaces/bindings`
+- `PUT /api/interfaces/bindings`
+- `GET /api/schedule-actions`
+- `GET /api/schedules`
+- `POST /api/schedules`
 - `GET /api/extensions/{extension_id}`
 - `GET /api/extensions/{extension_id}/diagnostics`
 - `GET /api/extensions/{extension_id}/ui/module`

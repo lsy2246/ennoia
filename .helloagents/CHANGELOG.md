@@ -3,6 +3,10 @@
 ## [0.2.0] - 2026-04-23
 
 ### 重构
+- **[interface-scheduler]**: 删除核心内置 `journal`，新增细粒度接口贡献与绑定、Wasm Worker 接口路由、系统 scheduler 和扩展 `schedule_actions`，让会话/运行/定时业务由扩展实现 — by Codex
+  - 方案: [202604231535_wasm-action-interface-scheduler](plan/202604231535_wasm-action-interface-scheduler/)
+  - 决策: wasm-action-interface-scheduler#D001(采用薄系统接口绑定 + Wasm Worker 动作实现)
+- **[web-tooling]**: 为 Web workspace 接入 ESLint flat config 与 `bun run --cwd web lint` 脚本 — by Codex
 - **[extension-runtime]**: 一次性切换为扩展能力包模型，使用可选 `ui`、可选 Wasm `worker` 与宿主 Worker RPC，移除端口型扩展后端主路径 — by lsy
   - 方案: [202604231111_wasm-extension-runtime](archive/2026-04/202604231111_wasm-extension-runtime/)
   - 决策: wasm-extension-runtime#D001(采用 Rust Host + Wasm Worker 能力包模型)

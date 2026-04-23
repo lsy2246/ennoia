@@ -15,6 +15,8 @@
 - 主工作台位于 `web/src/App.tsx`
 - 样式入口位于 `web/src/styles.css`
 - 共享 API 访问统一收口到 `web/packages/api-client/src/index.ts`
+- API client 已提供 interface binding 与 scheduler 封装：`interfaces.ts`、`schedules.ts`
+- `web` 提供 `bun run --cwd web lint`，基于 ESLint flat config 检查 `src` 与 `packages`
 - 工作台支持 `@agent` 消息路由，不再使用“目标”输入框
 - 内置前端 i18n namespace 使用 `web`
 - 扩展 UI 模块加载使用 `/api/extensions/{extension_id}/ui/module`

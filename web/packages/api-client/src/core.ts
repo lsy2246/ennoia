@@ -37,7 +37,7 @@ export async function fetchJson<T>(path: string, init?: RequestInit): Promise<T>
 
   if (!response.ok) {
     const body = await response.text().catch(() => "");
-    let parsed: ApiErrorBody | null = null;
+    let parsed: ApiErrorBody | null;
     try {
       parsed = JSON.parse(body) as ApiErrorBody;
     } catch {

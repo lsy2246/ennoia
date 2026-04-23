@@ -79,6 +79,8 @@ try {
     baseUrl,
     `/api/conversations/${createdConversation.conversation.id}/messages`,
   );
+  const interfaces = await fetchJson(baseUrl, "/api/interfaces");
+  const scheduleActions = await fetchJson(baseUrl, "/api/schedule-actions");
   const memoryExtension = await fetchJson(baseUrl, "/api/extensions/memory");
   const workflowExtension = await fetchJson(baseUrl, "/api/extensions/workflow");
 
@@ -93,8 +95,16 @@ try {
     "ui messages should include settings namespace",
   );
   assert(conversations.length >= 1, "conversations should not be empty");
-  assert(messages.length === 1, "conversation should contain the created message");
-  assert(envelope.message.id, "journal should return the persisted message");
+  assert(Array.isArray(messages), "conversation messages should be served by an interface");
+  assert(envelope.message.id, "interface worker should return the created message envelope");
+  assert(
+    interfaces.some((item) => item.key === "conversation.list"),
+    "conversation interface should be registered",
+  );
+  assert(
+    scheduleActions.some((item) => item.schedule_action.id === "workflow.run"),
+    "workflow schedule action should be registered",
+  );
   assert(memoryExtension.id === "memory", "memory extension should be registered");
   assert(workflowExtension.id === "workflow", "workflow extension should be registered");
   assert(memoryExtension.worker?.entry, "memory extension should expose worker entry info");

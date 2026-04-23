@@ -130,9 +130,6 @@ async fn dispatch_memory_request(
             request,
         ));
     }
-    if record.source_kind == "builtin" {
-        return dispatch_builtin_journal(state, path, method, body).await;
-    }
     let extension_id = record.extension_id.as_deref().ok_or_else(|| {
         scoped(
             ApiError::not_found(format!("memory '{memory_id}' has no extension")),
@@ -155,55 +152,34 @@ async fn dispatch_memory_request(
 
 fn list_memory_records(state: &AppState) -> Vec<MemoryProviderRecord> {
     let config = current_memory_config(state);
-    let journal_enabled = config.enabled.iter().any(|id| id == "journal");
-    let mut records = vec![MemoryProviderRecord {
-        id: "journal".to_string(),
-        source_kind: "builtin".to_string(),
-        extension_id: None,
-        version: "1".to_string(),
-        interfaces: vec![
-            "workspace".to_string(),
-            "conversations".to_string(),
-            "messages".to_string(),
-            "lanes".to_string(),
-            "handoffs".to_string(),
-        ],
-        entry: None,
-        enabled: journal_enabled,
-        healthy: state.server_config.journal.enabled,
-    }];
-
-    records.extend(
-        state
-            .extensions
-            .snapshot()
-            .memories
-            .into_iter()
-            .map(|item| {
-                let memory_id = item.memory.id.clone();
-                let extension_id = item.extension_id.clone();
-                MemoryProviderRecord {
-                    id: memory_id.clone(),
-                    source_kind: "extension".to_string(),
-                    extension_id: Some(extension_id.clone()),
-                    version: item.memory.version,
-                    interfaces: item.memory.interfaces,
-                    entry: item.memory.entry,
-                    enabled: config
-                        .enabled
-                        .iter()
-                        .any(|id| id == &extension_id || id == &memory_id),
-                    healthy: state
-                        .extensions
-                        .get(&extension_id)
-                        .is_some_and(|extension| {
-                            matches!(extension.health, ennoia_kernel::ExtensionHealth::Ready)
-                        }),
-                }
-            }),
-    );
-
-    records
+    state
+        .extensions
+        .snapshot()
+        .memories
+        .into_iter()
+        .map(|item| {
+            let memory_id = item.memory.id.clone();
+            let extension_id = item.extension_id.clone();
+            MemoryProviderRecord {
+                id: memory_id.clone(),
+                source_kind: "extension".to_string(),
+                extension_id: Some(extension_id.clone()),
+                version: item.memory.version,
+                interfaces: item.memory.interfaces,
+                entry: item.memory.entry,
+                enabled: config
+                    .enabled
+                    .iter()
+                    .any(|id| id == &extension_id || id == &memory_id),
+                healthy: state
+                    .extensions
+                    .get(&extension_id)
+                    .is_some_and(|extension| {
+                        matches!(extension.health, ennoia_kernel::ExtensionHealth::Ready)
+                    }),
+            }
+        })
+        .collect()
 }
 
 fn current_memory_config(state: &AppState) -> ennoia_kernel::MemoryConfig {
@@ -243,64 +219,4 @@ fn resolve_memory_record(
                 request,
             )
         })
-}
-
-async fn dispatch_builtin_journal(
-    state: &AppState,
-    path: &str,
-    method: Method,
-    body: Bytes,
-) -> Result<Response, ApiError> {
-    let trimmed = path.trim_matches('/');
-    let segments = trimmed
-        .split('/')
-        .filter(|segment| !segment.is_empty())
-        .collect::<Vec<_>>();
-    match (method, segments.as_slice()) {
-        (Method::GET, ["workspace"]) => journal_workspace(State(state.clone()))
-            .await
-            .map(IntoResponse::into_response),
-        (Method::GET, ["conversations"]) => conversations_list(State(state.clone()))
-            .await
-            .map(IntoResponse::into_response),
-        (Method::POST, ["conversations"]) => {
-            let payload: CreateConversationPayload = serde_json::from_slice(&body)
-                .map_err(|error| ApiError::bad_request(error.to_string()))?;
-            conversations_create(State(state.clone()), Json(payload))
-                .await
-                .map(IntoResponse::into_response)
-        }
-        (Method::GET, ["conversations", conversation_id]) => {
-            conversation_detail(State(state.clone()), Path((*conversation_id).to_string()))
-                .await
-                .map(IntoResponse::into_response)
-        }
-        (Method::DELETE, ["conversations", conversation_id]) => {
-            conversation_delete(State(state.clone()), Path((*conversation_id).to_string()))
-                .await
-                .map(IntoResponse::into_response)
-        }
-        (Method::GET, ["conversations", conversation_id, "messages"]) => {
-            conversation_messages(State(state.clone()), Path((*conversation_id).to_string()))
-                .await
-                .map(IntoResponse::into_response)
-        }
-        (Method::POST, ["conversations", conversation_id, "messages"]) => {
-            let payload: ConversationMessagePayload = serde_json::from_slice(&body)
-                .map_err(|error| ApiError::bad_request(error.to_string()))?;
-            conversation_messages_create(
-                State(state.clone()),
-                Path((*conversation_id).to_string()),
-                Json(payload),
-            )
-            .await
-            .map(IntoResponse::into_response)
-        }
-        (Method::GET, ["conversations", conversation_id, "lanes"]) => {
-            conversation_lanes(State(state.clone()), Path((*conversation_id).to_string()))
-                .await
-                .map(IntoResponse::into_response)
-        }
-        _ => Err(ApiError::not_found("journal path not found")),
-    }
 }

@@ -79,6 +79,23 @@ fn handle(invocation: Invocation) -> String {
                 "gate_verdicts": []
             }))
         }
+        "workflow/runs/create" | "workflow/schedules/run" => success(json!(sample_run_bundle(
+            invocation
+                .params
+                .get("goal")
+                .and_then(Value::as_str)
+                .unwrap_or("Wasm workflow run")
+        ))),
+        "workflow/runs/get" => success(json!(sample_run_bundle("Wasm workflow run"))),
+        "workflow/runs/list-by-conversation" => success(json!([sample_run(
+            invocation
+                .params
+                .get("conversation_id")
+                .and_then(Value::as_str)
+                .unwrap_or("wasm-conversation-1")
+        )])),
+        "workflow/tasks/list-by-run" => success(json!([])),
+        "workflow/artifacts/list-by-run" => success(json!([])),
         path if path.starts_with("behavior/") => success(json!({
             "handled": true,
             "path": path,
@@ -89,6 +106,37 @@ fn handle(invocation: Invocation) -> String {
             format!("workflow worker method '{path}' not found"),
         ),
     }
+}
+
+fn sample_run_bundle(goal: &str) -> Value {
+    json!({
+        "run": sample_run("wasm-conversation-1"),
+        "tasks": [],
+        "artifacts": [],
+        "handoffs": [],
+        "stage_events": [],
+        "decision": {
+            "id": "wasm-decision-1",
+            "summary": goal,
+            "rationale": "Handled inside ennoia.worker.v1 sandbox.",
+            "created_at": "0"
+        },
+        "gate_verdicts": []
+    })
+}
+
+fn sample_run(conversation_id: &str) -> Value {
+    json!({
+        "id": "wasm-run-1",
+        "owner": { "kind": "global", "id": "runtime" },
+        "conversation_id": conversation_id,
+        "lane_id": null,
+        "trigger": "manual",
+        "stage": "planning",
+        "goal": "Wasm workflow run",
+        "created_at": "0",
+        "updated_at": "0"
+    })
 }
 
 fn success(data: Value) -> String {

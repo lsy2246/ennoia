@@ -363,24 +363,6 @@ export function Settings() {
               </div>
 
               <div className="mini-card">
-                <div className="panel-title">{t("web.settings.journal", "Journal")}</div>
-                <label className="check-row">
-                  <input
-                    type="checkbox"
-                    checked={config.journal.enabled}
-                    onChange={(event) =>
-                      setConfig({
-                        ...config,
-                        journal: { ...config.journal, enabled: event.target.checked },
-                      })
-                    }
-                  />
-                  {t("web.settings.journal_enabled", "启用原始会话记录")}
-                </label>
-                <p>{t("web.settings.journal_help", "关闭后系统不读写 data/journal，Conversation API 返回 journal_disabled。")}</p>
-              </div>
-
-              <div className="mini-card">
                 <div className="panel-title">{t("web.settings.rate_limit", "Rate Limit")}</div>
                 <label className="check-row">
                   <input

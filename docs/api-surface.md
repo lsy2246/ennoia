@@ -52,7 +52,11 @@
 - `GET /api/extensions/panels`
 - `GET /api/extensions/commands`
 - `GET /api/extensions/providers`
+- `GET /api/extensions/behaviors`
+- `GET /api/extensions/memories`
 - `GET /api/extensions/hooks`
+- `GET /api/extensions/interfaces`
+- `GET /api/extensions/schedule-actions`
 - `GET /api/extensions/{extension_id}`
 - `GET /api/extensions/{extension_id}/diagnostics`
 - `GET /api/extensions/{extension_id}/ui/module`
@@ -65,7 +69,15 @@
 - `POST /api/extensions/attach`
 - `DELETE /api/extensions/attach/{extension_id}`
 
-## Journal / Conversation
+## Interface Binding
+
+- `GET /api/interfaces`
+- `GET /api/interfaces/bindings`
+- `PUT /api/interfaces/bindings`
+
+接口绑定用于把系统稳定动作键绑定到扩展 Worker RPC 方法。没有显式绑定且只有一个实现时自动使用该实现；多个实现时要求用户或前端写入绑定。
+
+## Conversation
 
 - `GET /api/conversations`
 - `POST /api/conversations`
@@ -75,7 +87,16 @@
 - `POST /api/conversations/{conversation_id}/messages`
 - `GET /api/conversations/{conversation_id}/lanes`
 
-Journal 默认关闭；`journal.enabled = false` 时，Conversation API 返回 `journal_disabled`，系统不读写 `data/journal/`。
+Conversation API 是稳定产品入口，实际由以下接口键解析到扩展 Worker：
+
+- `conversation.list`
+- `conversation.create`
+- `conversation.get`
+- `conversation.delete`
+- `lane.list_by_conversation`
+- `message.list`
+- `message.append_user`
+- `message.append_agent`
 
 ## Memory Capability
 
@@ -85,13 +106,43 @@ Journal 默认关闭；`journal.enabled = false` 时，Conversation API 返回 `
 - `ANY /api/memory/{memory_id}/{*path}`
 - `ANY /api/memory/active/{*path}`
 
-Memory 能力通过扩展 Worker RPC 或内置 Journal 分发。Memory 扩展拥有自己的私有存储；它与 Journal 是并存机制，不通过 Journal 同步。
+Memory 能力通过扩展 Worker RPC 分发。Memory 扩展拥有自己的私有存储；核心不再提供内置 Journal 存储。
 
 ### Conversation 约定
 
 - `agent_ids.len() == 1` 时创建 `direct`
 - `agent_ids.len() >= 2` 时创建 `group`
 - 消息可附带 `addressed_agents`
+
+## Run / Task / Artifact
+
+- `POST /api/runs`
+- `GET /api/runs/{run_id}`
+- `GET /api/conversations/{conversation_id}/runs`
+- `GET /api/runs/{run_id}/tasks`
+- `GET /api/runs/{run_id}/artifacts`
+
+运行相关 API 是稳定产品入口，实际由以下接口键解析到扩展 Worker：
+
+- `run.create`
+- `run.get`
+- `run.list_by_conversation`
+- `task.list_by_run`
+- `artifact.list_by_run`
+
+## Schedule
+
+- `GET /api/schedule-actions`
+- `GET /api/schedules`
+- `POST /api/schedules`
+- `GET /api/schedules/{schedule_id}`
+- `PUT /api/schedules/{schedule_id}`
+- `DELETE /api/schedules/{schedule_id}`
+- `POST /api/schedules/{schedule_id}/run`
+- `POST /api/schedules/{schedule_id}/pause`
+- `POST /api/schedules/{schedule_id}/resume`
+
+Scheduler 只保存计划并触发扩展声明的 `schedule_actions`。当前触发器支持 `once`、`interval` 和带外部 `next_run_at` 的 `cron`。
 
 ## Workflow / Behavior Capability
 
@@ -100,7 +151,7 @@ Memory 能力通过扩展 Worker RPC 或内置 Journal 分发。Memory 扩展拥
 - `GET /api/behavior/status`
 - `ANY /api/behavior/{*path}`
 
-主系统不暴露 workflow 内部编排 API。运行编排、任务、产物索引、stage、decision 和 gate 都属于 workflow 扩展私有能力，统一由 Worker RPC 承载。
+Behavior 能力入口保留用于兼容和扩展自有 API。系统级运行入口优先使用更细粒度的 run/task/artifact 接口绑定。
 
 ## 日志
 

@@ -168,6 +168,35 @@ export type ExtensionMemoryContribution = {
   };
 };
 
+export type ExtensionInterfaceContribution = {
+  extension_id: string;
+  extension_kind: string;
+  extension_version: string;
+  source_mode: "dev" | "package";
+  install_dir: string;
+  interface: {
+    key: string;
+    method: string;
+    version: string;
+    schema?: string | null;
+  };
+};
+
+export type ExtensionScheduleActionContribution = {
+  extension_id: string;
+  extension_kind: string;
+  extension_version: string;
+  source_mode: "dev" | "package";
+  install_dir: string;
+  schedule_action: {
+    id: string;
+    method: string;
+    version: string;
+    title?: LocalizedText | null;
+    schema?: string | null;
+  };
+};
+
 export type ResolvedUiEntry = {
   kind: string;
   entry: string;
@@ -210,6 +239,8 @@ export type ExtensionRuntimeExtension = {
     behaviors: boolean;
     memories: boolean;
     hooks: boolean;
+    interfaces: boolean;
+    schedule_actions: boolean;
   };
   pages: ExtensionPageContribution["page"][];
   panels: ExtensionPanelContribution["panel"][];
@@ -220,6 +251,8 @@ export type ExtensionRuntimeExtension = {
   behaviors: ExtensionBehaviorContribution["behavior"][];
   memories: ExtensionMemoryContribution["memory"][];
   hooks: ExtensionHookContribution["hook"][];
+  interfaces: ExtensionInterfaceContribution["interface"][];
+  schedule_actions: ExtensionScheduleActionContribution["schedule_action"][];
   diagnostics: ExtensionDiagnostic[];
 };
 
@@ -236,6 +269,8 @@ export type ExtensionRuntimeSnapshot = {
   behaviors: ExtensionBehaviorContribution[];
   memories: ExtensionMemoryContribution[];
   hooks: ExtensionHookContribution[];
+  interfaces: ExtensionInterfaceContribution[];
+  schedule_actions: ExtensionScheduleActionContribution[];
 };
 
 export function sortExtensionPages(

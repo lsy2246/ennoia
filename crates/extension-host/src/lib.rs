@@ -6,8 +6,9 @@ pub mod worker;
 pub use registry::{
     read_registry_file, write_registry_file, ExtensionRuntime, ExtensionRuntimeConfig,
     ExtensionRuntimeSnapshot, RegisteredBehaviorContribution, RegisteredCommandContribution,
-    RegisteredHookContribution, RegisteredLocaleContribution, RegisteredMemoryContribution,
-    RegisteredPageContribution, RegisteredPanelContribution, RegisteredProviderContribution,
+    RegisteredHookContribution, RegisteredInterfaceContribution, RegisteredLocaleContribution,
+    RegisteredMemoryContribution, RegisteredPageContribution, RegisteredPanelContribution,
+    RegisteredProviderContribution, RegisteredScheduleActionContribution,
     RegisteredThemeContribution, ResolvedExtensionSnapshot,
 };
 
@@ -37,6 +38,8 @@ mod tests {
             behaviors: Vec::new(),
             memories: Vec::new(),
             hooks: Vec::new(),
+            interfaces: Vec::new(),
+            schedule_actions: Vec::new(),
         };
         let event = ExtensionRuntimeEvent {
             event_id: "evt-1".to_string(),

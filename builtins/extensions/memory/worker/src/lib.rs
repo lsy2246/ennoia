@@ -50,6 +50,79 @@ fn handle(invocation: Invocation) -> String {
             "message_count": 0,
             "graph_nodes_count": 1
         })),
+        "memory/conversations/list" => success(json!([sample_conversation()])),
+        "memory/conversations/create" => {
+            let title = invocation
+                .params
+                .get("title")
+                .and_then(Value::as_str)
+                .unwrap_or("新会话");
+            let conversation_id = "wasm-conversation-1";
+            let lane_id = "wasm-lane-1";
+            let conversation = json!({
+                "id": conversation_id,
+                "topology": invocation.params.get("topology").and_then(Value::as_str).unwrap_or("direct"),
+                "owner": invocation.params.get("owner").cloned().unwrap_or(json!({ "kind": "global", "id": "runtime" })),
+                "space_id": invocation.params.get("space_id").cloned().unwrap_or(Value::Null),
+                "title": title,
+                "participants": invocation.params.get("agent_ids").cloned().unwrap_or_else(|| {
+                    invocation.params.get("participants").cloned().unwrap_or(json!([]))
+                }),
+                "default_lane_id": lane_id,
+                "created_at": "0",
+                "updated_at": "0"
+            });
+            success(json!({
+                "conversation": conversation,
+                "default_lane": sample_lane(conversation_id)
+            }))
+        }
+        "memory/conversations/get" => success(json!(sample_conversation())),
+        "memory/conversations/delete" => success(json!({ "deleted": true })),
+        "memory/lanes/list-by-conversation" => success(json!([sample_lane(
+            invocation
+                .params
+                .get("conversation_id")
+                .and_then(Value::as_str)
+                .unwrap_or("wasm-conversation-1")
+        )])),
+        "memory/messages/list" => success(json!([])),
+        "memory/messages/append-user" | "memory/messages/append-agent" => {
+            let conversation_id = invocation
+                .params
+                .get("conversation_id")
+                .and_then(Value::as_str)
+                .unwrap_or("wasm-conversation-1");
+            let message = invocation
+                .params
+                .get("message")
+                .cloned()
+                .unwrap_or(Value::Null);
+            let lane_id = message
+                .get("lane_id")
+                .and_then(Value::as_str)
+                .unwrap_or("wasm-lane-1");
+            let message = json!({
+                "id": "wasm-message-1",
+                "conversation_id": conversation_id,
+                "lane_id": lane_id,
+                "sender": message.get("sender").and_then(Value::as_str).unwrap_or("operator"),
+                "role": message.get("role").and_then(Value::as_str).unwrap_or("operator"),
+                "body": message.get("body").and_then(Value::as_str).unwrap_or(""),
+                "mentions": message.get("addressed_agents").cloned().unwrap_or_else(|| {
+                    message.get("mentions").cloned().unwrap_or(json!([]))
+                }),
+                "created_at": "0"
+            });
+            success(json!({
+                "conversation": sample_conversation(),
+                "lane": sample_lane(conversation_id),
+                "message": message,
+                "runs": [],
+                "tasks": [],
+                "artifacts": []
+            }))
+        }
         "memory/memories" => success(json!(sample_memories())),
         "memory/memories/recall" => {
             let memories = sample_memories();
@@ -79,6 +152,35 @@ fn handle(invocation: Invocation) -> String {
             format!("memory worker method '{path}' not found"),
         ),
     }
+}
+
+fn sample_conversation() -> Value {
+    json!({
+        "id": "wasm-conversation-1",
+        "topology": "direct",
+        "owner": { "kind": "global", "id": "runtime" },
+        "space_id": null,
+        "title": "Wasm Memory Conversation",
+        "participants": [],
+        "default_lane_id": "wasm-lane-1",
+        "created_at": "0",
+        "updated_at": "0"
+    })
+}
+
+fn sample_lane(conversation_id: &str) -> Value {
+    json!({
+        "id": "wasm-lane-1",
+        "conversation_id": conversation_id,
+        "space_id": null,
+        "name": "Main",
+        "lane_type": "main",
+        "status": "open",
+        "goal": "默认会话线路",
+        "participants": [],
+        "created_at": "0",
+        "updated_at": "0"
+    })
 }
 
 fn sample_memories() -> Vec<Value> {

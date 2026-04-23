@@ -2,7 +2,7 @@
 
 ## 定位
 
-Extension 是系统能力包，Skill 是 Agent 可引用的能力包。Extension 不再表示“前端 + 独立后端服务”，而是由宿主装配的一组可选贡献：`ui`、`worker`、主题、语言、命令、Provider、Behavior、Memory 和 Hook。
+Extension 是系统能力包，Skill 是 Agent 可引用的能力包。Extension 不再表示“前端 + 独立后端服务”，而是由宿主装配的一组可选贡献：`ui`、`worker`、主题、语言、命令、Provider、Behavior、Memory、Hook、Interface 和 Schedule Action。
 
 ## 源码放置
 
@@ -63,6 +63,8 @@ memory_limit_mb = 128
 - `behaviors[]`
 - `memories[]`
 - `hooks[]`
+- `interfaces[]`
+- `schedule_actions[]`
 
 `pages[]` 是可选 UI 贡献。声明页面后，Web 的扩展详情页会提供“打开视图”；只有页面额外声明 `nav.default_pinned = true` 时才默认进入主导航。
 
@@ -81,7 +83,26 @@ hooks = [
 - `result`：可选结构化结果，供调用方继续返回或落库。
 - `message`：可选诊断说明。
 
-Provider、Behavior 和 Memory 贡献只声明能力入口；实际执行统一通过宿主 Worker RPC 分发，不允许扩展自行开放端口。
+Interface 贡献声明系统稳定动作的具体实现：
+
+```toml
+[contributes]
+interfaces = [
+  { key = "conversation.list", method = "memory/conversations/list", version = "1" },
+  { key = "message.append_user", method = "memory/messages/append-user", version = "1" }
+]
+```
+
+Schedule Action 贡献声明可被系统 scheduler 调用的定时业务动作：
+
+```toml
+[contributes]
+schedule_actions = [
+  { id = "workflow.run", method = "workflow/schedules/run", version = "1" }
+]
+```
+
+Provider、Behavior、Memory、Hook、Interface 和 Schedule Action 贡献只声明能力入口；实际执行统一通过宿主 Worker RPC 分发，不允许扩展自行开放端口。
 
 ## 推荐目录
 
@@ -110,8 +131,8 @@ Skill 目录独立：
 3. CLI 扫描内置扩展中的 `provider-presets/*.toml`，把默认渠道实例写入 `config/providers/`。
 4. CLI 把仓库内 `builtins/extensions/*` 追加为开发来源，供开发模式覆盖安装目录。
 5. Extension Host 扫描扩展包，解析 `ui`、`worker` 和贡献能力，不启动扩展私有进程。
-6. Server 暴露 runtime snapshot、事件流、诊断、日志、资源贡献接口，以及 `/api/extensions/{extension_id}/rpc/{method}` Worker RPC 入口。
-7. Core 只在自身生命周期时机派发 Hook；扩展内部按 Worker ABI 和 capability 组织自己的业务逻辑。
+6. Server 暴露 runtime snapshot、事件流、诊断、日志、资源贡献接口、接口绑定 API、scheduler API，以及 `/api/extensions/{extension_id}/rpc/{method}` Worker RPC 入口。
+7. Core 只维护稳定接口、绑定、计划与 Hook 派发；扩展内部按 Worker ABI 和 capability 组织自己的业务逻辑。
 8. Web 工作台根据 runtime snapshot 挂载页面、面板、主题、语言和命令；如果某个 mount 在本地 registry 中存在实现，则直接渲染真实组件。
 
 ## 开发热加载
@@ -156,7 +177,7 @@ Skill 目录独立：
 ## 沙箱与权限
 
 - Host 默认不注入 WASI，也不允许任意 import。
-- RPC 方法必须匹配 manifest 中 Provider、Behavior、Memory 或 Hook 贡献声明的 `entry` / `handler` 前缀；纯 Worker 扩展没有贡献前缀时允许调用安全方法名。
+- RPC 方法必须匹配 manifest 中 Provider、Behavior、Memory、Hook、Interface 或 Schedule Action 贡献声明的 `entry` / `handler` / `method` 前缀；纯 Worker 扩展没有贡献前缀时允许调用安全方法名。
 - `runtime.memory_limit_mb` 控制 Wasm store 内存上限。
 - `runtime.timeout_ms` 控制 Wasm fuel 预算，防止无限循环长期占用 Host。
 - `permissions` 是后续 host capability bridge 的唯一声明来源；在 bridge 接入前，Worker 没有文件、网络、环境变量或数据库的宿主访问能力。

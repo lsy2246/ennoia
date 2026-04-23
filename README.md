@@ -8,17 +8,17 @@
 - Agents：维护协作者档案、上游渠道、模型、技能和启用状态。
 - 技能：Agent 可引用的能力包，和扩展严格分离。
 - API 上游渠道：Agent 绑定的具体模型访问实例。
-- 扩展：系统插件包，可贡献页面、面板、主题、语言、命令、Hook 和上游实现。
-- 会话：系统内置 `journal` 文件记录层提供一套 Conversation、Lane、Message 与事件原文能力，默认关闭。
-- 记忆：以内置 `memory` 扩展形式提供独立能力包、私有数据库与 Web 页面；它与 journal 可并存，不自动消费或关闭 journal。
-- 编排：以内置 `workflow` 扩展承载运行编排、stage、decision、gate 与 artifact 产出。
+- 扩展：系统插件包，可贡献页面、面板、主题、语言、命令、Hook、接口实现和定时动作。
+- 会话：系统保留稳定 `/api/conversations` 入口，实际读写由 `conversation.*`、`message.*`、`lane.*` 等接口绑定到扩展 Worker。
+- 记忆：以内置 `memory` 扩展形式提供会话、消息和记忆相关接口实现；核心不再内置 `journal`。
+- 编排：以内置 `workflow` 扩展承载 run、task、artifact 与定时执行动作。
 - 日志：聚合前端日志和扩展运行事件。
 - 设置：通过表单直接编辑 `app/server` 文件配置、`config/profile.toml` 和 `config/preferences/*.toml`。
 
 ## 技术栈
 
 - 后端：Rust、Tokio、Axum、Serde、TOML
-- 存储：系统配置走 TOML 文件；journal 走 `data/journal/` 文件；扩展按需使用自己的私有存储。
+- 存储：系统配置走 TOML 文件；接口绑定走 `config/interfaces.toml`；定时计划走 `data/system/schedules.json`；扩展按需使用自己的私有存储。
 - 前端：React、Vite、TanStack Router、Zustand
 - 包管理：`bun`
 - 发布目标：一个 npm 包 + `~/.ennoia` 运行目录
@@ -31,8 +31,8 @@
 - `crates/cli`：初始化、开发与启动入口
 - `web`：Ennoia Web 工作台
 - `web/packages/api-client`：前端统一 API 访问层
-- `builtins/extensions/memory`：内置记忆扩展，包含上下文、审查与图谱能力
-- `builtins/extensions/workflow`：内置编排扩展，包含 Worker、Hook 约定与 `data/`
+- `builtins/extensions/memory`：内置记忆扩展，声明会话、线路、消息与记忆接口
+- `builtins/extensions/workflow`：内置编排扩展，声明 run/task/artifact 接口与 `workflow.run` 定时动作
 
 ## 内置能力源码
 
@@ -44,7 +44,8 @@
 ## 存储边界
 
 - 核心系统配置只走 `~/.ennoia/config/*.toml`。
-- 系统原始会话记录写入 `~/.ennoia/data/journal/`，默认关闭，可通过 `server.toml` 的 `journal.enabled` 开启。
+- 系统接口绑定写入 `~/.ennoia/config/interfaces.toml`；未显式绑定且只有一个实现时自动选中。
+- 系统定时计划写入 `~/.ennoia/data/system/schedules.json`，到期后由宿主调用扩展 Wasm Worker 的 `schedule_actions`。
 - 核心日志写入 `~/.ennoia/logs/`。
 - 扩展私有数据写入 `~/.ennoia/data/extensions/{extension_id}/`。
 - 核心不提供主业务 SQLite，不内建语义记忆、编排、任务或产物索引表。
@@ -82,10 +83,9 @@ cargo run -p ennoia-cli -- init
 - `cargo check --workspace`
 - `cargo test --workspace`
 - `bun run build:workers`
+- `bun run --cwd web lint`
 - `bun run --cwd web typecheck`
 - `bun run --cwd web build`
-
-当前 `web` 还没有单独的 `lint` 脚本。
 
 ## 文档入口
 

@@ -10,8 +10,9 @@ use ennoia_kernel::{
     ExtensionHealth, ExtensionKind, ExtensionManifest, ExtensionPermissionSpec,
     ExtensionRegistryEntry, ExtensionRegistryFile, ExtensionRpcRequest, ExtensionRpcResponse,
     ExtensionRuntimeEvent, ExtensionRuntimeSpec, ExtensionSourceMode, ExtensionUiSpec,
-    HookContribution, LocaleContribution, MemoryContribution, PageContribution, PanelContribution,
-    ProviderContribution, ResolvedUiEntry, ResolvedWorkerEntry, ThemeContribution,
+    HookContribution, InterfaceContribution, LocaleContribution, MemoryContribution,
+    PageContribution, PanelContribution, ProviderContribution, ResolvedUiEntry,
+    ResolvedWorkerEntry, ScheduleActionContribution, ThemeContribution,
 };
 use serde::Serialize;
 
@@ -40,6 +41,8 @@ pub struct ResolvedExtensionSnapshot {
     pub behaviors: Vec<BehaviorContribution>,
     pub memories: Vec<MemoryContribution>,
     pub hooks: Vec<HookContribution>,
+    pub interfaces: Vec<InterfaceContribution>,
+    pub schedule_actions: Vec<ScheduleActionContribution>,
     pub diagnostics: Vec<ExtensionDiagnostic>,
 }
 
@@ -134,6 +137,26 @@ pub struct RegisteredHookContribution {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RegisteredInterfaceContribution {
+    pub extension_id: String,
+    pub extension_kind: ExtensionKind,
+    pub extension_version: String,
+    pub source_mode: ExtensionSourceMode,
+    pub install_dir: String,
+    pub interface: InterfaceContribution,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RegisteredScheduleActionContribution {
+    pub extension_id: String,
+    pub extension_kind: ExtensionKind,
+    pub extension_version: String,
+    pub source_mode: ExtensionSourceMode,
+    pub install_dir: String,
+    pub schedule_action: ScheduleActionContribution,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ExtensionRuntimeSnapshot {
     pub generation: u64,
     pub updated_at: String,
@@ -147,6 +170,8 @@ pub struct ExtensionRuntimeSnapshot {
     pub behaviors: Vec<RegisteredBehaviorContribution>,
     pub memories: Vec<RegisteredMemoryContribution>,
     pub hooks: Vec<RegisteredHookContribution>,
+    pub interfaces: Vec<RegisteredInterfaceContribution>,
+    pub schedule_actions: Vec<RegisteredScheduleActionContribution>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -524,6 +549,36 @@ impl ResolvedExtensionSnapshot {
             })
             .collect()
     }
+
+    fn interface_rows(&self) -> Vec<RegisteredInterfaceContribution> {
+        self.interfaces
+            .iter()
+            .cloned()
+            .map(|interface| RegisteredInterfaceContribution {
+                extension_id: self.id.clone(),
+                extension_kind: self.kind.clone(),
+                extension_version: self.version.clone(),
+                source_mode: self.source_mode.clone(),
+                install_dir: self.install_dir.clone(),
+                interface,
+            })
+            .collect()
+    }
+
+    fn schedule_action_rows(&self) -> Vec<RegisteredScheduleActionContribution> {
+        self.schedule_actions
+            .iter()
+            .cloned()
+            .map(|schedule_action| RegisteredScheduleActionContribution {
+                extension_id: self.id.clone(),
+                extension_kind: self.kind.clone(),
+                extension_version: self.version.clone(),
+                source_mode: self.source_mode.clone(),
+                install_dir: self.install_dir.clone(),
+                schedule_action,
+            })
+            .collect()
+    }
 }
 
 fn build_snapshot(
@@ -552,6 +607,8 @@ fn build_snapshot(
     let mut behaviors = Vec::new();
     let mut memories = Vec::new();
     let mut hooks = Vec::new();
+    let mut interfaces = Vec::new();
+    let mut schedule_actions = Vec::new();
 
     for extension in &extensions {
         pages.extend(extension.page_rows());
@@ -563,6 +620,8 @@ fn build_snapshot(
         behaviors.extend(extension.behavior_rows());
         memories.extend(extension.memory_rows());
         hooks.extend(extension.hook_rows());
+        interfaces.extend(extension.interface_rows());
+        schedule_actions.extend(extension.schedule_action_rows());
     }
 
     Ok(ExtensionRuntimeSnapshot {
@@ -578,6 +637,8 @@ fn build_snapshot(
         behaviors,
         memories,
         hooks,
+        interfaces,
+        schedule_actions,
     })
 }
 
@@ -687,6 +748,8 @@ fn resolve_manifest(
         behaviors: manifest.contributes.behaviors,
         memories: manifest.contributes.memories,
         hooks: manifest.contributes.hooks,
+        interfaces: manifest.contributes.interfaces,
+        schedule_actions: manifest.contributes.schedule_actions,
         diagnostics,
     }
 }
@@ -803,6 +866,8 @@ fn failed_extension_snapshot(
         behaviors: Vec::new(),
         memories: Vec::new(),
         hooks: Vec::new(),
+        interfaces: Vec::new(),
+        schedule_actions: Vec::new(),
         diagnostics: vec![diagnostic(
             "error",
             "descriptor resolution failed",
@@ -902,6 +967,8 @@ fn empty_snapshot() -> ExtensionRuntimeSnapshot {
         behaviors: Vec::new(),
         memories: Vec::new(),
         hooks: Vec::new(),
+        interfaces: Vec::new(),
+        schedule_actions: Vec::new(),
     }
 }
 

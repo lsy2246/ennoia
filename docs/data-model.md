@@ -7,11 +7,53 @@
 - `SkillConfig`
 - `ProviderConfig`
 - `ExtensionRuntimeState`
+- `InterfaceBindingsConfig`
+- `ScheduleRecord`
 - `SystemLog`
 
-核心模型表达系统配置、扩展运行态、宿主协议和 journal 原始记录。Memory、Run、Task、Artifact、Timer/Job 等业务数据由对应扩展在私有边界内管理。
+核心模型表达系统配置、扩展运行态、接口绑定、scheduler 计划和宿主协议。Conversation、Message、Memory、Run、Task、Artifact 等业务数据由对应扩展在私有边界内管理。
 
-## Journal 域
+## Interface Binding 域
+
+`InterfaceBindingsConfig` 字段：
+
+- `bindings`
+
+`InterfaceBindingConfig` 字段：
+
+- `extension_id`
+- `method`
+
+约定：
+
+- key 是系统动作键，例如 `conversation.list`、`message.append_user`、`run.create`。
+- value 指向扩展 ID 和该扩展 Worker 的 RPC method。
+- 没有显式绑定且只有一个实现时自动绑定；多个实现时由用户或 UI 写入配置。
+
+## Schedule 域
+
+`ScheduleRecord` 字段：
+
+- `id`
+- `owner`
+- `trigger`
+- `target`
+- `params`
+- `enabled`
+- `next_run_at`
+- `last_run_at`
+- `last_status`
+- `last_error`
+- `created_at`
+- `updated_at`
+
+约定：
+
+- `target.extension_id` 和 `target.action_id` 指向扩展声明的 `schedule_actions`。
+- `params` 原样传给扩展 Worker，业务含义由扩展定义。
+- Scheduler 只负责计划与触发，不解释业务语义。
+
+## Conversation 接口域
 
 `ConversationSpec` 字段：
 
@@ -29,9 +71,10 @@
 
 - `agent_ids.len() == 1` 创建 `direct`。
 - `agent_ids.len() >= 2` 创建 `group`。
-- 产品文案可以称为“会话”，系统 API 和 journal 文件使用 `conversation`。
+- 产品文案可以称为“会话”，系统 API 使用 `conversation`。
+- 具体持久化格式由绑定到 `conversation.*`、`lane.*`、`message.*` 的扩展决定。
 
-## Message 域
+## Message 接口域
 
 `MessageSpec` 字段：
 
@@ -72,12 +115,13 @@
 
 ## Extension 域
 
-扩展运行态以 `ExtensionRuntimeState` 为准，扩展包通过 manifest 贡献页面、面板、主题、语言、命令、Hook 和 Provider 实现。
+扩展运行态以 `ExtensionRuntimeState` 为准，扩展包通过 manifest 贡献页面、面板、主题、语言、命令、Hook、Provider、Interface 和 Schedule Action 实现。
 
 ## 存储快照
 
 - 核心系统配置：`~/.ennoia/config/*.toml`。
-- Journal 原始记录：`~/.ennoia/data/journal/`。
+- 接口绑定：`~/.ennoia/config/interfaces.toml`。
+- 定时计划：`~/.ennoia/data/system/schedules.json`。
 - 核心前端日志：`~/.ennoia/logs/frontend.jsonl`。
 - 扩展私有数据：`~/.ennoia/data/extensions/{extension_id}/`。
 - 核心不维护主业务数据库快照。

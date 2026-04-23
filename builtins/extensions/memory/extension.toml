@@ -21,9 +21,20 @@ events = ["publish", "subscribe"]
 [capabilities]
 pages = true
 memories = true
+interfaces = true
 
 [contributes]
 pages = [{ id = "memory.page", title = { key = "web.nav.memory", fallback = "记忆" }, route = "/memory", mount = "memory.page", icon = "memory", nav = { default_pinned = true, order = 30 } }]
 memories = [
   { id = "memory", extension_id = "memory", interfaces = ["workspace", "conversations", "messages", "lanes", "handoffs", "truth", "context", "review", "graph"], entry = "memory", version = "1" }
+]
+interfaces = [
+  { key = "conversation.list", method = "memory/conversations/list", version = "1" },
+  { key = "conversation.create", method = "memory/conversations/create", version = "1" },
+  { key = "conversation.get", method = "memory/conversations/get", version = "1" },
+  { key = "conversation.delete", method = "memory/conversations/delete", version = "1" },
+  { key = "lane.list_by_conversation", method = "memory/lanes/list-by-conversation", version = "1" },
+  { key = "message.list", method = "memory/messages/list", version = "1" },
+  { key = "message.append_user", method = "memory/messages/append-user", version = "1" },
+  { key = "message.append_agent", method = "memory/messages/append-agent", version = "1" }
 ]
