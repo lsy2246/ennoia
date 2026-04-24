@@ -1,0 +1,33 @@
+id = "conversation"
+name = "Conversation"
+kind = "extension"
+version = "0.1.0"
+
+[source]
+mode = "package"
+root = "."
+dev = false
+
+[worker]
+kind = "process"
+entry = "bin/conversation-service"
+protocol = "jsonrpc-stdio"
+
+[permissions]
+storage = "extension"
+sqlite = true
+
+[capabilities]
+interfaces = true
+
+[contributes]
+interfaces = [
+  { key = "conversation.list", method = "conversation/conversations/list", version = "1" },
+  { key = "conversation.create", method = "conversation/conversations/create", version = "1" },
+  { key = "conversation.get", method = "conversation/conversations/get", version = "1" },
+  { key = "conversation.delete", method = "conversation/conversations/delete", version = "1" },
+  { key = "lane.list_by_conversation", method = "conversation/lanes/list-by-conversation", version = "1" },
+  { key = "message.list", method = "conversation/messages/list", version = "1" },
+  { key = "message.append_user", method = "conversation/messages/append-user", version = "1" },
+  { key = "message.append_agent", method = "conversation/messages/append-agent", version = "1" }
+]

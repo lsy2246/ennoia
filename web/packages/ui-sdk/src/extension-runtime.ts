@@ -254,6 +254,7 @@ export type ResolvedWorkerEntry = {
   kind: string;
   entry: string;
   abi: string;
+  protocol?: string | null;
   status: string;
 };
 

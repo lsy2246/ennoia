@@ -301,6 +301,8 @@ pub struct ExtensionWorkerSpec {
     pub entry: Option<String>,
     #[serde(default)]
     pub abi: Option<String>,
+    #[serde(default)]
+    pub protocol: Option<String>,
 }
 
 /// ExtensionPermissionSpec declares host capabilities an extension may request.
@@ -504,6 +506,8 @@ pub struct ResolvedWorkerEntry {
     pub kind: String,
     pub entry: String,
     pub abi: String,
+    #[serde(default)]
+    pub protocol: Option<String>,
     pub status: String,
 }
 

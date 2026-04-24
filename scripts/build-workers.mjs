@@ -5,6 +5,8 @@ import { fileURLToPath } from "node:url";
 
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const cargo = process.platform === "win32" ? "cargo.exe" : "cargo";
+const conversationBinaryName =
+  process.platform === "win32" ? "conversation-service.exe" : "conversation-service";
 
 function run(command, args) {
   const result = spawnSync(command, args, {
@@ -35,7 +37,20 @@ function copyWorker(packageName, outputName, destination) {
   console.log(`[workers] ${packageName} -> ${destination}`);
 }
 
+function copyNativeWorker(packageName, outputName, destination) {
+  const source = resolve(rootDir, "target", "release", outputName);
+  if (!existsSync(source)) {
+    console.error(`[workers] missing build output: ${source}`);
+    process.exit(1);
+  }
+  const target = resolve(rootDir, destination);
+  mkdirSync(dirname(target), { recursive: true });
+  copyFileSync(source, target);
+  console.log(`[workers] ${packageName} -> ${destination}`);
+}
+
 run("rustup", ["target", "add", "wasm32-unknown-unknown"]);
+run(cargo, ["build", "-p", "ennoia-conversation-service", "--release"]);
 run(cargo, [
   "build",
   "-p",
@@ -56,4 +71,11 @@ copyWorker(
   "ennoia-workflow-worker",
   "ennoia_workflow_worker.wasm",
   "builtins/extensions/workflow/worker/workflow.wasm",
+);
+copyNativeWorker(
+  "ennoia-conversation-service",
+  process.platform === "win32"
+    ? "ennoia-conversation-service.exe"
+    : "ennoia-conversation-service",
+  `builtins/extensions/conversation/bin/${conversationBinaryName}`,
 );

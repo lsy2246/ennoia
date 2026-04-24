@@ -12,6 +12,7 @@ Web
     -> Server
       -> Kernel / Contract / Paths / Observability
       -> Extension Host / Wasm Worker
+      -> Extension Host / Process Worker
       -> System Log
       -> Interface Router
         -> Memory Worker / Workflow Worker / Other Extension Workers
@@ -24,7 +25,7 @@ Web
 - `Kernel`：定义系统级配置、扩展 manifest、共享运行时模型和能力声明结构。
 - `Contract`：定义跨边界 DTO；当前保留 `behavior` 与 `memory` 兼容协议响应结构。
 - `Paths`：统一解析运行目录，所有运行时文件位置都通过 `RuntimePaths` 推导。
-- `Extension Host`：负责扩展扫描、attach / detach、reload / restart、诊断、Worker 解析和 Worker RPC 分发。
+- `Extension Host`：负责扩展扫描、attach / detach、reload / restart、诊断、Worker 解析和 Worker RPC 分发；Worker 可以是 Wasm，也可以是进程型 stdio RPC。
 - `Server`：负责 HTTP API、配置读写、接口绑定、定时调度、Worker RPC 路由、系统日志和系统内置组件装配。
 
 ## 细粒度接口层
@@ -43,7 +44,7 @@ Web
 
 - 核心不再内置 `journal` 文件记录层。
 - `/api/conversations`、`/api/conversations/{id}/messages` 等稳定入口通过接口层路由，不直接绑定某个 memory 大能力。
-- 内置 `memory` 扩展当前声明会话、线路、消息和记忆接口；其他扩展可以替换其中任意一个细粒度接口。
+- 内置 `conversation` 扩展当前声明会话、线路和消息接口；内置 `memory` 扩展只负责记忆、上下文、审查和图谱侧车。
 - `GET /api/memories`、`ANY /api/memory/...` 作为兼容能力入口保留，用于访问扩展自己的 memory API。
 - 兼容能力入口不读取系统级 `memory.toml`；只有一个可用 memory 实现时可自动选择，存在多个实现时要求调用方显式指定 memory id 或改走接口绑定。
 - Conversation、Message、Memory Graph、Review 等业务数据组织属于扩展私有责任，不属于系统日志。
@@ -89,7 +90,7 @@ Web
 - 扩展是能力包，可选声明 `ui` 和 `worker`，并可声明多类贡献：`pages`、`panels`、`themes`、`locales`、`commands`、`providers`、`behaviors`、`memories`、`hooks`、`interfaces`、`schedule_actions`。
 - UI 工作台读取扩展快照时，同时获得接口实现和定时动作清单。
 - `workflow` 和 `memory` 都只是内置扩展实现；系统依赖接口键和动作 ID，不反向依赖具体扩展。
-- 扩展不自行开放端口；Provider、Behavior、Memory、Hook、Interface 和 Schedule Action 的执行统一走宿主 Worker RPC。
+- 扩展不自行开放端口；Provider、Behavior、Memory、Hook、Interface 和 Schedule Action 的执行统一走宿主 Worker RPC，Worker 通过 Wasm ABI 或进程 stdio 协议接入。
 - 扩展 UI、语言、主题和业务配置归扩展包所有；Web 主壳只按 runtime snapshot 发现并挂载，不在系统前端包中静态注册某个扩展页面或文案。
 - 扩展 UI 通过独立 ESM bundle 动态加载；主壳只导入 `/api/extensions/{extension_id}/ui/module` 暴露的模块包装器，再按 mount id 调用扩展自己的 `mount/unmount`。
 - 扩展主题通过 `ennoia.theme` 与主壳对接；主壳只消费稳定语义 token 和 dockview token，不把内部 class 结构暴露给扩展。
@@ -102,4 +103,4 @@ Web
 - 系统定时计划：`~/.ennoia/data/system/schedules.json`
 - 扩展私有数据：`~/.ennoia/data/extensions/{extension_id}/`
 - 扩展私有配置：`~/.ennoia/data/extensions/{extension_id}/` 下由扩展自行定义
-- 核心不维护主业务总库；会话、运行数据和完整记忆数据都放在各自扩展边界内。
+- 核心不维护主业务总库；会话、运行数据和完整记忆数据都放在各自扩展边界内，例如 `conversation`、`memory`、`workflow` 各自维护自己的数据目录。

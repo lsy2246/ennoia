@@ -1,8 +1,10 @@
 use std::collections::HashMap;
-use std::fs;
-use std::io;
+use std::fs::{self, OpenOptions};
+use std::io::{self, BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, Stdio};
+use std::sync::{Arc, Mutex};
+use std::thread;
 use std::time::SystemTime;
 
 use ennoia_kernel::{ExtensionRpcRequest, ExtensionRpcResponse};
@@ -16,13 +18,17 @@ use wasmtime::{
 use crate::registry::ResolvedExtensionSnapshot;
 
 const SUPPORTED_WORKER_ABI: &str = "ennoia.worker";
+const SUPPORTED_PROCESS_PROTOCOL: &str = "jsonrpc-stdio";
 const MAX_RPC_BYTES: usize = 4 * 1024 * 1024;
 const FUEL_PER_TIMEOUT_MS: u64 = 10_000;
 
 #[derive(Debug)]
 pub struct WorkerRuntime {
     engine: Engine,
+    home_dir: PathBuf,
+    logs_dir: PathBuf,
     modules: Mutex<HashMap<String, CachedModule>>,
+    processes: Mutex<HashMap<String, Arc<Mutex<ProcessWorkerHandle>>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -55,16 +61,51 @@ struct WorkerInstance {
     instance: Instance,
 }
 
+#[derive(Debug)]
+struct ProcessWorkerHandle {
+    entry: PathBuf,
+    fingerprint: WorkerFingerprint,
+    protocol: String,
+    child: Child,
+    stdin: ChildStdin,
+    stdout: BufReader<ChildStdout>,
+}
+
+impl ProcessWorkerHandle {
+    fn shutdown(&mut self) {
+        if self.child.try_wait().ok().flatten().is_none() {
+            let _ = self.child.kill();
+        }
+        let _ = self.child.wait();
+    }
+}
+
+impl Drop for WorkerRuntime {
+    fn drop(&mut self) {
+        if let Ok(processes) = self.processes.lock() {
+            for handle in processes.values() {
+                if let Ok(mut handle) = handle.lock() {
+                    handle.shutdown();
+                }
+            }
+        }
+    }
+}
+
 impl WorkerRuntime {
-    pub fn new() -> io::Result<Self> {
+    pub fn new(home_dir: PathBuf, logs_dir: PathBuf) -> io::Result<Self> {
         let mut config = Config::new();
         config.consume_fuel(true);
         config.wasm_backtrace_details(wasmtime::WasmBacktraceDetails::Disable);
         let engine = Engine::new(&config).map_err(io::Error::other)?;
+        fs::create_dir_all(&logs_dir)?;
 
         Ok(Self {
             engine,
+            home_dir,
+            logs_dir,
             modules: Mutex::new(HashMap::new()),
+            processes: Mutex::new(HashMap::new()),
         })
     }
 
@@ -80,20 +121,6 @@ impl WorkerRuntime {
                 format!("extension '{}' does not declare a worker", extension.id),
             ));
         };
-
-        if worker.kind != "wasm" {
-            return Ok(ExtensionRpcResponse::failure(
-                "worker_kind_unsupported",
-                format!("unsupported worker kind '{}'", worker.kind),
-            ));
-        }
-
-        if worker.abi != SUPPORTED_WORKER_ABI {
-            return Ok(ExtensionRpcResponse::failure(
-                "worker_abi_unsupported",
-                format!("unsupported worker ABI '{}'", worker.abi),
-            ));
-        }
 
         if !is_safe_method_name(method) {
             return Ok(ExtensionRpcResponse::failure(
@@ -120,7 +147,106 @@ impl WorkerRuntime {
             ));
         }
 
-        let module = match self.load_module(&extension.id, &entry) {
+        match worker.kind.as_str() {
+            "wasm" => self.dispatch_wasm(extension, worker, method, request, &entry),
+            "process" => self.dispatch_process(extension, worker, method, request, &entry),
+            _ => Ok(ExtensionRpcResponse::failure(
+                "worker_kind_unsupported",
+                format!("unsupported worker kind '{}'", worker.kind),
+            )),
+        }
+    }
+
+    pub fn invalidate_missing_or_changed(&self, extensions: &[ResolvedExtensionSnapshot]) {
+        if let Ok(mut modules) = self.modules.lock() {
+            modules.retain(|extension_id, cached| {
+                let Some(extension) = extensions.iter().find(|item| &item.id == extension_id)
+                else {
+                    return false;
+                };
+                let Some(worker) = extension.worker.as_ref() else {
+                    return false;
+                };
+                if worker.kind != "wasm" {
+                    return false;
+                }
+                let entry = PathBuf::from(&worker.entry);
+                entry == cached.entry
+                    && worker_fingerprint(&entry)
+                        .map(|fingerprint| fingerprint == cached.fingerprint)
+                        .unwrap_or(false)
+            });
+        }
+
+        if let Ok(mut processes) = self.processes.lock() {
+            processes.retain(|extension_id, handle| {
+                let Some(extension) = extensions.iter().find(|item| &item.id == extension_id)
+                else {
+                    if let Ok(mut handle) = handle.lock() {
+                        handle.shutdown();
+                    }
+                    return false;
+                };
+                let Some(worker) = extension.worker.as_ref() else {
+                    if let Ok(mut handle) = handle.lock() {
+                        handle.shutdown();
+                    }
+                    return false;
+                };
+                if worker.kind != "process" {
+                    if let Ok(mut handle) = handle.lock() {
+                        handle.shutdown();
+                    }
+                    return false;
+                }
+                let entry = PathBuf::from(&worker.entry);
+                let protocol = worker
+                    .protocol
+                    .as_deref()
+                    .unwrap_or(SUPPORTED_PROCESS_PROTOCOL)
+                    .to_string();
+                let Ok(fingerprint) = worker_fingerprint(&entry) else {
+                    if let Ok(mut handle) = handle.lock() {
+                        handle.shutdown();
+                    }
+                    return false;
+                };
+                let Ok(mut process) = handle.lock() else {
+                    return false;
+                };
+                let alive = process
+                    .child
+                    .try_wait()
+                    .map(|status| status.is_none())
+                    .unwrap_or(false);
+                let keep = alive
+                    && process.entry == entry
+                    && process.fingerprint == fingerprint
+                    && process.protocol == protocol;
+                if !keep {
+                    process.shutdown();
+                }
+                keep
+            });
+        }
+    }
+
+    fn dispatch_wasm(
+        &self,
+        extension: &ResolvedExtensionSnapshot,
+        worker: &ennoia_kernel::ResolvedWorkerEntry,
+        method: &str,
+        request: ExtensionRpcRequest,
+        entry: &Path,
+    ) -> io::Result<ExtensionRpcResponse> {
+        if worker.abi != SUPPORTED_WORKER_ABI {
+            return Ok(ExtensionRpcResponse::failure(
+                "worker_abi_unsupported",
+                format!("unsupported worker ABI '{}'", worker.abi),
+            ));
+        }
+
+        let module = match self.load_module(&extension.id, entry) {
             Ok(module) => module,
             Err(error) => {
                 return Ok(ExtensionRpcResponse::failure(
@@ -146,7 +272,7 @@ impl WorkerRuntime {
             Err(error) => return Err(io::Error::other(error)),
         };
 
-        match self.invoke(extension, &module, &payload) {
+        match self.invoke_wasm(extension, &module, &payload) {
             Ok(response) => Ok(response),
             Err(error) => Ok(ExtensionRpcResponse::failure(
                 "worker_execution_failed",
@@ -155,23 +281,56 @@ impl WorkerRuntime {
         }
     }
 
-    pub fn invalidate_missing_or_changed(&self, extensions: &[ResolvedExtensionSnapshot]) {
-        let Ok(mut modules) = self.modules.lock() else {
-            return;
+    fn dispatch_process(
+        &self,
+        extension: &ResolvedExtensionSnapshot,
+        worker: &ennoia_kernel::ResolvedWorkerEntry,
+        method: &str,
+        request: ExtensionRpcRequest,
+        entry: &Path,
+    ) -> io::Result<ExtensionRpcResponse> {
+        let protocol = worker
+            .protocol
+            .as_deref()
+            .unwrap_or(SUPPORTED_PROCESS_PROTOCOL);
+        if protocol != SUPPORTED_PROCESS_PROTOCOL {
+            return Ok(ExtensionRpcResponse::failure(
+                "worker_protocol_unsupported",
+                format!("unsupported process worker protocol '{protocol}'"),
+            ));
+        }
+
+        let payload = WorkerInvocation {
+            method,
+            params: request.params,
+            context: request.context,
         };
-        modules.retain(|extension_id, cached| {
-            let Some(extension) = extensions.iter().find(|item| &item.id == extension_id) else {
-                return false;
-            };
-            let Some(worker) = extension.worker.as_ref() else {
-                return false;
-            };
-            let entry = PathBuf::from(&worker.entry);
-            entry == cached.entry
-                && worker_fingerprint(&entry)
-                    .map(|fingerprint| fingerprint == cached.fingerprint)
-                    .unwrap_or(false)
-        });
+        let payload = match serde_json::to_vec(&payload) {
+            Ok(payload) if payload.len() <= MAX_RPC_BYTES => payload,
+            Ok(_) => {
+                return Ok(ExtensionRpcResponse::failure(
+                    "rpc_payload_too_large",
+                    format!("RPC payload exceeds {} bytes", MAX_RPC_BYTES),
+                ))
+            }
+            Err(error) => return Err(io::Error::other(error)),
+        };
+
+        let handle = self.process_handle(extension, entry, protocol)?;
+        match self.invoke_process(&handle, &payload) {
+            Ok(response) => Ok(response),
+            Err(first_error) => {
+                self.remove_process(&extension.id);
+                let handle = self.process_handle(extension, entry, protocol)?;
+                self.invoke_process(&handle, &payload)
+                    .map_err(|second_error| {
+                        io::Error::other(format!(
+                        "process worker failed after restart; first error: {}; second error: {}",
+                        first_error, second_error
+                    ))
+                    })
+            }
+        }
     }
 
     fn load_module(&self, extension_id: &str, entry: &Path) -> io::Result<Module> {
@@ -211,7 +370,7 @@ impl WorkerRuntime {
         Ok(module)
     }
 
-    fn invoke(
+    fn invoke_wasm(
         &self,
         extension: &ResolvedExtensionSnapshot,
         module: &Module,
@@ -270,6 +429,145 @@ impl WorkerRuntime {
         let linker = Linker::new(&self.engine);
         let instance = linker.instantiate(&mut store, module)?;
         Ok(WorkerInstance { store, instance })
+    }
+
+    fn process_handle(
+        &self,
+        extension: &ResolvedExtensionSnapshot,
+        entry: &Path,
+        protocol: &str,
+    ) -> io::Result<Arc<Mutex<ProcessWorkerHandle>>> {
+        let fingerprint = worker_fingerprint(entry)?;
+        let mut processes = self
+            .processes
+            .lock()
+            .map_err(|_| io::Error::other("worker process cache poisoned"))?;
+
+        if let Some(existing) = processes.get(&extension.id) {
+            let existing = existing.clone();
+            let mut handle = existing
+                .lock()
+                .map_err(|_| io::Error::other("worker process handle poisoned"))?;
+            let alive = handle.child.try_wait()?.is_none();
+            if alive
+                && handle.entry == entry
+                && handle.fingerprint == fingerprint
+                && handle.protocol == protocol
+            {
+                drop(handle);
+                return Ok(existing);
+            }
+            handle.shutdown();
+        }
+
+        let spawned = Arc::new(Mutex::new(self.spawn_process(
+            extension,
+            entry,
+            fingerprint,
+            protocol,
+        )?));
+        processes.insert(extension.id.clone(), spawned.clone());
+        Ok(spawned)
+    }
+
+    fn spawn_process(
+        &self,
+        extension: &ResolvedExtensionSnapshot,
+        entry: &Path,
+        fingerprint: WorkerFingerprint,
+        protocol: &str,
+    ) -> io::Result<ProcessWorkerHandle> {
+        let log_path = self
+            .logs_dir
+            .join(format!("{}.process.log", extension.id.replace('/', "_")));
+        if let Some(parent) = log_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+
+        let mut command = Command::new(entry);
+        command
+            .current_dir(PathBuf::from(&extension.source_root))
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .env("ENNOIA_HOME", &self.home_dir)
+            .env("ENNOIA_EXTENSION_ID", &extension.id)
+            .env("ENNOIA_EXTENSION_ROOT", &extension.source_root)
+            .env("ENNOIA_EXTENSION_INSTALL_DIR", &extension.install_dir)
+            .env(
+                "ENNOIA_EXTENSION_DATA_DIR",
+                self.home_dir
+                    .join("data")
+                    .join("extensions")
+                    .join(&extension.id),
+            )
+            .env("ENNOIA_EXTENSION_LOG_DIR", &self.logs_dir)
+            .env("ENNOIA_WORKER_PROTOCOL", protocol);
+
+        let mut child = command.spawn()?;
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| io::Error::other("process worker missing stdin"))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| io::Error::other("process worker missing stdout"))?;
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| io::Error::other("process worker missing stderr"))?;
+        spawn_process_log_pump(stderr, log_path);
+
+        Ok(ProcessWorkerHandle {
+            entry: entry.to_path_buf(),
+            fingerprint,
+            protocol: protocol.to_string(),
+            child,
+            stdin,
+            stdout: BufReader::new(stdout),
+        })
+    }
+
+    fn invoke_process(
+        &self,
+        handle: &Arc<Mutex<ProcessWorkerHandle>>,
+        payload: &[u8],
+    ) -> io::Result<ExtensionRpcResponse> {
+        let mut handle = handle
+            .lock()
+            .map_err(|_| io::Error::other("worker process handle poisoned"))?;
+        if handle.child.try_wait()?.is_some() {
+            return Err(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                "process worker exited before handling the request",
+            ));
+        }
+
+        handle.stdin.write_all(payload)?;
+        handle.stdin.write_all(b"\n")?;
+        handle.stdin.flush()?;
+
+        let mut response = String::new();
+        let read = handle.stdout.read_line(&mut response)?;
+        if read == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "process worker closed stdout",
+            ));
+        }
+        parse_worker_response(response.trim_end_matches(['\r', '\n']).as_bytes())
+            .map_err(io::Error::other)
+    }
+
+    fn remove_process(&self, extension_id: &str) {
+        if let Ok(mut processes) = self.processes.lock() {
+            if let Some(handle) = processes.remove(extension_id) {
+                if let Ok(mut handle) = handle.lock() {
+                    handle.shutdown();
+                }
+            }
+        }
     }
 }
 
@@ -391,6 +689,20 @@ fn method_prefixes(extension: &ResolvedExtensionSnapshot) -> Vec<String> {
     prefixes
 }
 
+fn spawn_process_log_pump(stderr: ChildStderr, log_path: PathBuf) {
+    thread::spawn(move || {
+        let Ok(mut file) = OpenOptions::new().create(true).append(true).open(log_path) else {
+            return;
+        };
+        for line in BufReader::new(stderr).lines() {
+            let Ok(line) = line else {
+                break;
+            };
+            let _ = writeln!(file, "{line}");
+        }
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -407,7 +719,7 @@ mod tests {
             .expect("compile wat");
         fs::write(root.join("worker/plugin.wasm"), wasm).expect("write wasm");
 
-        let runtime = WorkerRuntime::new().expect("runtime");
+        let runtime = WorkerRuntime::new(root.join("home"), root.join("logs")).expect("runtime");
         let response = runtime
             .dispatch(
                 &test_extension(&root, "memory"),
@@ -418,7 +730,7 @@ mod tests {
 
         assert!(response.ok);
         assert_eq!(response.data["pong"], true);
-        fs::remove_dir_all(root).expect("cleanup");
+        fs::remove_dir_all(&root).expect("cleanup");
     }
 
     #[test]
@@ -431,7 +743,7 @@ mod tests {
         )
         .expect("write wasm");
 
-        let runtime = WorkerRuntime::new().expect("runtime");
+        let runtime = WorkerRuntime::new(root.join("home"), root.join("logs")).expect("runtime");
         let response = runtime
             .dispatch(
                 &test_extension(&root, "memory"),
@@ -442,7 +754,7 @@ mod tests {
 
         assert!(!response.ok);
         assert_eq!(response.error.expect("error").code, "rpc_method_forbidden");
-        fs::remove_dir_all(root).expect("cleanup");
+        fs::remove_dir_all(&root).expect("cleanup");
     }
 
     #[test]
@@ -457,7 +769,7 @@ mod tests {
         )
         .expect("write wasm");
 
-        let runtime = WorkerRuntime::new().expect("runtime");
+        let runtime = WorkerRuntime::new(root.join("home"), root.join("logs")).expect("runtime");
         let extension = test_extension(&root, "memory");
         let first = runtime
             .dispatch(&extension, "memory/ping", ExtensionRpcRequest::default())
@@ -476,7 +788,7 @@ mod tests {
             .dispatch(&extension, "memory/ping", ExtensionRpcRequest::default())
             .expect("dispatch second");
         assert_eq!(second.data["version"], 2);
-        fs::remove_dir_all(root).expect("cleanup");
+        fs::remove_dir_all(&root).expect("cleanup");
     }
 
     fn test_extension(root: &Path, method_prefix: &str) -> ResolvedExtensionSnapshot {
@@ -498,6 +810,7 @@ mod tests {
                     .to_string_lossy()
                     .replace('\\', "/"),
                 abi: SUPPORTED_WORKER_ABI.to_string(),
+                protocol: None,
                 status: "ready".to_string(),
             }),
             permissions: ExtensionPermissionSpec::default(),

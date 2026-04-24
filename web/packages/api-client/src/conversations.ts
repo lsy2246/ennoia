@@ -1,7 +1,36 @@
-﻿import { fetchJson } from "./core";
+import { fetchJson } from "./core";
 import type { ChatLane, ChatMessage, ChatSendResponse, ChatThread, ChatThreadDetail } from "./types";
 
 const CONVERSATIONS_API = "/api/conversations";
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isChatThread(value: unknown): value is ChatThread {
+  return isRecord(value)
+    && typeof value.id === "string"
+    && (value.topology === "direct" || value.topology === "group")
+    && typeof value.title === "string";
+}
+
+function normalizeChatDetailPayload(payload: unknown): {
+  conversation: ChatThread;
+  lanes?: ChatLane[];
+} {
+  if (isChatThread(payload)) {
+    return { conversation: payload };
+  }
+
+  if (!isRecord(payload) || !isChatThread(payload.conversation)) {
+    throw new Error("invalid conversation detail payload");
+  }
+
+  return {
+    conversation: payload.conversation,
+    lanes: Array.isArray(payload.lanes) ? payload.lanes as ChatLane[] : undefined,
+  };
+}
 
 export async function listChats() {
   return fetchJson<ChatThread[]>(CONVERSATIONS_API);
@@ -27,12 +56,14 @@ export async function deleteChat(chatId: string) {
 
 export async function getChat(chatId: string): Promise<ChatThreadDetail> {
   const [detail, messages] = await Promise.all([
-    fetchJson<{ conversation: ChatThread; lanes: ChatLane[] }>(`${CONVERSATIONS_API}/${chatId}`),
+    fetchJson<unknown>(`${CONVERSATIONS_API}/${chatId}`),
     fetchJson<ChatMessage[]>(`${CONVERSATIONS_API}/${chatId}/messages`),
   ]);
+  const normalized = normalizeChatDetailPayload(detail);
+  const lanes = normalized.lanes ?? await fetchJson<ChatLane[]>(`${CONVERSATIONS_API}/${chatId}/lanes`);
   return {
-    conversation: detail.conversation,
-    lanes: detail.lanes,
+    conversation: normalized.conversation,
+    lanes,
     messages,
     runs: [],
     tasks: [],
@@ -54,4 +85,3 @@ export async function sendChatMessage(
     body: JSON.stringify(payload),
   });
 }
-

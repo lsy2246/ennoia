@@ -96,4 +96,9 @@ fn render_assets_module(
 
 fn is_binary_asset(path: &str) -> bool {
     path.ends_with(".wasm")
+        || path.ends_with(".exe")
+        || matches!(
+            path.split('/').collect::<Vec<_>>().as_slice(),
+            ["extensions", _, "bin", ..]
+        )
 }

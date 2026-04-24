@@ -73,6 +73,7 @@ impl Default for CorsConfig {
 pub struct TimeoutConfig {
     pub enabled: bool,
     pub default_ms: u64,
+    #[serde(default)]
     pub per_path_ms: HashMap<String, u64>,
 }
 
@@ -148,6 +149,7 @@ fn read_env_trimmed(key: &str) -> Option<String> {
 pub struct BodyLimitConfig {
     pub enabled: bool,
     pub max_bytes: usize,
+    #[serde(default)]
     pub per_path_max: HashMap<String, usize>,
 }
 

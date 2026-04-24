@@ -13,6 +13,7 @@ tmp/
 .turbo/
 .tmp-tests/
 packaging/npm/vendor/
+builtins/extensions/conversation/bin/
 
 ## Panda
 styled-system

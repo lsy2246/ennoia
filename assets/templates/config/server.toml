@@ -16,6 +16,7 @@ max_age_seconds = 3600
 [timeout]
 enabled = true
 default_ms = 30000
+per_path_ms = {}
 
 [logging]
 enabled = true
@@ -33,6 +34,7 @@ level = "error"
 [body_limit]
 enabled = true
 max_bytes = 1048576
+per_path_max = {}
 
 [bootstrap]
 is_initialized = false

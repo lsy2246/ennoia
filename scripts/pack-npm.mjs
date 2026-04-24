@@ -45,6 +45,7 @@ function syncPackageVersion() {
 
 syncPackageVersion();
 run("构建扩展 UI bundle", "node", ["./scripts/build-extension-ui.mjs"]);
+run("构建扩展 worker", "node", ["./scripts/build-workers.mjs"]);
 run("构建 release CLI", "cargo", ["build", "--release", "--bin", "ennoia"]);
 
 if (!existsSync(builtBinary)) {

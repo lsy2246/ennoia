@@ -9,8 +9,8 @@
 - 技能：Agent 可引用的能力包，和扩展严格分离。
 - API 上游渠道：Agent 绑定的具体模型访问实例。
 - 扩展：系统插件包，可贡献页面、面板、主题、语言、命令、Hook、接口实现和定时动作。
-- 会话：系统保留稳定 `/api/conversations` 入口，实际读写由 `conversation.*`、`message.*`、`lane.*` 等接口绑定到扩展 Worker。
-- 记忆：以内置 `memory` 扩展形式提供会话、消息和记忆相关接口实现；核心不再内置 `journal`。
+- 会话：系统保留稳定 `/api/conversations` 入口，实际读写由 `conversation.*`、`message.*`、`lane.*` 等接口绑定到内置 `conversation` 扩展。
+- 记忆：以内置 `memory` 扩展形式提供记忆、上下文、审查和图谱能力；核心不再内置 `journal`。
 - 编排：以内置 `workflow` 扩展承载 run、task、artifact 与定时执行动作。
 - 日志：聚合前端日志和扩展运行事件。
 - 设置：通过表单直接编辑 `app/server` 文件配置、`config/profile.toml` 和 `config/preferences/*.toml`。
@@ -31,7 +31,8 @@
 - `crates/cli`：初始化、开发与启动入口
 - `web`：Ennoia Web 工作台
 - `web/packages/api-client`：前端统一 API 访问层
-- `builtins/extensions/memory`：内置记忆扩展，声明会话、线路、消息与记忆接口
+- `builtins/extensions/conversation`：内置会话扩展，声明会话、线路与消息接口
+- `builtins/extensions/memory`：内置记忆扩展，声明记忆、上下文、审查与图谱接口
 - `builtins/extensions/workflow`：内置编排扩展，声明 run/task/artifact 接口与 `workflow.run` 定时动作
 
 ## 内置能力源码

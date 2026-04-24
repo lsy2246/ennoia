@@ -708,6 +708,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "ennoia-conversation-service"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "ennoia-kernel",
+ "ennoia-paths",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "ennoia-extension-host"
 version = "0.1.0"
 dependencies = [

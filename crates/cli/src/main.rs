@@ -81,8 +81,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             print_default_config()?;
         }
         Some("dev") => {
+            let repo_root = env::current_dir()?;
             let paths = RuntimePaths::resolve(args.get(2).map(String::as_str));
             init_home_template(&paths)?;
+            ensure_builtin_process_workers(&repo_root)?;
             auto_attach_dev_extensions(&paths)?;
             let mut server_config: ServerConfig =
                 read_toml_or_default(&paths.server_config_file())?;
@@ -92,8 +94,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             run_dev_supervisor(paths, server_config).await?;
         }
         Some("start") | Some("serve") => {
+            let repo_root = env::current_dir()?;
             let paths = RuntimePaths::resolve(args.get(2).map(String::as_str));
             init_home_template(&paths)?;
+            ensure_builtin_process_workers(&repo_root)?;
             auto_attach_dev_extensions(&paths)?;
             run_server(paths.home()).await?;
         }
@@ -877,6 +881,78 @@ fn ensure_port_available(port: u16, label: &str) -> io::Result<()> {
                 ),
             )
         })
+}
+
+fn ensure_builtin_process_workers(repo_root: &Path) -> io::Result<()> {
+    let conversation_root = repo_root
+        .join("builtins")
+        .join("extensions")
+        .join("conversation");
+    if !conversation_root.join("extension.toml").exists() {
+        return Ok(());
+    }
+
+    let cargo = env::var_os("CARGO").unwrap_or_else(|| {
+        if cfg!(windows) {
+            "cargo.exe".into()
+        } else {
+            "cargo".into()
+        }
+    });
+    let status = Command::new(cargo)
+        .arg("build")
+        .arg("-p")
+        .arg("ennoia-conversation-service")
+        .current_dir(repo_root)
+        .status()?;
+    if !status.success() {
+        return Err(io::Error::other(
+            "failed to build builtin conversation process worker",
+        ));
+    }
+
+    let built_binary = repo_root
+        .join("target")
+        .join("debug")
+        .join(if cfg!(windows) {
+            "ennoia-conversation-service.exe"
+        } else {
+            "ennoia-conversation-service"
+        });
+    if !built_binary.exists() {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!(
+                "conversation process worker not found at {}",
+                built_binary.display()
+            ),
+        ));
+    }
+
+    let destination = conversation_root
+        .join("bin")
+        .join(conversation_service_name());
+    if let Some(parent) = destination.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::copy(&built_binary, &destination)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        let mut permissions = fs::metadata(&destination)?.permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&destination, permissions)?;
+    }
+    Ok(())
+}
+
+fn conversation_service_name() -> &'static str {
+    if cfg!(windows) {
+        "conversation-service.exe"
+    } else {
+        "conversation-service"
+    }
 }
 
 fn attached_dev_source_roots(paths: &RuntimePaths) -> io::Result<Vec<PathBuf>> {

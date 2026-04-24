@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 
 import {
   getChat,
@@ -30,7 +30,6 @@ function extractMentionedAgents(body: string, agents: AgentProfile[], participan
   return [...result];
 }
 
-
 export function SessionView({ sessionId }: { sessionId: string }) {
   const { formatDateTime, t } = useUiHelpers();
   const openView = useWorkbenchStore((state) => state.openView);
@@ -41,16 +40,13 @@ export function SessionView({ sessionId }: { sessionId: string }) {
   const [error, setError] = useState<string | null>(null);
 
   const activeAgents = useMemo(() => {
-    const ids = new Set(detail?.conversation.participants.filter((item) => item !== "operator") ?? []);
+    const ids = new Set(detail?.conversation?.participants?.filter((item) => item !== "operator") ?? []);
     return agents.filter((agent) => ids.has(agent.id));
   }, [agents, detail]);
 
-  useEffect(() => {
-    void hydrate();
-  }, [sessionId]);
-
-  async function hydrate() {
+  const hydrate = useCallback(async () => {
     setError(null);
+    setDetail(null);
     try {
       const [nextAgents, nextDetail] = await Promise.all([listAgents(), getChat(sessionId)]);
       setAgents(nextAgents);
@@ -58,14 +54,18 @@ export function SessionView({ sessionId }: { sessionId: string }) {
     } catch (err) {
       setError(String(err));
     }
-  }
+  }, [sessionId]);
+
+  useEffect(() => {
+    void hydrate();
+  }, [hydrate]);
 
   async function handleSend(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!detail || !draft.trim()) {
+    if (!detail?.conversation || !draft.trim()) {
       return;
     }
-    const addressed = extractMentionedAgents(draft, agents, detail.conversation.participants);
+    const addressed = extractMentionedAgents(draft, agents, detail.conversation.participants ?? []);
     setBusy(true);
     setError(null);
     try {
@@ -86,7 +86,7 @@ export function SessionView({ sessionId }: { sessionId: string }) {
   return (
     <div className="session-view">
       {error ? <div className="error">{error}</div> : null}
-      {detail ? (
+      {detail?.conversation ? (
         <>
           <header className="conversation-header">
             <div>

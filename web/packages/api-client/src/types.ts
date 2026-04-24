@@ -331,6 +331,7 @@ export type ExtensionDetail = {
     kind: string;
     entry: string;
     abi: string;
+    protocol?: string | null;
     status: string;
   } | null;
 };

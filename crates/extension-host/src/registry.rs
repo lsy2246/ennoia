@@ -206,6 +206,8 @@ impl ExtensionRuntime {
         if !config.registry_file.exists() {
             write_registry_file(&config.registry_file, &ExtensionRegistryFile::default())?;
         }
+        let home_dir = config.home_dir.clone();
+        let logs_dir = config.logs_dir.clone();
 
         let mut state = ExtensionRuntimeState {
             snapshot: empty_snapshot(),
@@ -217,7 +219,7 @@ impl ExtensionRuntime {
         Ok(Self {
             config,
             state: Arc::new(RwLock::new(state)),
-            worker_runtime: Arc::new(crate::worker::WorkerRuntime::new()?),
+            worker_runtime: Arc::new(crate::worker::WorkerRuntime::new(home_dir, logs_dir)?),
         })
     }
 
@@ -843,23 +845,72 @@ fn resolve_worker(
         .kind
         .clone()
         .unwrap_or_else(|| "wasm".to_string());
-    if kind != "wasm" {
+    let protocol = manifest.worker.protocol.clone();
+    match kind.as_str() {
+        "wasm" => {
+            if protocol.is_some() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "wasm worker must not declare a protocol",
+                ));
+            }
+        }
+        "process" => {
+            let protocol = protocol.as_deref().unwrap_or("jsonrpc-stdio");
+            if protocol != "jsonrpc-stdio" {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("unsupported process worker protocol '{protocol}'"),
+                ));
+            }
+        }
+        _ => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("unsupported worker kind '{kind}'"),
+            ));
+        }
+    }
+
+    let entry_path = resolve_worker_entry_path(root, &entry, &kind)?;
+    if !entry_path.exists() {
         return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("unsupported worker kind '{kind}'"),
+            io::ErrorKind::NotFound,
+            format!("worker entry not found: {}", entry_path.display()),
         ));
     }
 
     Ok(Some(ResolvedWorkerEntry {
         kind,
-        entry: normalize_display_path(&root.join(entry)),
-        abi: manifest
-            .worker
-            .abi
-            .clone()
-            .unwrap_or_else(|| "ennoia.worker".to_string()),
+        entry: normalize_display_path(&entry_path),
+        abi: manifest.worker.abi.clone().unwrap_or_else(|| {
+            if manifest.worker.kind.as_deref() == Some("process") {
+                String::new()
+            } else {
+                "ennoia.worker".to_string()
+            }
+        }),
+        protocol: protocol
+            .or_else(|| Some("jsonrpc-stdio".to_string()))
+            .filter(|_| manifest.worker.kind.as_deref() == Some("process")),
         status: "ready".to_string(),
     }))
+}
+
+fn resolve_worker_entry_path(root: &Path, entry: &str, kind: &str) -> io::Result<PathBuf> {
+    let direct = root.join(entry);
+    if direct.exists() {
+        return Ok(direct);
+    }
+
+    if kind == "process" && cfg!(windows) && Path::new(entry).extension().is_none() {
+        let fallback = root.join(format!("{entry}.exe"));
+        if fallback.exists() {
+            return Ok(fallback);
+        }
+    }
+
+    Ok(direct)
 }
 
 fn failed_extension_snapshot(
@@ -1050,7 +1101,9 @@ mod tests {
         let root = unique_test_dir("runtime-snapshot");
         let ext_dir = root.join("sample");
         fs::create_dir_all(&ext_dir).expect("create extension dir");
+        fs::create_dir_all(ext_dir.join("worker")).expect("create worker dir");
         fs::write(ext_dir.join("extension.toml"), sample_descriptor()).expect("write descriptor");
+        fs::write(ext_dir.join("worker/plugin.wasm"), b"test").expect("write worker");
 
         let config = ExtensionRuntimeConfig {
             registry_file: root.join("config/extensions.toml"),
@@ -1090,8 +1143,10 @@ mod tests {
         let root = unique_test_dir("runtime-attach");
         let ext_dir = root.join("foo");
         fs::create_dir_all(&ext_dir).expect("create extension dir");
+        fs::create_dir_all(ext_dir.join("worker")).expect("create worker dir");
         fs::write(ext_dir.join("extension.toml"), sample_descriptor_for("foo"))
             .expect("write descriptor");
+        fs::write(ext_dir.join("worker/plugin.wasm"), b"test").expect("write worker");
 
         let config = ExtensionRuntimeConfig {
             registry_file: root.join("config/extensions.toml"),

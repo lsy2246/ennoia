@@ -26,20 +26,20 @@ Extension 是系统能力包，Skill 是 Agent 可引用的能力包。Extension
 - `capabilities`
 - `contributes`
 
-`ui` 和 `worker` 都是可选声明。纯 UI 扩展不需要 `worker`，纯能力扩展不需要 `ui`。
+`ui` 和 `worker` 都是可选声明。纯 UI 扩展不需要 `worker`，纯能力扩展不需要 `ui`。`worker.kind` 当前支持 `wasm` 和 `process`；`process` Worker 通过 stdin/stdout 的 JSON 文本协议接入宿主，不需要自行开放 HTTP 端口。
 
 ```toml
+[worker]
+kind = "process"
+entry = "bin/conversation-service"
+protocol = "jsonrpc-stdio"
+
 [ui]
 runtime = "browser-esm"
 hmr = true
 
 [build]
 ui_bundle = "ui/dist/entry.js"
-
-[worker]
-kind = "wasm"
-entry = "worker/plugin.wasm"
-abi = "ennoia.worker"
 
 [permissions]
 storage = "extension"
@@ -54,6 +54,8 @@ startup = "lazy"
 timeout_ms = 30000
 memory_limit_mb = 128
 ```
+
+如果使用 Wasm Worker，则把 `worker.kind` 改为 `wasm`，并额外声明 `abi = "ennoia.worker"` 与对应的 `.wasm` 入口文件。
 
 `contributes` 可包含：
 
@@ -100,8 +102,8 @@ Interface 贡献声明系统稳定动作的具体实现：
 ```toml
 [contributes]
 interfaces = [
-  { key = "conversation.list", method = "memory/conversations/list", version = "1" },
-  { key = "message.append_user", method = "memory/messages/append-user", version = "1" }
+  { key = "conversation.list", method = "conversation/conversations/list", version = "1" },
+  { key = "message.append_user", method = "conversation/messages/append-user", version = "1" }
 ]
 ```
 

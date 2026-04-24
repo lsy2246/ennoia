@@ -11,6 +11,7 @@ members = [
   "crates/cli",
   "builtins/extensions/memory/plugins/memory-service",
   "builtins/extensions/memory/worker",
+  "builtins/extensions/conversation/plugins/conversation-service",
   "builtins/extensions/workflow/plugins/workflow-service",
   "builtins/extensions/workflow/worker",
 ]
