@@ -346,8 +346,8 @@ label {
   position: fixed;
   z-index: 1000;
   display: flex;
-  background: var(--bg-panel);
-  border: 1px solid var(--line);
+  background: transparent;
+  border: none;
   transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1), padding 0.2s ease, width 0.2s ease;
   overflow: visible;
 }
@@ -365,7 +365,6 @@ label {
   transform: translateY(-50%);
   max-height: calc(100vh - 36px);
   border-radius: 0;
-  border-width: 0 1px 0 0;
   padding: 8px;
 }
 .omni-dock[data-position="right"] {
@@ -374,30 +373,29 @@ label {
   transform: translateY(-50%);
   max-height: calc(100vh - 36px);
   border-radius: 0;
-  border-width: 0 0 0 1px;
   padding: 8px;
 }
 .omni-dock[data-position="bottom"] {
   bottom: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  max-width: calc(100vw - 36px);
+  left: 0;
+  width: 100vw;
   border-radius: 0;
-  border-width: 1px 0 0 0;
   padding: 8px 12px;
+  justify-content: center;
 }
 .omni-dock[data-position="top"] {
   top: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  max-width: calc(100vw - 36px);
+  left: 0;
+  width: 100vw;
   border-radius: 0;
-  border-width: 0 0 1px 0;
   padding: 8px 12px;
+  justify-content: center;
 }
 .omni-dock[data-position="floating"] {
   border-radius: var(--radius-lg);
   padding: 8px;
+  border: 1px solid var(--line);
+  background: var(--bg-panel);
   backdrop-filter: blur(40px) saturate(150%);
   -webkit-backdrop-filter: blur(40px) saturate(150%);
   box-shadow: var(--shadow-float);
@@ -406,12 +404,11 @@ label {
 /* 磁吸“车位”预览框 */
 .dock-preview-zone {
   position: fixed;
-  background: color-mix(in srgb, var(--accent) 15%, transparent);
-  border: 2px dashed var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border: none;
   border-radius: 0;
   z-index: 990;
   pointer-events: none;
-  animation: pulse-border 1.5s infinite;
 }
 @keyframes pulse-border {
   0% { border-color: color-mix(in srgb, var(--accent) 50%, transparent); }
@@ -474,7 +471,7 @@ label {
 .omni-dock[data-position="top"] .dock-container,
 .omni-dock[data-position="bottom"] .dock-container,
 .omni-dock[data-position="floating"] .dock-container[data-vertical="false"] {
-  max-width: calc(100vw - 72px);
+  max-width: calc(100vw - 48px);
   overflow-x: auto;
   overflow-y: hidden;
   padding-bottom: 4px;
@@ -516,17 +513,7 @@ label {
 }
 
 .dock-divider {
-  background: var(--line);
-}
-.dock-divider[data-vertical="true"] {
-  width: 100%;
-  height: 1px;
-  margin: 4px 0;
-}
-.dock-divider[data-vertical="false"] {
-  width: 1px;
-  height: 24px;
-  margin: 0 4px;
+  display: none;
 }
 
 .dock-item {

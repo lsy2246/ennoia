@@ -584,14 +584,15 @@ export function App() {
       };
     }
 
-    const collapsed = 88;
-    const sideExpanded = 248;
-    const edgeExpanded = 140;
+    const sideCollapsed = 60;
+    const sideExpanded = 220;
+    const edgeCollapsed = 52;
+    const edgeExpanded = 88;
     return {
-      paddingLeft: dockPosition === "left" ? `${dockExpanded ? sideExpanded : collapsed}px` : "16px",
-      paddingRight: dockPosition === "right" ? `${dockExpanded ? sideExpanded : collapsed}px` : "16px",
-      paddingBottom: dockPosition === "bottom" ? `${dockExpanded ? edgeExpanded : collapsed}px` : "16px",
-      paddingTop: dockPosition === "top" ? `${dockExpanded ? edgeExpanded : collapsed}px` : "16px",
+      paddingLeft: dockPosition === "left" ? `${dockExpanded ? sideExpanded : sideCollapsed}px` : "16px",
+      paddingRight: dockPosition === "right" ? `${dockExpanded ? sideExpanded : sideCollapsed}px` : "16px",
+      paddingBottom: dockPosition === "bottom" ? `${dockExpanded ? edgeExpanded : edgeCollapsed}px` : "16px",
+      paddingTop: dockPosition === "top" ? `${dockExpanded ? edgeExpanded : edgeCollapsed}px` : "16px",
     };
   }, [dockExpanded, dockPosition, isMobileViewport]);
 
