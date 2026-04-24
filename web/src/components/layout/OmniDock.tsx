@@ -141,6 +141,31 @@ export function OmniDock({
 
   const dockRef = useRef<HTMLDivElement>(null);
   const preferencesRef = useRef<HTMLDivElement>(null);
+  const settingsWrapperRef = useRef<HTMLDivElement>(null);
+  const [popoverEdgeStyle] = useState<React.CSSProperties>({});
+
+  const popoverRefCallback = (node: HTMLDivElement | null) => {
+    preferencesRef.current = node;
+    if (!node) return;
+    const wrapper = settingsWrapperRef.current;
+    const nav = dockRef.current;
+    if (!wrapper || !nav) return;
+    const pos = drag.isDragging ? "floating" : position;
+    if (pos === "bottom" || pos === "top") {
+      const wrapperRect = wrapper.getBoundingClientRect();
+      const navRect = nav.getBoundingClientRect();
+      const centerX = wrapperRect.left + wrapperRect.width / 2 - navRect.left;
+      node.style.left = `${centerX}px`;
+      node.style.transform = "translateX(-50%)";
+      if (pos === "bottom") {
+        node.style.bottom = `calc(100% + 8px)`;
+        node.style.top = "auto";
+      } else {
+        node.style.top = `calc(100% + 8px)`;
+        node.style.bottom = "auto";
+      }
+    }
+  };
 
   const themeOptions: PreferenceOption[] = availableThemes.map((theme) => ({
     value: theme.id,
@@ -375,7 +400,7 @@ export function OmniDock({
 
           <div className="dock-divider" data-vertical={isVertical} />
 
-          <div style={{ position: "relative" }}>
+          <div style={{ position: "relative" }} ref={settingsWrapperRef}>
             <button
               type="button"
               className={`dock-item ${showPreferences ? "dock-item--active" : ""}`}
@@ -397,9 +422,10 @@ export function OmniDock({
           <>
             <div className="popover-backdrop" onClick={() => setShowPreferences(false)} />
             <div
-              ref={preferencesRef}
+              ref={popoverRefCallback}
               className="dock-settings-popover"
               data-position={drag.isDragging ? "floating" : position}
+              style={popoverEdgeStyle}
             >
               <div className="settings-group">
                 <PreferenceSelect
