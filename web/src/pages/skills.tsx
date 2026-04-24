@@ -84,7 +84,7 @@ export function Skills() {
             <article key={skill.id} className="resource-card">
               <header>
                 <strong>{skill.display_name}</strong>
-                <span>{skill.enabled ? t("web.common.enabled", "启用") : t("web.common.disabled", "停用")}</span>
+                <span className={`badge ${skill.enabled ? "badge--success" : "badge--muted"}`}>{skill.enabled ? t("web.common.enabled", "启用") : t("web.common.disabled", "停用")}</span>
               </header>
               <p>{skill.description || t("web.common.none", "无")}</p>
               <div className="kv-list">

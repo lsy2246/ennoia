@@ -13,6 +13,7 @@ import {
 } from "@ennoia/api-client";
 import type { ExtensionProviderContribution } from "@ennoia/ui-sdk";
 import { formatRelativePath } from "@/lib/pathDisplay";
+import { Select } from "@/components/Select";
 import { useUiHelpers } from "@/stores/ui";
 
 const EMPTY_AGENT: AgentProfile = {
@@ -168,25 +169,20 @@ export function AgentEditorView({
         </label>
         <label>
           {t("web.agents.api_channel", "API 上游渠道")}
-          <select
+          <Select
             value={form.provider_id}
-            onChange={(event) => {
-              const provider = providers.find((item) => item.id === event.target.value);
+            onChange={(value) => {
+              const provider = providers.find((item) => item.id === value);
               const contribution = findProviderContribution(runtime?.registry.providers ?? [], provider ?? null);
               setForm({
                 ...form,
-                provider_id: event.target.value,
+                provider_id: value,
                 model_id: provider?.default_model ?? form.model_id,
                 generation_options: defaultGenerationOptions(contribution),
               });
             }}
-          >
-            {providers.map((provider) => (
-              <option key={provider.id} value={provider.id}>
-                {provider.display_name}
-              </option>
-            ))}
-          </select>
+            options={providers.map((provider) => ({ value: provider.id, label: provider.display_name }))}
+          />
         </label>
         <label>
           {t("web.agents.model", "模型")}
@@ -224,25 +220,21 @@ export function AgentEditorView({
                 <label key={option.id}>
                   {resolveText(option.label)}
                   {option.value_type === "select" && option.allowed_values.length > 0 ? (
-                    <select
+                    <Select
                       value={value}
-                      required={option.required}
-                      onChange={(event) =>
+                      onChange={(val) =>
                         setForm({
                           ...form,
                           generation_options: {
                             ...(form.generation_options ?? {}),
-                            [option.id]: event.target.value,
+                            [option.id]: val,
                           },
                         })}
-                    >
-                      {!option.required ? <option value="">{t("web.common.none", "无")}</option> : null}
-                      {option.allowed_values.map((item: string) => (
-                        <option key={item} value={item}>
-                          {item}
-                        </option>
-                      ))}
-                    </select>
+                      options={[
+                        ...(!option.required ? [{ value: "", label: t("web.common.none", "无") }] : []),
+                        ...option.allowed_values.map((item: string) => ({ value: item, label: item })),
+                      ]}
+                    />
                   ) : (
                     <input
                       value={value}

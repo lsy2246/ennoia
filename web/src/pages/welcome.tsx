@@ -5,6 +5,7 @@ import { bootstrapSetup } from "@ennoia/api-client";
 import { applyTheme, readUiBootstrapCache, writeUiBootstrapCache } from "@ennoia/theme-runtime";
 import { buildTimeZoneOptionGroups, getBrowserTimeZone } from "@/lib/timeZones";
 import { normalizeLocaleSelection } from "@/lib/uiCapabilities";
+import { Select } from "@/components/Select";
 import { useRuntimeStore } from "@/stores/runtime";
 import { useUiHelpers, useUiStore } from "@/stores/ui";
 
@@ -104,40 +105,32 @@ export function Welcome() {
             </label>
             <label>
               {t("settings.bootstrap.language", "语言")}
-              <select value={locale} onChange={(event) => void handleLocalePreview(event.target.value)}>
-                {availableLocales.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
-                ))}
-              </select>
+              <Select
+                value={locale}
+                onChange={(value) => void handleLocalePreview(value)}
+                options={availableLocales.map((option) => ({ value: option, label: option }))}
+              />
             </label>
           </div>
 
           <div className="form-row">
             <label>
               {t("settings.bootstrap.time_zone", "时区")}
-              <select value={timeZone} onChange={(event) => setTimeZone(event.target.value)}>
-                {timeZoneGroups.map((group) => (
-                  <optgroup key={group.label} label={group.label}>
-                    {group.options.map((option) => (
-                      <option key={`${group.label}:${option.value}`} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </optgroup>
-                ))}
-              </select>
+              <Select
+                value={timeZone}
+                onChange={setTimeZone}
+                options={timeZoneGroups.flatMap((group) =>
+                  group.options.map((option) => ({ value: option.value, label: option.label, group: group.label }))
+                )}
+              />
             </label>
             <label>
               {t("settings.bootstrap.theme", "主题")}
-              <select value={themeId} onChange={(event) => previewTheme(event.target.value)}>
-                {availableThemes.map((theme) => (
-                  <option key={theme.id} value={theme.id}>
-                    {theme.label}
-                  </option>
-                ))}
-              </select>
+              <Select
+                value={themeId}
+                onChange={previewTheme}
+                options={availableThemes.map((theme) => ({ value: theme.id, label: theme.label }))}
+              />
             </label>
           </div>
         </div>

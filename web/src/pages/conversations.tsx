@@ -137,8 +137,10 @@ export function Conversations() {
               <div>
                 <strong>{conversation.title}</strong>
                 <span>
-                  {conversation.topology === "direct" ? t("web.conversations.kind_direct", "Direct") : t("web.conversations.kind_group", "Group")}
-                  {" · "}
+                  <span className={`badge ${conversation.topology === "direct" ? "badge--accent" : "badge--muted"}`}>
+                    {conversation.topology === "direct" ? t("web.conversations.kind_direct", "Direct") : t("web.conversations.kind_group", "Group")}
+                  </span>
+                  {" "}
                   {conversation.id}
                 </span>
               </div>

@@ -91,7 +91,7 @@ export function SessionView({ sessionId }: { sessionId: string }) {
           <header className="conversation-header">
             <div>
               <h1>{detail.conversation.title}</h1>
-              <p>{detail.conversation.id} · {detail.conversation.topology}</p>
+              <p><span className="badge badge--accent">{detail.conversation.topology}</span> {detail.conversation.id}</p>
             </div>
             <div className="button-row">
               <button type="button" className="secondary" onClick={() => void hydrate()}>
@@ -130,7 +130,7 @@ export function SessionView({ sessionId }: { sessionId: string }) {
                 >
                   <header>
                     <strong>{message.sender}</strong>
-                    <span>{formatDateTime(message.created_at)}</span>
+                    <small>{formatDateTime(message.created_at)}</small>
                   </header>
                   <p>{message.body}</p>
                 </article>

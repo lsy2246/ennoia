@@ -10,6 +10,7 @@ import {
   type ServerConfig,
 } from "@ennoia/api-client";
 import { buildTimeZoneOptionGroups } from "@/lib/timeZones";
+import { Select } from "@/components/Select";
 import { Providers } from "@/pages/providers";
 import { useRuntimeStore } from "@/stores/runtime";
 import { useUiHelpers } from "@/stores/ui";
@@ -298,17 +299,13 @@ export function Settings() {
         </label>
         <label>
           {t("web.settings.time_zone", "时区")}
-          <select value={timeZone} onChange={(event) => setTimeZone(event.target.value)}>
-            {buildTimeZoneOptionGroups(t, false).map((group) => (
-              <optgroup key={group.label} label={group.label}>
-                {group.options.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </optgroup>
-            ))}
-          </select>
+          <Select
+            value={timeZone}
+            onChange={setTimeZone}
+            options={buildTimeZoneOptionGroups(t, false).flatMap((group) =>
+              group.options.map((option) => ({ value: option.value, label: option.label, group: group.label }))
+            )}
+          />
         </label>
         <button type="submit">{t("web.settings.save_personal", "保存个人设置")}</button>
       </form>
@@ -528,20 +525,21 @@ export function Settings() {
                 </label>
                 <label>
                   {t("web.settings.level", "级别")}
-                  <select
+                  <Select
                     value={config.logging.level}
-                    onChange={(event) =>
+                    onChange={(value) =>
                       setConfig({
                         ...config,
-                        logging: { ...config.logging, level: event.target.value },
+                        logging: { ...config.logging, level: value },
                       })
                     }
-                  >
-                    <option value="debug">debug</option>
-                    <option value="info">info</option>
-                    <option value="warn">warn</option>
-                    <option value="error">error</option>
-                  </select>
+                    options={[
+                      { value: "debug", label: "debug" },
+                      { value: "info", label: "info" },
+                      { value: "warn", label: "warn" },
+                      { value: "error", label: "error" },
+                    ]}
+                  />
                 </label>
                 <label>
                   {t("web.settings.sample_rate", "采样率")}
@@ -579,26 +577,27 @@ export function Settings() {
                 </label>
                 <label>
                   {t("settings.runtime.dev_console.level", "开发模式控制台级别")}
-                  <select
+                  <Select
                     value={config.logging.dev_console.level}
-                    onChange={(event) =>
+                    onChange={(value) =>
                       setConfig({
                         ...config,
                         logging: {
                           ...config.logging,
                           dev_console: {
                             ...config.logging.dev_console,
-                            level: event.target.value,
+                            level: value,
                           },
                         },
                       })
                     }
-                  >
-                    <option value="debug">debug</option>
-                    <option value="info">info</option>
-                    <option value="warn">warn</option>
-                    <option value="error">error</option>
-                  </select>
+                    options={[
+                      { value: "debug", label: "debug" },
+                      { value: "info", label: "info" },
+                      { value: "warn", label: "warn" },
+                      { value: "error", label: "error" },
+                    ]}
+                  />
                 </label>
                 <StringListEditor
                   title={t("web.settings.redact_headers", "脱敏请求头")}

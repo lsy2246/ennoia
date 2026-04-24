@@ -105,13 +105,13 @@ export function Extensions() {
             <article key={extension.id} className="resource-card" onClick={() => void selectExtension(extension)}>
               <header>
                 <strong>{extension.name}</strong>
-                <span>{extension.status}</span>
+                <span className={`badge ${extension.status === "running" ? "badge--success" : extension.status === "error" ? "badge--danger" : "badge--muted"}`}>{extension.status}</span>
               </header>
-              <p>{extension.id} · {extension.version}</p>
+              <p>{extension.id}</p>
               <div className="tag-row">
                 <span>{extension.kind}</span>
                 <span>{extension.source_mode.toLowerCase()}</span>
-                <span>{extension.enabled ? t("web.common.enabled", "启用") : t("web.common.disabled", "停用")}</span>
+                <span className={extension.enabled ? "badge badge--success" : "badge badge--muted"}>{extension.enabled ? t("web.common.enabled", "启用") : t("web.common.disabled", "停用")}</span>
               </div>
             </article>
           ))}
@@ -124,26 +124,26 @@ export function Extensions() {
           <>
             <div className="kv-list">
               <span>ID</span><strong>{selected.id}</strong>
-              <span>{t("web.common.status", "状态")}</span><strong>{selected.status}</strong>
+              <span>{t("web.common.status", "状态")}</span><strong><span className={`badge ${selected.status === "running" ? "badge--success" : selected.status === "error" ? "badge--danger" : "badge--muted"}`}>{selected.status}</span></strong>
               <span>{t("web.extensions.install_dir", "扩展包目录")}</span><strong>{formatRelativePath(selected.install_dir)}</strong>
               <span>{t("web.extensions.source_root", "来源目录")}</span><strong>{formatRelativePath(selected.source_root)}</strong>
-              <span>{t("web.extensions.diagnostics", "诊断")}</span><strong>{selected.diagnostics.length}</strong>
+              <span>{t("web.extensions.diagnostics", "诊断")}</span><strong><span className={`badge ${selected.diagnostics.length > 0 ? "badge--warn" : "badge--muted"}`}>{selected.diagnostics.length}</span></strong>
             </div>
             <div className="extension-summary-grid">
               <article className="memory-lane">
                 <span>{t("web.extensions.contributes_ui", "贡献 UI")}</span>
-                <strong>{detail?.ui ? "ui" : "—"}</strong>
+                <strong>{detail?.ui ? <span className="badge badge--success">active</span> : <span className="badge badge--muted">—</span>}</strong>
                 <small>{t("web.extensions.contributes_ui_help", "扩展可贡献页面、面板、主题和语言包。")}</small>
               </article>
               <article className="memory-lane">
                 <span>{t("web.extensions.contributes_api", "贡献 API 上游接口")}</span>
-                <strong>{detail?.worker?.status ?? "—"}</strong>
+                <strong>{detail?.worker?.status ? <span className={`badge ${detail.worker.status === "running" ? "badge--success" : "badge--muted"}`}>{detail.worker.status}</span> : <span className="badge badge--muted">—</span>}</strong>
                 <small>{t("web.extensions.contributes_api_help", "API 上游接口实现属于扩展能力，但这里只展示扩展包状态。")}</small>
               </article>
               <article className="memory-lane">
                 <span>{t("web.extensions.package_state", "扩展包状态")}</span>
-                <strong>{detail?.health ?? selected.status}</strong>
-                <small>{detail?.generation ? `generation ${detail.generation}` : selected.version}</small>
+                <strong><span className={`badge ${(detail?.health ?? selected.status) === "running" ? "badge--success" : (detail?.health ?? selected.status) === "error" ? "badge--danger" : "badge--muted"}`}>{detail?.health ?? selected.status}</span></strong>
+                <small>{detail?.generation ? `generation ${detail.generation}` : ""}</small>
               </article>
             </div>
             <div className="button-row">
@@ -162,7 +162,7 @@ export function Extensions() {
                   return (
                     <article key={page.page.id} className="mini-card">
                       <strong>{label}</strong>
-                      <span>{page.page.mount}</span>
+                      <span className="badge badge--muted">{page.page.mount}</span>
                       <div className="button-row">
                         <button type="button" className="secondary" onClick={() => openExtensionPage(page.page.id, label)}>
                           {t("web.extensions.open_page", "打开视图")}

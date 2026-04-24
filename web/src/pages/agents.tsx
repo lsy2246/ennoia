@@ -67,13 +67,13 @@ export function Agents() {
             <article key={agent.id} className="resource-card">
               <header>
                 <strong>{agent.display_name}</strong>
-                <span>{agent.enabled ? t("web.common.enabled", "启用") : t("web.common.disabled", "停用")}</span>
+                <span className={`badge ${agent.enabled ? "badge--success" : "badge--muted"}`}>{agent.enabled ? t("web.common.enabled", "启用") : t("web.common.disabled", "停用")}</span>
               </header>
               <p>{agent.description || t("web.common.none", "无")}</p>
               <div className="tag-row">
                 <span>{providerLabel(agent.provider_id)}</span>
                 <span>{agent.model_id}</span>
-                <span>{agent.skills.length} skills</span>
+                <span className="badge badge--accent">{agent.skills.length} skills</span>
               </div>
               <p className="helper-text">
                 {t("web.agents.working_dir_help", "Agent 工作目录自动派生到 agents/{agent_id}/work，无需单独配置。")}

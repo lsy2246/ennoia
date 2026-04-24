@@ -7,6 +7,7 @@ import {
   type SystemLog,
 } from "@ennoia/api-client";
 import { useUiHelpers } from "@/stores/ui";
+import { Select } from "@/components/Select";
 
 type UnifiedLogItem = {
   id: string;
@@ -104,20 +105,26 @@ export function Logs() {
         {error ? <div className="error">{error}</div> : null}
         <div className="filter-bar">
           <input value={q} onChange={(event) => setQ(event.target.value)} placeholder={t("web.logs.search_placeholder", "搜索标题、摘要、详情或来源")} />
-          <select value={level} onChange={(event) => setLevel(event.target.value)}>
-            <option value="">{t("web.logs.all_levels", "全部等级")}</option>
-            <option value="info">info</option>
-            <option value="warn">warn</option>
-            <option value="error">error</option>
-          </select>
-          <select value={source} onChange={(event) => setSource(event.target.value)}>
-            <option value="">{t("web.logs.all_sources", "全部来源")}</option>
-            {sources.map((item) => (
-              <option key={item} value={item}>
-                {item}
-              </option>
-            ))}
-          </select>
+          <Select
+            value={level}
+            onChange={setLevel}
+            placeholder={t("web.logs.all_levels", "全部等级")}
+            options={[
+              { value: "", label: t("web.logs.all_levels", "全部等级") },
+              { value: "info", label: "info" },
+              { value: "warn", label: "warn" },
+              { value: "error", label: "error" },
+            ]}
+          />
+          <Select
+            value={source}
+            onChange={setSource}
+            placeholder={t("web.logs.all_sources", "全部来源")}
+            options={[
+              { value: "", label: t("web.logs.all_sources", "全部来源") },
+              ...sources.map((item) => ({ value: item, label: item })),
+            ]}
+          />
           <button type="button" onClick={() => void refresh()}>{t("web.action.refresh", "刷新")}</button>
         </div>
         <div className="stack">
@@ -125,7 +132,13 @@ export function Logs() {
             <article key={item.id} className={`log-card log-card--${item.level}`}>
               <header>
                 <strong>{item.title}</strong>
-                <span>{item.level} · {item.source} / {item.kind}</span>
+                <span>
+                  <span className={`badge ${item.level === "error" ? "badge--danger" : item.level === "warn" ? "badge--warn" : "badge--muted"}`}>{item.level}</span>
+                  {" "}
+                  <span className="badge badge--muted">{item.source}</span>
+                  {" "}
+                  <span className="badge badge--muted">{item.kind}</span>
+                </span>
               </header>
               <p>{item.summary}</p>
               {item.details ? <pre>{item.details}</pre> : null}

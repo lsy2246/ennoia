@@ -13,6 +13,7 @@ import {
 } from "@ennoia/api-client";
 import type { ExtensionScheduleActionContribution } from "@ennoia/ui-sdk";
 import { useUiHelpers } from "@/stores/ui";
+import { Select } from "@/components/Select";
 
 type TriggerKind = ScheduleTrigger["kind"];
 type ScheduleMode = "ai" | "command";
@@ -196,13 +197,14 @@ export function Schedules() {
           <div className="form-grid">
             <label>
               {t("web.schedules.mode", "模式")}
-              <select
+              <Select
                 value={mode}
-                onChange={(event) => setMode(event.target.value as ScheduleMode)}
-              >
-                <option value="ai">{t("web.schedules.mode_ai", "交给 AI 执行")}</option>
-                <option value="command">{t("web.schedules.mode_command", "直接运行命令")}</option>
-              </select>
+                onChange={(value) => setMode(value as ScheduleMode)}
+                options={[
+                  { value: "ai", label: t("web.schedules.mode_ai", "交给 AI 执行") },
+                  { value: "command", label: t("web.schedules.mode_command", "直接运行命令") },
+                ]}
+              />
               <p className="helper-text">
                 {mode === "ai"
                   ? t("web.schedules.mode_ai_help", "按 OpenClaw 风格，到点后把任务发给扩展/AI 工作流。")
@@ -211,28 +213,23 @@ export function Schedules() {
             </label>
             <label>
               {t("web.schedules.action", "动作")}
-              <select
+              <Select
                 value={selectedAction}
-                onChange={(event) => setSelectedAction(event.target.value)}
-                disabled={mode !== "ai" || actionOptions.length === 0}
-              >
-                {actionOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
+                onChange={setSelectedAction}
+                options={actionOptions}
+              />
             </label>
             <label>
               {t("web.schedules.trigger", "触发器")}
-              <select
+              <Select
                 value={triggerKind}
-                onChange={(event) => setTriggerKind(event.target.value as TriggerKind)}
-              >
-                <option value="interval">{t("web.schedules.interval", "间隔")}</option>
-                <option value="once">{t("web.schedules.once", "一次性")}</option>
-                <option value="cron">{t("web.schedules.cron", "Cron")}</option>
-              </select>
+                onChange={(value) => setTriggerKind(value as TriggerKind)}
+                options={[
+                  { value: "interval", label: t("web.schedules.interval", "间隔") },
+                  { value: "once", label: t("web.schedules.once", "一次性") },
+                  { value: "cron", label: t("web.schedules.cron", "Cron") },
+                ]}
+              />
             </label>
           </div>
 
@@ -340,7 +337,7 @@ export function Schedules() {
               <article key={schedule.id} className="resource-card">
                 <header>
                   <strong>{scheduleTitle(schedule)}</strong>
-                  <span>
+                  <span className={`badge ${schedule.enabled ? "badge--success" : "badge--muted"}`}>
                     {schedule.enabled
                       ? t("web.common.enabled", "启用")
                       : t("web.common.disabled", "停用")}
@@ -357,9 +354,9 @@ export function Schedules() {
                   <span>{t("web.schedules.last_run", "上次触发")}</span>
                   <strong>{formatScheduleTime(schedule.last_run_at)}</strong>
                   <span>{t("web.common.status", "状态")}</span>
-                  <strong>{schedule.last_status ?? "—"}</strong>
+                  <strong><span className={`badge ${schedule.last_status === "ok" ? "badge--success" : schedule.last_status === "error" ? "badge--danger" : "badge--muted"}`}>{schedule.last_status ?? "—"}</span></strong>
                   <span>{t("web.schedules.last_error", "最近错误")}</span>
-                  <strong>{schedule.last_error ?? "—"}</strong>
+                  <strong>{schedule.last_error ? <span className="badge badge--danger">{schedule.last_error}</span> : "—"}</strong>
                 </div>
                 <div className="button-row">
                   <button

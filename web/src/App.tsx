@@ -160,8 +160,8 @@ function ExtensionPanelDeck() {
           return (
             <article key={`${panel.extension_id}:${panel.panel.id}`} className="mini-card">
               <strong>{resolveText(panel.panel.title)}</strong>
-              <span>{panel.panel.slot} · {panel.extension_id}</span>
-              <span>{panel.panel.mount}</span>
+              <span><span className="badge badge--muted">{panel.panel.slot}</span> {panel.extension_id}</span>
+              <span className="badge badge--muted">{panel.panel.mount}</span>
             </article>
           );
         })
