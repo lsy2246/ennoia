@@ -403,6 +403,7 @@ impl ApiDevProcess {
     }
 
     fn build_api_binary(&self) -> io::Result<PathBuf> {
+        self.prune_dev_api_server_artifacts()?;
         let mut command = Command::new("cargo");
         command
             .arg("build")
@@ -436,6 +437,32 @@ impl ApiDevProcess {
             ));
         }
         Ok(binary)
+    }
+
+    fn prune_dev_api_server_artifacts(&self) -> io::Result<()> {
+        let deps_dir = self.target_dir.join("debug").join("deps");
+        if !deps_dir.exists() {
+            return Ok(());
+        }
+
+        for entry in fs::read_dir(&deps_dir)? {
+            let entry = entry?;
+            if !entry.file_type()?.is_file() {
+                continue;
+            }
+            let file_name = entry.file_name();
+            let file_name = file_name.to_string_lossy();
+            if file_name.starts_with("libennoia_server-")
+                && matches!(
+                    entry.path().extension().and_then(|value| value.to_str()),
+                    Some("rlib" | "rmeta")
+                )
+            {
+                let _ = fs::remove_file(entry.path());
+            }
+        }
+
+        Ok(())
     }
 
     fn stage_api_binary(&self, built_binary: &Path) -> io::Result<PathBuf> {

@@ -290,10 +290,100 @@ impl EventBusStore {
     }
 
     fn ensure_schema(&self) -> std::io::Result<()> {
-        self.open()?
+        let connection = self.open()?;
+        rebuild_legacy_schema_if_needed(&connection)?;
+        connection
             .execute_batch(EVENT_BUS_SCHEMA_SQL)
             .map_err(std::io::Error::other)
     }
+}
+
+fn rebuild_legacy_schema_if_needed(connection: &Connection) -> std::io::Result<()> {
+    let hook_events_exists = table_exists(connection, "hook_events")?;
+    let hook_deliveries_exists = table_exists(connection, "hook_deliveries")?;
+    if !hook_events_exists && !hook_deliveries_exists {
+        return Ok(());
+    }
+
+    let hook_events_valid = !hook_events_exists
+        || table_has_columns(
+            connection,
+            "hook_events",
+            &[
+                "id",
+                "event",
+                "resource_kind",
+                "resource_id",
+                "request_id",
+                "trace_id",
+                "span_id",
+                "parent_span_id",
+                "sampled",
+                "source",
+                "envelope_json",
+                "created_at",
+            ],
+        )?;
+    let hook_deliveries_valid = !hook_deliveries_exists
+        || table_has_columns(
+            connection,
+            "hook_deliveries",
+            &[
+                "id",
+                "event_id",
+                "extension_id",
+                "handler",
+                "status",
+                "attempt_count",
+                "last_error",
+                "next_attempt_at",
+                "created_at",
+                "updated_at",
+            ],
+        )?;
+
+    if hook_events_valid && hook_deliveries_valid {
+        return Ok(());
+    }
+
+    connection
+        .execute_batch(
+            "
+DROP TABLE IF EXISTS hook_deliveries;
+DROP TABLE IF EXISTS hook_events;
+",
+        )
+        .map_err(std::io::Error::other)
+}
+
+fn table_exists(connection: &Connection, table: &str) -> std::io::Result<bool> {
+    connection
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1 LIMIT 1",
+            params![table],
+            |_| Ok(()),
+        )
+        .optional()
+        .map(|row| row.is_some())
+        .map_err(std::io::Error::other)
+}
+
+fn table_has_columns(
+    connection: &Connection,
+    table: &str,
+    required_columns: &[&str],
+) -> std::io::Result<bool> {
+    let mut statement = connection
+        .prepare(&format!("PRAGMA table_info({table})"))
+        .map_err(std::io::Error::other)?;
+    let columns = statement
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(std::io::Error::other)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(std::io::Error::other)?;
+    Ok(required_columns
+        .iter()
+        .all(|required| columns.iter().any(|column| column == required)))
 }
 
 fn backoff_seconds(attempt: u32) -> i64 {
@@ -313,4 +403,53 @@ fn now_iso() -> String {
 
 fn default_hook_handler_path(event: &str) -> String {
     format!("hooks/{}", event.replace('.', "/"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn recreates_legacy_hook_events_schema_when_trace_columns_are_missing() {
+        let home = std::env::temp_dir().join(format!("ennoia-event-bus-test-{}", Uuid::new_v4()));
+        let paths = RuntimePaths::new(&home);
+        std::fs::create_dir_all(paths.system_sqlite_dir()).unwrap();
+        {
+            let connection = Connection::open(paths.system_events_db()).unwrap();
+            connection
+                .execute_batch(
+                    "
+CREATE TABLE hook_events (
+  seq INTEGER PRIMARY KEY AUTOINCREMENT,
+  id TEXT NOT NULL UNIQUE,
+  event TEXT NOT NULL,
+  resource_kind TEXT NOT NULL,
+  resource_id TEXT NOT NULL,
+  envelope_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+",
+                )
+                .unwrap();
+        }
+
+        {
+            let store = EventBusStore::new(&paths).unwrap();
+            let connection = store.open().unwrap();
+            let mut statement = connection
+                .prepare("PRAGMA table_info(hook_events)")
+                .unwrap();
+            let columns = statement
+                .query_map([], |row| row.get::<_, String>(1))
+                .unwrap()
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap();
+
+            assert!(columns.iter().any(|column| column == "trace_id"));
+            assert!(columns.iter().any(|column| column == "request_id"));
+            assert!(table_exists(&connection, "hook_deliveries").unwrap());
+        }
+
+        std::fs::remove_dir_all(home).unwrap();
+    }
 }

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import {
-  getObservabilityLogDetail,
+  ApiError,
   getObservabilityOverview,
   getObservabilityTraceDetail,
   listObservabilityLogs,
@@ -161,16 +161,18 @@ export function Observability() {
   const [traceSpans, setTraceSpans] = useState<ObservationSpanRecord[]>([]);
   const [selectedLogId, setSelectedLogId] = useState<string | null>(null);
   const [selectedTraceId, setSelectedTraceId] = useState<string | null>(null);
-  const [selectedLog, setSelectedLog] = useState<ObservationLogEntry | null>(null);
   const [selectedTrace, setSelectedTrace] = useState<ObservationTraceDetail | null>(null);
   const [logFilters, setLogFilters] = useState<LogFilters>(INITIAL_LOG_FILTERS);
   const [traceFilters, setTraceFilters] = useState<TraceFilters>(INITIAL_TRACE_FILTERS);
   const [busy, setBusy] = useState(false);
-  const [loadingLogDetail, setLoadingLogDetail] = useState(false);
   const [loadingTraceDetail, setLoadingTraceDetail] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const traceSummaries = useMemo(() => buildTraceSummaries(traceSpans), [traceSpans]);
+  const selectedLog = useMemo(
+    () => logs.find((item) => item.id === selectedLogId) ?? null,
+    [logs, selectedLogId],
+  );
 
   const logLevelOptions = useMemo(() => collectOptionValues(logs.map((item) => item.level)), [logs]);
   const logComponentOptions = useMemo(() => collectOptionValues(logs.map((item) => item.component)), [logs]);
@@ -292,36 +294,6 @@ export function Observability() {
   }, [filteredTraces]);
 
   useEffect(() => {
-    if (!selectedLogId) {
-      setSelectedLog(null);
-      return;
-    }
-
-    let cancelled = false;
-    setLoadingLogDetail(true);
-    void getObservabilityLogDetail(selectedLogId)
-      .then((detail) => {
-        if (!cancelled) {
-          setSelectedLog(detail);
-        }
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          setError(String(err));
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setLoadingLogDetail(false);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedLogId]);
-
-  useEffect(() => {
     if (!selectedTraceId) {
       setSelectedTrace(null);
       return;
@@ -337,6 +309,10 @@ export function Observability() {
       })
       .catch((err) => {
         if (!cancelled) {
+          if (err instanceof ApiError && err.status === 404) {
+            setSelectedTrace(null);
+            return;
+          }
           setError(String(err));
         }
       })
@@ -474,7 +450,6 @@ export function Observability() {
           <div className="details-panel observability-detail">
             <div className="observability-section-header">
               <strong>{t("web.observability.logs.detail", "日志详情")}</strong>
-              {loadingLogDetail ? <span>{t("web.common.loading", "加载中…")}</span> : null}
             </div>
             {selectedLog ? (
               <div className="stack">

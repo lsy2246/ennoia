@@ -1,4 +1,4 @@
-﻿import { fetchJson, toQueryString } from "./core";
+import { fetchJson, toQueryString } from "./core";
 import type { SystemLog } from "./types";
 
 export async function listLogs(
@@ -32,4 +32,3 @@ export async function reportFrontendLog(payload: {
     body: JSON.stringify(payload),
   });
 }
-

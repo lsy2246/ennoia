@@ -43,40 +43,39 @@ export async function generate(request = {}) {
   const model = request.model ?? config.default_model ?? DEFAULT_MODEL;
   const payload = {
     model,
-    input: normalizeInput(request.messages ?? request.input ?? request.prompt ?? ""),
+    messages: toChatCompletionMessages(
+      request.messages ?? request.input ?? request.prompt ?? "",
+      request.instructions ?? request.system_prompt,
+    ),
   };
 
-  const instructions = request.instructions ?? request.system_prompt;
-  if (instructions) {
-    payload.instructions = instructions;
-  }
-
-  const tools = normalizeTools(request.tools ?? []);
+  const tools = normalizeChatCompletionTools(request.tools ?? []);
   if (tools.length > 0) {
     payload.tools = tools;
     payload.tool_choice = request.tool_choice ?? "auto";
-  }
-
-  const reasoningEffort = request.generation_options?.reasoning_effort ?? request.reasoning_effort;
-  if (reasoningEffort) {
-    payload.reasoning = { effort: reasoningEffort };
   }
 
   if (request.metadata && typeof request.metadata === "object") {
     payload.metadata = request.metadata;
   }
 
-  const response = await openaiFetch(config, "/responses", {
+  const response = await openaiFetch(config, "/chat/completions", {
     method: "POST",
     body: JSON.stringify(payload),
   });
   const data = await response.json();
+  const text = collectChatCompletionText(data);
+  const toolCalls = collectChatCompletionToolCalls(data);
+
+  if (!text && toolCalls.length === 0) {
+    throw new Error(`OpenAI response missing assistant text: ${JSON.stringify(data)}`);
+  }
 
   return {
     id: data.id,
     model: data.model ?? model,
-    text: collectOutputText(data),
-    tool_calls: collectToolCalls(data),
+    text,
+    tool_calls: toolCalls,
     raw: data,
   };
 }
@@ -84,7 +83,7 @@ export async function generate(request = {}) {
 function normalizeProviderConfig(config) {
   const baseUrl = trimTrailingSlash(config.base_url || DEFAULT_BASE_URL);
   const apiKeyEnv = config.api_key_env || "OPENAI_API_KEY";
-  const apiKey = config.api_key || process.env[apiKeyEnv];
+  const apiKey = process.env[apiKeyEnv];
   if (!apiKey) {
     throw new Error(`OpenAI API key is missing; set ${apiKeyEnv}`);
   }
@@ -101,7 +100,7 @@ async function openaiFetch(config, path, init) {
   const response = await fetch(`${config.base_url}${path}`, {
     ...init,
     headers: {
-      "authorization": `Bearer ${config.api_key}`,
+      authorization: `Bearer ${config.api_key}`,
       "content-type": "application/json",
       ...(init.headers ?? {}),
     },
@@ -115,18 +114,27 @@ async function openaiFetch(config, path, init) {
   return response;
 }
 
-function normalizeInput(input) {
+function toChatCompletionMessages(input, instructions) {
+  const messages = [];
+  if (instructions) {
+    messages.push({ role: "system", content: String(instructions) });
+  }
   if (typeof input === "string") {
-    return input;
+    messages.push({ role: "user", content: input });
+    return messages;
   }
   if (!Array.isArray(input)) {
-    return String(input ?? "");
+    messages.push({ role: "user", content: String(input ?? "") });
+    return messages;
   }
 
-  return input.map((message) => ({
-    role: normalizeRole(message.role ?? message.sender),
-    content: normalizeContent(message.content ?? message.body ?? message.text ?? ""),
-  }));
+  return [
+    ...messages,
+    ...input.map((message) => ({
+      role: normalizeRole(message.role ?? message.sender),
+      content: normalizeMessageContent(message.content ?? message.body ?? message.text ?? ""),
+    })),
+  ];
 }
 
 function normalizeRole(role) {
@@ -142,50 +150,80 @@ function normalizeRole(role) {
   return "user";
 }
 
-function normalizeContent(content) {
+function normalizeMessageContent(content) {
   if (typeof content === "string") {
     return content;
   }
-  if (Array.isArray(content)) {
-    return content;
+  if (!Array.isArray(content)) {
+    return String(content ?? "");
   }
-  return String(content ?? "");
+  return content
+    .map((part) => {
+      if (typeof part === "string") {
+        return part;
+      }
+      if (typeof part?.text === "string") {
+        return part.text;
+      }
+      return "";
+    })
+    .join("\n");
 }
 
-function normalizeTools(tools) {
+function normalizeChatCompletionTools(tools) {
   return tools.map((tool) => {
-    if (tool.type) {
+    if (tool?.type === "function" && tool.function) {
       return tool;
     }
     return {
       type: "function",
-      name: tool.name,
-      description: tool.description ?? "",
-      parameters: tool.parameters ?? tool.input_schema ?? { type: "object", properties: {} },
-      strict: tool.strict ?? false,
+      function: {
+        name: tool.name,
+        description: tool.description ?? "",
+        parameters: tool.parameters ?? tool.input_schema ?? { type: "object", properties: {} },
+      },
     };
   });
 }
 
-function collectOutputText(response) {
-  if (typeof response.output_text === "string") {
-    return response.output_text;
-  }
-
-  return (response.output ?? [])
-    .flatMap((item) => item.content ?? [])
-    .filter((part) => part.type === "output_text" || part.type === "text")
-    .map((part) => part.text ?? "")
-    .join("");
+function collectChatCompletionText(response) {
+  return (response.choices ?? [])
+    .map((choice) => normalizeAssistantContent(choice?.message?.content))
+    .filter((item) => typeof item === "string" && item.trim().length > 0)
+    .join("\n");
 }
 
-function collectToolCalls(response) {
-  return (response.output ?? [])
-    .filter((item) => item.type === "function_call")
+function normalizeAssistantContent(content) {
+  if (typeof content === "string") {
+    return content;
+  }
+  if (!Array.isArray(content)) {
+    return "";
+  }
+  return content
+    .map((part) => {
+      if (typeof part === "string") {
+        return part;
+      }
+      if (typeof part?.text === "string") {
+        return part.text;
+      }
+      if (typeof part?.content === "string") {
+        return part.content;
+      }
+      return "";
+    })
+    .filter((item) => item.trim().length > 0)
+    .join("\n");
+}
+
+function collectChatCompletionToolCalls(response) {
+  return (response.choices ?? [])
+    .flatMap((choice) => choice?.message?.tool_calls ?? [])
     .map((item) => ({
-      id: item.call_id ?? item.id,
-      name: item.name,
-      arguments: safeJsonParse(item.arguments, item.arguments ?? {}),
+      id: item.id,
+      name: item.function?.name,
+      arguments: safeJsonParse(item.function?.arguments, item.function?.arguments ?? {}),
     }));
 }
 

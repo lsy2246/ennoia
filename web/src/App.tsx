@@ -244,7 +244,6 @@ function RoutedWorkbenchPanel(props: IDockviewPanelProps<RoutePanelParams>) {
       case "extensions":
         return <Extensions />;
       case "observability":
-      case "logs":
         return <Observability />;
       case "settings":
         return <Settings />;
@@ -733,7 +732,7 @@ export function App() {
       return {
         paddingLeft: "12px",
         paddingRight: "12px",
-        paddingBottom: "92px",
+        paddingBottom: "calc(var(--mobile-dock-height, 72px) + 12px)",
         paddingTop: "12px",
       };
     }

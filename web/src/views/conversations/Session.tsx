@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
 import {
   ApiError,
@@ -19,9 +19,16 @@ type LocalMessageDraft = {
   clientId: string;
   body: string;
   addressedAgents: string[];
+  segments: ComposerSegment[];
   createdAt: string;
   status: LocalMessageStatus;
   error?: string;
+};
+
+type PendingReplyMarker = {
+  id: string;
+  agentId: string;
+  createdAt: string;
 };
 
 type DisplayMessage =
@@ -52,9 +59,21 @@ type MentionState = {
   selectedIndex: number;
 };
 
+type ComposerSegment =
+  | {
+      kind: "text";
+      value: string;
+    }
+  | {
+      kind: "mention";
+      agentId: string;
+      label: string;
+    };
+
 type ComposerSnapshot = {
   body: string;
   addressedAgents: string[];
+  segments: ComposerSegment[];
 };
 
 const EMPTY_MENTION_STATE: MentionState = {
@@ -62,6 +81,11 @@ const EMPTY_MENTION_STATE: MentionState = {
   query: "",
   selectedIndex: 0,
 };
+
+const OUTBOX_STORAGE_PREFIX = "ennoia.conversation.outbox.v1";
+const PENDING_REPLY_STORAGE_PREFIX = "ennoia.conversation.pending-replies.v1";
+const RECOVER_SENDING_AFTER_MS = 1500;
+const MESSAGE_POLL_INTERVAL_MS = 2500;
 
 function uniqueStrings(values: string[]) {
   return [...new Set(values.map((item) => item.trim()).filter(Boolean))];
@@ -76,32 +100,46 @@ function createLocalDraft(snapshot: ComposerSnapshot): LocalMessageDraft {
     clientId: `local-${Math.random().toString(36).slice(2, 10)}`,
     body: snapshot.body,
     addressedAgents: snapshot.addressedAgents,
+    segments: snapshot.segments,
     createdAt: nowIso(),
     status: "queued",
   };
 }
 
-function createMentionNode(agent: AgentProfile) {
+function createMentionNode(agentId: string, label: string) {
   const node = document.createElement("span");
   node.className = "composer-mention";
   node.contentEditable = "false";
-  node.dataset.agentId = agent.id;
-  node.dataset.agentLabel = agent.display_name;
-  node.textContent = `@${agent.display_name}`;
+  node.dataset.agentId = agentId;
+  node.dataset.agentLabel = label;
+  node.textContent = `@${label}`;
   return node;
+}
+
+function appendTextSegment(segments: ComposerSegment[], value: string) {
+  if (!value) {
+    return;
+  }
+  const normalized = value.replace(/\u00a0/g, " ");
+  const last = segments[segments.length - 1];
+  if (last?.kind === "text") {
+    last.value += normalized;
+    return;
+  }
+  segments.push({ kind: "text", value: normalized });
 }
 
 function readComposerSnapshot(root: HTMLElement | null): ComposerSnapshot {
   if (!root) {
-    return { body: "", addressedAgents: [] };
+    return { body: "", addressedAgents: [], segments: [] };
   }
 
   const addressedAgents: string[] = [];
-  const parts: string[] = [];
+  const segments: ComposerSegment[] = [];
 
   const walk = (node: Node) => {
     if (node.nodeType === Node.TEXT_NODE) {
-      parts.push(node.textContent ?? "");
+      appendTextSegment(segments, node.textContent ?? "");
       return;
     }
 
@@ -111,26 +149,32 @@ function readComposerSnapshot(root: HTMLElement | null): ComposerSnapshot {
 
     if (node.dataset.agentId) {
       addressedAgents.push(node.dataset.agentId);
-      parts.push(`@${node.dataset.agentLabel ?? node.dataset.agentId}`);
+      segments.push({
+        kind: "mention",
+        agentId: node.dataset.agentId,
+        label: node.dataset.agentLabel ?? node.dataset.agentId,
+      });
       return;
     }
 
     if (node.tagName === "BR") {
-      parts.push("\n");
+      appendTextSegment(segments, "\n");
       return;
     }
 
     const isBlock = node !== root && ["DIV", "P"].includes(node.tagName);
-    if (isBlock && parts.length > 0 && !parts[parts.length - 1].endsWith("\n")) {
-      parts.push("\n");
+    const last = segments[segments.length - 1];
+    if (isBlock && last?.kind === "text" && !last.value.endsWith("\n")) {
+      appendTextSegment(segments, "\n");
     }
 
     for (const child of [...node.childNodes]) {
       walk(child);
     }
 
-    if (isBlock && parts.length > 0 && !parts[parts.length - 1].endsWith("\n")) {
-      parts.push("\n");
+    const tail = segments[segments.length - 1];
+    if (isBlock && tail?.kind === "text" && !tail.value.endsWith("\n")) {
+      appendTextSegment(segments, "\n");
     }
   };
 
@@ -138,9 +182,16 @@ function readComposerSnapshot(root: HTMLElement | null): ComposerSnapshot {
     walk(child);
   }
 
+  const body = segments
+    .map((segment) => segment.kind === "text" ? segment.value : `@${segment.label}`)
+    .join("")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+
   return {
-    body: parts.join("").replace(/\u00a0/g, " ").replace(/\n{3,}/g, "\n\n").trim(),
+    body,
     addressedAgents: uniqueStrings(addressedAgents),
+    segments,
   };
 }
 
@@ -166,6 +217,35 @@ function clearComposer(root: HTMLElement | null) {
   }
   root.innerHTML = "";
   root.dataset.empty = "true";
+}
+
+function appendTextNodes(root: HTMLElement, value: string) {
+  const parts = value.split("\n");
+  parts.forEach((part, index) => {
+    if (part.length > 0) {
+      root.appendChild(document.createTextNode(part));
+    }
+    if (index < parts.length - 1) {
+      root.appendChild(document.createElement("br"));
+    }
+  });
+}
+
+function writeComposerSnapshot(root: HTMLElement | null, snapshot: ComposerSnapshot) {
+  if (!root) {
+    return;
+  }
+
+  root.innerHTML = "";
+  for (const segment of snapshot.segments) {
+    if (segment.kind === "text") {
+      appendTextNodes(root, segment.value);
+      continue;
+    }
+    root.appendChild(createMentionNode(segment.agentId, segment.label));
+  }
+
+  root.dataset.empty = String(snapshot.body.length === 0);
 }
 
 function isSelectionInside(root: HTMLElement | null, node: Node | null) {
@@ -227,7 +307,7 @@ function replaceMentionAtCaret(root: HTMLElement | null, agent: AgentProfile) {
   const after = original.slice(context.offset);
   context.textNode.textContent = before;
 
-  const mentionNode = createMentionNode(agent);
+  const mentionNode = createMentionNode(agent.id, agent.display_name);
   const trailingText = document.createTextNode(after.startsWith(" ") ? after : ` ${after}`);
   const parent = context.textNode.parentNode;
   if (!parent) {
@@ -297,6 +377,173 @@ function summarizeBody(body: string) {
   return `${normalized.slice(0, 56)}…`;
 }
 
+function outboxStorageKey(sessionId: string) {
+  return `${OUTBOX_STORAGE_PREFIX}:${sessionId}`;
+}
+
+function pendingReplyStorageKey(sessionId: string) {
+  return `${PENDING_REPLY_STORAGE_PREFIX}:${sessionId}`;
+}
+
+function loadPersistedDrafts(sessionId: string): LocalMessageDraft[] {
+  if (typeof window === "undefined") {
+    return [];
+  }
+  try {
+    const raw = window.localStorage.getItem(outboxStorageKey(sessionId));
+    if (!raw) {
+      return [];
+    }
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed as LocalMessageDraft[] : [];
+  } catch {
+    return [];
+  }
+}
+
+function loadPersistedPendingReplies(sessionId: string): PendingReplyMarker[] {
+  if (typeof window === "undefined") {
+    return [];
+  }
+  try {
+    const raw = window.localStorage.getItem(pendingReplyStorageKey(sessionId));
+    if (!raw) {
+      return [];
+    }
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed as PendingReplyMarker[] : [];
+  } catch {
+    return [];
+  }
+}
+
+function persistDrafts(sessionId: string, drafts: LocalMessageDraft[]) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    if (drafts.length === 0) {
+      window.localStorage.removeItem(outboxStorageKey(sessionId));
+      return;
+    }
+    window.localStorage.setItem(outboxStorageKey(sessionId), JSON.stringify(drafts));
+  } catch {
+    return;
+  }
+}
+
+function persistPendingReplies(sessionId: string, pendingReplies: PendingReplyMarker[]) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    if (pendingReplies.length === 0) {
+      window.localStorage.removeItem(pendingReplyStorageKey(sessionId));
+      return;
+    }
+    window.localStorage.setItem(
+      pendingReplyStorageKey(sessionId),
+      JSON.stringify(pendingReplies),
+    );
+  } catch {
+    return;
+  }
+}
+
+function normalizeDraftBody(body: string) {
+  return body.replace(/\s+/g, " ").trim();
+}
+
+function matchesRemoteMessage(draft: LocalMessageDraft, message: ChatMessage) {
+  if (message.role !== "operator") {
+    return false;
+  }
+  if (normalizeDraftBody(message.body) !== normalizeDraftBody(draft.body)) {
+    return false;
+  }
+  const draftMentions = uniqueStrings(draft.addressedAgents).sort().join("|");
+  const remoteMentions = uniqueStrings(message.mentions ?? []).sort().join("|");
+  if (draftMentions !== remoteMentions) {
+    return false;
+  }
+  return message.created_at >= draft.createdAt;
+}
+
+function reconcileDraftsWithRemote(
+  drafts: LocalMessageDraft[],
+  messages: ChatMessage[],
+) {
+  if (drafts.length === 0 || messages.length === 0) {
+    return drafts;
+  }
+
+  const remainingMessages = [...messages];
+  const nextDrafts: LocalMessageDraft[] = [];
+
+  for (const draft of drafts) {
+    const matchedIndex = remainingMessages.findIndex((message) =>
+      matchesRemoteMessage(draft, message),
+    );
+    if (matchedIndex >= 0) {
+      remainingMessages.splice(matchedIndex, 1);
+      continue;
+    }
+    nextDrafts.push(draft);
+  }
+
+  return nextDrafts;
+}
+
+function reconcilePendingRepliesWithRemote(
+  pendingReplies: PendingReplyMarker[],
+  messages: ChatMessage[],
+) {
+  if (pendingReplies.length === 0 || messages.length === 0) {
+    return pendingReplies;
+  }
+
+  return pendingReplies.filter((marker) =>
+    !messages.some((message) =>
+      message.role === "agent"
+      && message.sender === marker.agentId
+      && message.created_at >= marker.createdAt),
+  );
+}
+
+function renderMessageBody(body: string, agents: AgentProfile[]): ReactNode {
+  const mentionMap = new Map<string, string>();
+  for (const agent of agents) {
+    mentionMap.set(agent.id.toLowerCase(), agent.display_name);
+    mentionMap.set(agent.display_name.toLowerCase(), agent.display_name);
+    mentionMap.set(agent.display_name.toLowerCase().replace(/\s+/g, "-"), agent.display_name);
+  }
+
+  const lines = body.split("\n");
+  return lines.map((line, lineIndex) => {
+    const parts = line.split(/(@[\p{L}\p{N}_.-]+)/gu);
+    return (
+      <Fragment key={`line:${lineIndex}`}>
+        {parts.map((part, partIndex) => {
+          const match = part.match(/^@([\p{L}\p{N}_.-]+)$/u);
+          if (!match) {
+            return <Fragment key={`part:${lineIndex}:${partIndex}`}>{part}</Fragment>;
+          }
+          const label = mentionMap.get(match[1].toLowerCase());
+          if (!label) {
+            return <Fragment key={`part:${lineIndex}:${partIndex}`}>{part}</Fragment>;
+          }
+          return (
+            <span key={`part:${lineIndex}:${partIndex}`} className="message-inline-mention">
+              @{label}
+            </span>
+          );
+        })}
+        {lineIndex < lines.length - 1 ? <br /> : null}
+      </Fragment>
+    );
+  });
+}
+
 export function SessionView({ sessionId, panelId }: { sessionId: string; panelId?: string }) {
   const { formatDateTime, t } = useUiHelpers();
   const openView = useWorkbenchStore((state) => state.openView);
@@ -306,16 +553,20 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
   const notifyChanged = useConversationsStore((state) => state.notifyChanged);
   const [agents, setAgents] = useState<AgentProfile[]>([]);
   const [detail, setDetail] = useState<ChatThreadDetail | null>(null);
-  const [localDrafts, setLocalDrafts] = useState<LocalMessageDraft[]>([]);
+  const [localDrafts, setLocalDrafts] = useState<LocalMessageDraft[]>(() => loadPersistedDrafts(sessionId));
+  const [pendingReplies, setPendingReplies] = useState<PendingReplyMarker[]>(() => loadPersistedPendingReplies(sessionId));
   const [mentionState, setMentionState] = useState<MentionState>(EMPTY_MENTION_STATE);
-  const [composerSnapshot, setComposerSnapshot] = useState<ComposerSnapshot>({ body: "", addressedAgents: [] });
+  const [composerSnapshot, setComposerSnapshot] = useState<ComposerSnapshot>({ body: "", addressedAgents: [], segments: [] });
   const [error, setError] = useState<string | null>(null);
   const editorRef = useRef<HTMLDivElement | null>(null);
+  const isMountedRef = useRef(true);
+  const inFlightDraftIdRef = useRef<string | null>(null);
 
   const activeAgents = useMemo(() => {
     const ids = new Set(detail?.conversation?.participants?.filter((item) => item !== "operator") ?? []);
     return agents.filter((agent) => ids.has(agent.id));
   }, [agents, detail]);
+  const conversation = detail?.conversation ?? null;
 
   const canMention = activeAgents.length > 1;
 
@@ -324,11 +575,32 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
     [activeAgents],
   );
 
+  const refreshThread = useCallback(async () => {
+    try {
+      const nextDetail = await getChat(sessionId);
+      if (!isMountedRef.current) {
+        return;
+      }
+      setDetail(nextDetail);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404 && panelId) {
+        closeView(panelId);
+        return;
+      }
+      if (isMountedRef.current) {
+        setError(String(err));
+      }
+    }
+  }, [closeView, panelId, sessionId]);
+
   const hydrate = useCallback(async () => {
     setError(null);
     setDetail(null);
     try {
       const [nextAgents, nextDetail] = await Promise.all([listAgents(), getChat(sessionId)]);
+      if (!isMountedRef.current) {
+        return;
+      }
       setAgents(nextAgents);
       setDetail(nextDetail);
     } catch (err) {
@@ -336,7 +608,9 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
         closeView(panelId);
         return;
       }
-      setError(String(err));
+      if (isMountedRef.current) {
+        setError(String(err));
+      }
     }
   }, [closeView, panelId, sessionId]);
 
@@ -349,6 +623,44 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
       closeView(panelId);
     }
   }, [closeView, deletedSessionMark, panelId]);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    setLocalDrafts(loadPersistedDrafts(sessionId));
+    setPendingReplies(loadPersistedPendingReplies(sessionId));
+  }, [sessionId]);
+
+  useEffect(() => {
+    persistDrafts(sessionId, localDrafts);
+  }, [localDrafts, sessionId]);
+
+  useEffect(() => {
+    persistPendingReplies(sessionId, pendingReplies);
+  }, [pendingReplies, sessionId]);
+
+  useEffect(() => {
+    if (!detail?.messages) {
+      return;
+    }
+    setLocalDrafts((current) => reconcileDraftsWithRemote(current, detail.messages));
+    setPendingReplies((current) => reconcilePendingRepliesWithRemote(current, detail.messages));
+  }, [detail?.messages]);
+
+  useEffect(() => {
+    if (!conversation) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      void refreshThread();
+    }, MESSAGE_POLL_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, [conversation, refreshThread]);
 
   const syncComposerState = useCallback(() => {
     const snapshot = readComposerSnapshot(editorRef.current);
@@ -380,6 +692,9 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
     }
     const query = mentionState.query.trim().toLowerCase();
     const options = activeAgents.filter((agent) => {
+      if (composerSnapshot.addressedAgents.includes(agent.id)) {
+        return false;
+      }
       if (!query) {
         return true;
       }
@@ -391,7 +706,7 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
       return haystacks.some((item) => item.includes(query));
     });
     return options;
-  }, [activeAgents, canMention, mentionState.query]);
+  }, [activeAgents, canMention, composerSnapshot.addressedAgents, mentionState.query]);
 
   useEffect(() => {
     if (!mentionState.open) {
@@ -406,8 +721,8 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
     }
   }, [mentionOptions.length, mentionState.open, mentionState.selectedIndex]);
 
-  const queueItems = useMemo(
-    () => localDrafts.filter((item) => item.status === "sending" || item.status === "queued"),
+  const waitingItems = useMemo(
+    () => localDrafts.filter((item) => item.status === "queued"),
     [localDrafts],
   );
 
@@ -416,8 +731,25 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
     [localDrafts],
   );
 
-  const sendingItem = queueItems.find((item) => item.status === "sending") ?? null;
-  const waitingItems = queueItems.filter((item) => item.status === "queued");
+  const sendingItem = useMemo(
+    () => localDrafts.find((item) => item.status === "sending") ?? null,
+    [localDrafts],
+  );
+
+  useEffect(() => {
+    if (!sendingItem || inFlightDraftIdRef.current) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setLocalDrafts((current) =>
+        current.map((item) =>
+          item.clientId === sendingItem.clientId && item.status === "sending"
+            ? { ...item, status: "queued" }
+            : item),
+      );
+    }, RECOVER_SENDING_AFTER_MS);
+    return () => window.clearTimeout(timer);
+  }, [sendingItem]);
 
   const sessionStatus = useMemo(() => {
     if (sendingItem) {
@@ -425,6 +757,13 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
         tone: "accent",
         label: t("web.conversations.status_sending", "正在发送消息…"),
         detail: t("web.conversations.status_sending_detail", "当前消息已进入处理链路，请稍候。"),
+      };
+    }
+    if (pendingReplies.length > 0) {
+      return {
+        tone: "accent",
+        label: t("web.conversations.status_ai_typing", "AI 正在输入…"),
+        detail: t("web.conversations.status_ai_typing_detail", "已发送给 Agent，正在等待回复写回会话。"),
       };
     }
     if (waitingItems.length > 0) {
@@ -446,7 +785,7 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
       label: t("web.conversations.status_idle", "会话空闲"),
       detail: t("web.conversations.status_idle_detail", "消息会串行发送；如果连续提交，会进入可见队列。"),
     };
-  }, [failedItems.length, sendingItem, t, waitingItems.length]);
+  }, [failedItems.length, pendingReplies.length, sendingItem, t, waitingItems.length]);
 
   const displayMessages = useMemo<DisplayMessage[]>(() => {
     const remoteMessages = (detail?.messages ?? []).map<DisplayMessage>((message) => ({
@@ -482,15 +821,40 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
     return activeAgents;
   }, [activeAgents, agentMap]);
 
+  const typingAgents = useMemo(() => {
+    const typingIds = new Set<string>();
+    if (sendingItem) {
+      for (const agent of resolveRecipients(sendingItem.addressedAgents)) {
+        typingIds.add(agent.id);
+      }
+    }
+    for (const marker of pendingReplies) {
+      typingIds.add(marker.agentId);
+    }
+    return [...typingIds]
+      .map((agentId) => agentMap.get(agentId))
+      .filter((agent): agent is AgentProfile => Boolean(agent));
+  }, [agentMap, pendingReplies, resolveRecipients, sendingItem]);
+
   const resetComposer = useCallback(() => {
     clearComposer(editorRef.current);
-    setComposerSnapshot({ body: "", addressedAgents: [] });
+    setComposerSnapshot({ body: "", addressedAgents: [], segments: [] });
     setMentionState(EMPTY_MENTION_STATE);
     focusComposerEnd(editorRef.current);
   }, []);
 
+  const restoreDraftToComposer = useCallback((draft: LocalMessageDraft) => {
+    writeComposerSnapshot(editorRef.current, {
+      body: draft.body,
+      addressedAgents: draft.addressedAgents,
+      segments: draft.segments,
+    });
+    syncComposerState();
+    focusComposerEnd(editorRef.current);
+  }, [syncComposerState]);
+
   const enqueueCurrentMessage = useCallback(() => {
-    if (!detail?.conversation) {
+    if (!conversation) {
       return;
     }
     const snapshot = readComposerSnapshot(editorRef.current);
@@ -503,40 +867,68 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
     const queued = createLocalDraft({
       body: snapshot.body.trim(),
       addressedAgents: recipients,
+      segments: snapshot.segments,
     });
     setLocalDrafts((current) => [...current, queued]);
     resetComposer();
-  }, [activeAgents, detail?.conversation, resetComposer]);
+  }, [activeAgents, conversation, resetComposer]);
 
   useEffect(() => {
-    if (!detail?.conversation || sendingItem) {
+    if (!conversation || sendingItem || inFlightDraftIdRef.current) {
       return;
     }
 
-    const next = localDrafts.find((item) => item.status === "queued");
+    const next = waitingItems[0];
     if (!next) {
       return;
     }
 
-    let cancelled = false;
+    inFlightDraftIdRef.current = next.clientId;
     setLocalDrafts((current) =>
       current.map((item) => item.clientId === next.clientId ? { ...item, status: "sending", error: undefined } : item),
     );
 
     void (async () => {
       try {
-        await sendChatMessage(detail.conversation.id, {
-          lane_id: detail.conversation.default_lane_id ?? undefined,
+        const response = await sendChatMessage(conversation.id, {
+          lane_id: conversation.default_lane_id ?? undefined,
           body: next.body,
           addressed_agents: next.addressedAgents,
         });
-        notifyChanged();
-        await hydrate();
-        if (!cancelled) {
-          setLocalDrafts((current) => current.filter((item) => item.clientId !== next.clientId));
+        if (!isMountedRef.current) {
+          return;
         }
+        setLocalDrafts((current) => current.filter((item) => item.clientId !== next.clientId));
+        setPendingReplies((current) => [
+          ...current,
+          ...next.addressedAgents.map((agentId) => ({
+            id: `${response.message.id}:${agentId}`,
+            agentId,
+            createdAt: response.message.created_at,
+          })),
+        ]);
+        setDetail((current) => {
+          if (!current) {
+            return current;
+          }
+          const nextLane = response.lane;
+          const nextMessages = current.messages.some((message) => message.id === response.message.id)
+            ? current.messages
+            : [...current.messages, response.message].sort((left, right) =>
+              left.created_at.localeCompare(right.created_at));
+          return {
+            ...current,
+            conversation: response.conversation,
+            lanes: current.lanes.some((lane) => lane.id === nextLane.id)
+              ? current.lanes.map((lane) => lane.id === nextLane.id ? nextLane : lane)
+              : [...current.lanes, nextLane],
+            messages: nextMessages,
+          };
+        });
+        notifyChanged();
+        void refreshThread();
       } catch (err) {
-        if (!cancelled) {
+        if (isMountedRef.current) {
           setLocalDrafts((current) =>
             current.map((item) => item.clientId === next.clientId
               ? { ...item, status: "failed", error: String(err) }
@@ -544,13 +936,19 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
           );
           setError(String(err));
         }
+      } finally {
+        if (inFlightDraftIdRef.current === next.clientId) {
+          inFlightDraftIdRef.current = null;
+        }
       }
     })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [detail?.conversation, hydrate, localDrafts, notifyChanged, sendingItem]);
+  }, [
+    conversation,
+    notifyChanged,
+    refreshThread,
+    sendingItem,
+    waitingItems,
+  ]);
 
   const retryLocalMessage = useCallback((clientId: string) => {
     setLocalDrafts((current) =>
@@ -561,6 +959,15 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
   const removeLocalMessage = useCallback((clientId: string) => {
     setLocalDrafts((current) => current.filter((item) => item.clientId !== clientId));
   }, []);
+
+  const editQueuedMessage = useCallback((clientId: string) => {
+    const target = localDrafts.find((item) => item.clientId === clientId && item.status === "queued");
+    if (!target) {
+      return;
+    }
+    restoreDraftToComposer(target);
+    setLocalDrafts((current) => current.filter((item) => item.clientId !== clientId));
+  }, [localDrafts, restoreDraftToComposer]);
 
   const chooseMention = useCallback((agent: AgentProfile) => {
     if (replaceMentionAtCaret(editorRef.current, agent)) {
@@ -618,7 +1025,7 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
       return;
     }
     node.scrollTop = node.scrollHeight;
-  }, [displayMessages.length, queueItems.length]);
+  }, [displayMessages.length, typingAgents.length, waitingItems.length]);
 
   return (
     <div className="session-view session-view--chat">
@@ -686,11 +1093,10 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
                       <strong>{message.sender}</strong>
                       <small>{formatDateTime(message.createdAt)}</small>
                     </header>
-                    <p>{message.body}</p>
+                    <p>{renderMessageBody(message.body, recipients)}</p>
                     {isOperator ? (
                       <footer className="message-bubble__footer">
                         <div className="message-route">
-                          <span>{t("web.conversations.sent_to", "已发送给")}</span>
                           <div className="message-route__agents">
                             {recipients.map((agent) => (
                               <span key={agent.id} className="badge badge--muted">@{agent.display_name}</span>
@@ -737,39 +1143,49 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
                 );
               })
             )}
+            {typingAgents.map((agent) => (
+              <article key={`typing:${agent.id}`} className="message-bubble message-bubble--typing">
+                <header className="message-bubble__header">
+                  <strong>{agent.display_name}</strong>
+                  <small>{t("web.conversations.ai_typing", "输入中")}</small>
+                </header>
+                <div className="typing-indicator" aria-label={t("web.conversations.ai_typing", "输入中")}>
+                  <span />
+                  <span />
+                  <span />
+                </div>
+              </article>
+            ))}
           </div>
 
           <div className="composer-shell">
-            {queueItems.length > 0 ? (
+            {waitingItems.length > 0 ? (
               <section className="queue-panel">
                 <div className="queue-panel__header">
                   <strong>{t("web.conversations.queue_title", "发送队列")}</strong>
-                  <span>{t("web.conversations.queue_summary", "当前显示正在发送和排队中的消息。")}</span>
+                  <span>{t("web.conversations.queue_summary", "这里只显示还在排队、尚未开始发送的消息。")}</span>
                 </div>
                 <div className="queue-list">
-                  {queueItems.map((item, index) => {
+                  {waitingItems.map((item, index) => {
                     const recipients = resolveRecipients(item.addressedAgents);
                     return (
                       <article key={item.clientId} className="queue-item">
                         <div className="queue-item__copy">
                           <strong>{index + 1}. {summarizeBody(item.body)}</strong>
                           <span>
-                            {t("web.conversations.sent_to", "已发送给")}
-                            {" "}
                             {recipients.map((agent) => `@${agent.display_name}`).join(" ")}
                           </span>
                         </div>
                         <div className="queue-item__actions">
-                          <span className={`badge ${item.status === "sending" ? "badge--accent" : "badge--warn"}`}>
-                            {item.status === "sending"
-                              ? t("web.conversations.message_status_sending", "发送中")
-                              : t("web.conversations.message_status_queued", "排队中")}
-                          </span>
-                          {item.status === "queued" ? (
+                          <span className="badge badge--warn">{t("web.conversations.message_status_queued", "排队中")}</span>
+                          <div className="button-row">
+                            <button type="button" className="secondary" onClick={() => editQueuedMessage(item.clientId)}>
+                              {t("web.action.edit", "编辑")}
+                            </button>
                             <button type="button" className="secondary" onClick={() => removeLocalMessage(item.clientId)}>
                               {t("web.conversations.remove", "移除")}
                             </button>
-                          ) : null}
+                          </div>
                         </div>
                       </article>
                     );
@@ -829,7 +1245,7 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
                     : t("web.conversations.mention_disabled", "当前只有 1 个 Agent，不显示 @ 候选。")}
                 </small>
                 <button type="submit" disabled={!composerSnapshot.body.trim()}>
-                  {queueItems.length > 0
+                  {waitingItems.length > 0 || Boolean(sendingItem)
                     ? t("web.conversations.enqueue", "加入队列")
                     : t("web.conversations.send", "发送")}
                 </button>
