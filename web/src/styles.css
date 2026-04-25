@@ -1835,11 +1835,77 @@ label {
 
 .resource-layout,
 .logs-layout,
+.observability-layout,
 .settings-grid,
 .extension-view {
   display: grid;
   gap: 16px;
   min-height: 0;
+}
+
+.observability-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.08fr) minmax(0, 0.92fr);
+  gap: 16px;
+  min-height: 0;
+}
+
+.observability-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+}
+
+.observability-section-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.observability-filter-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.observability-scroll {
+  min-height: 280px;
+  max-height: min(720px, calc(100vh - 360px));
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.observability-item {
+  cursor: pointer;
+}
+
+.observability-item--active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 26%, transparent);
+}
+
+.observability-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.observability-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.observability-json {
+  margin: 0;
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .resource-layout--single {
@@ -2349,6 +2415,7 @@ label {
 
   .conversation-grid,
   .resource-layout,
+  .observability-grid,
   .settings-grid,
   .extension-view,
   .memory-visual-grid,
@@ -2365,6 +2432,7 @@ label {
   .composer,
   .form-grid,
   .kv-list,
+  .observability-filter-grid,
   .filter-bar {
     grid-template-columns: 1fr;
     display: grid;

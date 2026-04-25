@@ -349,6 +349,89 @@ export type SystemLog = {
   at: string;
 };
 
+export type ObservationOverview = {
+  log_count: number;
+  span_count: number;
+  trace_count: number;
+};
+
+export type ObservationLogEntry = {
+  id: string;
+  seq: number;
+  event: string;
+  level: string;
+  component: string;
+  source_kind: string;
+  source_id?: string | null;
+  request_id?: string | null;
+  trace_id?: string | null;
+  span_id?: string | null;
+  parent_span_id?: string | null;
+  message: string;
+  attributes: unknown;
+  created_at: string;
+};
+
+export type ObservationSpanRecord = {
+  id: string;
+  seq: number;
+  trace_id: string;
+  span_id: string;
+  parent_span_id?: string | null;
+  request_id: string;
+  sampled: boolean;
+  source: string;
+  kind: string;
+  name: string;
+  component: string;
+  source_kind: string;
+  source_id?: string | null;
+  status: string;
+  attributes: unknown;
+  started_at: string;
+  ended_at: string;
+  duration_ms: number;
+};
+
+export type ObservationSpanLinkRecord = {
+  id: string;
+  seq: number;
+  trace_id: string;
+  span_id: string;
+  linked_trace_id: string;
+  linked_span_id: string;
+  link_type: string;
+  attributes: unknown;
+  created_at: string;
+};
+
+export type ObservationTraceDetail = {
+  trace_id: string;
+  spans: ObservationSpanRecord[];
+  links: ObservationSpanLinkRecord[];
+};
+
+export type ObservationLogQuery = {
+  event?: string;
+  level?: string;
+  component?: string;
+  source_kind?: string;
+  source_id?: string;
+  request_id?: string;
+  trace_id?: string;
+  cursor?: number;
+  limit?: number;
+};
+
+export type ObservationTraceQuery = {
+  request_id?: string;
+  component?: string;
+  kind?: string;
+  source_kind?: string;
+  source_id?: string;
+  limit?: number;
+};
+
 export type InterfaceImplementation = {
   extension_id: string;
   method: string;
