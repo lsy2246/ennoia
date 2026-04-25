@@ -1,9 +1,10 @@
 use ennoia_kernel::{
-    HookEventEnvelope, HookResourceRef, InterfaceBindingConfig, InterfaceBindingsConfig,
+    HookEventEnvelope, HookResourceRef, InterfaceBindingConfig, InterfaceBindingsConfig, OwnerRef,
     HOOK_EVENT_CONVERSATION_CREATED, HOOK_EVENT_CONVERSATION_MESSAGE_CREATED,
 };
 
 use super::*;
+use crate::event_bus::{HookEventWrite, SYSTEM_LOG_COMPONENT_EVENT_BUS};
 use crate::system_log::{SystemLogWrite, SYSTEM_LOG_COMPONENT_PROXY};
 
 #[derive(Debug, Serialize)]
@@ -107,13 +108,28 @@ pub(super) async fn conversation_delete(
     Extension(request): Extension<RequestContext>,
     Path(conversation_id): Path<String>,
 ) -> ApiResult<JsonValue> {
-    dispatch_interface_json(
+    let resource_id = conversation_id.clone();
+    let response = dispatch_interface_value(
         &state,
         &request,
         "conversation.delete",
         serde_json::json!({ "conversation_id": conversation_id }),
     )
-    .await
+    .await?;
+    if response
+        .get("deleted")
+        .and_then(JsonValue::as_bool)
+        .unwrap_or(false)
+    {
+        dispatch_hook_event(
+            &state,
+            "conversation.deleted",
+            "conversation",
+            &resource_id,
+            response.clone(),
+        );
+    }
+    Ok(Json(response))
 }
 
 pub(super) async fn conversation_messages(
@@ -434,7 +450,7 @@ fn dispatch_hook_event(
     let envelope = HookEventEnvelope {
         event: event.to_string(),
         occurred_at: now_iso(),
-        owner: None,
+        owner: payload_owner(&payload),
         resource: HookResourceRef {
             kind: resource_kind.to_string(),
             id: resource_id.to_string(),
@@ -452,18 +468,20 @@ fn dispatch_hook_event(
         payload,
     };
 
-    for hook in state.extensions.hooks_for_event(event) {
-        let Some(handler) = hook.hook.handler else {
-            continue;
-        };
-        let _ = state.extensions.dispatch_rpc(
-            &hook.extension_id,
-            &handler,
-            ennoia_kernel::ExtensionRpcRequest {
-                params: serde_json::to_value(&envelope).unwrap_or(JsonValue::Null),
-                context: serde_json::json!({ "source": "interface_router" }),
-            },
-        );
+    if let Err(error) = state.event_bus.publish(HookEventWrite {
+        envelope,
+        hooks: state.extensions.hooks_for_event(event),
+    }) {
+        let _ = state.system_log.append(SystemLogWrite {
+            event: "runtime.event_bus.publish_failed".to_string(),
+            level: "warn".to_string(),
+            component: SYSTEM_LOG_COMPONENT_EVENT_BUS.to_string(),
+            source_kind: "hook".to_string(),
+            source_id: Some(event.to_string()),
+            summary: "hook event publish failed".to_string(),
+            payload: serde_json::json!({ "error": error.to_string() }),
+            created_at: None,
+        });
     }
 }
 
@@ -473,4 +491,17 @@ fn payload_string_field(payload: &JsonValue, path: &[&str]) -> Option<String> {
         current = current.get(*segment)?;
     }
     current.as_str().map(str::to_string)
+}
+
+fn payload_owner(payload: &JsonValue) -> Option<OwnerRef> {
+    payload
+        .get("owner")
+        .cloned()
+        .or_else(|| {
+            payload
+                .get("conversation")
+                .and_then(|item| item.get("owner"))
+                .cloned()
+        })
+        .and_then(|value| serde_json::from_value(value).ok())
 }

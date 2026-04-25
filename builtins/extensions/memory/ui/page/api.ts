@@ -1,4 +1,4 @@
-import { fetchJson, type ChatThread } from "@ennoia/api-client";
+import { fetchJson } from "@ennoia/api-client";
 
 export type MemorySource = {
   kind: string;
@@ -35,19 +35,19 @@ export type RecallResult = {
 };
 
 export type WorkspaceSummary = {
-  conversations: ChatThread[];
   pending_review_count: number;
   active_memory_count: number;
-  message_count: number;
+  episode_count: number;
   graph_nodes_count: number;
+  session_state_count: number;
 };
 
 export async function listMemoryRecords() {
-  return fetchJson<MemoryRecord[]>("/api/memory/active/memories");
+  return fetchJson<MemoryRecord[]>("/api/memory/memories");
 }
 
 export async function getMemoryWorkspaceSummary() {
-  return fetchJson<WorkspaceSummary>("/api/memory/active/workspace");
+  return fetchJson<WorkspaceSummary>("/api/memory/workspace");
 }
 
 export async function recallMemoryRecords(payload: {
@@ -61,7 +61,7 @@ export async function recallMemoryRecords(payload: {
   conversation_id?: string;
   run_id?: string;
 }) {
-  return fetchJson<RecallResult>("/api/memory/active/memories/recall", {
+  return fetchJson<RecallResult>("/api/memory/recall", {
     method: "POST",
     body: JSON.stringify(payload),
   });
@@ -73,7 +73,7 @@ export async function reviewMemoryRecord(payload: {
   action: string;
   notes?: string;
 }) {
-  return fetchJson("/api/memory/active/memories/review", {
+  return fetchJson("/api/memory/review", {
     method: "POST",
     body: JSON.stringify(payload),
   });

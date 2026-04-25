@@ -23,8 +23,8 @@ export default function MemoryExtensionPage({ helpers }: MemoryExtensionPageProp
   const [activeTab, setActiveTab] = useState<MemoryTab>("truth");
   const [reviewer, setReviewer] = useState("operator");
   const [search, setSearch] = useState("");
-  const [ownerKind, setOwnerKind] = useState("operator");
-  const [ownerId, setOwnerId] = useState("local");
+  const [ownerKind, setOwnerKind] = useState("global");
+  const [ownerId, setOwnerId] = useState("global");
   const [conversationId, setConversationId] = useState("");
   const [busy, setBusy] = useState(false);
   const [recallResult, setRecallResult] = useState<string | null>(null);
@@ -53,8 +53,8 @@ export default function MemoryExtensionPage({ helpers }: MemoryExtensionPageProp
     setError(null);
     try {
       const result = await recallMemoryRecords({
-        owner_kind: ownerKind.trim() || "operator",
-        owner_id: ownerId.trim() || "local",
+        owner_kind: ownerKind.trim() || "global",
+        owner_id: ownerId.trim() || "global",
         conversation_id: conversationId.trim() || undefined,
         query_text: search.trim() || undefined,
         mode: "hybrid",
@@ -156,9 +156,9 @@ export default function MemoryExtensionPage({ helpers }: MemoryExtensionPageProp
             <small>待人工复核的记忆条目</small>
           </article>
           <article className="memory-lane">
-            <span>Context Events</span>
-            <strong>{workspace?.message_count ?? 0}</strong>
-            <small>记忆引擎观测到的原始上下文</small>
+            <span>Episodes</span>
+            <strong>{workspace?.episode_count ?? 0}</strong>
+            <small>记忆引擎接收的原始事件</small>
           </article>
         </div>
         <div className="stack">
@@ -245,8 +245,8 @@ export default function MemoryExtensionPage({ helpers }: MemoryExtensionPageProp
             <article className="mini-card">
               <div className="panel-title">Context Assembly</div>
               <div className="kv-list">
-                <span>消息/事件</span>
-                <strong>{workspace?.message_count ?? 0}</strong>
+                <span>事件</span>
+                <strong>{workspace?.episode_count ?? 0}</strong>
                 <span>Graph nodes</span>
                 <strong>{workspace?.graph_nodes_count ?? 0}</strong>
                 <span>Recall</span>
@@ -259,6 +259,13 @@ export default function MemoryExtensionPage({ helpers }: MemoryExtensionPageProp
                 系统会话页负责原始会话和消息；记忆扩展只消费这些原始记录，生成 truth、recent context、review
                 receipts 和 graph sidecar。
               </p>
+            </article>
+            <article className="mini-card">
+              <div className="panel-title">Session State</div>
+              <div className="kv-list">
+                <span>活跃状态</span>
+                <strong>{workspace?.session_state_count ?? 0}</strong>
+              </div>
             </article>
           </div>
         ) : null}

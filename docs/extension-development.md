@@ -26,7 +26,7 @@ Extension 是系统能力包，Skill 是 Agent 可引用的能力包。Extension
 - `capabilities`
 - `contributes`
 
-`ui` 和 `worker` 都是可选声明。纯 UI 扩展不需要 `worker`，纯能力扩展不需要 `ui`。`worker.kind` 当前支持 `wasm` 和 `process`；`process` Worker 通过 stdin/stdout 的 JSON 文本协议接入宿主，不需要自行开放 HTTP 端口。
+`ui` 和 `worker` 都是可选声明。纯 UI 扩展不需要 `worker`，纯能力扩展不需要 `ui`。`worker.kind` 当前支持 `wasm` 和 `process`；`process` Worker 通过 stdin/stdout 的 JSON 文本协议接入宿主，不需要自行开放 HTTP 端口。需要本地 SQLite、文件和后台任务的扩展，推荐直接使用 `process` Worker。
 
 ```toml
 [worker]
@@ -91,7 +91,7 @@ hooks = [
 ]
 ```
 
-系统把 Hook 事件转换为 Worker RPC 调用。扩展返回 `HookDispatchResponse`：
+系统先把 Hook 事件写入宿主事件总线，再异步转换为 Worker RPC 调用。扩展返回 `HookDispatchResponse`：
 
 - `handled=true`：扩展已处理该事件。
 - `result`：可选结构化结果，供调用方继续返回或落库。
@@ -116,7 +116,7 @@ schedule_actions = [
 ]
 ```
 
-Provider、Behavior、Memory、Hook、Interface 和 Schedule Action 贡献只声明能力入口；实际执行统一通过宿主 Worker RPC 分发，不允许扩展自行开放端口。
+Provider、Behavior、Memory、Hook、Interface 和 Schedule Action 贡献只声明能力入口；实际执行统一通过宿主 Worker RPC 分发或宿主事件总线投递，不允许扩展自行开放端口。
 扩展自己的配置、UI 文案、主题、页面实现和业务运行态都属于扩展边界，不得放入 Web 主壳的系统模块、核心配置模型或 `config/` 根目录。
 
 ## 推荐目录
@@ -125,6 +125,7 @@ Provider、Behavior、Memory、Hook、Interface 和 Schedule Action 贡献只声
 <extension_id>/
 ├─ extension.toml
 ├─ ui/               # 可选：页面、面板、主题、语言
+├─ bin/              # 可选：process Worker
 ├─ worker/           # 可选：Wasm Worker
 ├─ data/             # 可选：schema、私有模型、资源
 └─ provider-presets/ # 可选：初始化上游渠道实例
@@ -204,15 +205,12 @@ export default ui;
 
 `ennoia_worker_handle` 返回高 32 位为 `ptr`、低 32 位为 `len` 的打包值。返回缓冲区应是 `ExtensionRpcResponse` JSON；如果返回普通 JSON，宿主会包装为成功响应。
 
-内置 `memory` 与 `workflow` Worker 分别位于：
+内置 `conversation` 与 `memory` 当前都采用 process Worker，`workflow` 仍采用 Wasm Worker。
 
-- `builtins/extensions/memory/worker`
-- `builtins/extensions/workflow/worker`
+执行 `bun run build:workers` 会：
 
-执行 `bun run build:workers` 会编译 `wasm32-unknown-unknown` release 产物，并复制到：
-
-- `builtins/extensions/memory/worker/memory.wasm`
-- `builtins/extensions/workflow/worker/workflow.wasm`
+- 构建 `conversation` 与 `memory` 的 release 进程 Worker，并复制到各自扩展目录下的 `bin/`
+- 构建 `workflow` 的 `wasm32-unknown-unknown` release 产物，并复制到 `builtins/extensions/workflow/worker/workflow.wasm`
 
 ## 沙箱与权限
 

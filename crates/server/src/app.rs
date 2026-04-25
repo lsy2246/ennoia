@@ -14,6 +14,7 @@ use ennoia_paths::{default_home_dir, RuntimePaths};
 use tokio::net::TcpListener;
 use tracing::info;
 
+use crate::event_bus::{EventBusStore, SYSTEM_LOG_COMPONENT_EVENT_BUS};
 use crate::middleware::RateLimitState;
 use crate::routes::{build_router, run_due_schedules_once};
 use crate::system_log::{
@@ -42,6 +43,7 @@ pub struct AppState {
     pub rate_limit_state: RateLimitState,
     pub schedule_lock: Arc<tokio::sync::Mutex<()>>,
     pub system_log: Arc<SystemLogStore>,
+    pub event_bus: Arc<EventBusStore>,
     pub observability_guard: Option<Arc<ObservabilityGuard>>,
 }
 
@@ -53,6 +55,7 @@ pub fn default_app_state() -> AppState {
     let extensions =
         ExtensionRuntime::bootstrap(extension_runtime_config(&runtime_paths)).expect("runtime");
     let system_log = Arc::new(SystemLogStore::new(&runtime_paths).expect("system log"));
+    let event_bus = Arc::new(EventBusStore::new(&runtime_paths).expect("event bus"));
 
     AppState {
         app_config,
@@ -68,6 +71,7 @@ pub fn default_app_state() -> AppState {
         rate_limit_state: RateLimitState::new(),
         schedule_lock: Arc::new(tokio::sync::Mutex::new(())),
         system_log,
+        event_bus,
         observability_guard: None,
     }
 }
@@ -98,6 +102,7 @@ pub async fn bootstrap_app_state(home_dir: impl AsRef<Path>) -> Result<AppState,
     let spaces = default_spaces();
     let extensions = ExtensionRuntime::bootstrap(extension_runtime_config(&runtime_paths))?;
     let system_log = Arc::new(SystemLogStore::new(&runtime_paths)?);
+    let event_bus = Arc::new(EventBusStore::new(&runtime_paths)?);
 
     Ok(AppState {
         app_config,
@@ -113,6 +118,7 @@ pub async fn bootstrap_app_state(home_dir: impl AsRef<Path>) -> Result<AppState,
         rate_limit_state: RateLimitState::new(),
         schedule_lock: Arc::new(tokio::sync::Mutex::new(())),
         system_log,
+        event_bus,
         observability_guard,
     })
 }
@@ -183,6 +189,24 @@ pub async fn run_server(home_dir: impl AsRef<Path>) -> Result<(), AppError> {
         }
     });
 
+    let event_state = state.clone();
+    let mut event_cancel = cancel_rx.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(1));
+        loop {
+            tokio::select! {
+                _ = interval.tick() => {
+                    drain_hook_deliveries_once(&event_state);
+                }
+                changed = event_cancel.changed() => {
+                    if changed.is_err() || *event_cancel.borrow() {
+                        break;
+                    }
+                }
+            }
+        }
+    });
+
     let address = format!("{}:{}", state.server_config.host, state.server_config.port);
     let listener = TcpListener::bind(&address).await?;
     let serve_result = axum::serve(listener, build_router(state)).await;
@@ -199,6 +223,96 @@ pub async fn run_server(home_dir: impl AsRef<Path>) -> Result<(), AppError> {
     });
     serve_result?;
     Ok(())
+}
+
+fn drain_hook_deliveries_once(state: &AppState) {
+    let pending = match state.event_bus.list_pending_deliveries(32) {
+        Ok(items) => items,
+        Err(error) => {
+            let _ = state.system_log.append(SystemLogWrite {
+                event: "runtime.event_bus.pending_failed".to_string(),
+                level: "warn".to_string(),
+                component: SYSTEM_LOG_COMPONENT_EVENT_BUS.to_string(),
+                source_kind: "system".to_string(),
+                source_id: None,
+                summary: "event bus pending delivery scan failed".to_string(),
+                payload: serde_json::json!({ "error": error.to_string() }),
+                created_at: None,
+            });
+            return;
+        }
+    };
+
+    for delivery in pending {
+        let request = ennoia_kernel::ExtensionRpcRequest {
+            params: serde_json::to_value(&delivery.envelope).unwrap_or(serde_json::Value::Null),
+            context: serde_json::json!({
+                "source": "event_bus",
+                "delivery_id": delivery.id,
+                "event_id": delivery.event_id,
+            }),
+        };
+        let response =
+            state
+                .extensions
+                .dispatch_rpc(&delivery.extension_id, &delivery.handler, request);
+
+        match response {
+            Ok(response) if response.ok => {
+                let _ = state.event_bus.mark_delivery_succeeded(&delivery.id);
+            }
+            Ok(response) => {
+                let error = response
+                    .error
+                    .map(|item| format!("{}: {}", item.code, item.message))
+                    .unwrap_or_else(|| "hook delivery failed".to_string());
+                handle_delivery_failure(
+                    state,
+                    &delivery.id,
+                    delivery.attempt_count,
+                    &delivery.extension_id,
+                    &error,
+                );
+            }
+            Err(error) => {
+                handle_delivery_failure(
+                    state,
+                    &delivery.id,
+                    delivery.attempt_count,
+                    &delivery.extension_id,
+                    &error.to_string(),
+                );
+            }
+        }
+    }
+}
+
+fn handle_delivery_failure(
+    state: &AppState,
+    delivery_id: &str,
+    attempt_count: u32,
+    extension_id: &str,
+    error: &str,
+) {
+    let terminal = state
+        .event_bus
+        .mark_delivery_retry(delivery_id, error, attempt_count)
+        .unwrap_or(false);
+    if terminal {
+        let _ = state.system_log.append(SystemLogWrite {
+            event: "runtime.event_bus.delivery_failed".to_string(),
+            level: "warn".to_string(),
+            component: SYSTEM_LOG_COMPONENT_EVENT_BUS.to_string(),
+            source_kind: "extension".to_string(),
+            source_id: Some(extension_id.to_string()),
+            summary: "hook delivery exhausted retries".to_string(),
+            payload: serde_json::json!({
+                "delivery_id": delivery_id,
+                "error": error,
+            }),
+            created_at: None,
+        });
+    }
 }
 
 fn read_toml_or_default<T>(path: PathBuf) -> Result<T, AppError>

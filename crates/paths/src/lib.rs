@@ -132,6 +132,10 @@ impl RuntimePaths {
         self.system_sqlite_dir().join("system-log.db")
     }
 
+    pub fn system_events_db(&self) -> PathBuf {
+        self.system_sqlite_dir().join("events.db")
+    }
+
     pub fn extension_state_dir(&self, extension_id: &str) -> PathBuf {
         self.extensions_state_dir().join(extension_id)
     }

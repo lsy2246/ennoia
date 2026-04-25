@@ -161,11 +161,16 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/behaviors/active", get(active_behavior))
         .route("/api/behavior/status", get(behavior_status))
         .route("/api/behavior/{*path}", any(behavior_api_proxy))
-        .route("/api/memories", get(memories))
-        .route("/api/memories/active", get(active_memory))
-        .route("/api/memories/{memory_id}/status", get(memory_status))
-        .route("/api/memory/{memory_id}/{*path}", any(memory_api_proxy))
-        .route("/api/memory/active/{*path}", any(active_memory_api_proxy))
+        .route("/api/memory/workspace", get(memory_workspace))
+        .route("/api/memory/memories", get(memory_list))
+        .route("/api/memory/episodes", get(memory_episodes_list))
+        .route("/api/memory/remember", post(memory_remember))
+        .route("/api/memory/recall", post(memory_recall))
+        .route("/api/memory/review", post(memory_review))
+        .route(
+            "/api/memory/assemble-context",
+            post(memory_assemble_context),
+        )
         .route(
             "/api/extensions/{extension_id}/restart",
             post(extension_restart),

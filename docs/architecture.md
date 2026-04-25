@@ -14,6 +14,7 @@ Web
       -> Extension Host / Wasm Worker
       -> Extension Host / Process Worker
       -> System Log
+      -> Event Bus
       -> Interface Router
         -> Memory Worker / Workflow Worker / Other Extension Workers
       -> Scheduler
@@ -26,13 +27,13 @@ Web
 - `Contract`：定义跨边界 DTO；当前保留 `behavior` 与 `memory` 兼容协议响应结构。
 - `Paths`：统一解析运行目录，所有运行时文件位置都通过 `RuntimePaths` 推导。
 - `Extension Host`：负责扩展扫描、attach / detach、reload / restart、诊断、Worker 解析和 Worker RPC 分发；Worker 可以是 Wasm，也可以是进程型 stdio RPC。
-- `Server`：负责 HTTP API、配置读写、接口绑定、定时调度、Worker RPC 路由、系统日志和系统内置组件装配。
+- `Server`：负责 HTTP API、配置读写、接口绑定、定时调度、Worker RPC 路由、系统日志、事件总线和系统内置组件装配。
 
 ## 细粒度接口层
 
 - 系统用稳定 `/api/...` 表达产品动作，例如会话列表、创建会话、写消息、创建运行、读取任务。
 - 每个产品动作映射为一个接口键，例如 `conversation.list`、`message.append_user`、`run.create`、`task.list_by_run`。
-- 扩展通过 manifest 的 `contributes.interfaces` 声明实现，实际执行统一进入扩展 Wasm Worker RPC。
+- 扩展通过 manifest 的 `contributes.interfaces` 声明实现，实际执行统一进入扩展 Worker RPC。
 - `config/interfaces.toml` 只保存必要的显式绑定；没有显式绑定且只有一个实现时自动绑定，有多个实现时返回冲突。
 - 当前系统接口管理入口包括：
   - `GET /api/extensions/interfaces`
@@ -45,8 +46,9 @@ Web
 - 核心不再内置 `journal` 文件记录层。
 - `/api/conversations`、`/api/conversations/{id}/messages` 等稳定入口通过接口层路由，不直接绑定某个 memory 大能力。
 - 内置 `conversation` 扩展当前声明会话、线路和消息接口；内置 `memory` 扩展只负责记忆、上下文、审查和图谱侧车。
-- `GET /api/memories`、`ANY /api/memory/...` 作为兼容能力入口保留，用于访问扩展自己的 memory API。
-- 兼容能力入口不读取系统级 `memory.toml`；只有一个可用 memory 实现时可自动选择，存在多个实现时要求调用方显式指定 memory id 或改走接口绑定。
+- `memory` 的系统入口固定为 `/api/memory/*`，底层通过 `memory.*` 接口键解析到扩展 Worker。
+- `conversation` 不直接调用 `memory`；它只把稳定事件交给宿主事件总线。
+- `memory` 不直接读取 `conversation.db`；它只消费宿主持久化的系统事件。
 - Conversation、Message、Memory Graph、Review 等业务数据组织属于扩展私有责任，不属于系统日志。
 
 ## 运行与定时边界
@@ -82,9 +84,10 @@ Web
 
 ## Hook 边界
 
-- Hook 保留为系统事件分发机制，但不承担业务执行主通道。
-- 接口层完成会话创建、消息追加等动作后，可以广播 `conversation.created`、`conversation.message.created` 等事件。
-- 系统只在确实需要广播系统事件时才使用 Hook，不把会话、记忆或编排重新耦合回 Hook。
+- Hook 保留为扩展订阅系统事件的方式，但事件先进入宿主持久化事件总线，不做同步强耦合调用。
+- 接口层完成会话创建、消息追加等动作后，把 `conversation.created`、`conversation.message.created` 等事件写入 `events.db`。
+- 事件总线异步把事件投递给已注册 Hook；扩展临时离线不会阻塞会话写入。
+- 系统不把会话、记忆或编排重新耦合回 Hook。
 
 ## 扩展能力模型
 
@@ -101,6 +104,7 @@ Web
 - 系统级配置：`~/.ennoia/config/*.toml`
 - 接口绑定：`~/.ennoia/config/interfaces.toml`
 - 系统级日志：`~/.ennoia/data/system/sqlite/system-log.db`
+- 系统级事件总线：`~/.ennoia/data/system/sqlite/events.db`
 - 系统定时计划：`~/.ennoia/data/system/schedules.json`
 - 扩展私有数据：`~/.ennoia/data/extensions/{extension_id}/`
 - 扩展私有配置：`~/.ennoia/data/extensions/{extension_id}/` 下由扩展自行定义

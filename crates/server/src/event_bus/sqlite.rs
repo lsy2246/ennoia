@@ -1,0 +1,281 @@
+use std::path::PathBuf;
+
+use chrono::{Duration, Utc};
+use ennoia_extension_host::RegisteredHookContribution;
+use ennoia_kernel::HookEventEnvelope;
+use ennoia_paths::RuntimePaths;
+use rusqlite::{params, Connection, OptionalExtension};
+use uuid::Uuid;
+
+pub const SYSTEM_LOG_COMPONENT_EVENT_BUS: &str = "event_bus";
+
+const EVENT_BUS_SCHEMA_SQL: &str = r#"
+CREATE TABLE IF NOT EXISTS hook_events (
+  seq INTEGER PRIMARY KEY AUTOINCREMENT,
+  id TEXT NOT NULL UNIQUE,
+  event TEXT NOT NULL,
+  resource_kind TEXT NOT NULL,
+  resource_id TEXT NOT NULL,
+  conversation_id TEXT,
+  lane_id TEXT,
+  run_id TEXT,
+  envelope_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_hook_events_event_time
+  ON hook_events(event, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_hook_events_resource
+  ON hook_events(resource_kind, resource_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS hook_deliveries (
+  seq INTEGER PRIMARY KEY AUTOINCREMENT,
+  id TEXT NOT NULL UNIQUE,
+  event_id TEXT NOT NULL,
+  extension_id TEXT NOT NULL,
+  handler TEXT NOT NULL,
+  status TEXT NOT NULL,
+  attempt_count INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT,
+  next_attempt_at TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_hook_deliveries_pending
+  ON hook_deliveries(status, next_attempt_at, extension_id);
+"#;
+
+#[derive(Debug, Clone)]
+pub struct HookEventWrite {
+    pub envelope: HookEventEnvelope,
+    pub hooks: Vec<RegisteredHookContribution>,
+}
+
+#[derive(Debug, Clone)]
+pub struct HookDeliveryRecord {
+    pub id: String,
+    pub event_id: String,
+    pub extension_id: String,
+    pub handler: String,
+    pub attempt_count: u32,
+    pub envelope: HookEventEnvelope,
+}
+
+#[derive(Debug, Clone)]
+pub struct EventBusStore {
+    db_path: PathBuf,
+}
+
+impl EventBusStore {
+    pub fn new(paths: &RuntimePaths) -> std::io::Result<Self> {
+        if let Some(parent) = paths.system_events_db().parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let store = Self {
+            db_path: paths.system_events_db(),
+        };
+        store.ensure_schema()?;
+        Ok(store)
+    }
+
+    pub fn publish(&self, entry: HookEventWrite) -> std::io::Result<String> {
+        let connection = self.open()?;
+        let HookEventWrite { envelope, hooks } = entry;
+        let event_id = format!("hev-{}", Uuid::new_v4());
+        let created_at = envelope.occurred_at.clone();
+        let envelope_json = serde_json::to_string(&envelope).map_err(std::io::Error::other)?;
+
+        connection
+            .execute(
+                "INSERT INTO hook_events
+                (id, event, resource_kind, resource_id, conversation_id, lane_id, run_id, envelope_json, created_at)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                params![
+                    event_id,
+                    envelope.event,
+                    envelope.resource.kind,
+                    envelope.resource.id,
+                    envelope.resource.conversation_id,
+                    envelope.resource.lane_id,
+                    envelope.resource.run_id,
+                    envelope_json,
+                    created_at,
+                ],
+            )
+            .map_err(std::io::Error::other)?;
+
+        for hook in hooks {
+            let handler = hook
+                .hook
+                .handler
+                .clone()
+                .unwrap_or_else(|| default_hook_handler_path(&hook.hook.event));
+            let delivery_id = format!("hdl-{}", Uuid::new_v4());
+            let now = now_iso();
+            connection
+                .execute(
+                    "INSERT INTO hook_deliveries
+                    (id, event_id, extension_id, handler, status, attempt_count, last_error, next_attempt_at, created_at, updated_at)
+                    VALUES (?1, ?2, ?3, ?4, 'pending', 0, NULL, ?5, ?6, ?6)",
+                    params![delivery_id, event_id, hook.extension_id, handler, now, now],
+                )
+                .map_err(std::io::Error::other)?;
+        }
+
+        Ok(event_id)
+    }
+
+    pub fn list_pending_deliveries(
+        &self,
+        limit: usize,
+    ) -> std::io::Result<Vec<HookDeliveryRecord>> {
+        let connection = self.open()?;
+        let mut statement = connection
+            .prepare(
+                "SELECT d.id, d.event_id, d.extension_id, d.handler, d.attempt_count, e.envelope_json
+                 FROM hook_deliveries d
+                 JOIN hook_events e ON e.id = d.event_id
+                 WHERE d.status = 'pending' AND d.next_attempt_at <= ?1
+                 ORDER BY d.seq ASC
+                 LIMIT ?2",
+            )
+            .map_err(std::io::Error::other)?;
+        let rows = statement
+            .query_map(params![now_iso(), limit.max(1) as i64], |row| {
+                let envelope_json: String = row.get("envelope_json")?;
+                let envelope =
+                    serde_json::from_str::<HookEventEnvelope>(&envelope_json).map_err(|error| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            envelope_json.len(),
+                            rusqlite::types::Type::Text,
+                            Box::new(error),
+                        )
+                    })?;
+                Ok(HookDeliveryRecord {
+                    id: row.get("id")?,
+                    event_id: row.get("event_id")?,
+                    extension_id: row.get("extension_id")?,
+                    handler: row.get("handler")?,
+                    attempt_count: row.get::<_, i64>("attempt_count")? as u32,
+                    envelope,
+                })
+            })
+            .map_err(std::io::Error::other)?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(std::io::Error::other)
+    }
+
+    pub fn mark_delivery_succeeded(&self, delivery_id: &str) -> std::io::Result<()> {
+        self.open()?
+            .execute(
+                "UPDATE hook_deliveries
+                 SET status = 'succeeded', updated_at = ?2, last_error = NULL
+                 WHERE id = ?1",
+                params![delivery_id, now_iso()],
+            )
+            .map(|_| ())
+            .map_err(std::io::Error::other)
+    }
+
+    pub fn mark_delivery_retry(
+        &self,
+        delivery_id: &str,
+        error: &str,
+        previous_attempts: u32,
+    ) -> std::io::Result<bool> {
+        let connection = self.open()?;
+        let next_attempts = previous_attempts.saturating_add(1);
+        let terminal = next_attempts >= 20;
+        let updated_at = now_iso();
+        let next_attempt_at = if terminal {
+            updated_at.clone()
+        } else {
+            (Utc::now() + Duration::seconds(backoff_seconds(next_attempts))).to_rfc3339()
+        };
+        connection
+            .execute(
+                "UPDATE hook_deliveries
+                 SET status = ?2,
+                     attempt_count = ?3,
+                     last_error = ?4,
+                     next_attempt_at = ?5,
+                     updated_at = ?6
+                 WHERE id = ?1",
+                params![
+                    delivery_id,
+                    if terminal { "failed" } else { "pending" },
+                    next_attempts as i64,
+                    error,
+                    next_attempt_at,
+                    updated_at,
+                ],
+            )
+            .map_err(std::io::Error::other)?;
+        Ok(terminal)
+    }
+
+    pub fn get_delivery(&self, delivery_id: &str) -> std::io::Result<Option<HookDeliveryRecord>> {
+        let connection = self.open()?;
+        connection
+            .query_row(
+                "SELECT d.id, d.event_id, d.extension_id, d.handler, d.attempt_count, e.envelope_json
+                 FROM hook_deliveries d
+                 JOIN hook_events e ON e.id = d.event_id
+                 WHERE d.id = ?1",
+                params![delivery_id],
+                |row| {
+                    let envelope_json: String = row.get("envelope_json")?;
+                    let envelope = serde_json::from_str::<HookEventEnvelope>(&envelope_json)
+                        .map_err(|error| {
+                            rusqlite::Error::FromSqlConversionFailure(
+                                envelope_json.len(),
+                                rusqlite::types::Type::Text,
+                                Box::new(error),
+                            )
+                        })?;
+                    Ok(HookDeliveryRecord {
+                        id: row.get("id")?,
+                        event_id: row.get("event_id")?,
+                        extension_id: row.get("extension_id")?,
+                        handler: row.get("handler")?,
+                        attempt_count: row.get::<_, i64>("attempt_count")? as u32,
+                        envelope,
+                    })
+                },
+            )
+            .optional()
+            .map_err(std::io::Error::other)
+    }
+
+    fn open(&self) -> std::io::Result<Connection> {
+        let connection = Connection::open(&self.db_path).map_err(std::io::Error::other)?;
+        connection
+            .execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")
+            .map_err(std::io::Error::other)?;
+        Ok(connection)
+    }
+
+    fn ensure_schema(&self) -> std::io::Result<()> {
+        self.open()?
+            .execute_batch(EVENT_BUS_SCHEMA_SQL)
+            .map_err(std::io::Error::other)
+    }
+}
+
+fn backoff_seconds(attempt: u32) -> i64 {
+    match attempt {
+        0 | 1 => 1,
+        2 => 2,
+        3 => 4,
+        4 => 8,
+        5 => 16,
+        _ => 30,
+    }
+}
+
+fn now_iso() -> String {
+    Utc::now().to_rfc3339()
+}
+
+fn default_hook_handler_path(event: &str) -> String {
+    format!("hooks/{}", event.replace('.', "/"))
+}

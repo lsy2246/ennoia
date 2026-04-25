@@ -27,7 +27,7 @@ Extension descriptor 包含：
 
 贡献类型包含：页面、面板、主题、语言包、命令、Provider、Behavior、Memory、Hook、Interface 和 Schedule Action。
 
-`ui` 是可选界面入口；`worker` 是可选 Wasm 执行单元。宿主按声明装配能力，不要求扩展同时包含 UI 和 Worker。
+`ui` 是可选界面入口；`worker` 是可选执行单元，可为 Wasm，也可为进程型 stdio RPC。宿主按声明装配能力，不要求扩展同时包含 UI 和 Worker。
 
 ## 运行流程
 
@@ -67,7 +67,8 @@ schedule_actions = [
 - `node scripts/build-extension-ui.mjs --watch` 会把 `builtins/extensions/*/ui/entry.*` 构建到各自的 `ui/dist/entry.js`。
 - Server 运行时按 2 秒轮询刷新扩展注册表和 manifest；UI bundle 文件版本变化会更新 runtime snapshot。
 - Worker runtime 会缓存编译后的 Wasm Module，并在 `.wasm` mtime 或文件大小变化时自动重新编译。
-- 每次 RPC 调用创建新的 Wasm 实例，避免跨请求共享线性内存状态。
+- Process Worker 会按扩展维度常驻并在异常退出后自动重启。
+- 每次 Wasm RPC 调用创建新的 Wasm 实例，避免跨请求共享线性内存状态。
 
 ## Worker ABI
 
@@ -100,7 +101,7 @@ schedule_actions = [
 
 如果 Worker 返回普通 JSON，宿主会把它包装为 `ok=true` 的 `data`。
 
-内置 `memory` 与 `workflow` 都提供 `ennoia.worker` Worker crate。执行 `bun run build:workers` 会构建两个 release Wasm，并写入 manifest 中声明的 `worker/memory.wasm` 与 `worker/workflow.wasm`。
+内置 `conversation` 与 `memory` 当前都采用 `jsonrpc-stdio` process Worker；内置 `workflow` 仍提供 `ennoia.worker` Wasm Worker。执行 `bun run build:workers` 会构建两个 release 进程 Worker 和一个 release Wasm Worker，并复制到各自 manifest 声明的位置。
 
 ## 沙箱与权限
 

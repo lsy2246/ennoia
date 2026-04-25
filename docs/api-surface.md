@@ -100,16 +100,27 @@ Conversation API 是稳定产品入口，实际由以下接口键解析到扩展
 - `message.append_user`
 - `message.append_agent`
 
-## Memory Capability
+## Memory
 
-- `GET /api/memories`
-- `GET /api/memories/active`
-- `GET /api/memories/{memory_id}/status`
-- `ANY /api/memory/{memory_id}/{*path}`
-- `ANY /api/memory/active/{*path}`
+- `GET /api/memory/workspace`
+- `GET /api/memory/memories`
+- `GET /api/memory/episodes`
+- `POST /api/memory/remember`
+- `POST /api/memory/recall`
+- `POST /api/memory/review`
+- `POST /api/memory/assemble-context`
 
-Memory 能力通过扩展 Worker RPC 分发。Memory 扩展拥有自己的私有存储；核心不再提供内置 Journal 存储。
-`/api/memory/active/*` 仅在当前只有一个启用的 Memory 实现时自动选择；存在多个实现时调用方应使用显式 `{memory_id}` 或稳定接口绑定。
+Memory API 是稳定产品入口，实际由以下接口键解析到扩展 Worker：
+
+- `memory.workspace`
+- `memory.list`
+- `memory.episodes_list`
+- `memory.remember`
+- `memory.recall`
+- `memory.review`
+- `memory.assemble_context`
+
+会话事件先由宿主写入系统事件总线，再异步投递给 `memory` 扩展；Memory 扩展只维护自己的私有数据库，不再暴露兼容代理式 `memory/active/*` 路径。
 
 ### Conversation 约定
 

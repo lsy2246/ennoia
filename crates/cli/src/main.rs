@@ -884,14 +884,6 @@ fn ensure_port_available(port: u16, label: &str) -> io::Result<()> {
 }
 
 fn ensure_builtin_process_workers(repo_root: &Path) -> io::Result<()> {
-    let conversation_root = repo_root
-        .join("builtins")
-        .join("extensions")
-        .join("conversation");
-    if !conversation_root.join("extension.toml").exists() {
-        return Ok(());
-    }
-
     let cargo = env::var_os("CARGO").unwrap_or_else(|| {
         if cfg!(windows) {
             "cargo.exe".into()
@@ -903,46 +895,82 @@ fn ensure_builtin_process_workers(repo_root: &Path) -> io::Result<()> {
         .arg("build")
         .arg("-p")
         .arg("ennoia-conversation-service")
+        .arg("-p")
+        .arg("ennoia-memory")
         .current_dir(repo_root)
         .status()?;
     if !status.success() {
-        return Err(io::Error::other(
-            "failed to build builtin conversation process worker",
-        ));
+        return Err(io::Error::other("failed to build builtin process workers"));
     }
 
-    let built_binary = repo_root
-        .join("target")
-        .join("debug")
-        .join(if cfg!(windows) {
-            "ennoia-conversation-service.exe"
-        } else {
-            "ennoia-conversation-service"
-        });
-    if !built_binary.exists() {
-        return Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            format!(
-                "conversation process worker not found at {}",
-                built_binary.display()
-            ),
-        ));
+    let conversation_root = repo_root
+        .join("builtins")
+        .join("extensions")
+        .join("conversation");
+    if conversation_root.join("extension.toml").exists() {
+        let built_binary = repo_root
+            .join("target")
+            .join("debug")
+            .join(if cfg!(windows) {
+                "ennoia-conversation-service.exe"
+            } else {
+                "ennoia-conversation-service"
+            });
+        if !built_binary.exists() {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!(
+                    "conversation process worker not found at {}",
+                    built_binary.display()
+                ),
+            ));
+        }
+
+        let destination = conversation_root
+            .join("bin")
+            .join(conversation_service_name());
+        copy_builtin_process_worker(&built_binary, &destination)?;
     }
 
-    let destination = conversation_root
-        .join("bin")
-        .join(conversation_service_name());
+    let memory_root = repo_root.join("builtins").join("extensions").join("memory");
+    if memory_root.join("extension.toml").exists() {
+        let built_binary = repo_root
+            .join("target")
+            .join("debug")
+            .join(if cfg!(windows) {
+                "ennoia-memory-extension.exe"
+            } else {
+                "ennoia-memory-extension"
+            });
+        if !built_binary.exists() {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!(
+                    "memory process worker not found at {}",
+                    built_binary.display()
+                ),
+            ));
+        }
+
+        let destination = memory_root.join("bin").join(memory_service_name());
+        copy_builtin_process_worker(&built_binary, &destination)?;
+    }
+
+    Ok(())
+}
+
+fn copy_builtin_process_worker(source: &Path, destination: &Path) -> io::Result<()> {
     if let Some(parent) = destination.parent() {
         fs::create_dir_all(parent)?;
     }
-    fs::copy(&built_binary, &destination)?;
+    fs::copy(source, destination)?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
 
-        let mut permissions = fs::metadata(&destination)?.permissions();
+        let mut permissions = fs::metadata(destination)?.permissions();
         permissions.set_mode(0o755);
-        fs::set_permissions(&destination, permissions)?;
+        fs::set_permissions(destination, permissions)?;
     }
     Ok(())
 }
@@ -952,6 +980,14 @@ fn conversation_service_name() -> &'static str {
         "conversation-service.exe"
     } else {
         "conversation-service"
+    }
+}
+
+fn memory_service_name() -> &'static str {
+    if cfg!(windows) {
+        "memory-service.exe"
+    } else {
+        "memory-service"
     }
 }
 

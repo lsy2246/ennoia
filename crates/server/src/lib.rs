@@ -1,6 +1,7 @@
 //! Server exposes Ennoia over HTTP and hosts the extension runtime.
 
 pub mod app;
+pub mod event_bus;
 pub mod middleware;
 pub mod routes;
 pub mod system_log;

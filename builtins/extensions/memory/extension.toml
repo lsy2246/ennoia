@@ -13,9 +13,9 @@ runtime = "browser-esm"
 hmr = true
 
 [worker]
-kind = "wasm"
-entry = "worker/memory.wasm"
-abi = "ennoia.worker"
+kind = "process"
+entry = "bin/memory-service"
+protocol = "jsonrpc-stdio"
 
 [build]
 ui_bundle = "ui/dist/entry.js"
@@ -31,7 +31,8 @@ locales_dir = "ui/locales"
 [capabilities]
 pages = true
 locales = true
-memories = true
+hooks = true
+interfaces = true
 
 [contributes]
 pages = [{ id = "memory.page", title = { key = "ext.memory.page", fallback = "记忆" }, route = "/memory", mount = "memory.page", icon = "memory", nav = { default_pinned = true, order = 30 } }]
@@ -39,6 +40,17 @@ locales = [
   { locale = "zh-CN", namespace = "ext.memory", entry = "ui/locales/zh-CN.json", version = "1" },
   { locale = "en-US", namespace = "ext.memory", entry = "ui/locales/en-US.json", version = "1" },
 ]
-memories = [
-  { id = "memory", extension_id = "memory", interfaces = ["workspace", "conversations", "messages", "lanes", "handoffs", "truth", "context", "review", "graph"], entry = "memory", version = "1" }
+hooks = [
+  { event = "conversation.created", handler = "hooks/conversation/created" },
+  { event = "conversation.message.created", handler = "hooks/conversation/message/created" },
+  { event = "conversation.deleted", handler = "hooks/conversation/deleted" }
+]
+interfaces = [
+  { key = "memory.workspace", method = "memory/workspace", version = "1" },
+  { key = "memory.list", method = "memory/memories/list", version = "1" },
+  { key = "memory.episodes_list", method = "memory/episodes/list", version = "1" },
+  { key = "memory.remember", method = "memory/memories/remember", version = "1" },
+  { key = "memory.recall", method = "memory/memories/recall", version = "1" },
+  { key = "memory.review", method = "memory/memories/review", version = "1" },
+  { key = "memory.assemble_context", method = "memory/context/assemble", version = "1" }
 ]
