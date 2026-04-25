@@ -26,12 +26,26 @@ pub async fn run_behavior(
     runtime: &WorkflowRuntime,
     payload: BehaviorRunRequest,
 ) -> Result<BehaviorRunResponse, String> {
+    let requested_model_id = payload_string_field(&payload.metadata, "model_id");
+    let requested_max_turns = payload_u32_field(&payload.metadata, "max_turns");
     let mut context = payload.context.clone();
     context.push(ContextLayer::Core, format!("goal={}", payload.goal));
     if !payload.participants.is_empty() {
         context.push(
             ContextLayer::Execution,
             format!("participants={}", payload.participants.join(",")),
+        );
+    }
+    if let Some(model_id) = requested_model_id.as_deref() {
+        context.push(
+            ContextLayer::Execution,
+            format!("requested_model_id={model_id}"),
+        );
+    }
+    if let Some(max_turns) = requested_max_turns {
+        context.push(
+            ContextLayer::Execution,
+            format!("requested_max_turns={max_turns}"),
         );
     }
 
@@ -55,6 +69,8 @@ pub async fn run_behavior(
         lane_id: lane_id.clone(),
         trigger: payload.trigger.clone(),
         goal: payload.goal.clone(),
+        requested_model_id: requested_model_id.clone(),
+        requested_max_turns,
         participants: payload.participants.clone(),
         addressed_agents: payload.addressed_agents.clone(),
     };
@@ -86,6 +102,10 @@ pub async fn run_behavior(
         &plan.run,
         &payload.owner,
         &payload.goal,
+        &payload.addressed_agents,
+        requested_model_id.as_deref(),
+        requested_max_turns,
+        &payload.metadata,
     );
     let handoffs = Vec::<HandoffSpec>::new();
     runtime
@@ -110,6 +130,10 @@ pub fn persist_run_artifact(
     run: &RunSpec,
     owner: &OwnerRef,
     goal: &str,
+    addressed_agents: &[String],
+    requested_model_id: Option<&str>,
+    requested_max_turns: Option<u32>,
+    metadata: &serde_json::Value,
 ) -> ArtifactSpec {
     let owner_root = runtime_paths.owner_run_artifact_dir(owner, &run.id);
     let _ = fs::create_dir_all(&owner_root);
@@ -122,7 +146,11 @@ pub fn persist_run_artifact(
             "conversation_id": run.conversation_id,
             "lane_id": run.lane_id,
             "owner": owner,
-            "goal": goal
+            "goal": goal,
+            "addressed_agents": addressed_agents,
+            "requested_model_id": requested_model_id,
+            "requested_max_turns": requested_max_turns,
+            "metadata": metadata,
         }))
         .unwrap_or_default(),
     );
@@ -141,6 +169,23 @@ pub fn persist_run_artifact(
 
 fn now_iso() -> String {
     chrono::Utc::now().to_rfc3339()
+}
+
+fn payload_string_field(value: &serde_json::Value, key: &str) -> Option<String> {
+    value
+        .get(key)
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn payload_u32_field(value: &serde_json::Value, key: &str) -> Option<u32> {
+    value
+        .get(key)
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|item| u32::try_from(item).ok())
+        .map(|item| item.clamp(1, 128))
 }
 
 fn load_agent_configs(

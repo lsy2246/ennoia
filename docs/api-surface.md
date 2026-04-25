@@ -145,24 +145,49 @@ Memory 能力通过扩展 Worker RPC 分发。Memory 扩展拥有自己的私有
 - `POST /api/schedules/{schedule_id}/pause`
 - `POST /api/schedules/{schedule_id}/resume`
 
-Scheduler 只保存计划并触发目标。当前触发器支持 `once`、`interval` 和带外部 `next_run_at` 的 `cron`。
+`GET /api/schedule-actions` 仍保留给扩展声明定时模板；定时器主模型不再依赖它。
 
-目标支持两种：
+Scheduler 只保存计划并触发执行器。当前触发器支持 `once`、`interval` 和带外部 `next_run_at` 的 `cron`。
 
-- `extension`：调用扩展声明的 `schedule_actions`，适合把定时任务交给 AI / Workflow 执行。
+执行模型包括：
+
 - `command`：直接在本机 shell 中运行命令，适合脚本和本地自动化。
+- `agent`：触发一个指定 Agent 的编排运行；可选通过 `agent.context.conversation_id` 指定运行参考会话，不指定时独立运行。
+- `delivery.conversation_id`：可选；把结果作为系统消息投递到某个会话。
+- `delivery.lane_id`：可选；在目标会话里进一步投递到指定 lane。
+- `delivery.content_mode`：可选；控制投递完整结果、摘要或最终结论。
+- `retry`：控制失败重试次数和重试间隔。
+- `history`：保留最近运行记录，包括状态、错误和投递结果。
 
-`command` target 示例：
+`command` 定时器示例：
 
 ```json
 {
-  "target": {
-    "kind": "command",
-    "command": {
-      "command": "bun run --cwd web build",
-      "cwd": "C:/Users/Administrator/Desktop/code/ennoia",
-      "timeout_ms": 120000
+  "name": "前端构建",
+  "trigger": {
+    "kind": "interval",
+    "every_seconds": 3600
+  },
+  "executor": {
+    "kind": "agent",
+    "agent": {
+      "agent_id": "operator",
+      "prompt": "整理今天的待办并产出晨会提醒",
+      "model_id": "gpt-5.5",
+      "max_turns": 6,
+      "context": {
+        "conversation_id": "conv-daily"
+      }
     }
+  },
+  "delivery": {
+    "conversation_id": "conv-123",
+    "lane_id": "lane-default",
+    "content_mode": "summary"
+  },
+  "retry": {
+    "max_attempts": 2,
+    "backoff_seconds": 30
   }
 }
 ```

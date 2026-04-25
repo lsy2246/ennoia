@@ -15,6 +15,10 @@ pub struct RunRequest {
     pub trigger: BehaviorTrigger,
     pub goal: String,
     #[serde(default)]
+    pub requested_model_id: Option<String>,
+    #[serde(default)]
+    pub requested_max_turns: Option<u32>,
+    #[serde(default)]
     pub participants: Vec<String>,
     pub addressed_agents: Vec<String>,
 }

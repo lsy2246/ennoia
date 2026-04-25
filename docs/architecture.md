@@ -51,13 +51,14 @@ Web
 
 ## 运行与定时边界
 
-- `workflow` 是一个内置扩展实现，声明 run/task/artifact 接口和 `workflow.run` 定时动作。
+- `workflow` 是一个内置扩展实现，声明 run/task/artifact 接口，并承接定时器里的 Agent 执行。
 - `/api/runs`、`/api/runs/{id}/tasks`、`/api/conversations/{id}/runs` 等稳定入口通过接口层路由到扩展。
-- 系统 scheduler 只负责保存计划、计算到期、串行触发和记录最近一次执行状态。
-- 定时目标支持两类：
-  - `extension`：调用扩展的 `contributes.schedule_actions`，用于“交给 AI / Workflow 执行”。
+- 系统 scheduler 只负责保存计划、计算到期、串行触发、失败重试和记录最近运行历史。
+- 定时器支持两类执行方式：
   - `command`：直接在本机 shell 中运行命令，用于脚本和本地自动化。
-- `command` 目标支持 `command`、`cwd`、`timeout_ms`，并记录 stdout / stderr 摘要；业务风险由本机操作者自行控制。
+  - `agent`：触发指定 Agent 的编排运行，底层通过 `run.create` 进入工作流扩展；可独立运行，也可指定某个会话作为运行参考上下文，且与结果投递分开配置。
+- 定时器支持可选 `delivery.conversation_id`、`delivery.lane_id` 和 `delivery.content_mode`，可以把完整结果、摘要或最终结论投递到某个会话的指定 lane。
+- `command` 执行器支持 `command`、`cwd`、`timeout_ms`，并记录 stdout / stderr 摘要；业务风险由本机操作者自行控制。
 - 当前定时入口包括：
   - `GET /api/schedule-actions`
   - `GET /api/schedules`

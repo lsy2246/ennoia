@@ -35,25 +35,33 @@
 `ScheduleRecord` 字段：
 
 - `id`
+- `name`
+- `description`
 - `owner`
 - `trigger`
-- `target`
-- `params`
+- `executor`
+- `delivery`
+- `retry`
 - `enabled`
 - `next_run_at`
 - `last_run_at`
 - `last_status`
 - `last_error`
+- `last_output`
+- `history`
 - `created_at`
 - `updated_at`
 
 约定：
 
-- `target.extension_id` 和 `target.action_id` 指向扩展声明的 `schedule_actions`。
-- `target.kind = "extension"` 时，scheduler 调用扩展 Wasm Worker。
-- `target.kind = "command"` 时，scheduler 直接运行本机 shell 命令，字段为 `command.command`、`command.cwd`、`command.timeout_ms`。
-- `params` 原样传给扩展 Worker，业务含义由扩展定义。
-- Scheduler 只负责计划与触发，不解释业务语义。
+- `executor.kind = "command"` 时，scheduler 直接运行本机 shell 命令，字段为 `command.command`、`command.cwd`、`command.timeout_ms`。
+- `executor.kind = "agent"` 时，scheduler 触发指定 Agent 的编排运行，字段为 `agent.agent_id`、`agent.prompt`、`agent.model_id`、`agent.max_turns`，可选 `agent.context.conversation_id` 作为运行参考上下文；未指定时独立运行。
+- `delivery.conversation_id` 可选；存在时，scheduler 会把结果作为系统消息投递到对应会话。
+- `delivery.lane_id` 可选；存在时，scheduler 会把结果投递到会话内指定 lane。
+- `delivery.content_mode` 可选；支持 `full`、`summary`、`conclusion`。
+- `retry` 控制失败重试次数和间隔。
+- `history` 保存最近运行记录，包含状态、错误、输出与投递结果。
+- Scheduler 只负责计划、触发、重试与记录，不解释业务语义。
 
 ## Conversation 接口域
 

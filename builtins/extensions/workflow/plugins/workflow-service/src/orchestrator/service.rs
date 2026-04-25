@@ -74,7 +74,7 @@ impl OrchestratorService {
                 conversation_id: request.conversation_id.clone(),
                 lane_id: request.lane_id.clone(),
                 task_kind,
-                title: format!("{} · {}", request.goal, agent_id),
+                title: task_title(&request, agent_id),
                 assigned_agent_id: agent_id.clone(),
                 status: TaskStatus::Pending,
                 created_at: now.clone(),
@@ -165,6 +165,21 @@ fn build_signals(
         evidence,
         execution,
     }
+}
+
+fn task_title(request: &RunRequest, agent_id: &str) -> String {
+    let mut title = format!("{} · {}", request.goal, agent_id);
+    if let Some(model_id) = request
+        .requested_model_id
+        .as_deref()
+        .filter(|item| !item.trim().is_empty())
+    {
+        title.push_str(&format!(" · model={model_id}"));
+    }
+    if let Some(max_turns) = request.requested_max_turns {
+        title.push_str(&format!(" · max_turns={max_turns}"));
+    }
+    title
 }
 
 fn to_gate_record(run_id: &str, verdict: &GateVerdict, at: &str) -> GateRecord {

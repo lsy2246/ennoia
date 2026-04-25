@@ -35,7 +35,7 @@
 ├─ skills/                     # 技能安装内容根目录
 ├─ data/
 │  ├─ system/
-│  │  ├─ schedules.json        # 系统 scheduler 的计划记录
+│  │  ├─ schedules.json        # 系统 scheduler 的定时器记录
 │  │  └─ sqlite/
 │  │     └─ system-log.db      # 系统日志 SQLite
 │  └─ extensions/              # 扩展私有运行数据，例如 memory / workflow 的 sqlite
@@ -59,7 +59,7 @@
 ## 数据职责
 
 - `data/system/sqlite/system-log.db`：系统日志库，只记录系统组件观测事件，不记录会话 history。
-- `data/system/schedules.json`：scheduler 计划列表，记录 trigger、target、params、启用状态和最近执行结果；target 可以是扩展动作或本机命令。
+- `data/system/schedules.json`：scheduler 定时器列表，记录 trigger、executor、delivery、retry、启用状态、最近执行结果和最近运行历史；executor 可以是命令或 Agent。
 - `data/extensions/{extension_id}/`：扩展私有运行数据根目录。
   - 扩展私有配置、数据库、缓存和业务运行态都应保留在自己的扩展目录内，不再上浮到 `config/` 根目录。
   - `conversation` 扩展在自己的目录中维护会话、线路和消息数据。

@@ -8,10 +8,10 @@
 - Agents：维护协作者档案、上游渠道、模型、技能和启用状态。
 - 技能：Agent 可引用的能力包，和扩展严格分离。
 - API 上游渠道：Agent 绑定的具体模型访问实例。
-- 扩展：系统插件包，可贡献页面、面板、主题、语言、命令、Hook、接口实现和定时动作。
+- 扩展：系统插件包，可贡献页面、面板、主题、语言、命令、Hook、接口实现和定时模板。
 - 会话：系统保留稳定 `/api/conversations` 入口，实际读写由 `conversation.*`、`message.*`、`lane.*` 等接口绑定到内置 `conversation` 扩展。
 - 记忆：以内置 `memory` 扩展形式提供记忆、上下文、审查和图谱能力；核心不再内置 `journal`。
-- 编排：以内置 `workflow` 扩展承载 run、task、artifact 与定时执行动作。
+- 编排：以内置 `workflow` 扩展承载 run、task、artifact；定时器里的 Agent 执行通过编排接口落地。
 - 日志：聚合前端日志和扩展运行事件。
 - 设置：通过表单直接编辑 `app/server` 文件配置、`config/profile.toml` 和 `config/preferences/*.toml`。
 
@@ -33,7 +33,7 @@
 - `web/packages/api-client`：前端统一 API 访问层
 - `builtins/extensions/conversation`：内置会话扩展，声明会话、线路与消息接口
 - `builtins/extensions/memory`：内置记忆扩展，声明记忆、上下文、审查与图谱接口
-- `builtins/extensions/workflow`：内置编排扩展，声明 run/task/artifact 接口与 `workflow.run` 定时动作
+- `builtins/extensions/workflow`：内置编排扩展，声明 run/task/artifact 接口
 
 ## 内置能力源码
 
@@ -46,7 +46,7 @@
 
 - 核心系统配置只走 `~/.ennoia/config/*.toml`。
 - 系统接口绑定写入 `~/.ennoia/config/interfaces.toml`；未显式绑定且只有一个实现时自动选中。
-- 系统定时计划写入 `~/.ennoia/data/system/schedules.json`，到期后由宿主调用扩展 Wasm Worker 的 `schedule_actions`。
+- 系统定时计划写入 `~/.ennoia/data/system/schedules.json`，到期后由宿主运行命令或触发 Agent，并可把完整结果、摘要或最终结论投递到会话 / lane。
 - 核心日志写入 `~/.ennoia/logs/`。
 - 扩展私有数据写入 `~/.ennoia/data/extensions/{extension_id}/`。
 - 核心不提供主业务 SQLite，不内建语义记忆、编排、任务或产物索引表。

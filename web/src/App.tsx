@@ -114,7 +114,7 @@ const BUILTIN_NAV = [
   { id: "conversations", href: "/conversations", icon: "⌘", labelKey: "web.nav.conversations", fallback: "会话", hintKey: "web.nav.conversations_hint", hint: "统一发起 direct 和 group conversation" },
   { id: "agents", href: "/agents", icon: "A", labelKey: "web.nav.agents", fallback: "Agents", hintKey: "web.nav.agents_hint", hint: "多开 Agent 编辑视图" },
   { id: "skills", href: "/skills", icon: "S", labelKey: "web.nav.skills", fallback: "技能", hintKey: "web.nav.skills_hint", hint: "发现并分配技能给 Agent" },
-  { id: "schedules", href: "/schedules", icon: "T", labelKey: "web.nav.schedules", fallback: "定时器", hintKey: "web.nav.schedules_hint", hint: "管理定时触发的扩展动作" },
+  { id: "schedules", href: "/schedules", icon: "T", labelKey: "web.nav.schedules", fallback: "定时器", hintKey: "web.nav.schedules_hint", hint: "管理定时触发的命令、Agent 与会话投递" },
   { id: "extensions", href: "/extensions", icon: "E", labelKey: "web.nav.extensions", fallback: "扩展", hintKey: "web.nav.extensions_hint", hint: "系统插件与贡献能力" },
   { id: "logs", href: "/logs", icon: "L", labelKey: "web.nav.logs", fallback: "日志", hintKey: "web.nav.logs_hint", hint: "统一观测台" },
   { id: "settings", href: "/settings", icon: "⚙", labelKey: "web.nav.settings", fallback: "设置", hintKey: "web.nav.settings_hint", hint: "运行时配置表单" },

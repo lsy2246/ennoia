@@ -378,43 +378,79 @@ export type ScheduleTrigger =
   | { kind: "interval"; every_seconds: number }
   | { kind: "cron"; expression: string; next_run_at: string };
 
-export type ExtensionScheduleTarget = {
-  kind?: "extension";
-  extension_id: string;
-  action_id: string;
+export type ScheduleExecutor =
+  | {
+      kind: "command";
+      command: {
+        command: string;
+        cwd?: string | null;
+        timeout_ms?: number | null;
+      };
+    }
+  | {
+      kind: "agent";
+      agent: {
+        agent_id: string;
+        prompt: string;
+        model_id?: string | null;
+        max_turns?: number | null;
+        context?: {
+          conversation_id?: string | null;
+        };
+      };
+    };
+
+export type ScheduleDelivery = {
+  conversation_id?: string | null;
+  lane_id?: string | null;
+  content_mode?: "full" | "summary" | "conclusion" | null;
 };
 
-export type CommandScheduleTarget = {
-  kind: "command";
-  command: {
-    command: string;
-    cwd?: string | null;
-    timeout_ms?: number | null;
-  };
+export type ScheduleRetryPolicy = {
+  max_attempts?: number;
+  backoff_seconds?: number;
 };
 
-export type ScheduleTarget = ExtensionScheduleTarget | CommandScheduleTarget;
+export type ScheduleRunRecord = {
+  id: string;
+  started_at: string;
+  finished_at: string;
+  attempt: number;
+  status: string;
+  error?: string | null;
+  delivered?: boolean;
+  delivery_error?: string | null;
+  output?: unknown;
+};
 
 export type ScheduleRecord = {
   id: string;
+  name?: string | null;
+  description?: string | null;
   owner: unknown;
   trigger: ScheduleTrigger;
-  target: ScheduleTarget;
-  params: unknown;
+  executor: ScheduleExecutor;
+  delivery?: ScheduleDelivery;
+  retry?: ScheduleRetryPolicy;
   enabled: boolean;
   next_run_at?: string | null;
   last_run_at?: string | null;
   last_status?: string | null;
   last_error?: string | null;
+  last_output?: unknown;
+  history?: ScheduleRunRecord[];
   created_at: string;
   updated_at: string;
 };
 
 export type SchedulePayload = {
+  name?: string | null;
+  description?: string | null;
   owner?: unknown;
   trigger: ScheduleTrigger;
-  target: ScheduleTarget;
-  params?: unknown;
+  executor: ScheduleExecutor;
+  delivery?: ScheduleDelivery;
+  retry?: ScheduleRetryPolicy;
   enabled?: boolean;
 };
 

@@ -85,3 +85,7 @@ export async function sendChatMessage(
     body: JSON.stringify(payload),
   });
 }
+
+export async function listChatLanes(chatId: string) {
+  return fetchJson<ChatLane[]>(`${CONVERSATIONS_API}/${chatId}/lanes`);
+}
