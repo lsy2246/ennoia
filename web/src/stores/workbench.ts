@@ -7,7 +7,11 @@ export type WorkbenchViewDescriptor = {
   kind: WorkbenchViewKind;
   entityId: string;
   title: string;
+  titleKey?: string;
+  titleFallback?: string;
   subtitle?: string;
+  subtitleKey?: string;
+  subtitleFallback?: string;
   openedAt: number;
 };
 
@@ -42,6 +46,7 @@ type WorkbenchState = {
   closeView: (panelId: string) => void;
   restoreView: (panelId: string) => void;
   markClosed: (panelId: string) => void;
+  updateViewDescriptor: (panelId: string, patch: Partial<WorkbenchViewDescriptor>) => void;
   resetLayout: () => void;
 };
 
@@ -87,12 +92,12 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
       panelId,
       openedAt: Date.now(),
     };
-
     state.api.addPanel({
       id: panelId,
       title: descriptor.title,
       component: "resource",
       params: {
+        panelKind: "resource",
         descriptor: view,
       },
       position: {
@@ -100,6 +105,11 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
         direction: options?.placement ?? "right",
       },
     });
+
+    const openedPanel = state.api.getPanel?.(panelId);
+    if (openedPanel) {
+      state.api.setActivePanel?.(openedPanel);
+    }
 
     set({
       openViews: [...state.openViews, view],
@@ -132,7 +142,11 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
       kind: view.kind,
       entityId: view.entityId,
       title: view.title,
+      titleKey: view.titleKey,
+      titleFallback: view.titleFallback,
       subtitle: view.subtitle,
+      subtitleKey: view.subtitleKey,
+      subtitleFallback: view.subtitleFallback,
     });
   },
 
@@ -145,6 +159,13 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
         ? [removed, ...state.recentViews.filter((item) => item.panelId !== panelId)].slice(0, 16)
         : state.recentViews,
     });
+  },
+
+  updateViewDescriptor(panelId, patch) {
+    set((state) => ({
+      openViews: state.openViews.map((item) => item.panelId === panelId ? { ...item, ...patch } : item),
+      recentViews: state.recentViews.map((item) => item.panelId === panelId ? { ...item, ...patch } : item),
+    }));
   },
 
   resetLayout() {

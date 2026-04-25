@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect, useRef } from "react";
+import { useCallback, useMemo, useState, useEffect, useRef } from "react";
 import {
   DockviewDefaultTab,
   DockviewReact,
@@ -34,10 +34,12 @@ import { Skills } from "@/pages/skills";
 import { ExtensionPageView } from "@/views/extensions/Page";
 
 type ResourcePanelParams = {
+  panelKind?: "resource";
   descriptor: WorkbenchViewDescriptor;
 };
 
 type RoutePanelParams = {
+  panelKind?: "route";
   routeId: string;
   href: string;
   label: string;
@@ -53,6 +55,25 @@ type LocalWorkbenchPreferences = {
 
 const LOCAL_WORKBENCH_PREFERENCES_KEY = "ennoia.web.workbench.v2";
 const WORKBENCH_EMPTY_PRIMARY_IDS = ["conversations", "agents", "skills", "settings"] as const;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isRoutePanelParams(value: unknown): value is RoutePanelParams {
+  return isRecord(value)
+    && typeof value.routeId === "string"
+    && typeof value.href === "string"
+    && (value.source === "builtin" || value.source === "extension");
+}
+
+function isResourcePanelParams(value: unknown): value is ResourcePanelParams {
+  return isRecord(value)
+    && isRecord(value.descriptor)
+    && typeof value.descriptor.kind === "string"
+    && typeof value.descriptor.entityId === "string"
+    && typeof value.descriptor.title === "string";
+}
 
 function readWorkbenchPreferences(): LocalWorkbenchPreferences {
   if (typeof window === "undefined") {
@@ -192,13 +213,13 @@ function ResourceViewPanel(props: IDockviewPanelProps<ResourcePanelParams>) {
     case "api-channel":
       return (
         <div className="resource-panel">
-          <ApiChannelEditorView channelId={descriptor.entityId} />
+          <ApiChannelEditorView channelId={descriptor.entityId} panelId={descriptor.panelId} />
         </div>
       );
     case "session":
       return (
         <div className="resource-panel">
-          <SessionView sessionId={descriptor.entityId} />
+          <SessionView sessionId={descriptor.entityId} panelId={descriptor.panelId} />
         </div>
       );
     default:
@@ -326,7 +347,9 @@ function WorkbenchTab(props: any) {
 export function App() {
   const { describeAppliedTheme, resolveText, runtime, t } = useUiHelpers();
   const uiState = useUiStore();
+  const workbenchApi = useWorkbenchStore((state) => state.api);
   const registerApi = useWorkbenchStore((state) => state.registerApi);
+  const updateViewDescriptor = useWorkbenchStore((state) => state.updateViewDescriptor);
   const initialWorkbenchPreferences = useMemo(() => readWorkbenchPreferences(), []);
   const isMobileViewport = useIsMobileViewport();
   const dockThemeClass = describeAppliedTheme(uiState.themeId).appearance === "light"
@@ -378,6 +401,58 @@ export function App() {
       .sort((left, right) => (order.get(left.id) ?? 0) - (order.get(right.id) ?? 0));
   }, [navItems]);
 
+  const resolveRouteLabel = useCallback((params: Pick<RoutePanelParams, "routeId" | "href" | "source" | "label">) => {
+    return navItems.find((item) =>
+      item.id === params.routeId
+      && item.href === params.href
+      && item.source === params.source,
+    )?.label
+      ?? navItems.find((item) => item.id === params.routeId && item.source === params.source)?.label
+      ?? navItems.find((item) => item.href === params.href)?.label
+      ?? params.label;
+  }, [navItems]);
+
+  const resolveDescriptorTitle = useCallback((descriptor: WorkbenchViewDescriptor) => {
+    return descriptor.titleKey
+      ? t(descriptor.titleKey, descriptor.titleFallback ?? descriptor.title)
+      : descriptor.title;
+  }, [t]);
+
+  const resolveDescriptorSubtitle = useCallback((descriptor: WorkbenchViewDescriptor) => {
+    if (!descriptor.subtitleKey) {
+      return descriptor.subtitle;
+    }
+    return t(descriptor.subtitleKey, descriptor.subtitleFallback ?? descriptor.subtitle ?? "");
+  }, [t]);
+
+  const normalizeDescriptorLocalization = useCallback((descriptor: WorkbenchViewDescriptor) => {
+    if (descriptor.titleKey) {
+      return descriptor;
+    }
+
+    if (descriptor.kind === "agent" && descriptor.entityId.startsWith("new-")) {
+      return {
+        ...descriptor,
+        titleKey: "web.agents.new",
+        titleFallback: "新建 Agent",
+        subtitleKey: descriptor.subtitle ? "web.agents.edit" : descriptor.subtitleKey,
+        subtitleFallback: descriptor.subtitle ? "编辑 Agent" : descriptor.subtitleFallback,
+      };
+    }
+
+    if (descriptor.kind === "api-channel" && descriptor.entityId.startsWith("new-")) {
+      return {
+        ...descriptor,
+        titleKey: "web.channels.new",
+        titleFallback: "新建渠道",
+        subtitleKey: descriptor.subtitle ? "web.channels.edit" : descriptor.subtitleKey,
+        subtitleFallback: descriptor.subtitle ? "编辑 API 上游渠道" : descriptor.subtitleFallback,
+      };
+    }
+
+    return descriptor;
+  }, []);
+
   const dockComponents = useMemo(
     () => ({
       inspector: RuntimeInspectorPanel,
@@ -413,52 +488,52 @@ export function App() {
     } as const;
   };
 
-  const openRoutePanel = (payload: NavItem, options?: { panelPosition?: ReturnType<typeof buildPanelPosition> }) => {
+  const openRoutePanel = useCallback((payload: NavItem, options?: { panelPosition?: ReturnType<typeof buildPanelPosition> }) => {
     if (isMobileViewport) {
       setActiveNavId(payload.id);
       return;
     }
 
-    const currentApi = useWorkbenchStore.getState().api;
-    if (!currentApi) {
+    if (!workbenchApi) {
       return;
     }
 
     if (!options?.panelPosition) {
-      const activePanel = currentApi.activePanel as IDockviewPanel | undefined;
-      const activePanelParams = activePanel?.params as RoutePanelParams | undefined;
-      if (activePanel && activePanelParams) {
+      const activePanel = workbenchApi.activePanel as IDockviewPanel | undefined;
+      if (activePanel && isRoutePanelParams(activePanel.params)) {
         activePanel.api.setTitle(payload.label);
         activePanel.update({
           params: {
+            panelKind: "route",
             routeId: payload.id,
             href: payload.href,
             label: payload.label,
             source: payload.source,
-          },
+          } satisfies RoutePanelParams,
         });
         setActiveNavId(payload.id);
         return;
       }
     }
 
-    currentApi.addPanel({
+    workbenchApi.addPanel({
       id: `route:${payload.source}:${payload.id}:${Date.now().toString(36)}`,
       title: payload.label,
       component: "route",
       params: {
+        panelKind: "route",
         routeId: payload.id,
         href: payload.href,
         label: payload.label,
         source: payload.source,
-      },
+      } satisfies RoutePanelParams,
       position: options?.panelPosition,
     });
     setHasDesktopViews(true);
     setActiveNavId(payload.id);
-  };
+  }, [isMobileViewport, workbenchApi]);
 
-  const scheduleOpenRoutePanel = (payload: NavItem, options?: { panelPosition?: ReturnType<typeof buildPanelPosition> }) => {
+  const scheduleOpenRoutePanel = useCallback((payload: NavItem, options?: { panelPosition?: ReturnType<typeof buildPanelPosition> }) => {
     if (typeof window === "undefined") {
       openRoutePanel(payload, options);
       return;
@@ -472,7 +547,7 @@ export function App() {
       pendingDropOpenRef.current = null;
       openRoutePanel(payload, options);
     }, 0);
-  };
+  }, [openRoutePanel]);
 
   const openDraggedRoutePanel = (event: DockviewDidDropEvent) => {
     const payload = resolveNavDragPayload(event.nativeEvent.dataTransfer);
@@ -483,16 +558,16 @@ export function App() {
     scheduleOpenRoutePanel(payload, { panelPosition: buildPanelPosition(event) });
   };
 
-  const persistWorkbenchPreferences = (layout?: unknown) => {
+  const persistWorkbenchPreferences = useCallback((layout?: unknown) => {
     writeWorkbenchPreferences({
       dockPosition: dockPositionRef.current,
       dockExpanded: dockExpandedRef.current,
       layout: layout === undefined ? readWorkbenchPreferences().layout : layout,
       mobileActiveNavId: isMobileViewport ? activeNavId : readWorkbenchPreferences().mobileActiveNavId,
     });
-  };
+  }, [activeNavId, isMobileViewport]);
 
-  const scheduleLayoutPersistence = (api: { toJSON?: () => unknown }) => {
+  const scheduleLayoutPersistence = useCallback((api: { toJSON?: () => unknown }) => {
     if (typeof window === "undefined") {
       try {
         persistWorkbenchPreferences(api.toJSON?.());
@@ -514,7 +589,81 @@ export function App() {
         persistWorkbenchPreferences();
       }
     }, 48);
-  };
+  }, [persistWorkbenchPreferences]);
+
+  const syncOpenPanelTitles = useCallback((api = workbenchApi) => {
+    if (!api?.panels || isMobileViewport) {
+      return;
+    }
+
+    let hasChanges = false;
+
+    for (const rawPanel of api.panels as IDockviewPanel[]) {
+      if (isRoutePanelParams(rawPanel.params)) {
+        const nextLabel = resolveRouteLabel(rawPanel.params);
+        rawPanel.api.setTitle(nextLabel);
+        if (rawPanel.params.label !== nextLabel || rawPanel.params.panelKind !== "route") {
+          rawPanel.update({
+            params: {
+              ...rawPanel.params,
+              panelKind: "route",
+              label: nextLabel,
+            } satisfies RoutePanelParams,
+          });
+          hasChanges = true;
+        }
+        continue;
+      }
+
+      if (!isResourcePanelParams(rawPanel.params)) {
+        continue;
+      }
+
+      const descriptor = normalizeDescriptorLocalization(rawPanel.params.descriptor);
+      const nextTitle = resolveDescriptorTitle(descriptor);
+      const nextSubtitle = resolveDescriptorSubtitle(descriptor);
+      rawPanel.api.setTitle(nextTitle);
+      if (
+        rawPanel.params.panelKind !== "resource"
+        || rawPanel.params.descriptor.titleKey !== descriptor.titleKey
+        || rawPanel.params.descriptor.titleFallback !== descriptor.titleFallback
+        || rawPanel.params.descriptor.subtitleKey !== descriptor.subtitleKey
+        || rawPanel.params.descriptor.subtitleFallback !== descriptor.subtitleFallback
+        || descriptor.title !== nextTitle
+        || descriptor.subtitle !== nextSubtitle
+      ) {
+        const nextDescriptor = {
+          ...descriptor,
+          title: nextTitle,
+          subtitle: nextSubtitle,
+        };
+        rawPanel.update({
+          params: {
+            panelKind: "resource",
+            descriptor: nextDescriptor,
+          } satisfies ResourcePanelParams,
+        });
+        updateViewDescriptor(rawPanel.id, {
+          title: nextTitle,
+          subtitle: nextSubtitle,
+        });
+        hasChanges = true;
+      }
+    }
+
+    if (hasChanges) {
+      scheduleLayoutPersistence(api);
+    }
+  }, [
+    isMobileViewport,
+    normalizeDescriptorLocalization,
+    resolveDescriptorSubtitle,
+    resolveDescriptorTitle,
+    resolveRouteLabel,
+    scheduleLayoutPersistence,
+    updateViewDescriptor,
+    workbenchApi,
+  ]);
 
   const watermarkComponent = useMemo(
     () =>
@@ -543,7 +692,7 @@ export function App() {
     dockPositionRef.current = dockPosition;
     dockExpandedRef.current = dockExpanded;
     persistWorkbenchPreferences();
-  }, [activeNavId, dockExpanded, dockPosition, isMobileViewport]);
+  }, [activeNavId, dockExpanded, dockPosition, isMobileViewport, persistWorkbenchPreferences]);
 
   useEffect(() => {
     if (!isMobileViewport) {
@@ -560,6 +709,10 @@ export function App() {
       setActiveNavId((current) => current ?? storedMobileActiveNavId);
     }
   }, [isMobileViewport, navItems]);
+
+  useEffect(() => {
+    syncOpenPanelTitles();
+  }, [syncOpenPanelTitles]);
 
   useEffect(() => () => {
     if (typeof window === "undefined") {
@@ -624,6 +777,7 @@ export function App() {
                 api={null as never}
                 containerApi={null as never}
                 params={{
+                  panelKind: "route",
                   routeId: activeNavItem.id,
                   href: activeNavItem.href,
                   label: activeNavItem.label,
@@ -662,8 +816,7 @@ export function App() {
                 scheduleLayoutPersistence(api);
               });
               api.onDidActivePanelChange?.((panel: IDockviewPanel | undefined) => {
-                const params = panel?.params as RoutePanelParams | undefined;
-                setActiveNavId(params?.routeId);
+                setActiveNavId(isRoutePanelParams(panel?.params) ? panel.params.routeId : undefined);
               });
               api.onUnhandledDragOverEvent?.((dragEvent: DockviewDndOverlayEvent) => {
                 if (resolveNavDragPayload(dragEvent.nativeEvent.dataTransfer)) {
@@ -676,6 +829,7 @@ export function App() {
                   api.fromJSON(storedLayout, { reuseExistingPanels: false });
                   window.setTimeout(() => {
                     restoringLayoutRef.current = false;
+                    syncOpenPanelTitles(api);
                     syncDesktopViewState();
                     scheduleLayoutPersistence(api);
                   }, 0);
@@ -687,6 +841,7 @@ export function App() {
                   });
                 }
               } else {
+                syncOpenPanelTitles(api);
                 syncDesktopViewState();
               }
             }}

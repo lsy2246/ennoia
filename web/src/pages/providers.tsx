@@ -4,18 +4,20 @@ import {
   listProviders,
   type ProviderConfig,
 } from "@ennoia/api-client";
+import { useProvidersStore } from "@/stores/providers";
 import { useUiHelpers } from "@/stores/ui";
 import { useWorkbenchStore } from "@/stores/workbench";
 
 export function Providers() {
   const { t } = useUiHelpers();
   const openView = useWorkbenchStore((state) => state.openView);
+  const providersRevision = useProvidersStore((state) => state.revision);
   const [channels, setChannels] = useState<ProviderConfig[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     void refresh();
-  }, []);
+  }, [providersRevision]);
 
   async function refresh() {
     setError(null);
@@ -43,7 +45,11 @@ export function Providers() {
                 kind: "api-channel",
                 entityId: `new-${Date.now()}`,
                 title: t("web.channels.new", "新建渠道"),
+                titleKey: "web.channels.new",
+                titleFallback: "新建渠道",
                 subtitle: t("web.channels.edit", "编辑 API 上游渠道"),
+                subtitleKey: "web.channels.edit",
+                subtitleFallback: "编辑 API 上游渠道",
               })}
           >
             {t("web.channels.new", "新建渠道")}

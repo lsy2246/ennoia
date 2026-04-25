@@ -8,12 +8,18 @@ import {
   type AgentProfile,
   type ChatThread,
 } from "@ennoia/api-client";
+import { useConversationsStore } from "@/stores/conversations";
 import { useUiHelpers } from "@/stores/ui";
 import { useWorkbenchStore } from "@/stores/workbench";
 
 export function Conversations() {
   const { t } = useUiHelpers();
   const openView = useWorkbenchStore((state) => state.openView);
+  const openViews = useWorkbenchStore((state) => state.openViews);
+  const closeView = useWorkbenchStore((state) => state.closeView);
+  const conversationRevision = useConversationsStore((state) => state.revision);
+  const notifyChanged = useConversationsStore((state) => state.notifyChanged);
+  const notifyDeleted = useConversationsStore((state) => state.notifyDeleted);
   const [agents, setAgents] = useState<AgentProfile[]>([]);
   const [sessions, setSessions] = useState<ChatThread[]>([]);
   const [selectedAgentIds, setSelectedAgentIds] = useState<string[]>([]);
@@ -23,7 +29,7 @@ export function Conversations() {
 
   useEffect(() => {
     void refresh();
-  }, []);
+  }, [conversationRevision]);
 
   async function refresh() {
     setError(null);
@@ -69,6 +75,7 @@ export function Conversations() {
         title: created.conversation.title,
         subtitle: created.conversation.topology,
       });
+      notifyChanged();
     } catch (err) {
       setError(String(err));
     } finally {
@@ -77,10 +84,23 @@ export function Conversations() {
   }
 
   async function handleDeleteSession(id: string) {
+    const confirmed = window.confirm(
+      t("web.conversations.delete_confirm", "确认删除这个会话吗？删除后无法恢复，并且已打开的相关会话窗口会被关闭。"),
+    );
+    if (!confirmed) {
+      return;
+    }
+
     setBusy(true);
     setError(null);
     try {
       await deleteChat(id);
+      for (const view of openViews) {
+        if (view.kind === "session" && view.entityId === id) {
+          closeView(view.panelId);
+        }
+      }
+      notifyDeleted(id);
       await refresh();
     } catch (err) {
       setError(String(err));

@@ -8,7 +8,9 @@ import {
   updateProvider,
   type ProviderConfig,
 } from "@ennoia/api-client";
+import { useProvidersStore } from "@/stores/providers";
 import { useUiHelpers } from "@/stores/ui";
+import { useWorkbenchStore } from "@/stores/workbench";
 
 const EMPTY_CHANNEL: ProviderConfig = {
   id: "",
@@ -42,8 +44,18 @@ function normalizeModels(models: string[]) {
   return Array.from(new Set(models.map((item) => item.trim()).filter(Boolean)));
 }
 
-export function ApiChannelEditorView({ channelId }: { channelId: string }) {
+function resolveProviderImplementationKind(
+  contribution: NonNullable<ReturnType<typeof useUiHelpers>["runtime"]>["registry"]["providers"][number],
+) {
+  return contribution.provider.kind || contribution.provider.id || "";
+}
+
+export function ApiChannelEditorView({ channelId, panelId }: { channelId: string; panelId?: string }) {
   const { runtime, t } = useUiHelpers();
+  const closeView = useWorkbenchStore((state) => state.closeView);
+  const updateViewDescriptor = useWorkbenchStore((state) => state.updateViewDescriptor);
+  const workbenchApi = useWorkbenchStore((state) => state.api);
+  const notifyProvidersChanged = useProvidersStore((state) => state.notifyChanged);
   const [form, setForm] = useState<ProviderConfig>(EMPTY_CHANNEL);
   const [modelEntries, setModelEntries] = useState<ModelEntry[]>([]);
   const [defaultModelKey, setDefaultModelKey] = useState<string | null>(null);
@@ -55,10 +67,11 @@ export function ApiChannelEditorView({ channelId }: { channelId: string }) {
   const interfaceTypes = useMemo(() => {
     return (runtime?.registry.providers ?? [])
       .map((contribution) => {
-        const kind = contribution.provider.kind || contribution.provider.id;
+        const kind = resolveProviderImplementationKind(contribution);
         return kind ? [kind, kind] : null;
       })
       .filter((item): item is [string, string] => item !== null)
+      .filter(([kind], index, entries) => entries.findIndex(([entryKind]) => entryKind === kind) === index)
       .sort(([left], [right]) => left.localeCompare(right));
   }, [runtime?.registry.providers]);
 
@@ -69,7 +82,18 @@ export function ApiChannelEditorView({ channelId }: { channelId: string }) {
 
   useEffect(() => {
     void hydrate();
-  }, [channelId]);
+  }, [channelId, runtime?.registry.providers]);
+
+  useEffect(() => {
+    if (!workbenchApi || !panelId) {
+      return;
+    }
+
+    const nextTitle = form.display_name.trim() || form.id.trim() || (isNew ? t("web.channels.new", "新建渠道") : channelId);
+    const panel = workbenchApi.getPanel?.(panelId);
+    panel?.api?.setTitle?.(nextTitle);
+    updateViewDescriptor(panelId, { title: nextTitle });
+  }, [channelId, form.display_name, form.id, isNew, panelId, t, updateViewDescriptor, workbenchApi]);
 
   function applyModelState(models: string[], preferredDefault?: string) {
     const normalizedModels = normalizeModels(models);
@@ -107,10 +131,7 @@ export function ApiChannelEditorView({ channelId }: { channelId: string }) {
       const next = await listProviders();
 
       if (isNew) {
-        const defaultKind =
-          runtime?.registry.providers[0]?.provider.kind ??
-          runtime?.registry.providers[0]?.provider.id ??
-          "";
+        const defaultKind = interfaceTypes[0]?.[0] ?? "";
         applyInterfaceDefaults(defaultKind, { resetIdentity: true });
         return;
       }
@@ -137,24 +158,67 @@ export function ApiChannelEditorView({ channelId }: { channelId: string }) {
     setBusy(true);
     setError(null);
 
-    const payload = {
-      ...form,
-      available_models: normalizeModels(modelEntries.map((entry) => entry.value)),
-    };
-    payload.default_model =
-      payload.available_models.find(
-        (model) => modelEntries.find((entry) => entry.key === defaultModelKey)?.value.trim() === model,
-      ) ??
-      payload.available_models[0] ??
-      "";
+      const payload = {
+        ...form,
+        available_models: normalizeModels(modelEntries.map((entry) => entry.value)),
+      };
+      payload.kind = payload.kind.trim();
+      payload.default_model =
+        payload.available_models.find(
+          (model) => modelEntries.find((entry) => entry.key === defaultModelKey)?.value.trim() === model,
+        ) ??
+        payload.available_models[0] ??
+        "";
+
+      if (!payload.kind) {
+        throw new Error(t("web.channels.interface_type_required", "请先选择一个可用的接口类型。"));
+      }
 
     try {
-      if (isNew) {
-        await createProvider(payload);
-      } else {
-        await updateProvider(channelId, payload);
+      const saved = isNew
+        ? await createProvider(payload)
+        : await updateProvider(channelId, payload);
+
+      if (panelId && workbenchApi) {
+        const panel = workbenchApi.getPanel?.(panelId);
+        const nextTitle = saved.display_name || saved.id || payload.display_name || payload.id;
+        panel?.api?.setTitle?.(nextTitle);
+        panel?.update?.({
+          params: {
+            panelKind: "resource",
+            descriptor: {
+              ...(panel?.params?.descriptor ?? {}),
+              panelId,
+              kind: "api-channel",
+              entityId: saved.id,
+              title: nextTitle,
+              subtitle: saved.kind,
+              openedAt: Date.now(),
+            },
+          },
+        });
+        updateViewDescriptor(panelId, {
+          kind: "api-channel",
+          entityId: saved.id,
+          title: nextTitle,
+          subtitle: saved.kind,
+        });
       }
-      await hydrate();
+
+      const normalized = applyModelState(
+        [...saved.available_models, saved.default_model],
+        saved.default_model,
+      );
+      setForm({
+        ...saved,
+        available_models: normalized.models,
+        default_model: normalized.defaultModel,
+      });
+      if (isNew) {
+        notifyProvidersChanged();
+        return;
+      }
+      notifyProvidersChanged();
     } catch (err) {
       setError(String(err));
     } finally {
@@ -164,7 +228,7 @@ export function ApiChannelEditorView({ channelId }: { channelId: string }) {
 
   function applyInterfaceDefaults(kind: string, options?: { resetIdentity?: boolean }) {
     const contribution = providerContributions.find(
-      (item) => item.provider.kind === kind || item.provider.id === kind,
+      (item) => resolveProviderImplementationKind(item) === kind,
     );
     const recommendedModel = contribution?.provider.recommended_model ?? "";
     const nextModels = recommendedModel ? [recommendedModel] : [];
@@ -190,6 +254,11 @@ export function ApiChannelEditorView({ channelId }: { channelId: string }) {
     setError(null);
     try {
       await deleteProvider(form.id);
+      notifyProvidersChanged();
+      if (panelId) {
+        closeView(panelId);
+        return;
+      }
       setForm(EMPTY_CHANNEL);
       setModelEntries([]);
       setDefaultModelKey(null);
@@ -300,6 +369,11 @@ export function ApiChannelEditorView({ channelId }: { channelId: string }) {
             onChange={(event) => applyInterfaceDefaults(event.target.value)}
             disabled={!isNew}
           >
+            {interfaceTypes.length === 0 ? (
+              <option value="">
+                {t("web.channels.interface_type_empty", "当前没有可用接口类型")}
+              </option>
+            ) : null}
             {interfaceTypes.map(([kind, label]) => (
               <option key={kind} value={kind}>
                 {label}
@@ -419,7 +493,7 @@ export function ApiChannelEditorView({ channelId }: { channelId: string }) {
         />
       </label>
       <div className="button-row">
-        <button type="submit" disabled={busy}>
+        <button type="submit" disabled={busy || (isNew && interfaceTypes.length === 0)}>
           {t("web.action.save", "保存")}
         </button>
         <button
