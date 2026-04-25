@@ -1,7 +1,0 @@
-mod sqlite;
-
-pub use sqlite::{
-    SystemLogEntry, SystemLogQuery, SystemLogStore, SystemLogWrite, SYSTEM_LOG_COMPONENT_BEHAVIOR,
-    SYSTEM_LOG_COMPONENT_EXTENSION_HOST, SYSTEM_LOG_COMPONENT_HOST, SYSTEM_LOG_COMPONENT_MEMORY,
-    SYSTEM_LOG_COMPONENT_PROXY,
-};

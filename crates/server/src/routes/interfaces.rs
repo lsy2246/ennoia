@@ -2,10 +2,15 @@ use ennoia_kernel::{
     HookEventEnvelope, HookResourceRef, InterfaceBindingConfig, InterfaceBindingsConfig, OwnerRef,
     HOOK_EVENT_CONVERSATION_CREATED, HOOK_EVENT_CONVERSATION_MESSAGE_CREATED,
 };
+use std::time::Instant;
 
 use super::*;
-use crate::event_bus::{HookEventWrite, SYSTEM_LOG_COMPONENT_EVENT_BUS};
-use crate::system_log::{SystemLogWrite, SYSTEM_LOG_COMPONENT_PROXY};
+use crate::app::record_trace_span;
+use crate::event_bus::HookEventWrite;
+use crate::observability::{
+    ObservationLogWrite, ObservationSpanWrite, OBSERVABILITY_COMPONENT_EVENT_BUS,
+    OBSERVABILITY_COMPONENT_PROXY,
+};
 
 #[derive(Debug, Serialize)]
 pub(super) struct InterfaceStatusRecord {
@@ -76,6 +81,7 @@ pub(super) async fn conversations_create(
         dispatch_interface_value(&state, &request, "conversation.create", payload).await?;
     dispatch_hook_event(
         &state,
+        &request,
         HOOK_EVENT_CONVERSATION_CREATED,
         "conversation",
         response
@@ -123,6 +129,7 @@ pub(super) async fn conversation_delete(
     {
         dispatch_hook_event(
             &state,
+            &request,
             "conversation.deleted",
             "conversation",
             &resource_id,
@@ -164,6 +171,7 @@ pub(super) async fn conversation_messages_create(
     .await?;
     dispatch_hook_event(
         &state,
+        &request,
         HOOK_EVENT_CONVERSATION_MESSAGE_CREATED,
         "message",
         response
@@ -299,6 +307,9 @@ pub(super) async fn dispatch_interface_value_with_context(
         ));
     }
 
+    let span_trace = request.child_trace("interface_rpc");
+    let started = Instant::now();
+    let started_at = now_iso();
     let response = state
         .extensions
         .dispatch_rpc(
@@ -309,6 +320,15 @@ pub(super) async fn dispatch_interface_value_with_context(
                 context: serde_json::json!({
                     "interface": key,
                     "request_id": request.request_id,
+                    "trace": {
+                        "request_id": span_trace.request_id,
+                        "trace_id": span_trace.trace_id,
+                        "span_id": span_trace.span_id,
+                        "parent_span_id": span_trace.parent_span_id,
+                        "sampled": span_trace.sampled,
+                        "source": span_trace.source,
+                        "traceparent": span_trace.to_traceparent(),
+                    },
                     "extra": context
                 }),
             },
@@ -316,6 +336,26 @@ pub(super) async fn dispatch_interface_value_with_context(
         .map_err(|error| scoped(ApiError::internal(error.to_string()), request))?;
 
     if response.ok {
+        record_trace_span(
+            state,
+            ObservationSpanWrite {
+                trace: span_trace,
+                kind: "interface_rpc".to_string(),
+                name: key.to_string(),
+                component: OBSERVABILITY_COMPONENT_PROXY.to_string(),
+                source_kind: "extension".to_string(),
+                source_id: Some(binding.extension_id.clone()),
+                status: "ok".to_string(),
+                attributes: serde_json::json!({
+                    "interface": key,
+                    "extension_id": binding.extension_id,
+                    "method": binding.method,
+                }),
+                started_at,
+                ended_at: now_iso(),
+                duration_ms: started.elapsed().as_millis() as i64,
+            },
+        );
         return Ok(response.data);
     }
 
@@ -323,6 +363,27 @@ pub(super) async fn dispatch_interface_value_with_context(
         .error
         .map(|item| format!("{}: {}", item.code, item.message))
         .unwrap_or_else(|| format!("interface '{key}' failed"));
+    record_trace_span(
+        state,
+        ObservationSpanWrite {
+            trace: span_trace,
+            kind: "interface_rpc".to_string(),
+            name: key.to_string(),
+            component: OBSERVABILITY_COMPONENT_PROXY.to_string(),
+            source_kind: "extension".to_string(),
+            source_id: Some(binding.extension_id.clone()),
+            status: "error".to_string(),
+            attributes: serde_json::json!({
+                "interface": key,
+                "extension_id": binding.extension_id,
+                "method": binding.method,
+                "error": error,
+            }),
+            started_at,
+            ended_at: now_iso(),
+            duration_ms: started.elapsed().as_millis() as i64,
+        },
+    );
     Err(scoped(ApiError::bad_request(error), request))
 }
 
@@ -349,16 +410,19 @@ pub(super) fn resolve_interface_binding(
             method: only.interface.method.clone(),
         }),
         [] => {
-            let _ = state.system_log.append(SystemLogWrite {
-                event: "runtime.interface.missing".to_string(),
-                level: "warn".to_string(),
-                component: SYSTEM_LOG_COMPONENT_PROXY.to_string(),
-                source_kind: "interface".to_string(),
-                source_id: Some(key.to_string()),
-                summary: "interface binding missing".to_string(),
-                payload: serde_json::json!({ "interface": key }),
-                created_at: None,
-            });
+            let _ = state.observability.append_log_scoped(
+                ObservationLogWrite {
+                    event: "runtime.interface.missing".to_string(),
+                    level: "warn".to_string(),
+                    component: OBSERVABILITY_COMPONENT_PROXY.to_string(),
+                    source_kind: "interface".to_string(),
+                    source_id: Some(key.to_string()),
+                    message: "interface binding missing".to_string(),
+                    attributes: serde_json::json!({ "interface": key }),
+                    created_at: None,
+                },
+                Some(&request.trace_context()),
+            );
             Err(scoped(
                 ApiError::not_found(format!("interface '{key}' is not implemented")),
                 request,
@@ -442,6 +506,7 @@ fn persist_interface_bindings(
 
 fn dispatch_hook_event(
     state: &AppState,
+    request: &RequestContext,
     event: &str,
     resource_kind: &str,
     resource_id: &str,
@@ -468,20 +533,69 @@ fn dispatch_hook_event(
         payload,
     };
 
-    if let Err(error) = state.event_bus.publish(HookEventWrite {
+    let span_trace = request.child_trace("event_publish");
+    let started = Instant::now();
+    let started_at = now_iso();
+    match state.event_bus.publish(HookEventWrite {
         envelope,
         hooks: state.extensions.hooks_for_event(event),
+        trace: span_trace.clone(),
     }) {
-        let _ = state.system_log.append(SystemLogWrite {
-            event: "runtime.event_bus.publish_failed".to_string(),
-            level: "warn".to_string(),
-            component: SYSTEM_LOG_COMPONENT_EVENT_BUS.to_string(),
-            source_kind: "hook".to_string(),
-            source_id: Some(event.to_string()),
-            summary: "hook event publish failed".to_string(),
-            payload: serde_json::json!({ "error": error.to_string() }),
-            created_at: None,
-        });
+        Ok(event_id) => {
+            record_trace_span(
+                state,
+                ObservationSpanWrite {
+                    trace: span_trace,
+                    kind: "event_publish".to_string(),
+                    name: event.to_string(),
+                    component: OBSERVABILITY_COMPONENT_EVENT_BUS.to_string(),
+                    source_kind: resource_kind.to_string(),
+                    source_id: Some(resource_id.to_string()),
+                    status: "ok".to_string(),
+                    attributes: serde_json::json!({
+                        "event": event,
+                        "event_id": event_id,
+                    }),
+                    started_at,
+                    ended_at: now_iso(),
+                    duration_ms: started.elapsed().as_millis() as i64,
+                },
+            );
+        }
+        Err(error) => {
+            record_trace_span(
+                state,
+                ObservationSpanWrite {
+                    trace: span_trace.clone(),
+                    kind: "event_publish".to_string(),
+                    name: event.to_string(),
+                    component: OBSERVABILITY_COMPONENT_EVENT_BUS.to_string(),
+                    source_kind: resource_kind.to_string(),
+                    source_id: Some(resource_id.to_string()),
+                    status: "error".to_string(),
+                    attributes: serde_json::json!({
+                        "event": event,
+                        "error": error.to_string(),
+                    }),
+                    started_at,
+                    ended_at: now_iso(),
+                    duration_ms: started.elapsed().as_millis() as i64,
+                },
+            );
+            let _ = state.observability.append_log_scoped(
+                ObservationLogWrite {
+                    event: "runtime.event_bus.publish_failed".to_string(),
+                    level: "warn".to_string(),
+                    component: OBSERVABILITY_COMPONENT_EVENT_BUS.to_string(),
+                    source_kind: "hook".to_string(),
+                    source_id: Some(event.to_string()),
+                    message: "hook event publish failed".to_string(),
+                    attributes: serde_json::json!({ "error": error.to_string() }),
+                    created_at: None,
+                },
+                Some(&span_trace),
+            );
+        }
     }
 }
 

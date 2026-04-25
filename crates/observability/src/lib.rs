@@ -2,17 +2,109 @@
 
 use std::path::Path;
 
+use http::HeaderMap;
 use serde::{Deserialize, Serialize};
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::EnvFilter;
+use uuid::Uuid;
 
 pub const REQUEST_ID_HEADER: &str = "x-request-id";
+pub const TRACE_ID_HEADER: &str = "x-trace-id";
+pub const SPAN_ID_HEADER: &str = "x-span-id";
+pub const TRACEPARENT_HEADER: &str = "traceparent";
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TraceContext {
+    pub request_id: String,
+    pub trace_id: String,
+    pub span_id: String,
+    #[serde(default)]
+    pub parent_span_id: Option<String>,
+    pub sampled: bool,
+    pub source: String,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RequestContext {
     pub request_id: String,
+    pub trace_id: String,
+    pub span_id: String,
+    #[serde(default)]
+    pub parent_span_id: Option<String>,
+    pub sampled: bool,
+    pub source: String,
+}
+
+impl RequestContext {
+    pub fn from_headers(headers: &HeaderMap) -> Self {
+        let request_id = headers
+            .get(REQUEST_ID_HEADER)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string)
+            .unwrap_or_else(next_request_id);
+        let propagated = parse_trace_headers(headers);
+        let trace_id = propagated
+            .as_ref()
+            .map(|item| item.trace_id.clone())
+            .unwrap_or_else(next_trace_id);
+        let parent_span_id = propagated.as_ref().map(|item| item.parent_span_id.clone());
+        let sampled = propagated.as_ref().map(|item| item.sampled).unwrap_or(true);
+
+        Self {
+            request_id,
+            trace_id,
+            span_id: next_span_id(),
+            parent_span_id,
+            sampled,
+            source: "http".to_string(),
+        }
+    }
+
+    pub fn trace_context(&self) -> TraceContext {
+        TraceContext {
+            request_id: self.request_id.clone(),
+            trace_id: self.trace_id.clone(),
+            span_id: self.span_id.clone(),
+            parent_span_id: self.parent_span_id.clone(),
+            sampled: self.sampled,
+            source: self.source.clone(),
+        }
+    }
+
+    pub fn child_trace(&self, source: impl Into<String>) -> TraceContext {
+        TraceContext {
+            request_id: self.request_id.clone(),
+            trace_id: self.trace_id.clone(),
+            span_id: next_span_id(),
+            parent_span_id: Some(self.span_id.clone()),
+            sampled: self.sampled,
+            source: source.into(),
+        }
+    }
+}
+
+impl TraceContext {
+    pub fn child(&self, source: impl Into<String>) -> Self {
+        Self {
+            request_id: self.request_id.clone(),
+            trace_id: self.trace_id.clone(),
+            span_id: next_span_id(),
+            parent_span_id: Some(self.span_id.clone()),
+            sampled: self.sampled,
+            source: source.into(),
+        }
+    }
+
+    pub fn to_traceparent(&self) -> String {
+        format!(
+            "00-{}-{}-{}",
+            self.trace_id,
+            self.span_id,
+            if self.sampled { "01" } else { "00" }
+        )
+    }
 }
 
 #[derive(Debug)]
@@ -58,5 +150,69 @@ pub fn init(
 }
 
 pub fn next_request_id() -> String {
-    format!("req_{}", uuid::Uuid::new_v4().simple())
+    format!("req_{}", Uuid::new_v4().simple())
+}
+
+pub fn next_trace_id() -> String {
+    Uuid::new_v4().simple().to_string()
+}
+
+pub fn next_span_id() -> String {
+    let value = Uuid::new_v4().simple().to_string();
+    value[..16].to_string()
+}
+
+#[derive(Debug, Clone)]
+struct PropagatedTrace {
+    trace_id: String,
+    parent_span_id: String,
+    sampled: bool,
+}
+
+fn parse_trace_headers(headers: &HeaderMap) -> Option<PropagatedTrace> {
+    if let Some(traceparent) = headers
+        .get(TRACEPARENT_HEADER)
+        .and_then(|value| value.to_str().ok())
+    {
+        let parts = traceparent.trim().split('-').collect::<Vec<_>>();
+        if parts.len() == 4
+            && is_valid_trace_id(parts[1])
+            && is_valid_span_id(parts[2])
+            && parts[3].len() == 2
+        {
+            let sampled = u8::from_str_radix(parts[3], 16)
+                .map(|flags| flags & 0x01 == 0x01)
+                .unwrap_or(true);
+            return Some(PropagatedTrace {
+                trace_id: parts[1].to_string(),
+                parent_span_id: parts[2].to_string(),
+                sampled,
+            });
+        }
+    }
+
+    let trace_id = headers
+        .get(TRACE_ID_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .filter(|value| is_valid_trace_id(value))?;
+    let parent_span_id = headers
+        .get(SPAN_ID_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .filter(|value| is_valid_span_id(value))
+        .map(str::to_string)
+        .unwrap_or_else(next_span_id);
+
+    Some(PropagatedTrace {
+        trace_id: trace_id.to_string(),
+        parent_span_id,
+        sampled: true,
+    })
+}
+
+fn is_valid_trace_id(value: &str) -> bool {
+    value.len() == 32 && value.chars().all(|item| item.is_ascii_hexdigit())
+}
+
+fn is_valid_span_id(value: &str) -> bool {
+    value.len() == 16 && value.chars().all(|item| item.is_ascii_hexdigit())
 }

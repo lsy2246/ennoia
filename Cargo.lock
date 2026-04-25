@@ -766,6 +766,7 @@ dependencies = [
 name = "ennoia-observability"
 version = "0.1.0"
 dependencies = [
+ "http",
  "serde",
  "tracing",
  "tracing-appender",

@@ -58,10 +58,7 @@ pub async fn rate_limit_middleware(
     if !cfg.enabled {
         return next.run(req).await;
     }
-    let request_id = req
-        .extensions()
-        .get::<RequestContext>()
-        .map(|ctx| ctx.request_id.clone());
+    let request_id = req.extensions().get::<RequestContext>().cloned();
 
     let path = req.uri().path();
     if path_matches(path, &cfg.exempt_paths) {
@@ -76,7 +73,11 @@ pub async fn rate_limit_middleware(
     if !allowed {
         let error = request_id
             .as_ref()
-            .map(|id| ApiError::rate_limited("rate limit exceeded").with_request_id(id))
+            .map(|id| {
+                ApiError::rate_limited("rate limit exceeded")
+                    .with_request_id(&id.request_id)
+                    .with_trace_id(&id.trace_id)
+            })
             .unwrap_or_else(|| ApiError::rate_limited("rate limit exceeded"));
         return error.into_response();
     }

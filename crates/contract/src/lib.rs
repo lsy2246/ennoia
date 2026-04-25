@@ -27,6 +27,7 @@ pub struct ApiErrorBody {
     pub code: ErrorCode,
     pub message: String,
     pub request_id: Option<String>,
+    pub trace_id: Option<String>,
     #[serde(default)]
     pub details: serde_json::Value,
     pub retryable: bool,
@@ -46,6 +47,7 @@ impl ApiError {
                 code,
                 message: message.into(),
                 request_id: None,
+                trace_id: None,
                 details: serde_json::Value::Object(Default::default()),
                 retryable: false,
             },
@@ -106,6 +108,11 @@ impl ApiError {
 
     pub fn with_request_id(mut self, request_id: impl Into<String>) -> Self {
         self.body.request_id = Some(request_id.into());
+        self
+    }
+
+    pub fn with_trace_id(mut self, trace_id: impl Into<String>) -> Self {
+        self.body.trace_id = Some(trace_id.into());
         self
     }
 

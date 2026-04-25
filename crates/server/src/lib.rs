@@ -3,8 +3,8 @@
 pub mod app;
 pub mod event_bus;
 pub mod middleware;
+pub mod observability;
 pub mod routes;
-pub mod system_log;
 
 pub use app::{bootstrap_app_state, default_app_state, run_server, AppState};
 pub use routes::build_router;

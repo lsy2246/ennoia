@@ -199,11 +199,23 @@ export default ui;
 {
   "method": "memory/recall",
   "params": {},
-  "context": {}
+  "context": {
+    "trace": {
+      "request_id": "req_xxx",
+      "trace_id": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "span_id": "xxxxxxxxxxxxxxxx",
+      "parent_span_id": "xxxxxxxxxxxxxxxx",
+      "sampled": true,
+      "source": "interface_rpc",
+      "traceparent": "00-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx-xxxxxxxxxxxxxxxx-01"
+    }
+  }
 }
 ```
 
 `ennoia_worker_handle` 返回高 32 位为 `ptr`、低 32 位为 `len` 的打包值。返回缓冲区应是 `ExtensionRpcResponse` JSON；如果返回普通 JSON，宿主会包装为成功响应。
+
+`context.trace` 表示当前跨边界调用的链路上下文。扩展不需要理解宿主内部数据库结构，但如果扩展内部还会继续拆子步骤、写自己的日志或继续调用其他能力，应该优先透传这组字段。
 
 内置 `conversation` 与 `memory` 当前都采用 process Worker，`workflow` 仍采用 Wasm Worker。
 

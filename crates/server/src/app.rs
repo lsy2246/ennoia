@@ -2,6 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
+use std::time::Instant;
 
 use ennoia_assets::builtins;
 use ennoia_extension_host::{ExtensionRuntime, ExtensionRuntimeConfig};
@@ -9,17 +10,19 @@ use ennoia_kernel::{
     apply_server_log_env_overrides, AgentConfig, AppConfig, PlatformOverview, ProviderConfig,
     ServerConfig, SkillConfig, SkillRegistryEntry, SkillRegistryFile, SpaceSpec, UiConfig,
 };
-use ennoia_observability::{self, ObservabilityGuard};
+use ennoia_observability::{self, next_span_id, ObservabilityGuard, TraceContext};
 use ennoia_paths::{default_home_dir, RuntimePaths};
 use tokio::net::TcpListener;
 use tracing::info;
 
-use crate::event_bus::{EventBusStore, SYSTEM_LOG_COMPONENT_EVENT_BUS};
+use crate::event_bus::EventBusStore;
 use crate::middleware::RateLimitState;
-use crate::routes::{build_router, run_due_schedules_once};
-use crate::system_log::{
-    SystemLogStore, SystemLogWrite, SYSTEM_LOG_COMPONENT_EXTENSION_HOST, SYSTEM_LOG_COMPONENT_HOST,
+use crate::observability::{
+    ObservabilityStore, ObservationLogWrite, ObservationSpanLinkWrite, ObservationSpanWrite,
+    OBSERVABILITY_COMPONENT_EVENT_BUS, OBSERVABILITY_COMPONENT_EXTENSION_HOST,
+    OBSERVABILITY_COMPONENT_HOST,
 };
+use crate::routes::{build_router, run_due_schedules_once};
 
 type AppError = Box<dyn std::error::Error + Send + Sync>;
 
@@ -42,7 +45,7 @@ pub struct AppState {
     pub spaces: Vec<SpaceSpec>,
     pub rate_limit_state: RateLimitState,
     pub schedule_lock: Arc<tokio::sync::Mutex<()>>,
-    pub system_log: Arc<SystemLogStore>,
+    pub observability: Arc<ObservabilityStore>,
     pub event_bus: Arc<EventBusStore>,
     pub observability_guard: Option<Arc<ObservabilityGuard>>,
 }
@@ -54,7 +57,7 @@ pub fn default_app_state() -> AppState {
     runtime_paths.ensure_layout().expect("runtime layout");
     let extensions =
         ExtensionRuntime::bootstrap(extension_runtime_config(&runtime_paths)).expect("runtime");
-    let system_log = Arc::new(SystemLogStore::new(&runtime_paths).expect("system log"));
+    let observability = Arc::new(ObservabilityStore::new(&runtime_paths).expect("observability"));
     let event_bus = Arc::new(EventBusStore::new(&runtime_paths).expect("event bus"));
 
     AppState {
@@ -70,7 +73,7 @@ pub fn default_app_state() -> AppState {
         spaces: default_spaces(),
         rate_limit_state: RateLimitState::new(),
         schedule_lock: Arc::new(tokio::sync::Mutex::new(())),
-        system_log,
+        observability,
         event_bus,
         observability_guard: None,
     }
@@ -101,7 +104,7 @@ pub async fn bootstrap_app_state(home_dir: impl AsRef<Path>) -> Result<AppState,
     let providers = load_provider_configs(&runtime_paths)?;
     let spaces = default_spaces();
     let extensions = ExtensionRuntime::bootstrap(extension_runtime_config(&runtime_paths))?;
-    let system_log = Arc::new(SystemLogStore::new(&runtime_paths)?);
+    let observability = Arc::new(ObservabilityStore::new(&runtime_paths)?);
     let event_bus = Arc::new(EventBusStore::new(&runtime_paths)?);
 
     Ok(AppState {
@@ -117,7 +120,7 @@ pub async fn bootstrap_app_state(home_dir: impl AsRef<Path>) -> Result<AppState,
         spaces,
         rate_limit_state: RateLimitState::new(),
         schedule_lock: Arc::new(tokio::sync::Mutex::new(())),
-        system_log,
+        observability,
         event_bus,
         observability_guard,
     })
@@ -125,15 +128,15 @@ pub async fn bootstrap_app_state(home_dir: impl AsRef<Path>) -> Result<AppState,
 
 pub async fn run_server(home_dir: impl AsRef<Path>) -> Result<(), AppError> {
     let state = bootstrap_app_state(home_dir).await?;
-    let system_log = state.system_log.clone();
-    let _ = state.system_log.append(SystemLogWrite {
+    let observability = state.observability.clone();
+    let _ = state.observability.append_log(ObservationLogWrite {
         event: "runtime.host.started".to_string(),
         level: "info".to_string(),
-        component: SYSTEM_LOG_COMPONENT_HOST.to_string(),
+        component: OBSERVABILITY_COMPONENT_HOST.to_string(),
         source_kind: "system".to_string(),
         source_id: None,
-        summary: "server started".to_string(),
-        payload: serde_json::json!({
+        message: "server started".to_string(),
+        attributes: serde_json::json!({
             "host": state.server_config.host,
             "port": state.server_config.port,
         }),
@@ -142,7 +145,7 @@ pub async fn run_server(home_dir: impl AsRef<Path>) -> Result<(), AppError> {
 
     let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
     let extensions = state.extensions.clone();
-    let refresh_log = state.system_log.clone();
+    let refresh_log = state.observability.clone();
     let mut extension_cancel = cancel_rx.clone();
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(2));
@@ -150,14 +153,14 @@ pub async fn run_server(home_dir: impl AsRef<Path>) -> Result<(), AppError> {
             tokio::select! {
                 _ = interval.tick() => {
                     if extensions.refresh_from_disk(EXTENSION_REFRESH_SUMMARY).is_err() {
-                        let _ = refresh_log.append(SystemLogWrite {
+                        let _ = refresh_log.append_log(ObservationLogWrite {
                             event: "runtime.extension.refresh_failed".to_string(),
                             level: "warn".to_string(),
-                            component: SYSTEM_LOG_COMPONENT_EXTENSION_HOST.to_string(),
+                            component: OBSERVABILITY_COMPONENT_EXTENSION_HOST.to_string(),
                             source_kind: "system".to_string(),
                             source_id: None,
-                            summary: "extension refresh failed".to_string(),
-                            payload: serde_json::json!({}),
+                            message: "extension refresh failed".to_string(),
+                            attributes: serde_json::json!({}),
                             created_at: None,
                         });
                     }
@@ -211,14 +214,14 @@ pub async fn run_server(home_dir: impl AsRef<Path>) -> Result<(), AppError> {
     let listener = TcpListener::bind(&address).await?;
     let serve_result = axum::serve(listener, build_router(state)).await;
     let _ = cancel_tx.send(true);
-    let _ = system_log.append(SystemLogWrite {
+    let _ = observability.append_log(ObservationLogWrite {
         event: "runtime.host.stopping".to_string(),
         level: "info".to_string(),
-        component: SYSTEM_LOG_COMPONENT_HOST.to_string(),
+        component: OBSERVABILITY_COMPONENT_HOST.to_string(),
         source_kind: "system".to_string(),
         source_id: None,
-        summary: "server stopping".to_string(),
-        payload: serde_json::json!({}),
+        message: "server stopping".to_string(),
+        attributes: serde_json::json!({}),
         created_at: None,
     });
     serve_result?;
@@ -229,14 +232,14 @@ fn drain_hook_deliveries_once(state: &AppState) {
     let pending = match state.event_bus.list_pending_deliveries(32) {
         Ok(items) => items,
         Err(error) => {
-            let _ = state.system_log.append(SystemLogWrite {
+            let _ = state.observability.append_log(ObservationLogWrite {
                 event: "runtime.event_bus.pending_failed".to_string(),
                 level: "warn".to_string(),
-                component: SYSTEM_LOG_COMPONENT_EVENT_BUS.to_string(),
+                component: OBSERVABILITY_COMPONENT_EVENT_BUS.to_string(),
                 source_kind: "system".to_string(),
                 source_id: None,
-                summary: "event bus pending delivery scan failed".to_string(),
-                payload: serde_json::json!({ "error": error.to_string() }),
+                message: "event bus pending delivery scan failed".to_string(),
+                attributes: serde_json::json!({ "error": error.to_string() }),
                 created_at: None,
             });
             return;
@@ -244,12 +247,31 @@ fn drain_hook_deliveries_once(state: &AppState) {
     };
 
     for delivery in pending {
+        let span_trace = TraceContext {
+            request_id: delivery.trace.request_id.clone(),
+            trace_id: delivery.trace.trace_id.clone(),
+            span_id: next_span_id(),
+            parent_span_id: None,
+            sampled: delivery.trace.sampled,
+            source: "event_bus.delivery".to_string(),
+        };
+        let started = Instant::now();
+        let started_at = chrono::Utc::now().to_rfc3339();
         let request = ennoia_kernel::ExtensionRpcRequest {
             params: serde_json::to_value(&delivery.envelope).unwrap_or(serde_json::Value::Null),
             context: serde_json::json!({
                 "source": "event_bus",
                 "delivery_id": delivery.id,
                 "event_id": delivery.event_id,
+                "trace": {
+                    "request_id": span_trace.request_id,
+                    "trace_id": span_trace.trace_id,
+                    "span_id": span_trace.span_id,
+                    "parent_span_id": span_trace.parent_span_id,
+                    "sampled": span_trace.sampled,
+                    "source": span_trace.source,
+                    "traceparent": span_trace.to_traceparent(),
+                }
             }),
         };
         let response =
@@ -260,6 +282,39 @@ fn drain_hook_deliveries_once(state: &AppState) {
         match response {
             Ok(response) if response.ok => {
                 let _ = state.event_bus.mark_delivery_succeeded(&delivery.id);
+                let delivery_span_id = span_trace.span_id.clone();
+                record_trace_span(
+                    state,
+                    ObservationSpanWrite {
+                        trace: span_trace,
+                        kind: "hook_delivery".to_string(),
+                        name: "event_bus.delivery".to_string(),
+                        component: OBSERVABILITY_COMPONENT_EVENT_BUS.to_string(),
+                        source_kind: "extension".to_string(),
+                        source_id: Some(delivery.extension_id.clone()),
+                        status: "ok".to_string(),
+                        attributes: serde_json::json!({
+                            "event_id": delivery.event_id,
+                            "delivery_id": delivery.id,
+                            "handler": delivery.handler,
+                            "event": delivery.envelope.event,
+                        }),
+                        started_at,
+                        ended_at: chrono::Utc::now().to_rfc3339(),
+                        duration_ms: started.elapsed().as_millis() as i64,
+                    },
+                );
+                let _ = state
+                    .observability
+                    .append_span_link(ObservationSpanLinkWrite {
+                        trace_id: delivery.trace.trace_id.clone(),
+                        span_id: delivery_span_id,
+                        linked_trace_id: delivery.trace.trace_id.clone(),
+                        linked_span_id: delivery.trace.span_id.clone(),
+                        link_type: "follows_from".to_string(),
+                        attributes: serde_json::json!({}),
+                        created_at: None,
+                    });
             }
             Ok(response) => {
                 let error = response
@@ -268,18 +323,32 @@ fn drain_hook_deliveries_once(state: &AppState) {
                     .unwrap_or_else(|| "hook delivery failed".to_string());
                 handle_delivery_failure(
                     state,
+                    &span_trace,
+                    &delivery.trace.span_id,
+                    started_at,
+                    started,
                     &delivery.id,
                     delivery.attempt_count,
                     &delivery.extension_id,
+                    &delivery.event_id,
+                    &delivery.handler,
+                    &delivery.envelope.event,
                     &error,
                 );
             }
             Err(error) => {
                 handle_delivery_failure(
                     state,
+                    &span_trace,
+                    &delivery.trace.span_id,
+                    started_at,
+                    started,
                     &delivery.id,
                     delivery.attempt_count,
                     &delivery.extension_id,
+                    &delivery.event_id,
+                    &delivery.handler,
+                    &delivery.envelope.event,
                     &error.to_string(),
                 );
             }
@@ -289,29 +358,72 @@ fn drain_hook_deliveries_once(state: &AppState) {
 
 fn handle_delivery_failure(
     state: &AppState,
+    trace: &TraceContext,
+    producer_span_id: &str,
+    started_at: String,
+    started: Instant,
     delivery_id: &str,
     attempt_count: u32,
     extension_id: &str,
+    event_id: &str,
+    handler: &str,
+    event: &str,
     error: &str,
 ) {
+    record_trace_span(
+        state,
+        ObservationSpanWrite {
+            trace: trace.clone(),
+            kind: "hook_delivery".to_string(),
+            name: "event_bus.delivery".to_string(),
+            component: OBSERVABILITY_COMPONENT_EVENT_BUS.to_string(),
+            source_kind: "extension".to_string(),
+            source_id: Some(extension_id.to_string()),
+            status: "error".to_string(),
+            attributes: serde_json::json!({
+                "event_id": event_id,
+                "delivery_id": delivery_id,
+                "handler": handler,
+                "event": event,
+                "error": error,
+            }),
+            started_at,
+            ended_at: chrono::Utc::now().to_rfc3339(),
+            duration_ms: started.elapsed().as_millis() as i64,
+        },
+    );
+    let _ = state
+        .observability
+        .append_span_link(ObservationSpanLinkWrite {
+            trace_id: trace.trace_id.clone(),
+            span_id: trace.span_id.clone(),
+            linked_trace_id: trace.trace_id.clone(),
+            linked_span_id: producer_span_id.to_string(),
+            link_type: "follows_from".to_string(),
+            attributes: serde_json::json!({}),
+            created_at: None,
+        });
     let terminal = state
         .event_bus
         .mark_delivery_retry(delivery_id, error, attempt_count)
         .unwrap_or(false);
     if terminal {
-        let _ = state.system_log.append(SystemLogWrite {
-            event: "runtime.event_bus.delivery_failed".to_string(),
-            level: "warn".to_string(),
-            component: SYSTEM_LOG_COMPONENT_EVENT_BUS.to_string(),
-            source_kind: "extension".to_string(),
-            source_id: Some(extension_id.to_string()),
-            summary: "hook delivery exhausted retries".to_string(),
-            payload: serde_json::json!({
-                "delivery_id": delivery_id,
-                "error": error,
-            }),
-            created_at: None,
-        });
+        let _ = state.observability.append_log_scoped(
+            ObservationLogWrite {
+                event: "runtime.event_bus.delivery_failed".to_string(),
+                level: "warn".to_string(),
+                component: OBSERVABILITY_COMPONENT_EVENT_BUS.to_string(),
+                source_kind: "extension".to_string(),
+                source_id: Some(extension_id.to_string()),
+                message: "hook delivery exhausted retries".to_string(),
+                attributes: serde_json::json!({
+                    "delivery_id": delivery_id,
+                    "error": error,
+                }),
+                created_at: None,
+            },
+            Some(trace),
+        );
     }
 }
 
@@ -546,4 +658,8 @@ fn sort_skill_registry_entries(entries: &mut [SkillRegistryEntry]) {
             .then_with(|| left.source.cmp(&right.source))
             .then_with(|| left.path.cmp(&right.path))
     });
+}
+
+pub(crate) fn record_trace_span(state: &AppState, entry: ObservationSpanWrite) {
+    let _ = state.observability.append_span(entry);
 }

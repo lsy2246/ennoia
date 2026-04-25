@@ -3,11 +3,14 @@ use axum::{
     middleware::Next,
     response::Response,
 };
+use chrono::Utc;
 use ennoia_observability::RequestContext;
 use std::time::Instant;
 use tracing::info;
 
+use crate::app::record_trace_span;
 use crate::app::AppState;
+use crate::observability::ObservationSpanWrite;
 
 /// logging_middleware emits one line per request: method path status latency-ms.
 /// Sampling and redaction are honored from the live LoggingConfig.
@@ -31,16 +34,26 @@ pub async fn logging_middleware(
     let request_id = req
         .extensions()
         .get::<RequestContext>()
-        .map(|ctx| ctx.request_id.clone())
-        .unwrap_or_else(|| "unknown".to_string());
+        .cloned()
+        .unwrap_or_else(|| RequestContext {
+            request_id: "unknown".to_string(),
+            trace_id: "unknown".to_string(),
+            span_id: "unknown".to_string(),
+            parent_span_id: None,
+            sampled: true,
+            source: "http".to_string(),
+        });
     let started = Instant::now();
+    let started_at = Utc::now().to_rfc3339();
 
     let response = next.run(req).await;
 
     let elapsed_ms = started.elapsed().as_millis();
     let status = response.status().as_u16();
     info!(
-        request_id = %request_id,
+        request_id = %request_id.request_id,
+        trace_id = %request_id.trace_id,
+        span_id = %request_id.span_id,
         http_method = %method,
         http_path = %path,
         http_status = status,
@@ -48,6 +61,32 @@ pub async fn logging_middleware(
         configured_level = %cfg.level,
         "http request completed"
     );
+    if request_id.trace_id != "unknown" && request_id.span_id != "unknown" {
+        record_trace_span(
+            &state,
+            ObservationSpanWrite {
+                trace: request_id.trace_context(),
+                kind: "http".to_string(),
+                name: format!("{} {}", method, path),
+                component: "http".to_string(),
+                source_kind: "route".to_string(),
+                source_id: Some(path.clone()),
+                status: if status >= 500 {
+                    "error".to_string()
+                } else {
+                    "ok".to_string()
+                },
+                attributes: serde_json::json!({
+                    "method": method.as_str(),
+                    "path": path,
+                    "status": status,
+                }),
+                started_at,
+                ended_at: Utc::now().to_rfc3339(),
+                duration_ms: elapsed_ms as i64,
+            },
+        );
+    }
     response
 }
 

@@ -19,6 +19,7 @@ export class ApiError extends Error {
     public code: ApiErrorBody["code"],
     message: string,
     public requestId?: string | null,
+    public traceId?: string | null,
   ) {
     super(message);
   }
@@ -50,12 +51,14 @@ export async function fetchJson<T>(path: string, init?: RequestInit): Promise<T>
         status: response.status,
         code: parsed.code,
         request_id: parsed.request_id,
+        trace_id: parsed.trace_id,
       });
       throw new ApiError(
         response.status,
         parsed.code,
         parsed.message || `request failed: ${response.status}`,
         parsed.request_id,
+        parsed.trace_id,
       );
     }
     throw new ApiError(response.status, "INTERNAL", body || `request failed: ${response.status}`);

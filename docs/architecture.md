@@ -2,7 +2,7 @@
 
 ## 目标
 
-`Ennoia` 是单操作者、多 Agent 的本地 AI 工作台。系统核心只负责运行时骨架：配置、路径、系统日志、扩展生命周期、能力路由和 Worker RPC；具体业务能力通过内置实现或扩展能力包接入。
+`Ennoia` 是单操作者、多 Agent 的本地 AI 工作台。系统核心只负责运行时骨架：配置、路径、Observability、扩展生命周期、能力路由和 Worker RPC；具体业务能力通过内置实现或扩展能力包接入。
 
 ## 总体分层
 
@@ -13,7 +13,7 @@ Web
       -> Kernel / Contract / Paths / Observability
       -> Extension Host / Wasm Worker
       -> Extension Host / Process Worker
-      -> System Log
+      -> Observability Store
       -> Event Bus
       -> Interface Router
         -> Memory Worker / Workflow Worker / Other Extension Workers
@@ -27,7 +27,7 @@ Web
 - `Contract`：定义跨边界 DTO；当前保留 `behavior` 与 `memory` 兼容协议响应结构。
 - `Paths`：统一解析运行目录，所有运行时文件位置都通过 `RuntimePaths` 推导。
 - `Extension Host`：负责扩展扫描、attach / detach、reload / restart、诊断、Worker 解析和 Worker RPC 分发；Worker 可以是 Wasm，也可以是进程型 stdio RPC。
-- `Server`：负责 HTTP API、配置读写、接口绑定、定时调度、Worker RPC 路由、系统日志、事件总线和系统内置组件装配。
+- `Server`：负责 HTTP API、配置读写、接口绑定、定时调度、Worker RPC 路由、Observability、事件总线和系统内置组件装配。
 
 ## 细粒度接口层
 
@@ -49,7 +49,7 @@ Web
 - `memory` 的系统入口固定为 `/api/memory/*`，底层通过 `memory.*` 接口键解析到扩展 Worker。
 - `conversation` 不直接调用 `memory`；它只把稳定事件交给宿主事件总线。
 - `memory` 不直接读取 `conversation.db`；它只消费宿主持久化的系统事件。
-- Conversation、Message、Memory Graph、Review 等业务数据组织属于扩展私有责任，不属于系统日志。
+- Conversation、Message、Memory Graph、Review 等业务数据组织属于扩展私有责任，不属于 Observability。
 
 ## 运行与定时边界
 
@@ -72,15 +72,27 @@ Web
   - `POST /api/schedules/{schedule_id}/pause`
   - `POST /api/schedules/{schedule_id}/resume`
 
-## 系统日志
+## Observability
 
-- 系统日志是系统组件自己的观测层，不属于记忆层。
-- 系统日志记录系统级事件，例如：宿主启动、扩展 attach / reload / restart、行为路由失败、记忆路由失败、Worker RPC 失败等。
-- 系统日志使用独立 SQLite，文件位于 `data/system/sqlite/system-log.db`。
-- 系统日志通过以下接口暴露：
-  - `GET /api/system/logs`
-  - `GET /api/system/logs/{log_id}`
-- 系统日志不承载会话 history，也不作为扩展业务数据的底层存储依赖。
+- 宿主内建统一 Observability 子系统，不属于记忆层，也不混入业务主数据。
+- Observability 当前统一落到 `data/system/sqlite/observability.db`，内部按表区分 `logs`、`spans` 和 `span_links`。
+- `logs` 记录系统级事件，例如：宿主启动、扩展 attach / reload / restart、行为路由失败、Worker RPC 失败等。
+- `spans` 记录调用链节点；`span_links` 记录异步关联，避免把所有异步链路都硬塞成父子关系。
+- Trace 模型固定使用 `trace_id`、`span_id`、`parent_span_id`、`request_id`、`sampled` 和 `source`。
+- 当前先追踪跨边界 span，不追踪每条 SQL：
+  - HTTP 入口
+  - Interface Router -> Worker RPC
+  - Behavior Router -> Worker RPC
+  - `/api/extensions/{extension_id}/rpc/{method}`
+  - Event Bus publish
+  - Event Bus hook delivery
+- Worker RPC `context` 会收到 `trace` 字段，扩展可以把它继续透传给自己的内部子流程。
+- 当前系统 observability 查询接口包括：
+  - `GET /api/observability/overview`
+  - `GET /api/observability/logs`
+  - `GET /api/observability/logs/{log_id}`
+  - `GET /api/observability/traces`
+  - `GET /api/observability/traces/{trace_id}`
 
 ## Hook 边界
 
@@ -103,7 +115,7 @@ Web
 
 - 系统级配置：`~/.ennoia/config/*.toml`
 - 接口绑定：`~/.ennoia/config/interfaces.toml`
-- 系统级日志：`~/.ennoia/data/system/sqlite/system-log.db`
+- 系统级观测：`~/.ennoia/data/system/sqlite/observability.db`
 - 系统级事件总线：`~/.ennoia/data/system/sqlite/events.db`
 - 系统定时计划：`~/.ennoia/data/system/schedules.json`
 - 扩展私有数据：`~/.ennoia/data/extensions/{extension_id}/`

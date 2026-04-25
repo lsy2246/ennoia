@@ -4,9 +4,13 @@ use axum::response::{IntoResponse, Response};
 use ennoia_contract::behavior::BehaviorStatusResponse;
 use ennoia_extension_host::RegisteredBehaviorContribution;
 use ennoia_observability::RequestContext;
+use std::time::Instant;
 
 use super::*;
-use crate::system_log::{SystemLogWrite, SYSTEM_LOG_COMPONENT_BEHAVIOR};
+use crate::app::record_trace_span;
+use crate::observability::{
+    ObservationLogWrite, ObservationSpanWrite, OBSERVABILITY_COMPONENT_BEHAVIOR,
+};
 
 #[derive(Debug, Serialize)]
 pub(super) struct BehaviorProviderRecord {
@@ -112,7 +116,7 @@ pub(super) async fn behavior_api_proxy(
         &path,
         method,
         body,
-        SYSTEM_LOG_COMPONENT_BEHAVIOR,
+        OBSERVABILITY_COMPONENT_BEHAVIOR,
     )
     .await
 }
@@ -125,14 +129,14 @@ pub(super) fn resolve_active_behavior(
     match behaviors.as_slice() {
         [only] => Ok(only.clone()),
         [] => {
-            let _ = state.system_log.append(SystemLogWrite {
+            let _ = state.observability.append_log(ObservationLogWrite {
                 event: "runtime.behavior.resolve_failed".to_string(),
                 level: "warn".to_string(),
-                component: SYSTEM_LOG_COMPONENT_BEHAVIOR.to_string(),
+                component: OBSERVABILITY_COMPONENT_BEHAVIOR.to_string(),
                 source_kind: "system".to_string(),
                 source_id: None,
-                summary: "active behavior not found".to_string(),
-                payload: serde_json::json!({ "reason": "no behavior contribution" }),
+                message: "active behavior not found".to_string(),
+                attributes: serde_json::json!({ "reason": "no behavior contribution" }),
                 created_at: None,
             });
             Err(scoped(ApiError::not_found("active behavior not found"), request))
@@ -157,16 +161,19 @@ pub(super) async fn dispatch_worker_capability_request(
     component: &str,
 ) -> Result<Response, ApiError> {
     let extension = state.extensions.get(extension_id).ok_or_else(|| {
-        let _ = state.system_log.append(SystemLogWrite {
-            event: "runtime.extension.resolve_failed".to_string(),
-            level: "warn".to_string(),
-            component: component.to_string(),
-            source_kind: "extension".to_string(),
-            source_id: Some(extension_id.to_string()),
-            summary: "extension not found for capability request".to_string(),
-            payload: serde_json::json!({ "path": path }),
-            created_at: None,
-        });
+        let _ = state.observability.append_log_scoped(
+            ObservationLogWrite {
+                event: "runtime.extension.resolve_failed".to_string(),
+                level: "warn".to_string(),
+                component: component.to_string(),
+                source_kind: "extension".to_string(),
+                source_id: Some(extension_id.to_string()),
+                message: "extension not found for capability request".to_string(),
+                attributes: serde_json::json!({ "path": path }),
+                created_at: None,
+            },
+            Some(&request.trace_context()),
+        );
         scoped(
             ApiError::not_found(format!("extension '{extension_id}' not found")),
             request,
@@ -181,6 +188,9 @@ pub(super) async fn dispatch_worker_capability_request(
     }
 
     let routed_path = join_entry_path(entry, path);
+    let span_trace = request.child_trace("behavior_rpc");
+    let started = Instant::now();
+    let started_at = now_iso();
     let params = if body.is_empty() {
         JsonValue::Null
     } else {
@@ -195,6 +205,15 @@ pub(super) async fn dispatch_worker_capability_request(
             "method": method.as_str(),
             "path": path,
             "routed_path": routed_path,
+            "trace": {
+                "request_id": span_trace.request_id.clone(),
+                "trace_id": span_trace.trace_id.clone(),
+                "span_id": span_trace.span_id.clone(),
+                "parent_span_id": span_trace.parent_span_id.clone(),
+                "sampled": span_trace.sampled,
+                "source": span_trace.source.clone(),
+                "traceparent": span_trace.to_traceparent(),
+            }
         }),
     };
 
@@ -204,6 +223,26 @@ pub(super) async fn dispatch_worker_capability_request(
         .map_err(|error| scoped(ApiError::internal(error.to_string()), request))?;
 
     if response.ok {
+        record_trace_span(
+            state,
+            ObservationSpanWrite {
+                trace: span_trace,
+                kind: "behavior_rpc".to_string(),
+                name: routed_path.clone(),
+                component: component.to_string(),
+                source_kind: "extension".to_string(),
+                source_id: Some(extension_id.to_string()),
+                status: "ok".to_string(),
+                attributes: serde_json::json!({
+                    "method": method.as_str(),
+                    "path": path,
+                    "routed_path": routed_path,
+                }),
+                started_at,
+                ended_at: now_iso(),
+                duration_ms: started.elapsed().as_millis() as i64,
+            },
+        );
         return Ok(Json(response.data).into_response());
     }
 
@@ -211,6 +250,27 @@ pub(super) async fn dispatch_worker_capability_request(
         .error
         .map(|item| format!("{}: {}", item.code, item.message))
         .unwrap_or_else(|| "worker request failed".to_string());
+    record_trace_span(
+        state,
+        ObservationSpanWrite {
+            trace: span_trace,
+            kind: "behavior_rpc".to_string(),
+            name: routed_path.clone(),
+            component: component.to_string(),
+            source_kind: "extension".to_string(),
+            source_id: Some(extension_id.to_string()),
+            status: "error".to_string(),
+            attributes: serde_json::json!({
+                "method": method.as_str(),
+                "path": path,
+                "routed_path": routed_path,
+                "error": error,
+            }),
+            started_at,
+            ended_at: now_iso(),
+            duration_ms: started.elapsed().as_millis() as i64,
+        },
+    );
     Err(scoped(ApiError::bad_request(error), request))
 }
 

@@ -1,21 +1,24 @@
 use axum::{extract::Request, http::HeaderValue, middleware::Next, response::Response};
-use ennoia_observability::{next_request_id, RequestContext, REQUEST_ID_HEADER};
+use ennoia_observability::{
+    RequestContext, REQUEST_ID_HEADER, SPAN_ID_HEADER, TRACEPARENT_HEADER, TRACE_ID_HEADER,
+};
 
 pub async fn request_context_middleware(mut req: Request, next: Next) -> Response {
-    let request_id = req
-        .headers()
-        .get(REQUEST_ID_HEADER)
-        .and_then(|value| value.to_str().ok())
-        .map(str::to_string)
-        .unwrap_or_else(next_request_id);
-
-    req.extensions_mut().insert(RequestContext {
-        request_id: request_id.clone(),
-    });
+    let context = RequestContext::from_headers(req.headers());
+    req.extensions_mut().insert(context.clone());
 
     let mut response = next.run(req).await;
-    if let Ok(value) = HeaderValue::from_str(&request_id) {
+    if let Ok(value) = HeaderValue::from_str(&context.request_id) {
         response.headers_mut().insert(REQUEST_ID_HEADER, value);
+    }
+    if let Ok(value) = HeaderValue::from_str(&context.trace_id) {
+        response.headers_mut().insert(TRACE_ID_HEADER, value);
+    }
+    if let Ok(value) = HeaderValue::from_str(&context.span_id) {
+        response.headers_mut().insert(SPAN_ID_HEADER, value);
+    }
+    if let Ok(value) = HeaderValue::from_str(&context.trace_context().to_traceparent()) {
+        response.headers_mut().insert(TRACEPARENT_HEADER, value);
     }
     response
 }

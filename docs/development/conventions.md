@@ -90,7 +90,7 @@
 
 ### 5.4 日志边界
 
-- 长生命周期后端模块统一使用 `tracing` 记录运行日志，需要进入产品可查询日志时再写入 `system_log`
+- 长生命周期后端模块统一使用 `tracing` 记录运行日志，需要进入产品可查询观测数据时再写入宿主 `observability`
 - `server` 路由、扩展调度、Hook 派发、Worker RPC 和后台轮询不得使用 `println!`、`eprintln!` 或 `dbg!`
 - `cli` 的 `stdout` / `stderr` 只用于直接面向操作者的终端输出，不把它当作系统日志通道
 - `ennoia dev` 始终把 API、Web 和扩展 UI watcher 输出写入日志文件，并通过 `config/server.toml` 的 `logging.dev_console` 控制是否按级别镜像到命令窗口

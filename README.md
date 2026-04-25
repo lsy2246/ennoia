@@ -48,6 +48,7 @@
 - 系统接口绑定写入 `~/.ennoia/config/interfaces.toml`；未显式绑定且只有一个实现时自动选中。
 - 系统定时计划写入 `~/.ennoia/data/system/schedules.json`，到期后由宿主运行命令或触发 Agent，并可把完整结果、摘要或最终结论投递到会话 / lane。
 - 系统事件总线写入 `~/.ennoia/data/system/sqlite/events.db`，用于持久化会话等系统事件及其 Hook 投递状态。
+- 系统观测数据写入 `~/.ennoia/data/system/sqlite/observability.db`，统一承载 logs、traces 和 span links。
 - 核心日志写入 `~/.ennoia/logs/`。
 - 扩展私有数据写入 `~/.ennoia/data/extensions/{extension_id}/`。
 - 核心不提供主业务 SQLite，不内建语义记忆、编排、任务或产物索引表。

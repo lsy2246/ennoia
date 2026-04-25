@@ -13,6 +13,7 @@ export type ApiErrorBody = {
   code: ErrorCode;
   message: string;
   request_id?: string | null;
+  trace_id?: string | null;
   details?: Record<string, unknown> | null;
   retryable: boolean;
 };

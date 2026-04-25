@@ -46,27 +46,29 @@ mod extensions;
 mod interfaces;
 mod logs;
 mod memory;
+mod observability;
 mod resources;
 mod runtime;
 mod schedules;
-mod system_logs;
 
 use behavior::*;
 use extensions::*;
 use interfaces::*;
 use logs::*;
 use memory::*;
+use observability::*;
 use resources::*;
 use runtime::*;
 use schedules::*;
-use system_logs::*;
 
 pub(crate) use schedules::run_due_schedules_once;
 
 type ApiResult<T> = Result<Json<T>, ApiError>;
 
 fn scoped(error: ApiError, request: &RequestContext) -> ApiError {
-    error.with_request_id(&request.request_id)
+    error
+        .with_request_id(&request.request_id)
+        .with_trace_id(&request.trace_id)
 }
 
 pub fn build_router(state: AppState) -> Router {
@@ -234,8 +236,17 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/schedules/{schedule_id}/resume", post(schedule_resume))
         .route("/api/spaces", get(spaces))
         .route("/api/logs", get(logs_list))
-        .route("/api/system/logs", get(system_logs))
-        .route("/api/system/logs/{log_id}", get(system_log_detail))
+        .route("/api/observability/overview", get(observability_overview))
+        .route("/api/observability/logs", get(observability_logs))
+        .route(
+            "/api/observability/logs/{log_id}",
+            get(observability_log_detail),
+        )
+        .route("/api/observability/traces", get(observability_traces))
+        .route(
+            "/api/observability/traces/{trace_id}",
+            get(observability_trace_detail),
+        )
         .route("/api/logs/frontend", post(frontend_log_create))
         .merge(bootstrap)
         .merge(runtime)

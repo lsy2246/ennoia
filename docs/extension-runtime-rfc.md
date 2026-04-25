@@ -85,7 +85,17 @@ schedule_actions = [
 {
   "method": "memory/recall",
   "params": {},
-  "context": {}
+  "context": {
+    "trace": {
+      "request_id": "req_xxx",
+      "trace_id": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "span_id": "xxxxxxxxxxxxxxxx",
+      "parent_span_id": "xxxxxxxxxxxxxxxx",
+      "sampled": true,
+      "source": "interface_rpc",
+      "traceparent": "00-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx-xxxxxxxxxxxxxxxx-01"
+    }
+  }
 }
 ```
 
@@ -100,6 +110,8 @@ schedule_actions = [
 ```
 
 如果 Worker 返回普通 JSON，宿主会把它包装为 `ok=true` 的 `data`。
+
+宿主当前会在跨边界调用上写入 trace 上下文。Process Worker 和 Wasm Worker 都只消费 `context.trace` 这组普通 JSON 字段；链路追踪落库、查询和采样由宿主负责。
 
 内置 `conversation` 与 `memory` 当前都采用 `jsonrpc-stdio` process Worker；内置 `workflow` 仍提供 `ennoia.worker` Wasm Worker。执行 `bun run build:workers` 会构建两个 release 进程 Worker 和一个 release Wasm Worker，并复制到各自 manifest 声明的位置。
 

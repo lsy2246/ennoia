@@ -3,11 +3,10 @@ use std::path::PathBuf;
 use chrono::{Duration, Utc};
 use ennoia_extension_host::RegisteredHookContribution;
 use ennoia_kernel::HookEventEnvelope;
+use ennoia_observability::TraceContext;
 use ennoia_paths::RuntimePaths;
 use rusqlite::{params, Connection, OptionalExtension};
 use uuid::Uuid;
-
-pub const SYSTEM_LOG_COMPONENT_EVENT_BUS: &str = "event_bus";
 
 const EVENT_BUS_SCHEMA_SQL: &str = r#"
 CREATE TABLE IF NOT EXISTS hook_events (
@@ -19,6 +18,12 @@ CREATE TABLE IF NOT EXISTS hook_events (
   conversation_id TEXT,
   lane_id TEXT,
   run_id TEXT,
+  request_id TEXT,
+  trace_id TEXT,
+  span_id TEXT,
+  parent_span_id TEXT,
+  sampled INTEGER NOT NULL DEFAULT 1,
+  source TEXT NOT NULL DEFAULT 'event_bus',
   envelope_json TEXT NOT NULL,
   created_at TEXT NOT NULL
 );
@@ -26,6 +31,8 @@ CREATE INDEX IF NOT EXISTS idx_hook_events_event_time
   ON hook_events(event, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_hook_events_resource
   ON hook_events(resource_kind, resource_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_hook_events_trace_time
+  ON hook_events(trace_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS hook_deliveries (
   seq INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -48,6 +55,7 @@ CREATE INDEX IF NOT EXISTS idx_hook_deliveries_pending
 pub struct HookEventWrite {
     pub envelope: HookEventEnvelope,
     pub hooks: Vec<RegisteredHookContribution>,
+    pub trace: TraceContext,
 }
 
 #[derive(Debug, Clone)]
@@ -58,6 +66,7 @@ pub struct HookDeliveryRecord {
     pub handler: String,
     pub attempt_count: u32,
     pub envelope: HookEventEnvelope,
+    pub trace: TraceContext,
 }
 
 #[derive(Debug, Clone)]
@@ -79,7 +88,11 @@ impl EventBusStore {
 
     pub fn publish(&self, entry: HookEventWrite) -> std::io::Result<String> {
         let connection = self.open()?;
-        let HookEventWrite { envelope, hooks } = entry;
+        let HookEventWrite {
+            envelope,
+            hooks,
+            trace,
+        } = entry;
         let event_id = format!("hev-{}", Uuid::new_v4());
         let created_at = envelope.occurred_at.clone();
         let envelope_json = serde_json::to_string(&envelope).map_err(std::io::Error::other)?;
@@ -87,8 +100,8 @@ impl EventBusStore {
         connection
             .execute(
                 "INSERT INTO hook_events
-                (id, event, resource_kind, resource_id, conversation_id, lane_id, run_id, envelope_json, created_at)
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                (id, event, resource_kind, resource_id, conversation_id, lane_id, run_id, request_id, trace_id, span_id, parent_span_id, sampled, source, envelope_json, created_at)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
                 params![
                     event_id,
                     envelope.event,
@@ -97,6 +110,12 @@ impl EventBusStore {
                     envelope.resource.conversation_id,
                     envelope.resource.lane_id,
                     envelope.resource.run_id,
+                    trace.request_id,
+                    trace.trace_id,
+                    trace.span_id,
+                    trace.parent_span_id,
+                    if trace.sampled { 1 } else { 0 },
+                    trace.source,
                     envelope_json,
                     created_at,
                 ],
@@ -131,7 +150,7 @@ impl EventBusStore {
         let connection = self.open()?;
         let mut statement = connection
             .prepare(
-                "SELECT d.id, d.event_id, d.extension_id, d.handler, d.attempt_count, e.envelope_json
+                "SELECT d.id, d.event_id, d.extension_id, d.handler, d.attempt_count, e.envelope_json, e.request_id, e.trace_id, e.span_id, e.parent_span_id, e.sampled, e.source
                  FROM hook_deliveries d
                  JOIN hook_events e ON e.id = d.event_id
                  WHERE d.status = 'pending' AND d.next_attempt_at <= ?1
@@ -157,6 +176,14 @@ impl EventBusStore {
                     handler: row.get("handler")?,
                     attempt_count: row.get::<_, i64>("attempt_count")? as u32,
                     envelope,
+                    trace: TraceContext {
+                        request_id: row.get("request_id")?,
+                        trace_id: row.get("trace_id")?,
+                        span_id: row.get("span_id")?,
+                        parent_span_id: row.get("parent_span_id")?,
+                        sampled: row.get::<_, i64>("sampled")? != 0,
+                        source: row.get("source")?,
+                    },
                 })
             })
             .map_err(std::io::Error::other)?;
@@ -217,7 +244,7 @@ impl EventBusStore {
         let connection = self.open()?;
         connection
             .query_row(
-                "SELECT d.id, d.event_id, d.extension_id, d.handler, d.attempt_count, e.envelope_json
+                "SELECT d.id, d.event_id, d.extension_id, d.handler, d.attempt_count, e.envelope_json, e.request_id, e.trace_id, e.span_id, e.parent_span_id, e.sampled, e.source
                  FROM hook_deliveries d
                  JOIN hook_events e ON e.id = d.event_id
                  WHERE d.id = ?1",
@@ -239,6 +266,14 @@ impl EventBusStore {
                         handler: row.get("handler")?,
                         attempt_count: row.get::<_, i64>("attempt_count")? as u32,
                         envelope,
+                        trace: TraceContext {
+                            request_id: row.get("request_id")?,
+                            trace_id: row.get("trace_id")?,
+                            span_id: row.get("span_id")?,
+                            parent_span_id: row.get("parent_span_id")?,
+                            sampled: row.get::<_, i64>("sampled")? != 0,
+                            source: row.get("source")?,
+                        },
                     })
                 },
             )

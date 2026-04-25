@@ -20,10 +20,7 @@ pub async fn timeout_middleware(
     if !cfg.enabled {
         return next.run(req).await;
     }
-    let request_id = req
-        .extensions()
-        .get::<RequestContext>()
-        .map(|ctx| ctx.request_id.clone());
+    let request_id = req.extensions().get::<RequestContext>().cloned();
 
     let path = req.uri().path().to_string();
     let ms = cfg
@@ -37,7 +34,11 @@ pub async fn timeout_middleware(
         Ok(response) => response,
         Err(_) => request_id
             .as_ref()
-            .map(|id| ApiError::timeout("request timed out").with_request_id(id))
+            .map(|id| {
+                ApiError::timeout("request timed out")
+                    .with_request_id(&id.request_id)
+                    .with_trace_id(&id.trace_id)
+            })
             .unwrap_or_else(|| ApiError::timeout("request timed out"))
             .into_response(),
     }

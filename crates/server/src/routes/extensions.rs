@@ -1,7 +1,11 @@
 use super::*;
 use ennoia_kernel::{ExtensionRpcRequest, ExtensionRpcResponse, HookDispatchResponse};
+use std::time::Instant;
 
-use crate::system_log::{SystemLogWrite, SYSTEM_LOG_COMPONENT_EXTENSION_HOST};
+use crate::app::record_trace_span;
+use crate::observability::{
+    ObservationLogWrite, ObservationSpanWrite, OBSERVABILITY_COMPONENT_EXTENSION_HOST,
+};
 
 #[allow(dead_code)]
 const HOOK_DISPATCH_ATTEMPTS: usize = 20;
@@ -260,11 +264,80 @@ pub(super) async fn extension_rpc(
     Path((extension_id, method)): Path<(String, String)>,
     Json(payload): Json<ExtensionRpcRequest>,
 ) -> ApiResult<ExtensionRpcResponse> {
+    let span_trace = request.child_trace("extension_rpc");
+    let started = Instant::now();
+    let started_at = now_iso();
+    let ExtensionRpcRequest { params, context } = payload;
     state
         .extensions
-        .dispatch_rpc(&extension_id, &method, payload)
-        .map(Json)
-        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))
+        .dispatch_rpc(
+            &extension_id,
+            &method,
+            ExtensionRpcRequest {
+                params,
+                context: serde_json::json!({
+                    "upstream": context,
+                    "trace": {
+                        "request_id": span_trace.request_id.clone(),
+                        "trace_id": span_trace.trace_id.clone(),
+                        "span_id": span_trace.span_id.clone(),
+                        "parent_span_id": span_trace.parent_span_id.clone(),
+                        "sampled": span_trace.sampled,
+                        "source": span_trace.source.clone(),
+                        "traceparent": span_trace.to_traceparent(),
+                    }
+                }),
+            },
+        )
+        .map(|response| {
+            record_trace_span(
+                &state,
+                ObservationSpanWrite {
+                    trace: span_trace.clone(),
+                    kind: "extension_rpc".to_string(),
+                    name: method.clone(),
+                    component: OBSERVABILITY_COMPONENT_EXTENSION_HOST.to_string(),
+                    source_kind: "extension".to_string(),
+                    source_id: Some(extension_id.clone()),
+                    status: if response.ok {
+                        "ok".to_string()
+                    } else {
+                        "error".to_string()
+                    },
+                    attributes: serde_json::json!({
+                        "extension_id": extension_id,
+                        "method": method,
+                    }),
+                    started_at: started_at.clone(),
+                    ended_at: now_iso(),
+                    duration_ms: started.elapsed().as_millis() as i64,
+                },
+            );
+            Json(response)
+        })
+        .map_err(|error| {
+            record_trace_span(
+                &state,
+                ObservationSpanWrite {
+                    trace: span_trace,
+                    kind: "extension_rpc".to_string(),
+                    name: method.clone(),
+                    component: OBSERVABILITY_COMPONENT_EXTENSION_HOST.to_string(),
+                    source_kind: "extension".to_string(),
+                    source_id: Some(extension_id.clone()),
+                    status: "error".to_string(),
+                    attributes: serde_json::json!({
+                        "extension_id": extension_id,
+                        "method": method,
+                        "error": error.to_string(),
+                    }),
+                    started_at,
+                    ended_at: now_iso(),
+                    duration_ms: started.elapsed().as_millis() as i64,
+                },
+            );
+            scoped(ApiError::internal(error.to_string()), &request)
+        })
 }
 pub(super) async fn extension_reload(
     State(state): State<AppState>,
@@ -281,14 +354,14 @@ pub(super) async fn extension_reload(
                 &request,
             )
         })?;
-    let _ = state.system_log.append(SystemLogWrite {
+    let _ = state.observability.append_log(ObservationLogWrite {
         event: "runtime.extension.reloaded".to_string(),
         level: "info".to_string(),
-        component: SYSTEM_LOG_COMPONENT_EXTENSION_HOST.to_string(),
+        component: OBSERVABILITY_COMPONENT_EXTENSION_HOST.to_string(),
         source_kind: "extension".to_string(),
         source_id: Some(extension_id),
-        summary: "extension reloaded".to_string(),
-        payload: serde_json::json!({}),
+        message: "extension reloaded".to_string(),
+        attributes: serde_json::json!({}),
         created_at: None,
     });
     Ok(Json(item))
@@ -309,14 +382,14 @@ pub(super) async fn extension_restart(
                 &request,
             )
         })?;
-    let _ = state.system_log.append(SystemLogWrite {
+    let _ = state.observability.append_log(ObservationLogWrite {
         event: "runtime.extension.restarted".to_string(),
         level: "info".to_string(),
-        component: SYSTEM_LOG_COMPONENT_EXTENSION_HOST.to_string(),
+        component: OBSERVABILITY_COMPONENT_EXTENSION_HOST.to_string(),
         source_kind: "extension".to_string(),
         source_id: Some(extension_id),
-        summary: "extension restarted".to_string(),
-        payload: serde_json::json!({}),
+        message: "extension restarted".to_string(),
+        attributes: serde_json::json!({}),
         created_at: None,
     });
     Ok(Json(item))
@@ -331,14 +404,14 @@ pub(super) async fn extension_attach(
         .extensions
         .attach_dev_source(&payload.path)
         .map_err(|error| scoped(ApiError::bad_request(error.to_string()), &request))?;
-    let _ = state.system_log.append(SystemLogWrite {
+    let _ = state.observability.append_log(ObservationLogWrite {
         event: "runtime.extension.attached".to_string(),
         level: "info".to_string(),
-        component: SYSTEM_LOG_COMPONENT_EXTENSION_HOST.to_string(),
+        component: OBSERVABILITY_COMPONENT_EXTENSION_HOST.to_string(),
         source_kind: "extension".to_string(),
         source_id: Some(item.id.clone()),
-        summary: "extension attached".to_string(),
-        payload: serde_json::json!({ "path": payload.path }),
+        message: "extension attached".to_string(),
+        attributes: serde_json::json!({ "path": payload.path }),
         created_at: None,
     });
     Ok(Json(item))
@@ -359,14 +432,14 @@ pub(super) async fn extension_detach(
             &request,
         ));
     }
-    let _ = state.system_log.append(SystemLogWrite {
+    let _ = state.observability.append_log(ObservationLogWrite {
         event: "runtime.extension.detached".to_string(),
         level: "info".to_string(),
-        component: SYSTEM_LOG_COMPONENT_EXTENSION_HOST.to_string(),
+        component: OBSERVABILITY_COMPONENT_EXTENSION_HOST.to_string(),
         source_kind: "extension".to_string(),
         source_id: Some(extension_id),
-        summary: "extension detached".to_string(),
-        payload: serde_json::json!({}),
+        message: "extension detached".to_string(),
+        attributes: serde_json::json!({}),
         created_at: None,
     });
     Ok(StatusCode::NO_CONTENT)
@@ -406,18 +479,18 @@ pub(super) async fn extension_enabled_put(
             },
             ..existing
         });
-    let _ = state.system_log.append(SystemLogWrite {
+    let _ = state.observability.append_log(ObservationLogWrite {
         event: if payload.enabled {
             "runtime.extension.enabled".to_string()
         } else {
             "runtime.extension.disabled".to_string()
         },
         level: "info".to_string(),
-        component: SYSTEM_LOG_COMPONENT_EXTENSION_HOST.to_string(),
+        component: OBSERVABILITY_COMPONENT_EXTENSION_HOST.to_string(),
         source_kind: "extension".to_string(),
         source_id: Some(extension_id.clone()),
-        summary: "extension enablement changed".to_string(),
-        payload: serde_json::json!({ "enabled": payload.enabled }),
+        message: "extension enablement changed".to_string(),
+        attributes: serde_json::json!({ "enabled": payload.enabled }),
         created_at: None,
     });
     Ok(Json(updated))

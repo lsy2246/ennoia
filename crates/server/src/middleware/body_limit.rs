@@ -20,10 +20,7 @@ pub async fn body_limit_middleware(
     if !cfg.enabled {
         return next.run(req).await;
     }
-    let request_id = req
-        .extensions()
-        .get::<RequestContext>()
-        .map(|ctx| ctx.request_id.clone());
+    let request_id = req.extensions().get::<RequestContext>().cloned();
 
     let path = req.uri().path().to_string();
     let limit = cfg
@@ -40,7 +37,8 @@ pub async fn body_limit_middleware(
                 .as_ref()
                 .map(|id| {
                     ApiError::payload_too_large(format!("body exceeds {limit} bytes"))
-                        .with_request_id(id)
+                        .with_request_id(&id.request_id)
+                        .with_trace_id(&id.trace_id)
                 })
                 .unwrap_or_else(|| {
                     ApiError::payload_too_large(format!("body exceeds {limit} bytes"))
