@@ -1,3 +1,6 @@
+mod query;
+mod schema;
+
 use std::path::PathBuf;
 
 use chrono::Utc;
@@ -8,81 +11,16 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use uuid::Uuid;
 
+use self::query::{ColumnCount, FilterOperator, SelectQuery};
+use self::schema::{LogsSchema, SpanLinksSchema, SpansSchema, TableSchema};
+
 pub const OBSERVABILITY_COMPONENT_HOST: &str = "host";
 pub const OBSERVABILITY_COMPONENT_EXTENSION_HOST: &str = "extension_host";
 pub const OBSERVABILITY_COMPONENT_BEHAVIOR: &str = "behavior_router";
 pub const OBSERVABILITY_COMPONENT_PROXY: &str = "extension_proxy";
 pub const OBSERVABILITY_COMPONENT_EVENT_BUS: &str = "event_bus";
 
-const OBSERVABILITY_SCHEMA_SQL: &str = r#"
-CREATE TABLE IF NOT EXISTS logs (
-  seq INTEGER PRIMARY KEY AUTOINCREMENT,
-  id TEXT NOT NULL UNIQUE,
-  event TEXT NOT NULL,
-  level TEXT NOT NULL,
-  component TEXT NOT NULL,
-  source_kind TEXT NOT NULL,
-  source_id TEXT,
-  request_id TEXT,
-  trace_id TEXT,
-  span_id TEXT,
-  parent_span_id TEXT,
-  message TEXT NOT NULL,
-  attributes_json TEXT NOT NULL,
-  created_at TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_logs_event_time
-  ON logs(event, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_logs_component_time
-  ON logs(component, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_logs_source_time
-  ON logs(source_kind, source_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_logs_trace_time
-  ON logs(trace_id, created_at DESC);
-
-CREATE TABLE IF NOT EXISTS spans (
-  seq INTEGER PRIMARY KEY AUTOINCREMENT,
-  id TEXT NOT NULL UNIQUE,
-  trace_id TEXT NOT NULL,
-  span_id TEXT NOT NULL,
-  parent_span_id TEXT,
-  request_id TEXT NOT NULL,
-  sampled INTEGER NOT NULL DEFAULT 1,
-  source TEXT NOT NULL,
-  kind TEXT NOT NULL,
-  name TEXT NOT NULL,
-  component TEXT NOT NULL,
-  source_kind TEXT NOT NULL,
-  source_id TEXT,
-  status TEXT NOT NULL,
-  attributes_json TEXT NOT NULL,
-  started_at TEXT NOT NULL,
-  ended_at TEXT NOT NULL,
-  duration_ms INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_spans_trace_seq
-  ON spans(trace_id, seq ASC);
-CREATE INDEX IF NOT EXISTS idx_spans_request_seq
-  ON spans(request_id, seq ASC);
-CREATE INDEX IF NOT EXISTS idx_spans_component_time
-  ON spans(component, ended_at DESC);
-
-CREATE TABLE IF NOT EXISTS span_links (
-  seq INTEGER PRIMARY KEY AUTOINCREMENT,
-  id TEXT NOT NULL UNIQUE,
-  trace_id TEXT NOT NULL,
-  span_id TEXT NOT NULL,
-  linked_trace_id TEXT NOT NULL,
-  linked_span_id TEXT NOT NULL,
-  link_type TEXT NOT NULL,
-  attributes_json TEXT NOT NULL,
-  created_at TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_span_links_trace_seq
-  ON span_links(trace_id, seq ASC);
-CREATE INDEX IF NOT EXISTS idx_span_links_span
-  ON span_links(span_id, linked_span_id, link_type);
-"#;
+const SQLITE_PRAGMAS: &[&str] = &["PRAGMA journal_mode=WAL;", "PRAGMA synchronous=NORMAL;"];
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ObservationLogEntry {
@@ -256,9 +194,7 @@ impl ObservabilityStore {
             serde_json::to_string(&entry.attributes).map_err(std::io::Error::other)?;
         connection
             .execute(
-                "INSERT INTO logs
-                (id, event, level, component, source_kind, source_id, request_id, trace_id, span_id, parent_span_id, message, attributes_json, created_at)
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                &LogsSchema::insert_statement(),
                 params![
                     id,
                     entry.event,
@@ -300,50 +236,10 @@ impl ObservabilityStore {
         query: &ObservationLogQuery,
     ) -> std::io::Result<Vec<ObservationLogEntry>> {
         let connection = self.open()?;
-        let mut sql = String::from(
-            "SELECT seq, id, event, level, component, source_kind, source_id, request_id, trace_id, span_id, parent_span_id, message, attributes_json, created_at
-             FROM logs WHERE 1=1",
-        );
-        let mut params_vec = Vec::<rusqlite::types::Value>::new();
-
-        if let Some(event) = &query.event {
-            sql.push_str(" AND event = ?");
-            params_vec.push(event.clone().into());
-        }
-        if let Some(level) = &query.level {
-            sql.push_str(" AND lower(level) = lower(?)");
-            params_vec.push(level.clone().into());
-        }
-        if let Some(component) = &query.component {
-            sql.push_str(" AND component = ?");
-            params_vec.push(component.clone().into());
-        }
-        if let Some(source_kind) = &query.source_kind {
-            sql.push_str(" AND source_kind = ?");
-            params_vec.push(source_kind.clone().into());
-        }
-        if let Some(source_id) = &query.source_id {
-            sql.push_str(" AND source_id = ?");
-            params_vec.push(source_id.clone().into());
-        }
-        if let Some(request_id) = &query.request_id {
-            sql.push_str(" AND request_id = ?");
-            params_vec.push(request_id.clone().into());
-        }
-        if let Some(trace_id) = &query.trace_id {
-            sql.push_str(" AND trace_id = ?");
-            params_vec.push(trace_id.clone().into());
-        }
-        if let Some(before_seq) = query.before_seq {
-            sql.push_str(" AND seq < ?");
-            params_vec.push(before_seq.into());
-        }
-        sql.push_str(" ORDER BY seq DESC LIMIT ?");
-        params_vec.push((query.limit.max(1) as i64).into());
-
-        let mut statement = connection.prepare(&sql).map_err(std::io::Error::other)?;
+        let prepared = build_logs_query(query).build();
+        let mut statement = prepared.prepare(&connection)?;
         let rows = statement
-            .query_map(rusqlite::params_from_iter(params_vec), map_log_entry)
+            .query_map(rusqlite::params_from_iter(prepared.params), map_log_entry)
             .map_err(std::io::Error::other)?;
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(std::io::Error::other)
@@ -353,8 +249,7 @@ impl ObservabilityStore {
         let connection = self.open()?;
         connection
             .query_row(
-                "SELECT seq, id, event, level, component, source_kind, source_id, request_id, trace_id, span_id, parent_span_id, message, attributes_json, created_at
-                 FROM logs WHERE id = ?1",
+                &LogsSchema::select_by_id_statement(),
                 params![id],
                 map_log_entry,
             )
@@ -372,9 +267,7 @@ impl ObservabilityStore {
             serde_json::to_string(&entry.attributes).map_err(std::io::Error::other)?;
         connection
             .execute(
-                "INSERT INTO spans
-                (id, trace_id, span_id, parent_span_id, request_id, sampled, source, kind, name, component, source_kind, source_id, status, attributes_json, started_at, ended_at, duration_ms)
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+                &SpansSchema::insert_statement(),
                 params![
                     id,
                     entry.trace.trace_id,
@@ -424,46 +317,10 @@ impl ObservabilityStore {
         query: &ObservationSpanQuery,
     ) -> std::io::Result<Vec<ObservationSpanRecord>> {
         let connection = self.open()?;
-        let mut sql = String::from(
-            "SELECT seq, id, trace_id, span_id, parent_span_id, request_id, sampled, source, kind, name, component, source_kind, source_id, status, attributes_json, started_at, ended_at, duration_ms
-             FROM spans WHERE 1=1",
-        );
-        let mut params_vec = Vec::<rusqlite::types::Value>::new();
-
-        if let Some(trace_id) = &query.trace_id {
-            sql.push_str(" AND trace_id = ?");
-            params_vec.push(trace_id.clone().into());
-        }
-        if let Some(request_id) = &query.request_id {
-            sql.push_str(" AND request_id = ?");
-            params_vec.push(request_id.clone().into());
-        }
-        if let Some(component) = &query.component {
-            sql.push_str(" AND component = ?");
-            params_vec.push(component.clone().into());
-        }
-        if let Some(kind) = &query.kind {
-            sql.push_str(" AND kind = ?");
-            params_vec.push(kind.clone().into());
-        }
-        if let Some(source_kind) = &query.source_kind {
-            sql.push_str(" AND source_kind = ?");
-            params_vec.push(source_kind.clone().into());
-        }
-        if let Some(source_id) = &query.source_id {
-            sql.push_str(" AND source_id = ?");
-            params_vec.push(source_id.clone().into());
-        }
-        if query.trace_id.is_some() || query.request_id.is_some() {
-            sql.push_str(" ORDER BY seq ASC LIMIT ?");
-        } else {
-            sql.push_str(" ORDER BY seq DESC LIMIT ?");
-        }
-        params_vec.push((query.limit.max(1) as i64).into());
-
-        let mut statement = connection.prepare(&sql).map_err(std::io::Error::other)?;
+        let prepared = build_spans_query(query).build();
+        let mut statement = prepared.prepare(&connection)?;
         let rows = statement
-            .query_map(rusqlite::params_from_iter(params_vec), map_span_record)
+            .query_map(rusqlite::params_from_iter(prepared.params), map_span_record)
             .map_err(std::io::Error::other)?;
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(std::io::Error::other)
@@ -480,9 +337,7 @@ impl ObservabilityStore {
             serde_json::to_string(&entry.attributes).map_err(std::io::Error::other)?;
         connection
             .execute(
-                "INSERT INTO span_links
-                (id, trace_id, span_id, linked_trace_id, linked_span_id, link_type, attributes_json, created_at)
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                &SpanLinksSchema::insert_statement(),
                 params![
                     id,
                     entry.trace_id,
@@ -514,26 +369,13 @@ impl ObservabilityStore {
         query: &ObservationLinkQuery,
     ) -> std::io::Result<Vec<ObservationSpanLinkRecord>> {
         let connection = self.open()?;
-        let mut sql = String::from(
-            "SELECT seq, id, trace_id, span_id, linked_trace_id, linked_span_id, link_type, attributes_json, created_at
-             FROM span_links WHERE 1=1",
-        );
-        let mut params_vec = Vec::<rusqlite::types::Value>::new();
-
-        if let Some(trace_id) = &query.trace_id {
-            sql.push_str(" AND trace_id = ?");
-            params_vec.push(trace_id.clone().into());
-        }
-        if let Some(span_id) = &query.span_id {
-            sql.push_str(" AND span_id = ?");
-            params_vec.push(span_id.clone().into());
-        }
-        sql.push_str(" ORDER BY seq ASC LIMIT ?");
-        params_vec.push((query.limit.max(1) as i64).into());
-
-        let mut statement = connection.prepare(&sql).map_err(std::io::Error::other)?;
+        let prepared = build_span_links_query(query).build();
+        let mut statement = prepared.prepare(&connection)?;
         let rows = statement
-            .query_map(rusqlite::params_from_iter(params_vec), map_span_link_record)
+            .query_map(
+                rusqlite::params_from_iter(prepared.params),
+                map_span_link_record,
+            )
             .map_err(std::io::Error::other)?;
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(std::io::Error::other)
@@ -541,9 +383,12 @@ impl ObservabilityStore {
 
     pub fn overview(&self) -> std::io::Result<ObservationOverview> {
         let connection = self.open()?;
-        let log_count = query_count(&connection, "SELECT COUNT(*) FROM logs")?;
-        let span_count = query_count(&connection, "SELECT COUNT(*) FROM spans")?;
-        let trace_count = query_count(&connection, "SELECT COUNT(DISTINCT trace_id) FROM spans")?;
+        let log_count = query_count(&connection, &LogsSchema::count_statement(ColumnCount::All))?;
+        let span_count = query_count(&connection, &SpansSchema::count_statement(ColumnCount::All))?;
+        let trace_count = query_count(
+            &connection,
+            &SpansSchema::count_statement(ColumnCount::Distinct(SpansSchema::TRACE_ID)),
+        )?;
         Ok(ObservationOverview {
             log_count,
             span_count,
@@ -553,75 +398,203 @@ impl ObservabilityStore {
 
     fn open(&self) -> std::io::Result<Connection> {
         let connection = Connection::open(&self.db_path).map_err(std::io::Error::other)?;
-        connection
-            .execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")
-            .map_err(std::io::Error::other)?;
+        for pragma in SQLITE_PRAGMAS {
+            connection
+                .execute_batch(pragma)
+                .map_err(std::io::Error::other)?;
+        }
         Ok(connection)
     }
 
     fn ensure_schema(&self) -> std::io::Result<()> {
-        self.open()?
-            .execute_batch(OBSERVABILITY_SCHEMA_SQL)
-            .map_err(std::io::Error::other)
+        let connection = self.open()?;
+        for statement in schema::schema_statements() {
+            connection
+                .execute_batch(&statement)
+                .map_err(std::io::Error::other)?;
+        }
+        Ok(())
     }
 }
 
+fn build_logs_query(query: &ObservationLogQuery) -> SelectQuery {
+    let mut builder = SelectQuery::new(LogsSchema::NAME, LogsSchema::SELECT_COLUMNS);
+    if let Some(event) = &query.event {
+        builder.push_filter(LogsSchema::EVENT, FilterOperator::Eq, event.clone().into());
+    }
+    if let Some(level) = &query.level {
+        builder.push_filter(
+            LogsSchema::LEVEL,
+            FilterOperator::EqIgnoreCase,
+            level.clone().into(),
+        );
+    }
+    if let Some(component) = &query.component {
+        builder.push_filter(
+            LogsSchema::COMPONENT,
+            FilterOperator::Eq,
+            component.clone().into(),
+        );
+    }
+    if let Some(source_kind) = &query.source_kind {
+        builder.push_filter(
+            LogsSchema::SOURCE_KIND,
+            FilterOperator::Eq,
+            source_kind.clone().into(),
+        );
+    }
+    if let Some(source_id) = &query.source_id {
+        builder.push_filter(
+            LogsSchema::SOURCE_ID,
+            FilterOperator::Eq,
+            source_id.clone().into(),
+        );
+    }
+    if let Some(request_id) = &query.request_id {
+        builder.push_filter(
+            LogsSchema::REQUEST_ID,
+            FilterOperator::Eq,
+            request_id.clone().into(),
+        );
+    }
+    if let Some(trace_id) = &query.trace_id {
+        builder.push_filter(
+            LogsSchema::TRACE_ID,
+            FilterOperator::Eq,
+            trace_id.clone().into(),
+        );
+    }
+    if let Some(before_seq) = query.before_seq {
+        builder.push_filter(LogsSchema::SEQ, FilterOperator::Lt, before_seq.into());
+    }
+    builder
+        .order_by(LogsSchema::SEQ, true)
+        .limit(query.limit.max(1) as i64)
+}
+
+fn build_spans_query(query: &ObservationSpanQuery) -> SelectQuery {
+    let mut builder = SelectQuery::new(SpansSchema::NAME, SpansSchema::SELECT_COLUMNS);
+    if let Some(trace_id) = &query.trace_id {
+        builder.push_filter(
+            SpansSchema::TRACE_ID,
+            FilterOperator::Eq,
+            trace_id.clone().into(),
+        );
+    }
+    if let Some(request_id) = &query.request_id {
+        builder.push_filter(
+            SpansSchema::REQUEST_ID,
+            FilterOperator::Eq,
+            request_id.clone().into(),
+        );
+    }
+    if let Some(component) = &query.component {
+        builder.push_filter(
+            SpansSchema::COMPONENT,
+            FilterOperator::Eq,
+            component.clone().into(),
+        );
+    }
+    if let Some(kind) = &query.kind {
+        builder.push_filter(SpansSchema::KIND, FilterOperator::Eq, kind.clone().into());
+    }
+    if let Some(source_kind) = &query.source_kind {
+        builder.push_filter(
+            SpansSchema::SOURCE_KIND,
+            FilterOperator::Eq,
+            source_kind.clone().into(),
+        );
+    }
+    if let Some(source_id) = &query.source_id {
+        builder.push_filter(
+            SpansSchema::SOURCE_ID,
+            FilterOperator::Eq,
+            source_id.clone().into(),
+        );
+    }
+    let descending = query.trace_id.is_none() && query.request_id.is_none();
+    builder
+        .order_by(SpansSchema::SEQ, descending)
+        .limit(query.limit.max(1) as i64)
+}
+
+fn build_span_links_query(query: &ObservationLinkQuery) -> SelectQuery {
+    let mut builder = SelectQuery::new(SpanLinksSchema::NAME, SpanLinksSchema::SELECT_COLUMNS);
+    if let Some(trace_id) = &query.trace_id {
+        builder.push_filter(
+            SpanLinksSchema::TRACE_ID,
+            FilterOperator::Eq,
+            trace_id.clone().into(),
+        );
+    }
+    if let Some(span_id) = &query.span_id {
+        builder.push_filter(
+            SpanLinksSchema::SPAN_ID,
+            FilterOperator::Eq,
+            span_id.clone().into(),
+        );
+    }
+    builder
+        .order_by(SpanLinksSchema::SEQ, false)
+        .limit(query.limit.max(1) as i64)
+}
+
 fn map_log_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<ObservationLogEntry> {
-    let attributes_json: String = row.get("attributes_json")?;
+    let attributes_json: String = row.get(LogsSchema::ATTRIBUTES_JSON)?;
     Ok(ObservationLogEntry {
-        seq: row.get("seq")?,
-        id: row.get("id")?,
-        event: row.get("event")?,
-        level: row.get("level")?,
-        component: row.get("component")?,
-        source_kind: row.get("source_kind")?,
-        source_id: row.get("source_id")?,
-        request_id: row.get("request_id")?,
-        trace_id: row.get("trace_id")?,
-        span_id: row.get("span_id")?,
-        parent_span_id: row.get("parent_span_id")?,
-        message: row.get("message")?,
+        seq: row.get(LogsSchema::SEQ)?,
+        id: row.get(LogsSchema::ID)?,
+        event: row.get(LogsSchema::EVENT)?,
+        level: row.get(LogsSchema::LEVEL)?,
+        component: row.get(LogsSchema::COMPONENT)?,
+        source_kind: row.get(LogsSchema::SOURCE_KIND)?,
+        source_id: row.get(LogsSchema::SOURCE_ID)?,
+        request_id: row.get(LogsSchema::REQUEST_ID)?,
+        trace_id: row.get(LogsSchema::TRACE_ID)?,
+        span_id: row.get(LogsSchema::SPAN_ID)?,
+        parent_span_id: row.get(LogsSchema::PARENT_SPAN_ID)?,
+        message: row.get(LogsSchema::MESSAGE)?,
         attributes: serde_json::from_str(&attributes_json).unwrap_or(JsonValue::Null),
-        created_at: row.get("created_at")?,
+        created_at: row.get(LogsSchema::CREATED_AT)?,
     })
 }
 
 fn map_span_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<ObservationSpanRecord> {
-    let attributes_json: String = row.get("attributes_json")?;
+    let attributes_json: String = row.get(SpansSchema::ATTRIBUTES_JSON)?;
     Ok(ObservationSpanRecord {
-        seq: row.get("seq")?,
-        id: row.get("id")?,
-        trace_id: row.get("trace_id")?,
-        span_id: row.get("span_id")?,
-        parent_span_id: row.get("parent_span_id")?,
-        request_id: row.get("request_id")?,
-        sampled: row.get::<_, i64>("sampled")? != 0,
-        source: row.get("source")?,
-        kind: row.get("kind")?,
-        name: row.get("name")?,
-        component: row.get("component")?,
-        source_kind: row.get("source_kind")?,
-        source_id: row.get("source_id")?,
-        status: row.get("status")?,
+        seq: row.get(SpansSchema::SEQ)?,
+        id: row.get(SpansSchema::ID)?,
+        trace_id: row.get(SpansSchema::TRACE_ID)?,
+        span_id: row.get(SpansSchema::SPAN_ID)?,
+        parent_span_id: row.get(SpansSchema::PARENT_SPAN_ID)?,
+        request_id: row.get(SpansSchema::REQUEST_ID)?,
+        sampled: row.get::<_, i64>(SpansSchema::SAMPLED)? != 0,
+        source: row.get(SpansSchema::SOURCE)?,
+        kind: row.get(SpansSchema::KIND)?,
+        name: row.get(SpansSchema::NAME_COL)?,
+        component: row.get(SpansSchema::COMPONENT)?,
+        source_kind: row.get(SpansSchema::SOURCE_KIND)?,
+        source_id: row.get(SpansSchema::SOURCE_ID)?,
+        status: row.get(SpansSchema::STATUS)?,
         attributes: serde_json::from_str(&attributes_json).unwrap_or(JsonValue::Null),
-        started_at: row.get("started_at")?,
-        ended_at: row.get("ended_at")?,
-        duration_ms: row.get("duration_ms")?,
+        started_at: row.get(SpansSchema::STARTED_AT)?,
+        ended_at: row.get(SpansSchema::ENDED_AT)?,
+        duration_ms: row.get(SpansSchema::DURATION_MS)?,
     })
 }
 
 fn map_span_link_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<ObservationSpanLinkRecord> {
-    let attributes_json: String = row.get("attributes_json")?;
+    let attributes_json: String = row.get(SpanLinksSchema::ATTRIBUTES_JSON)?;
     Ok(ObservationSpanLinkRecord {
-        seq: row.get("seq")?,
-        id: row.get("id")?,
-        trace_id: row.get("trace_id")?,
-        span_id: row.get("span_id")?,
-        linked_trace_id: row.get("linked_trace_id")?,
-        linked_span_id: row.get("linked_span_id")?,
-        link_type: row.get("link_type")?,
+        seq: row.get(SpanLinksSchema::SEQ)?,
+        id: row.get(SpanLinksSchema::ID)?,
+        trace_id: row.get(SpanLinksSchema::TRACE_ID)?,
+        span_id: row.get(SpanLinksSchema::SPAN_ID)?,
+        linked_trace_id: row.get(SpanLinksSchema::LINKED_TRACE_ID)?,
+        linked_span_id: row.get(SpanLinksSchema::LINKED_SPAN_ID)?,
+        link_type: row.get(SpanLinksSchema::LINK_TYPE)?,
         attributes: serde_json::from_str(&attributes_json).unwrap_or(JsonValue::Null),
-        created_at: row.get("created_at")?,
+        created_at: row.get(SpanLinksSchema::CREATED_AT)?,
     })
 }
 

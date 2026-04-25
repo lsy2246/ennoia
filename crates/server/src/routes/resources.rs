@@ -276,21 +276,22 @@ fn resolve_provider_contribution(
     state: &AppState,
     kind: &str,
 ) -> Result<Option<ennoia_extension_host::RegisteredProviderContribution>, ApiError> {
+    let normalized = kind.trim();
     let matches = state
         .extensions
         .snapshot()
         .providers
         .into_iter()
-        .filter(|item| item.provider.kind == kind)
+        .filter(|item| item.provider.kind == normalized || item.provider.id == normalized)
         .collect::<Vec<_>>();
 
     match matches.len() {
         0 => Err(ApiError::bad_request(format!(
-            "接口类型 '{kind}' 当前没有可用实现扩展。"
+            "接口类型 '{normalized}' 当前没有可用实现扩展。"
         ))),
         1 => Ok(matches.into_iter().next()),
         _ => Err(ApiError::bad_request(format!(
-            "接口类型 '{kind}' 对应多个实现扩展，当前不允许创建渠道。"
+            "接口类型 '{normalized}' 对应多个实现扩展，当前不允许创建渠道。"
         ))),
     }
 }
