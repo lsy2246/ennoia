@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 
 import {
   ApiError,
@@ -14,46 +14,13 @@ import {
 import { useConversationsStore } from "@/stores/conversations";
 import { useUiHelpers } from "@/stores/ui";
 import { useWorkbenchStore } from "@/stores/workbench";
-
-type LocalMessageStatus = "queued" | "sending" | "failed";
-
-type LocalMessageDraft = {
-  clientId: string;
-  body: string;
-  addressedAgents: string[];
-  segments: ComposerSegment[];
-  createdAt: string;
-  status: LocalMessageStatus;
-  error?: string;
-};
-
-type PendingReplyMarker = {
-  id: string;
-  agentId: string;
-  createdAt: string;
-};
-
-type DisplayMessage =
-  | {
-      kind: "remote";
-      id: string;
-      role: ChatMessage["role"];
-      sender: string;
-      body: string;
-      mentions: string[];
-      createdAt: string;
-    }
-  | {
-      kind: "local";
-      id: string;
-      role: "operator";
-      sender: string;
-      body: string;
-      mentions: string[];
-      createdAt: string;
-      status: LocalMessageStatus;
-      error?: string;
-    };
+import { ChatStream } from "./ChatStream";
+import { buildChatEntries, buildStatusEntries } from "./chat-entry-builder";
+import type {
+  ComposerSegment,
+  LocalMessageDraft,
+  PendingReplyMarker,
+} from "./chat-types";
 
 type ComposerPickerMode = "mention" | "skill";
 
@@ -63,22 +30,6 @@ type ComposerPickerState = {
   query: string;
   selectedIndex: number;
 };
-
-type ComposerSegment =
-  | {
-      kind: "text";
-      value: string;
-    }
-  | {
-      kind: "mention";
-      agentId: string;
-      label: string;
-    }
-  | {
-      kind: "skill";
-      skillId: string;
-      label: string;
-    };
 
 type ComposerPickerOption = {
   kind: ComposerPickerMode;
@@ -573,60 +524,6 @@ function reconcilePendingRepliesWithRemote(
   );
 }
 
-function renderMessageBody(body: string, agents: AgentProfile[], skills: SkillConfig[]): ReactNode {
-  const mentionMap = new Map<string, string>();
-  for (const agent of agents) {
-    mentionMap.set(agent.id.toLowerCase(), agent.display_name);
-    mentionMap.set(agent.display_name.toLowerCase(), agent.display_name);
-    mentionMap.set(agent.display_name.toLowerCase().replace(/\s+/g, "-"), agent.display_name);
-  }
-
-  const skillMap = new Map<string, string>();
-  for (const skill of skills) {
-    skillMap.set(skill.id.toLowerCase(), skill.display_name);
-    skillMap.set(skill.display_name.toLowerCase(), skill.display_name);
-    skillMap.set(skill.display_name.toLowerCase().replace(/\s+/g, "-"), skill.display_name);
-  }
-
-  const lines = body.split("\n");
-  return lines.map((line, lineIndex) => {
-    const parts = line.split(/([@/][\p{L}\p{N}_.-]+)/gu);
-    return (
-      <Fragment key={`line:${lineIndex}`}>
-        {parts.map((part, partIndex) => {
-          const mentionMatch = part.match(/^@([\p{L}\p{N}_.-]+)$/u);
-          if (mentionMatch) {
-            const label = mentionMap.get(mentionMatch[1].toLowerCase());
-            if (!label) {
-              return <Fragment key={`part:${lineIndex}:${partIndex}`}>{part}</Fragment>;
-            }
-            return (
-              <span key={`part:${lineIndex}:${partIndex}`} className="message-inline-mention">
-                @{label}
-              </span>
-            );
-          }
-
-          const skillMatch = part.match(/^\/([\p{L}\p{N}_.-]+)$/u);
-          if (!skillMatch) {
-            return <Fragment key={`part:${lineIndex}:${partIndex}`}>{part}</Fragment>;
-          }
-          const label = skillMap.get(skillMatch[1].toLowerCase());
-          if (!label) {
-            return <Fragment key={`part:${lineIndex}:${partIndex}`}>{part}</Fragment>;
-          }
-          return (
-            <span key={`part:${lineIndex}:${partIndex}`} className="message-inline-skill">
-              /{label}
-            </span>
-          );
-        })}
-        {lineIndex < lines.length - 1 ? <br /> : null}
-      </Fragment>
-    );
-  });
-}
-
 export function SessionView({ sessionId, panelId }: { sessionId: string; panelId?: string }) {
   const { formatDateTime, t } = useUiHelpers();
   const openView = useWorkbenchStore((state) => state.openView);
@@ -909,66 +806,6 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
     return () => window.clearTimeout(timer);
   }, [sendingItem]);
 
-  const sessionStatus = useMemo(() => {
-    if (sendingItem) {
-      return {
-        tone: "accent",
-        label: t("web.conversations.status_sending", "正在发送消息…"),
-        detail: t("web.conversations.status_sending_detail", "当前消息已进入处理链路，请稍候。"),
-      };
-    }
-    if (pendingReplies.length > 0) {
-      return {
-        tone: "accent",
-        label: t("web.conversations.status_ai_typing", "AI 正在输入…"),
-        detail: t("web.conversations.status_ai_typing_detail", "已发送给 Agent，正在等待回复写回会话。"),
-      };
-    }
-    if (waitingItems.length > 0) {
-      return {
-        tone: "warn",
-        label: t("web.conversations.status_queue", "排队中"),
-        detail: t("web.conversations.status_queue_detail", "还有 {count} 条消息等待发送。").replace("{count}", String(waitingItems.length)),
-      };
-    }
-    if (failedItems.length > 0) {
-      return {
-        tone: "danger",
-        label: t("web.conversations.status_failed", "有消息发送失败"),
-        detail: t("web.conversations.status_failed_detail", "你可以重试失败消息，或从队列中移除它。"),
-      };
-    }
-    return {
-      tone: "muted",
-      label: t("web.conversations.status_idle", "会话空闲"),
-      detail: t("web.conversations.status_idle_detail", "消息会串行发送；如果连续提交，会进入可见队列。"),
-    };
-  }, [failedItems.length, pendingReplies.length, sendingItem, t, waitingItems.length]);
-
-  const displayMessages = useMemo<DisplayMessage[]>(() => {
-    const remoteMessages = (detail?.messages ?? []).map<DisplayMessage>((message) => ({
-      kind: "remote",
-      id: message.id,
-      role: message.role,
-      sender: message.sender,
-      body: message.body,
-      mentions: message.mentions,
-      createdAt: message.created_at,
-    }));
-    const localMessages = localDrafts.map<DisplayMessage>((item) => ({
-      kind: "local",
-      id: item.clientId,
-      role: "operator",
-      sender: "Operator",
-      body: item.body,
-      mentions: item.addressedAgents,
-      createdAt: item.createdAt,
-      status: item.status,
-      error: item.error,
-    }));
-    return [...remoteMessages, ...localMessages].sort((left, right) => left.createdAt.localeCompare(right.createdAt));
-  }, [detail?.messages, localDrafts]);
-
   const resolveRecipients = useCallback((mentions: string[]) => {
     const resolved = uniqueStrings(mentions)
       .map((agentId) => agentMap.get(agentId))
@@ -981,18 +818,58 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
 
   const typingAgents = useMemo(() => {
     const typingIds = new Set<string>();
-    if (sendingItem) {
-      for (const agent of resolveRecipients(sendingItem.addressedAgents)) {
-        typingIds.add(agent.id);
-      }
-    }
     for (const marker of pendingReplies) {
       typingIds.add(marker.agentId);
     }
     return [...typingIds]
       .map((agentId) => agentMap.get(agentId))
       .filter((agent): agent is AgentProfile => Boolean(agent));
-  }, [agentMap, pendingReplies, resolveRecipients, sendingItem]);
+  }, [agentMap, pendingReplies]);
+
+  const chatEntries = useMemo(() => buildChatEntries({
+    messages: detail?.messages ?? [],
+    localDrafts,
+    resolveRecipients,
+  }), [detail?.messages, localDrafts, resolveRecipients]);
+
+  const statusEntries = useMemo(() => buildStatusEntries({
+    typingAgents,
+    pendingCreatedAt: pendingReplies[0]?.createdAt,
+    texts: {
+      typingLabel: t("web.conversations.status_ai_typing", "AI 正在输入…"),
+      typingDetail: t("web.conversations.status_ai_typing_detail", "已发送给 Agent，正在等待回复写回会话。"),
+    },
+  }), [pendingReplies, t, typingAgents]);
+
+  const streamEntries = useMemo(
+    () => [...chatEntries, ...statusEntries],
+    [chatEntries, statusEntries],
+  );
+
+  const composerStatus = useMemo(() => {
+    if (sendingItem) {
+      return {
+        tone: "accent" as const,
+        label: t("web.conversations.status_sending", "正在发送消息…"),
+        detail: t("web.conversations.status_sending_detail", "当前消息已进入处理链路，请稍候。"),
+      };
+    }
+    if (waitingItems.length > 0) {
+      return {
+        tone: "warn" as const,
+        label: t("web.conversations.status_queue", "排队中"),
+        detail: t("web.conversations.status_queue_detail", "还有 {count} 条消息等待发送。").replace("{count}", String(waitingItems.length)),
+      };
+    }
+    if (failedItems.length > 0) {
+      return {
+        tone: "danger" as const,
+        label: t("web.conversations.status_failed", "有消息发送失败"),
+        detail: t("web.conversations.status_failed_detail", "你可以重试失败消息，或从队列中移除它。"),
+      };
+    }
+    return null;
+  }, [failedItems.length, sendingItem, t, waitingItems.length]);
 
   const composerPlaceholder = useMemo(() => {
     if (canMention && canUseSkills) {
@@ -1226,7 +1103,7 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
       return;
     }
     node.scrollTop = node.scrollHeight;
-  }, [displayMessages.length, typingAgents.length, waitingItems.length]);
+  }, [chatEntries.length, statusEntries.length]);
 
   return (
     <div className="session-view session-view--chat">
@@ -1250,11 +1127,6 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
             </div>
           </header>
 
-          <section className={`session-status session-status--${sessionStatus.tone}`}>
-            <strong>{sessionStatus.label}</strong>
-            <span>{sessionStatus.detail}</span>
-          </section>
-
           <div className="session-view__meta session-view__meta--chat">
             <div className="tag-row">
               {activeAgents.map((agent) => (
@@ -1277,89 +1149,26 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
           </div>
 
           <div ref={scrollRef} className="message-stream message-stream--chat">
-            {displayMessages.length === 0 ? (
-              <div className="empty-card conversation-empty-card">
-                {t("web.conversations.empty_messages", "还没有消息。在输入框用 @agent_id 指定某个 Agent。")}
-              </div>
-            ) : (
-              displayMessages.map((message) => {
-                const recipients = resolveRecipients(message.mentions);
-                const isOperator = message.role === "operator";
-                return (
-                  <article
-                    key={message.id}
-                    className={isOperator ? "message-bubble message-bubble--operator" : "message-bubble"}
-                  >
-                    <header className="message-bubble__header">
-                      <strong>{message.sender}</strong>
-                      <small>{formatDateTime(message.createdAt)}</small>
-                    </header>
-                    <p>{renderMessageBody(message.body, recipients, skills)}</p>
-                    {isOperator ? (
-                      <footer className="message-bubble__footer">
-                        <div className="message-route">
-                          <div className="message-route__agents">
-                            {recipients.map((agent) => (
-                              <span key={agent.id} className="badge badge--muted">@{agent.display_name}</span>
-                            ))}
-                          </div>
-                        </div>
-                        {message.kind === "local" ? (
-                          <div className="message-state">
-                            <span className={`badge ${
-                              message.status === "failed"
-                                ? "badge--danger"
-                                : message.status === "sending"
-                                  ? "badge--accent"
-                                  : "badge--warn"
-                            }`}>
-                              {message.status === "sending"
-                                ? t("web.conversations.message_status_sending", "发送中")
-                                : message.status === "queued"
-                                  ? t("web.conversations.message_status_queued", "排队中")
-                                  : t("web.conversations.message_status_failed", "发送失败")}
-                            </span>
-                            {message.status === "failed" ? (
-                              <div className="button-row">
-                                <button type="button" className="secondary" onClick={() => retryLocalMessage(message.id)}>
-                                  {t("web.conversations.retry", "重试")}
-                                </button>
-                                <button type="button" className="secondary" onClick={() => removeLocalMessage(message.id)}>
-                                  {t("web.conversations.remove", "移除")}
-                                </button>
-                              </div>
-                            ) : null}
-                          </div>
-                        ) : (
-                          <span className="message-delivery">
-                            {t("web.conversations.message_status_delivered", "已送达")}
-                          </span>
-                        )}
-                      </footer>
-                    ) : null}
-                    {message.kind === "local" && message.error ? (
-                      <small className="message-error">{message.error}</small>
-                    ) : null}
-                  </article>
-                );
-              })
-            )}
-            {typingAgents.map((agent) => (
-              <article key={`typing:${agent.id}`} className="message-bubble message-bubble--typing">
-                <header className="message-bubble__header">
-                  <strong>{agent.display_name}</strong>
-                  <small>{t("web.conversations.ai_typing", "输入中")}</small>
-                </header>
-                <div className="typing-indicator" aria-label={t("web.conversations.ai_typing", "输入中")}>
-                  <span />
-                  <span />
-                  <span />
-                </div>
-              </article>
-            ))}
+            <ChatStream
+              entries={streamEntries}
+              agents={activeAgents}
+              skills={skills}
+              emptyMessage={t("web.conversations.empty_messages", "还没有消息。在输入框用 @agent_id 指定某个 Agent。")}
+              formatDateTime={formatDateTime}
+              t={t}
+              onRetry={retryLocalMessage}
+              onRemove={removeLocalMessage}
+            />
           </div>
 
           <div className="composer-shell">
+            {composerStatus ? (
+              <section className={`composer-status composer-status--${composerStatus.tone}`}>
+                <strong>{composerStatus.label}</strong>
+                <span>{composerStatus.detail}</span>
+              </section>
+            ) : null}
+
             {waitingItems.length > 0 ? (
               <section className="queue-panel">
                 <div className="queue-panel__header">
