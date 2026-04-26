@@ -6,7 +6,9 @@ pub mod memory;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
+use ennoia_error_utils::normalize_error_message;
 use serde::{Deserialize, Serialize};
+use std::fmt;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
@@ -41,11 +43,12 @@ pub struct ApiError {
 
 impl ApiError {
     pub fn new(status: StatusCode, code: ErrorCode, message: impl Into<String>) -> Self {
+        let message = normalize_error_message(message.into());
         Self {
             status,
             body: ApiErrorBody {
                 code,
-                message: message.into(),
+                message,
                 request_id: None,
                 trace_id: None,
                 details: serde_json::Value::Object(Default::default()),
@@ -120,7 +123,19 @@ impl ApiError {
         self.body.details = details;
         self
     }
+
+    pub fn message(&self) -> &str {
+        &self.body.message
+    }
 }
+
+impl fmt::Display for ApiError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.body.message)
+    }
+}
+
+impl std::error::Error for ApiError {}
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {

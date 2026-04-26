@@ -27,6 +27,7 @@ pub use domain::{
     LaneSpec, MessageRole, MessageSpec, OwnerKind, OwnerRef, ParticipantRef, ParticipantType,
     RunSpec, RuntimeProfile, SpaceSpec, TaskKind, TaskSpec, TaskStatus,
 };
+pub use ennoia_error_utils::normalize_error_message;
 pub use extension::{
     BehaviorContribution, CommandContribution, ContributionSet, ExtensionAssetsSpec,
     ExtensionCapabilities, ExtensionDiagnostic, ExtensionHealth, ExtensionKind, ExtensionManifest,

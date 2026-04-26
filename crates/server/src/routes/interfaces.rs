@@ -640,7 +640,7 @@ fn spawn_conversation_agent_reply(state: AppState, request: RequestContext, payl
                         || payload_string_field(&payload, &["message", "conversation_id"]),
                     ),
                     message: "conversation agent reply generation failed".to_string(),
-                    attributes: serde_json::json!({ "error": format!("{error:?}") }),
+                    attributes: serde_json::json!({ "error": error.to_string() }),
                     created_at: None,
                 },
                 Some(&request.trace_context()),
@@ -746,7 +746,7 @@ async fn generate_conversation_agent_reply(
         .await
         {
             Ok(reply) => reply,
-            Err(error) => format!("{agent_id} 上游调用失败：{error:?}"),
+            Err(error) => error.to_string(),
         };
         let append_response = dispatch_interface_value(
             state,

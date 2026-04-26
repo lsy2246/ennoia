@@ -3,6 +3,7 @@ members = [
   "crates/assets",
   "crates/kernel",
   "crates/policy",
+  "crates/error-utils",
   "crates/extension-host",
   "crates/paths",
   "crates/observability",

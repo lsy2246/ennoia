@@ -1932,6 +1932,18 @@ label {
   vertical-align: baseline;
 }
 
+.message-inline-skill {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  margin: 0 2px;
+  border-radius: 999px;
+  background: color-mix(in srgb, #9b7bff 18%, transparent);
+  color: #7a5cff;
+  font-weight: 600;
+  vertical-align: baseline;
+}
+
 .composer {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 120px;
@@ -2094,6 +2106,17 @@ label {
   border-radius: 999px;
   background: color-mix(in srgb, var(--accent) 14%, transparent);
   color: var(--accent);
+  font-weight: 600;
+}
+
+.composer-skill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  margin: 0 2px;
+  border-radius: 999px;
+  background: color-mix(in srgb, #9b7bff 14%, transparent);
+  color: #7a5cff;
   font-weight: 600;
 }
 

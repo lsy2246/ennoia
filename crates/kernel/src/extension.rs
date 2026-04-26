@@ -1,3 +1,4 @@
+use ennoia_error_utils::normalize_error_message;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
@@ -543,7 +544,7 @@ impl ExtensionRpcResponse {
             data: JsonValue::Null,
             error: Some(ExtensionRpcError {
                 code: code.into(),
-                message: message.into(),
+                message: normalize_error_message(message.into()),
             }),
         }
     }

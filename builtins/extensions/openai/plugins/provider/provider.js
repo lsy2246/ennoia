@@ -108,7 +108,12 @@ async function openaiFetch(config, path, init) {
 
   if (!response.ok) {
     const body = await response.text();
-    throw new Error(`OpenAI request failed: ${response.status} ${body}`);
+    const summary = summarizeOpenAiErrorBody(body);
+    throw new Error(
+      summary
+        ? `OpenAI request failed: ${response.status} ${summary}`
+        : `OpenAI request failed: ${response.status}`,
+    );
   }
 
   return response;
@@ -225,6 +230,63 @@ function collectChatCompletionToolCalls(response) {
       name: item.function?.name,
       arguments: safeJsonParse(item.function?.arguments, item.function?.arguments ?? {}),
     }));
+}
+
+function summarizeOpenAiErrorBody(body) {
+  const trimmed = String(body ?? "").trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  try {
+    const parsed = JSON.parse(trimmed);
+    return (
+      readJsonString(parsed, ["message"])
+      || readJsonString(parsed, ["error"])
+      || readJsonString(parsed, ["error", "message"])
+      || readJsonString(parsed, ["top_reason"])
+      || readJsonString(parsed, ["error", "code"])
+      || readJsonString(parsed, ["code"])
+      || readJsonArrayString(parsed, "failures", ["error_message"])
+      || readJsonArrayString(parsed, "failures", ["top_reason"])
+      || readJsonArrayString(parsed, "failures", ["error_code"])
+      || ""
+    );
+  } catch {
+    const lines = trimmed.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    for (let index = lines.length - 1; index >= 0; index -= 1) {
+      const line = lines[index];
+      if (/^(Error|panic|exception):/i.test(line)) {
+        return line;
+      }
+    }
+    return lines.at(-1) ?? trimmed;
+  }
+}
+
+function readJsonString(value, path) {
+  let current = value;
+  for (const segment of path) {
+    if (current == null || typeof current !== "object") {
+      return "";
+    }
+    current = current[segment];
+  }
+  return typeof current === "string" ? current.trim() : "";
+}
+
+function readJsonArrayString(value, key, path) {
+  const items = value?.[key];
+  if (!Array.isArray(items)) {
+    return "";
+  }
+  for (const item of items) {
+    const found = readJsonString(item, path);
+    if (found) {
+      return found;
+    }
+  }
+  return "";
 }
 
 function safeJsonParse(value, fallback) {

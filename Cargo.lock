@@ -702,6 +702,7 @@ name = "ennoia-contract"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "ennoia-error-utils",
  "ennoia-kernel",
  "serde",
  "serde_json",
@@ -719,6 +720,13 @@ dependencies = [
  "sqlx",
  "tokio",
  "uuid",
+]
+
+[[package]]
+name = "ennoia-error-utils"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
 ]
 
 [[package]]
@@ -740,6 +748,7 @@ name = "ennoia-kernel"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "ennoia-error-utils",
  "serde",
  "serde_json",
 ]

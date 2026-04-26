@@ -4,10 +4,12 @@ import {
   ApiError,
   getChat,
   listAgents,
+  listSkills,
   sendChatMessage,
   type AgentProfile,
   type ChatMessage,
   type ChatThreadDetail,
+  type SkillConfig,
 } from "@ennoia/api-client";
 import { useConversationsStore } from "@/stores/conversations";
 import { useUiHelpers } from "@/stores/ui";
@@ -53,8 +55,11 @@ type DisplayMessage =
       error?: string;
     };
 
-type MentionState = {
+type ComposerPickerMode = "mention" | "skill";
+
+type ComposerPickerState = {
   open: boolean;
+  mode: ComposerPickerMode;
   query: string;
   selectedIndex: number;
 };
@@ -68,7 +73,20 @@ type ComposerSegment =
       kind: "mention";
       agentId: string;
       label: string;
+    }
+  | {
+      kind: "skill";
+      skillId: string;
+      label: string;
     };
+
+type ComposerPickerOption = {
+  kind: ComposerPickerMode;
+  id: string;
+  displayLabel: string;
+  insertLabel: string;
+  secondaryLabel: string;
+};
 
 type ComposerSnapshot = {
   body: string;
@@ -76,8 +94,9 @@ type ComposerSnapshot = {
   segments: ComposerSegment[];
 };
 
-const EMPTY_MENTION_STATE: MentionState = {
+const EMPTY_PICKER_STATE: ComposerPickerState = {
   open: false,
+  mode: "mention",
   query: "",
   selectedIndex: 0,
 };
@@ -106,13 +125,20 @@ function createLocalDraft(snapshot: ComposerSnapshot): LocalMessageDraft {
   };
 }
 
-function createMentionNode(agentId: string, label: string) {
+function createComposerTokenNode(
+  kind: ComposerPickerMode,
+  id: string,
+  displayLabel: string,
+  insertLabel: string,
+) {
   const node = document.createElement("span");
-  node.className = "composer-mention";
+  node.className = kind === "mention" ? "composer-mention" : "composer-skill";
   node.contentEditable = "false";
-  node.dataset.agentId = agentId;
-  node.dataset.agentLabel = label;
-  node.textContent = `@${label}`;
+  node.dataset.tokenKind = kind;
+  node.dataset.tokenId = id;
+  node.dataset.tokenLabel = insertLabel;
+  node.dataset.tokenDisplayLabel = displayLabel;
+  node.textContent = `${kind === "mention" ? "@" : "/"}${displayLabel}`;
   return node;
 }
 
@@ -147,12 +173,29 @@ function readComposerSnapshot(root: HTMLElement | null): ComposerSnapshot {
       return;
     }
 
-    if (node.dataset.agentId) {
-      addressedAgents.push(node.dataset.agentId);
+    if (node.dataset.tokenKind === "mention") {
+      const agentId = node.dataset.tokenId ?? "";
+      if (!agentId) {
+        return;
+      }
+      addressedAgents.push(agentId);
       segments.push({
         kind: "mention",
-        agentId: node.dataset.agentId,
-        label: node.dataset.agentLabel ?? node.dataset.agentId,
+        agentId,
+        label: node.dataset.tokenDisplayLabel ?? node.dataset.tokenLabel ?? agentId,
+      });
+      return;
+    }
+
+    if (node.dataset.tokenKind === "skill") {
+      const skillId = node.dataset.tokenLabel ?? node.dataset.tokenId ?? "";
+      if (!skillId) {
+        return;
+      }
+      segments.push({
+        kind: "skill",
+        skillId,
+        label: node.dataset.tokenDisplayLabel ?? skillId,
       });
       return;
     }
@@ -183,7 +226,15 @@ function readComposerSnapshot(root: HTMLElement | null): ComposerSnapshot {
   }
 
   const body = segments
-    .map((segment) => segment.kind === "text" ? segment.value : `@${segment.label}`)
+    .map((segment) => {
+      if (segment.kind === "text") {
+        return segment.value;
+      }
+      if (segment.kind === "mention") {
+        return `@${segment.label}`;
+      }
+      return `/${segment.skillId}`;
+    })
     .join("")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
@@ -242,7 +293,11 @@ function writeComposerSnapshot(root: HTMLElement | null, snapshot: ComposerSnaps
       appendTextNodes(root, segment.value);
       continue;
     }
-    root.appendChild(createMentionNode(segment.agentId, segment.label));
+    if (segment.kind === "mention") {
+      root.appendChild(createComposerTokenNode("mention", segment.agentId, segment.label, segment.label));
+      continue;
+    }
+    root.appendChild(createComposerTokenNode("skill", segment.skillId, segment.label, segment.skillId));
   }
 
   root.dataset.empty = String(snapshot.body.length === 0);
@@ -255,7 +310,7 @@ function isSelectionInside(root: HTMLElement | null, node: Node | null) {
   return root === node || root.contains(node);
 }
 
-function extractMentionQuery(root: HTMLElement | null) {
+function extractComposerTrigger(root: HTMLElement | null) {
   if (!root || typeof window === "undefined") {
     return null;
   }
@@ -277,27 +332,30 @@ function extractMentionQuery(root: HTMLElement | null) {
   const offset = selection.anchorOffset;
   const text = anchorNode.textContent ?? "";
   const before = text.slice(0, offset);
-  const match = before.match(/(?:^|\s)@([\p{L}\p{N}_.-]*)$/u);
+  const match = before.match(/(?:^|\s)([@/])([\p{L}\p{N}_.-]*)$/u);
   if (!match) {
     return null;
   }
 
-  const query = match[1] ?? "";
-  const atIndex = before.lastIndexOf("@");
+  const trigger = match[1] ?? "";
+  const query = match[2] ?? "";
+  const atIndex = before.lastIndexOf(trigger);
   if (atIndex < 0) {
     return null;
   }
 
   return {
     textNode: anchorNode,
+    kind: trigger === "@" ? "mention" : "skill",
+    trigger,
     atIndex,
     offset,
     query,
   };
 }
 
-function replaceMentionAtCaret(root: HTMLElement | null, agent: AgentProfile) {
-  const context = extractMentionQuery(root);
+function replaceComposerTriggerAtCaret(root: HTMLElement | null, option: ComposerPickerOption) {
+  const context = extractComposerTrigger(root);
   if (!root || !context || typeof window === "undefined") {
     return false;
   }
@@ -307,15 +365,20 @@ function replaceMentionAtCaret(root: HTMLElement | null, agent: AgentProfile) {
   const after = original.slice(context.offset);
   context.textNode.textContent = before;
 
-  const mentionNode = createMentionNode(agent.id, agent.display_name);
+  const tokenNode = createComposerTokenNode(
+    option.kind,
+    option.id,
+    option.displayLabel,
+    option.insertLabel,
+  );
   const trailingText = document.createTextNode(after.startsWith(" ") ? after : ` ${after}`);
   const parent = context.textNode.parentNode;
   if (!parent) {
     return false;
   }
 
-  parent.insertBefore(mentionNode, context.textNode.nextSibling);
-  parent.insertBefore(trailingText, mentionNode.nextSibling);
+  parent.insertBefore(tokenNode, context.textNode.nextSibling);
+  parent.insertBefore(trailingText, tokenNode.nextSibling);
 
   const selection = window.getSelection();
   if (selection) {
@@ -334,7 +397,7 @@ function replaceMentionAtCaret(root: HTMLElement | null, agent: AgentProfile) {
   return true;
 }
 
-function handleMentionBackspace(root: HTMLElement | null) {
+function handleComposerTokenBackspace(root: HTMLElement | null) {
   if (!root || typeof window === "undefined") {
     return false;
   }
@@ -350,7 +413,7 @@ function handleMentionBackspace(root: HTMLElement | null) {
 
   if (anchorNode instanceof Text && selection.anchorOffset === 0) {
     const previous = anchorNode.previousSibling;
-    if (previous instanceof HTMLElement && previous.dataset.agentId) {
+    if (previous instanceof HTMLElement && previous.dataset.tokenKind) {
       previous.remove();
       root.dataset.empty = String(readComposerSnapshot(root).body.length === 0);
       return true;
@@ -359,7 +422,7 @@ function handleMentionBackspace(root: HTMLElement | null) {
 
   if (anchorNode instanceof HTMLElement && selection.anchorOffset > 0) {
     const previous = anchorNode.childNodes[selection.anchorOffset - 1];
-    if (previous instanceof HTMLElement && previous.dataset.agentId) {
+    if (previous instanceof HTMLElement && previous.dataset.tokenKind) {
       previous.remove();
       root.dataset.empty = String(readComposerSnapshot(root).body.length === 0);
       return true;
@@ -510,7 +573,7 @@ function reconcilePendingRepliesWithRemote(
   );
 }
 
-function renderMessageBody(body: string, agents: AgentProfile[]): ReactNode {
+function renderMessageBody(body: string, agents: AgentProfile[], skills: SkillConfig[]): ReactNode {
   const mentionMap = new Map<string, string>();
   for (const agent of agents) {
     mentionMap.set(agent.id.toLowerCase(), agent.display_name);
@@ -518,23 +581,43 @@ function renderMessageBody(body: string, agents: AgentProfile[]): ReactNode {
     mentionMap.set(agent.display_name.toLowerCase().replace(/\s+/g, "-"), agent.display_name);
   }
 
+  const skillMap = new Map<string, string>();
+  for (const skill of skills) {
+    skillMap.set(skill.id.toLowerCase(), skill.display_name);
+    skillMap.set(skill.display_name.toLowerCase(), skill.display_name);
+    skillMap.set(skill.display_name.toLowerCase().replace(/\s+/g, "-"), skill.display_name);
+  }
+
   const lines = body.split("\n");
   return lines.map((line, lineIndex) => {
-    const parts = line.split(/(@[\p{L}\p{N}_.-]+)/gu);
+    const parts = line.split(/([@/][\p{L}\p{N}_.-]+)/gu);
     return (
       <Fragment key={`line:${lineIndex}`}>
         {parts.map((part, partIndex) => {
-          const match = part.match(/^@([\p{L}\p{N}_.-]+)$/u);
-          if (!match) {
+          const mentionMatch = part.match(/^@([\p{L}\p{N}_.-]+)$/u);
+          if (mentionMatch) {
+            const label = mentionMap.get(mentionMatch[1].toLowerCase());
+            if (!label) {
+              return <Fragment key={`part:${lineIndex}:${partIndex}`}>{part}</Fragment>;
+            }
+            return (
+              <span key={`part:${lineIndex}:${partIndex}`} className="message-inline-mention">
+                @{label}
+              </span>
+            );
+          }
+
+          const skillMatch = part.match(/^\/([\p{L}\p{N}_.-]+)$/u);
+          if (!skillMatch) {
             return <Fragment key={`part:${lineIndex}:${partIndex}`}>{part}</Fragment>;
           }
-          const label = mentionMap.get(match[1].toLowerCase());
+          const label = skillMap.get(skillMatch[1].toLowerCase());
           if (!label) {
             return <Fragment key={`part:${lineIndex}:${partIndex}`}>{part}</Fragment>;
           }
           return (
-            <span key={`part:${lineIndex}:${partIndex}`} className="message-inline-mention">
-              @{label}
+            <span key={`part:${lineIndex}:${partIndex}`} className="message-inline-skill">
+              /{label}
             </span>
           );
         })}
@@ -552,10 +635,11 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
   const deletedSessionMark = useConversationsStore((state) => state.deletedSessionMarks[sessionId]);
   const notifyChanged = useConversationsStore((state) => state.notifyChanged);
   const [agents, setAgents] = useState<AgentProfile[]>([]);
+  const [skills, setSkills] = useState<SkillConfig[]>([]);
   const [detail, setDetail] = useState<ChatThreadDetail | null>(null);
   const [localDrafts, setLocalDrafts] = useState<LocalMessageDraft[]>(() => loadPersistedDrafts(sessionId));
   const [pendingReplies, setPendingReplies] = useState<PendingReplyMarker[]>(() => loadPersistedPendingReplies(sessionId));
-  const [mentionState, setMentionState] = useState<MentionState>(EMPTY_MENTION_STATE);
+  const [pickerState, setPickerState] = useState<ComposerPickerState>(EMPTY_PICKER_STATE);
   const [composerSnapshot, setComposerSnapshot] = useState<ComposerSnapshot>({ body: "", addressedAgents: [], segments: [] });
   const [error, setError] = useState<string | null>(null);
   const editorRef = useRef<HTMLDivElement | null>(null);
@@ -569,6 +653,13 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
   const conversation = detail?.conversation ?? null;
 
   const canMention = activeAgents.length > 1;
+  const enabledSkills = useMemo(
+    () => skills
+      .filter((skill) => skill.enabled)
+      .sort((left, right) => left.display_name.localeCompare(right.display_name)),
+    [skills],
+  );
+  const canUseSkills = enabledSkills.length > 0;
 
   const agentMap = useMemo(
     () => new Map(activeAgents.map((agent) => [agent.id, agent])),
@@ -597,11 +688,16 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
     setError(null);
     setDetail(null);
     try {
-      const [nextAgents, nextDetail] = await Promise.all([listAgents(), getChat(sessionId)]);
+      const [nextAgents, nextSkills, nextDetail] = await Promise.all([
+        listAgents(),
+        listSkills(),
+        getChat(sessionId),
+      ]);
       if (!isMountedRef.current) {
         return;
       }
       setAgents(nextAgents);
+      setSkills(nextSkills);
       setDetail(nextDetail);
     } catch (err) {
       if (err instanceof ApiError && err.status === 404 && panelId) {
@@ -666,60 +762,122 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
     const snapshot = readComposerSnapshot(editorRef.current);
     setComposerSnapshot(snapshot);
     editorRef.current?.setAttribute("data-empty", String(snapshot.body.length === 0));
-    if (!canMention) {
-      setMentionState(EMPTY_MENTION_STATE);
-      return;
-    }
-    const context = extractMentionQuery(editorRef.current);
+    const context = extractComposerTrigger(editorRef.current);
     if (!context) {
-      setMentionState(EMPTY_MENTION_STATE);
+      setPickerState(EMPTY_PICKER_STATE);
       return;
     }
-    setMentionState((current) => ({
+    if (context.kind === "mention" && !canMention) {
+      setPickerState(EMPTY_PICKER_STATE);
+      return;
+    }
+    if (context.kind === "skill" && !canUseSkills) {
+      setPickerState(EMPTY_PICKER_STATE);
+      return;
+    }
+    const mode = context.kind as ComposerPickerMode;
+    setPickerState((current) => ({
       open: true,
+      mode,
       query: context.query,
-      selectedIndex: current.selectedIndex,
+      selectedIndex: current.mode === mode ? current.selectedIndex : 0,
     }));
-  }, [canMention]);
+  }, [canMention, canUseSkills]);
 
   useEffect(() => {
     syncComposerState();
   }, [syncComposerState]);
 
-  const mentionOptions = useMemo(() => {
-    if (!canMention) {
+  const pickerOptions = useMemo<ComposerPickerOption[]>(() => {
+    if (!pickerState.open) {
       return [];
     }
-    const query = mentionState.query.trim().toLowerCase();
-    const options = activeAgents.filter((agent) => {
-      if (composerSnapshot.addressedAgents.includes(agent.id)) {
-        return false;
+    const query = pickerState.query.trim().toLowerCase();
+    if (pickerState.mode === "mention") {
+      if (!canMention) {
+        return [];
       }
-      if (!query) {
-        return true;
-      }
-      const haystacks = [
-        agent.id.toLowerCase(),
-        agent.display_name.toLowerCase(),
-        agent.display_name.toLowerCase().replace(/\s+/g, "-"),
-      ];
-      return haystacks.some((item) => item.includes(query));
-    });
-    return options;
-  }, [activeAgents, canMention, composerSnapshot.addressedAgents, mentionState.query]);
+      return activeAgents
+        .filter((agent) => {
+          if (composerSnapshot.addressedAgents.includes(agent.id)) {
+            return false;
+          }
+          if (!query) {
+            return true;
+          }
+          const haystacks = [
+            agent.id.toLowerCase(),
+            agent.display_name.toLowerCase(),
+            agent.display_name.toLowerCase().replace(/\s+/g, "-"),
+          ];
+          return haystacks.some((item) => item.includes(query));
+        })
+        .map<ComposerPickerOption>((agent) => ({
+          kind: "mention",
+          id: agent.id,
+          displayLabel: agent.display_name,
+          insertLabel: agent.display_name,
+          secondaryLabel: agent.id,
+        }));
+    }
+
+    if (!canUseSkills) {
+      return [];
+    }
+
+    const selectedSkillIds = new Set(
+      composerSnapshot.segments
+        .filter((segment): segment is Extract<ComposerSegment, { kind: "skill" }> => segment.kind === "skill")
+        .map((segment) => segment.skillId),
+    );
+
+    return enabledSkills
+      .filter((skill) => {
+        if (selectedSkillIds.has(skill.id)) {
+          return false;
+        }
+        if (!query) {
+          return true;
+        }
+        const haystacks = [
+          skill.id.toLowerCase(),
+          skill.display_name.toLowerCase(),
+          skill.display_name.toLowerCase().replace(/\s+/g, "-"),
+          ...skill.tags.map((tag) => tag.toLowerCase()),
+        ];
+        return haystacks.some((item) => item.includes(query));
+      })
+      .map<ComposerPickerOption>((skill) => ({
+        kind: "skill",
+        id: skill.id,
+        displayLabel: skill.display_name,
+        insertLabel: skill.id,
+        secondaryLabel: skill.id,
+      }));
+  }, [
+    activeAgents,
+    canMention,
+    canUseSkills,
+    composerSnapshot.addressedAgents,
+    composerSnapshot.segments,
+    enabledSkills,
+    pickerState.mode,
+    pickerState.open,
+    pickerState.query,
+  ]);
 
   useEffect(() => {
-    if (!mentionState.open) {
+    if (!pickerState.open) {
       return;
     }
-    if (mentionOptions.length === 0) {
-      setMentionState((current) => ({ ...current, selectedIndex: 0 }));
+    if (pickerOptions.length === 0) {
+      setPickerState((current) => ({ ...current, selectedIndex: 0 }));
       return;
     }
-    if (mentionState.selectedIndex >= mentionOptions.length) {
-      setMentionState((current) => ({ ...current, selectedIndex: 0 }));
+    if (pickerState.selectedIndex >= pickerOptions.length) {
+      setPickerState((current) => ({ ...current, selectedIndex: 0 }));
     }
-  }, [mentionOptions.length, mentionState.open, mentionState.selectedIndex]);
+  }, [pickerOptions.length, pickerState.open, pickerState.selectedIndex]);
 
   const waitingItems = useMemo(
     () => localDrafts.filter((item) => item.status === "queued"),
@@ -836,10 +994,45 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
       .filter((agent): agent is AgentProfile => Boolean(agent));
   }, [agentMap, pendingReplies, resolveRecipients, sendingItem]);
 
+  const composerPlaceholder = useMemo(() => {
+    if (canMention && canUseSkills) {
+      return t(
+        "web.conversations.composer_placeholder_with_skill",
+        "输入消息。使用 @ 选择 Agent，使用 / 选择技能；不 @ 时默认投递给会话内 Agent。",
+      );
+    }
+    if (canUseSkills) {
+      return t(
+        "web.conversations.composer_placeholder_skill_only",
+        "输入消息。使用 / 选择技能；消息默认投递给当前会话内 Agent。",
+      );
+    }
+    return t(
+      "web.conversations.composer_placeholder",
+      "输入消息。使用 @coder / @planner 定向提问；不 @ 时默认投递给会话内 Agent。",
+    );
+  }, [canMention, canUseSkills, t]);
+
+  const composerHint = useMemo(() => {
+    if (canMention && canUseSkills) {
+      return t(
+        "web.conversations.mention_and_skill_hint",
+        "输入 @ 可选择会话内 Agent，输入 / 可选择技能。",
+      );
+    }
+    if (canMention) {
+      return t("web.conversations.mention_hint", "输入 @ 可选择当前会话中的 Agent。");
+    }
+    if (canUseSkills) {
+      return t("web.conversations.skill_hint", "输入 / 可选择当前可用的技能。");
+    }
+    return t("web.conversations.skill_disabled", "当前没有可用技能候选。");
+  }, [canMention, canUseSkills, t]);
+
   const resetComposer = useCallback(() => {
     clearComposer(editorRef.current);
     setComposerSnapshot({ body: "", addressedAgents: [], segments: [] });
-    setMentionState(EMPTY_MENTION_STATE);
+    setPickerState(EMPTY_PICKER_STATE);
     focusComposerEnd(editorRef.current);
   }, []);
 
@@ -969,44 +1162,45 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
     setLocalDrafts((current) => current.filter((item) => item.clientId !== clientId));
   }, [localDrafts, restoreDraftToComposer]);
 
-  const chooseMention = useCallback((agent: AgentProfile) => {
-    if (replaceMentionAtCaret(editorRef.current, agent)) {
+  const choosePickerOption = useCallback((option: ComposerPickerOption) => {
+    if (replaceComposerTriggerAtCaret(editorRef.current, option)) {
       syncComposerState();
     }
-    setMentionState(EMPTY_MENTION_STATE);
+    setPickerState(EMPTY_PICKER_STATE);
   }, [syncComposerState]);
 
   const handleComposerKeyDown = useCallback((event: KeyboardEvent<HTMLDivElement>) => {
-    if (mentionState.open && mentionOptions.length > 0) {
+    if (pickerState.open && pickerOptions.length > 0) {
       if (event.key === "ArrowDown") {
         event.preventDefault();
-        setMentionState((current) => ({
+        setPickerState((current) => ({
           ...current,
-          selectedIndex: (current.selectedIndex + 1) % mentionOptions.length,
+          selectedIndex: (current.selectedIndex + 1) % pickerOptions.length,
         }));
         return;
       }
       if (event.key === "ArrowUp") {
         event.preventDefault();
-        setMentionState((current) => ({
+        setPickerState((current) => ({
           ...current,
-          selectedIndex: (current.selectedIndex - 1 + mentionOptions.length) % mentionOptions.length,
+          selectedIndex: (current.selectedIndex - 1 + pickerOptions.length) % pickerOptions.length,
         }));
         return;
       }
       if (event.key === "Enter" || event.key === "Tab") {
         event.preventDefault();
-        chooseMention(mentionOptions[mentionState.selectedIndex] ?? mentionOptions[0]);
-        return;
-      }
-      if (event.key === "Escape") {
-        event.preventDefault();
-        setMentionState(EMPTY_MENTION_STATE);
+        choosePickerOption(pickerOptions[pickerState.selectedIndex] ?? pickerOptions[0]);
         return;
       }
     }
 
-    if (event.key === "Backspace" && handleMentionBackspace(editorRef.current)) {
+    if (pickerState.open && event.key === "Escape") {
+      event.preventDefault();
+      setPickerState(EMPTY_PICKER_STATE);
+      return;
+    }
+
+    if (event.key === "Backspace" && handleComposerTokenBackspace(editorRef.current)) {
       event.preventDefault();
       syncComposerState();
       return;
@@ -1016,7 +1210,14 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
       event.preventDefault();
       enqueueCurrentMessage();
     }
-  }, [chooseMention, enqueueCurrentMessage, mentionOptions, mentionState.open, mentionState.selectedIndex, syncComposerState]);
+  }, [
+    choosePickerOption,
+    enqueueCurrentMessage,
+    pickerOptions,
+    pickerState.open,
+    pickerState.selectedIndex,
+    syncComposerState,
+  ]);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -1093,7 +1294,7 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
                       <strong>{message.sender}</strong>
                       <small>{formatDateTime(message.createdAt)}</small>
                     </header>
-                    <p>{renderMessageBody(message.body, recipients)}</p>
+                    <p>{renderMessageBody(message.body, recipients, skills)}</p>
                     {isOperator ? (
                       <footer className="message-bubble__footer">
                         <div className="message-route">
@@ -1207,7 +1408,7 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
                   role="textbox"
                   aria-multiline="true"
                   data-empty="true"
-                  data-placeholder={t("web.conversations.composer_placeholder", "输入消息。使用 @coder / @planner 定向提问；不 @ 时默认投递给会话内 Agent。")}
+                  data-placeholder={composerPlaceholder}
                   onInput={syncComposerState}
                   onClick={syncComposerState}
                   onKeyUp={syncComposerState}
@@ -1219,31 +1420,27 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
                     syncComposerState();
                   }}
                 />
-                {mentionState.open && mentionOptions.length > 0 ? (
+                {pickerState.open && pickerOptions.length > 0 ? (
                   <div className="mention-picker">
-                    {mentionOptions.map((agent, index) => (
+                    {pickerOptions.map((option, index) => (
                       <button
-                        key={agent.id}
+                        key={`${option.kind}:${option.id}`}
                         type="button"
-                        className={index === mentionState.selectedIndex ? "mention-picker__item mention-picker__item--active" : "mention-picker__item"}
+                        className={index === pickerState.selectedIndex ? "mention-picker__item mention-picker__item--active" : "mention-picker__item"}
                         onMouseDown={(event) => {
                           event.preventDefault();
-                          chooseMention(agent);
+                          choosePickerOption(option);
                         }}
                       >
-                        <strong>@{agent.display_name}</strong>
-                        <span>{agent.id}</span>
+                        <strong>{option.kind === "mention" ? "@" : "/"}{option.displayLabel}</strong>
+                        <span>{option.secondaryLabel}</span>
                       </button>
                     ))}
                   </div>
                 ) : null}
               </div>
               <div className="composer-actions">
-                <small>
-                  {canMention
-                    ? t("web.conversations.mention_hint", "输入 @ 可选择当前会话中的 Agent。")
-                    : t("web.conversations.mention_disabled", "当前只有 1 个 Agent，不显示 @ 候选。")}
-                </small>
+                <small>{composerHint}</small>
                 <button type="submit" disabled={!composerSnapshot.body.trim()}>
                   {waitingItems.length > 0 || Boolean(sendingItem)
                     ? t("web.conversations.enqueue", "加入队列")

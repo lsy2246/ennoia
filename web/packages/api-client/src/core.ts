@@ -23,6 +23,10 @@ export class ApiError extends Error {
   ) {
     super(message);
   }
+
+  override toString() {
+    return this.message;
+  }
 }
 
 export async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
