@@ -33,7 +33,7 @@ Web
 
 - 系统用稳定 `/api/...` 表达产品动作，例如会话列表、创建会话、写消息、创建运行、读取任务。
 - 每个产品动作映射为一个接口键，例如 `conversation.list`、`message.append_user`、`run.create`、`task.list_by_run`。
-- 扩展通过 manifest 的 `contributes.interfaces` 声明实现，实际执行统一进入扩展 Worker RPC。
+- 扩展通过 manifest 的 `capabilities[].metadata.interface` 声明接口实现，实际执行统一进入扩展 Worker RPC。
 - `config/interfaces.toml` 只保存必要的显式绑定；没有显式绑定且只有一个实现时自动绑定，有多个实现时返回冲突。
 - 当前系统接口管理入口包括：
   - `GET /api/extensions/interfaces`
@@ -103,8 +103,10 @@ Web
 
 ## 扩展能力模型
 
-- 扩展是能力包，可选声明 `ui` 和 `worker`，并可声明多类贡献：`pages`、`panels`、`themes`、`locales`、`commands`、`providers`、`behaviors`、`memories`、`hooks`、`interfaces`、`schedule_actions`。
-- UI 工作台读取扩展快照时，同时获得接口实现和定时动作清单。
+- 扩展 manifest 只保留当前协议，不再声明独立协议版本号。
+- 扩展是能力包，可选声明 `ui` 和 `worker`，主声明模型统一为：`resource_types`、`capabilities`、`surfaces`、`locales`、`themes`、`commands`、`subscriptions`。
+- `pages`、`panels`、`providers`、`behaviors`、`memories`、`hooks`、`interfaces`、`schedule_actions` 都是运行时派生视图，不再是 manifest 顶层主声明。
+- UI 工作台读取扩展快照时，同时获得通用声明和派生视图。
 - `workflow` 和 `memory` 都只是内置扩展实现；系统依赖接口键和动作 ID，不反向依赖具体扩展。
 - 扩展不自行开放端口；Provider、Behavior、Memory、Hook、Interface 和 Schedule Action 的执行统一走宿主 Worker RPC，Worker 通过 Wasm ABI 或进程 stdio 协议接入。
 - 扩展 UI、语言、主题和业务配置归扩展包所有；Web 主壳只按 runtime snapshot 发现并挂载，不在系统前端包中静态注册某个扩展页面或文案。

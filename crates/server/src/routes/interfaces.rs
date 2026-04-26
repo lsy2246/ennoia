@@ -51,7 +51,6 @@ pub(super) struct InterfaceStatusRecord {
 pub(super) struct InterfaceImplementationRecord {
     extension_id: String,
     method: String,
-    version: String,
     #[serde(default)]
     schema: Option<String>,
     extension_status: String,
@@ -472,7 +471,6 @@ fn list_interface_status(state: &AppState) -> Vec<InterfaceStatusRecord> {
             .push(InterfaceImplementationRecord {
                 extension_id: item.extension_id.clone(),
                 method: item.interface.method,
-                version: item.interface.version,
                 schema: item.interface.schema,
                 extension_status: state
                     .extensions

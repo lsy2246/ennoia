@@ -8,7 +8,7 @@
 - Agents：维护协作者档案、上游渠道、模型、技能和启用状态。
 - 技能：Agent 可引用的能力包，和扩展严格分离。
 - API 上游渠道：Agent 绑定的具体模型访问实例。
-- 扩展：系统插件包，可贡献页面、面板、主题、语言、命令、Hook、接口实现和定时模板。
+- 扩展：系统插件包，manifest 统一声明 `resource_types`、`capabilities`、`surfaces`、`locales`、`themes`、`commands`、`subscriptions`；页面、面板、接口实现和定时动作都从这些声明派生。
 - 会话：系统保留稳定 `/api/conversations` 入口，实际读写由 `conversation.*`、`message.*`、`lane.*` 等接口绑定到内置 `conversation` 扩展。
 - 记忆：以内置 `memory` 扩展形式提供记忆、上下文、审查和图谱能力；会话事件先进入宿主事件总线，再异步投递给 `memory`。
 - 编排：以内置 `workflow` 扩展承载 run、task、artifact；定时器里的 Agent 执行通过编排接口落地。

@@ -17,10 +17,12 @@ use chrono::Utc;
 use ennoia_contract::ApiError;
 use ennoia_extension_host::{
     read_registry_file, ExtensionRuntimeSnapshot, RegisteredBehaviorContribution,
-    RegisteredCommandContribution, RegisteredHookContribution, RegisteredInterfaceContribution,
-    RegisteredLocaleContribution, RegisteredMemoryContribution, RegisteredPageContribution,
-    RegisteredPanelContribution, RegisteredProviderContribution,
-    RegisteredScheduleActionContribution, RegisteredThemeContribution, ResolvedExtensionSnapshot,
+    RegisteredCapabilityContribution, RegisteredCommandContribution, RegisteredHookContribution,
+    RegisteredInterfaceContribution, RegisteredLocaleContribution, RegisteredMemoryContribution,
+    RegisteredPageContribution, RegisteredPanelContribution, RegisteredProviderContribution,
+    RegisteredResourceTypeContribution, RegisteredScheduleActionContribution,
+    RegisteredSubscriptionContribution, RegisteredSurfaceContribution, RegisteredThemeContribution,
+    ResolvedExtensionSnapshot,
 };
 use ennoia_kernel::{
     AgentConfig, AppConfig, BootstrapState, ExtensionDiagnostic, ExtensionRuntimeEvent,
@@ -291,6 +293,10 @@ struct OverviewResponse {
 
 #[derive(Debug, Serialize)]
 struct UiRuntimeRegistryResponse {
+    resource_types: Vec<RegisteredResourceTypeContribution>,
+    capabilities: Vec<RegisteredCapabilityContribution>,
+    surfaces: Vec<RegisteredSurfaceContribution>,
+    subscriptions: Vec<RegisteredSubscriptionContribution>,
     pages: Vec<RegisteredPageContribution>,
     panels: Vec<RegisteredPanelContribution>,
     themes: Vec<RegisteredThemeContribution>,
@@ -408,7 +414,6 @@ struct ExtensionWorkbenchRecord {
     name: String,
     enabled: bool,
     status: String,
-    version: String,
     kind: String,
     source_mode: String,
     install_dir: String,
@@ -492,7 +497,11 @@ async fn ui_runtime(State(state): State<AppState>) -> Json<UiRuntimeResponse> {
     let snapshot = state.extensions.snapshot();
     let instance_preference = read_instance_ui_preference_from_disk(&state);
     let space_preferences = list_space_ui_preferences_from_disk(&state);
-    let registry_version = (snapshot.pages.len()
+    let registry_version = (snapshot.resource_types.len()
+        + snapshot.capabilities.len()
+        + snapshot.surfaces.len()
+        + snapshot.subscriptions.len()
+        + snapshot.pages.len()
         + snapshot.panels.len()
         + snapshot.themes.len()
         + snapshot.locales.len()
@@ -506,6 +515,10 @@ async fn ui_runtime(State(state): State<AppState>) -> Json<UiRuntimeResponse> {
     Json(UiRuntimeResponse {
         ui_config: state.ui_config.clone(),
         registry: UiRuntimeRegistryResponse {
+            resource_types: snapshot.resource_types,
+            capabilities: snapshot.capabilities,
+            surfaces: snapshot.surfaces,
+            subscriptions: snapshot.subscriptions,
             pages: snapshot.pages,
             panels: snapshot.panels,
             themes: snapshot.themes,
@@ -636,7 +649,7 @@ fn extension_message_bundle(
     let source_root = PathBuf::from(&contribution.install_dir);
     let message_path =
         resolve_safe_extension_asset(&source_root, &contribution.locale.entry).ok()?;
-    let messages = fs::read_to_string(message_path).ok()?;
+    let messages = fs::read_to_string(&message_path).ok()?;
     let parsed = serde_json::from_str::<HashMap<String, String>>(&messages).ok()?;
 
     Some(UiMessageBundleResponse {
@@ -645,7 +658,7 @@ fn extension_message_bundle(
         namespace: namespace.to_string(),
         messages: parsed,
         source: format!("extension:{}", contribution.extension_id),
-        version: contribution.locale.version.clone(),
+        version: extension_asset_version(&message_path),
     })
 }
 
@@ -882,7 +895,6 @@ fn list_extension_workbench_records(state: &AppState) -> Vec<ExtensionWorkbenchR
                     } else {
                         "disabled".to_string()
                     },
-                    version: "unknown".to_string(),
                     kind: "extension".to_string(),
                     source_mode: record.source,
                     install_dir: record.path.clone(),
@@ -913,11 +925,23 @@ fn map_extension_workbench_record(
             ennoia_kernel::ExtensionHealth::Discovering => "discovering".to_string(),
             ennoia_kernel::ExtensionHealth::Resolving => "resolving".to_string(),
         },
-        version: extension.version.clone(),
         kind: format!("{:?}", extension.kind),
         source_mode: format!("{:?}", extension.source_mode),
         install_dir: extension.install_dir.clone(),
         source_root: extension.source_root.clone(),
         diagnostics: extension.diagnostics.clone(),
     }
+}
+
+fn extension_asset_version(path: &PathBuf) -> String {
+    fs::metadata(path)
+        .ok()
+        .and_then(|metadata| {
+            metadata
+                .modified()
+                .ok()
+                .and_then(|value| value.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|value| format!("{}-{}", value.as_millis(), metadata.len()))
+        })
+        .unwrap_or_else(|| "0".to_string())
 }

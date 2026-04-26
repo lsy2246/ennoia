@@ -16,7 +16,6 @@ use crate::observability::{
 pub(super) struct BehaviorProviderRecord {
     id: String,
     extension_id: String,
-    version: String,
     interfaces: Vec<String>,
     entry: Option<String>,
     extension_status: String,
@@ -40,7 +39,6 @@ pub(super) async fn behaviors(State(state): State<AppState>) -> Json<Vec<Behavio
                 BehaviorProviderRecord {
                     id: item.behavior.id,
                     extension_id: extension_id.clone(),
-                    version: item.behavior.version,
                     interfaces: item.behavior.interfaces,
                     entry: item.behavior.entry,
                     extension_status: state
@@ -63,7 +61,6 @@ pub(super) async fn active_behavior(
     Ok(Json(BehaviorProviderRecord {
         id: resolved.behavior.id.clone(),
         extension_id: resolved.extension_id.clone(),
-        version: resolved.behavior.version.clone(),
         interfaces: resolved.behavior.interfaces.clone(),
         entry: resolved.behavior.entry.clone(),
         extension_status: state
@@ -94,7 +91,6 @@ pub(super) async fn behavior_status(
         extension_id: resolved.extension_id,
         behavior_id: resolved.behavior.id,
         healthy: matches!(extension.health, ennoia_kernel::ExtensionHealth::Ready),
-        version: resolved.behavior.version,
         interfaces: resolved.behavior.interfaces,
     }))
 }

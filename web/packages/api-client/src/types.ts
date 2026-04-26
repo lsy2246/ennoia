@@ -1,5 +1,6 @@
 import type {
   ExtensionBehaviorContribution,
+  ExtensionCapabilityContribution,
   ExtensionDiagnostic,
   ExtensionInterfaceContribution,
   ExtensionLocaleContribution,
@@ -7,7 +8,10 @@ import type {
   ExtensionPageContribution,
   ExtensionPanelContribution,
   ExtensionProviderContribution,
+  ExtensionResourceTypeContribution,
   ExtensionScheduleActionContribution,
+  ExtensionSubscriptionContribution,
+  ExtensionSurfaceContribution,
   ExtensionThemeContribution,
   LocalizedText,
 } from "@ennoia/ui-sdk";
@@ -47,6 +51,10 @@ export type UiConfig = {
 export type UiRuntime = {
   ui_config: UiConfig;
   registry: {
+    resource_types: ExtensionResourceTypeContribution[];
+    capabilities: ExtensionCapabilityContribution[];
+    surfaces: ExtensionSurfaceContribution[];
+    subscriptions: ExtensionSubscriptionContribution[];
     pages: ExtensionPageContribution[];
     panels: ExtensionPanelContribution[];
     themes: ExtensionThemeContribution[];
@@ -291,7 +299,6 @@ export type ExtensionRuntimeState = {
   name: string;
   enabled: boolean;
   status: string;
-  version: string;
   kind: string;
   source_mode: string;
   install_dir: string;
@@ -314,13 +321,11 @@ export type ExtensionDetail = {
   id: string;
   name: string;
   kind: string;
-  version: string;
   source_mode: string;
   source_root: string;
   install_dir: string;
   generation: number;
   health: string;
-  diagnostics: ExtensionDiagnostic[];
   ui?: {
     kind: string;
     entry: string;
@@ -334,6 +339,52 @@ export type ExtensionDetail = {
     protocol?: string | null;
     status: string;
   } | null;
+  permissions: {
+    storage?: string | null;
+    sqlite: boolean;
+    network: string[];
+    events: string[];
+    fs: string[];
+    env: string[];
+  };
+  runtime: {
+    startup: string;
+    timeout_ms: number;
+    memory_limit_mb: number;
+  };
+  capabilities: {
+    resource_types: boolean;
+    capabilities: boolean;
+    surfaces: boolean;
+    locales: boolean;
+    themes: boolean;
+    commands: boolean;
+    subscriptions: boolean;
+  };
+  resource_types: ExtensionResourceTypeContribution["resource_type"][];
+  capability_rows: ExtensionCapabilityContribution["capability"][];
+  surfaces: ExtensionSurfaceContribution["surface"][];
+  pages: ExtensionPageContribution["page"][];
+  panels: ExtensionPanelContribution["panel"][];
+  themes: ExtensionThemeContribution["theme"][];
+  locales: ExtensionLocaleContribution["locale"][];
+  commands: {
+    id: string;
+    title: LocalizedText;
+    action: string;
+    shortcut?: string | null;
+  }[];
+  providers: ExtensionProviderContribution["provider"][];
+  behaviors: ExtensionBehaviorContribution["behavior"][];
+  memories: ExtensionMemoryContribution["memory"][];
+  hooks: {
+    event: string;
+    handler?: string | null;
+  }[];
+  interfaces: ExtensionInterfaceContribution["interface"][];
+  schedule_actions: ExtensionScheduleActionContribution["schedule_action"][];
+  subscriptions: ExtensionSubscriptionContribution["subscription"][];
+  diagnostics: ExtensionDiagnostic[];
 };
 
 export type SystemLog = {
@@ -435,7 +486,6 @@ export type ObservationTraceQuery = {
 export type InterfaceImplementation = {
   extension_id: string;
   method: string;
-  version: string;
   schema?: string | null;
   extension_status: string;
 };

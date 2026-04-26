@@ -165,12 +165,8 @@ async fn extension_command(
         "list" => {
             for extension in state.extensions.snapshot().extensions {
                 println!(
-                    "{}\t{}\t{:?}\t{:?}\t{}",
-                    extension.id,
-                    extension.version,
-                    extension.source_mode,
-                    extension.health,
-                    extension.source_root
+                    "{}\t{:?}\t{:?}\t{}",
+                    extension.id, extension.source_mode, extension.health, extension.source_root
                 );
             }
         }

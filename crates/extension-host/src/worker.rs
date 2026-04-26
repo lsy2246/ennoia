@@ -796,7 +796,6 @@ mod tests {
             id: "test".to_string(),
             name: "Test".to_string(),
             kind: ExtensionKind::SystemExtension,
-            version: "0.1.0".to_string(),
             source_mode: ennoia_kernel::ExtensionSourceMode::Dev,
             source_root: root.to_string_lossy().replace('\\', "/"),
             install_dir: root.to_string_lossy().replace('\\', "/"),
@@ -820,6 +819,9 @@ mod tests {
                 ..ExtensionRuntimeSpec::default()
             },
             capabilities: ExtensionCapabilities::default(),
+            resource_types: Vec::new(),
+            capability_rows: Vec::new(),
+            surfaces: Vec::new(),
             pages: Vec::new(),
             panels: Vec::new(),
             themes: Vec::new(),
@@ -832,11 +834,11 @@ mod tests {
                 extension_id: Some("test".to_string()),
                 interfaces: Vec::new(),
                 entry: Some(method_prefix.to_string()),
-                version: "1".to_string(),
             }],
             hooks: Vec::new(),
             interfaces: Vec::new(),
             schedule_actions: Vec::new(),
+            subscriptions: Vec::new(),
             diagnostics: Vec::new(),
         }
     }

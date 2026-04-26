@@ -4,7 +4,6 @@ use super::*;
 #[derive(Debug, Clone, Serialize)]
 pub(super) struct MemoryExtensionRecord {
     extension_id: String,
-    version: String,
     interfaces: Vec<String>,
     enabled: bool,
     healthy: bool,
@@ -30,7 +29,6 @@ pub(super) async fn extension_memories(
             }
             Some(MemoryExtensionRecord {
                 extension_id: extension.id,
-                version: extension.version,
                 interfaces,
                 enabled: !matches!(extension.health, ennoia_kernel::ExtensionHealth::Stopped),
                 healthy: matches!(extension.health, ennoia_kernel::ExtensionHealth::Ready),

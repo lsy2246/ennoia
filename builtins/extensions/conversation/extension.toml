@@ -1,7 +1,6 @@
 id = "conversation"
 name = "Conversation"
 kind = "extension"
-version = "0.1.0"
 
 [source]
 mode = "package"
@@ -17,17 +16,58 @@ protocol = "jsonrpc-stdio"
 storage = "extension"
 sqlite = true
 
-[capabilities]
-interfaces = true
+[[capabilities]]
+id = "conversation.list"
+contract = "conversation.list"
+kind = "query"
+entry = "conversation/conversations/list"
+metadata = { interface = { key = "conversation.list" } }
 
-[contributes]
-interfaces = [
-  { key = "conversation.list", method = "conversation/conversations/list", version = "1" },
-  { key = "conversation.create", method = "conversation/conversations/create", version = "1" },
-  { key = "conversation.get", method = "conversation/conversations/get", version = "1" },
-  { key = "conversation.delete", method = "conversation/conversations/delete", version = "1" },
-  { key = "lane.list_by_conversation", method = "conversation/lanes/list-by-conversation", version = "1" },
-  { key = "message.list", method = "conversation/messages/list", version = "1" },
-  { key = "message.append_user", method = "conversation/messages/append-user", version = "1" },
-  { key = "message.append_agent", method = "conversation/messages/append-agent", version = "1" }
-]
+[[capabilities]]
+id = "conversation.create"
+contract = "conversation.create"
+kind = "action"
+entry = "conversation/conversations/create"
+metadata = { interface = { key = "conversation.create" } }
+
+[[capabilities]]
+id = "conversation.get"
+contract = "conversation.get"
+kind = "query"
+entry = "conversation/conversations/get"
+metadata = { interface = { key = "conversation.get" } }
+
+[[capabilities]]
+id = "conversation.delete"
+contract = "conversation.delete"
+kind = "action"
+entry = "conversation/conversations/delete"
+metadata = { interface = { key = "conversation.delete" } }
+
+[[capabilities]]
+id = "lane.list_by_conversation"
+contract = "lane.list_by_conversation"
+kind = "query"
+entry = "conversation/lanes/list-by-conversation"
+metadata = { interface = { key = "lane.list_by_conversation" } }
+
+[[capabilities]]
+id = "message.list"
+contract = "message.list"
+kind = "query"
+entry = "conversation/messages/list"
+metadata = { interface = { key = "message.list" } }
+
+[[capabilities]]
+id = "message.append_user"
+contract = "message.append_user"
+kind = "action"
+entry = "conversation/messages/append-user"
+metadata = { interface = { key = "message.append_user" } }
+
+[[capabilities]]
+id = "message.append_agent"
+contract = "message.append_agent"
+kind = "action"
+entry = "conversation/messages/append-agent"
+metadata = { interface = { key = "message.append_agent" } }

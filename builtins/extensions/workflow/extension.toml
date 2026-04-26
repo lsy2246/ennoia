@@ -1,7 +1,6 @@
 id = "workflow"
 name = "Workflow"
 kind = "extension"
-version = "0.1.0"
 
 [source]
 mode = "package"
@@ -18,22 +17,52 @@ storage = "extension"
 sqlite = true
 events = ["publish", "subscribe"]
 
-[capabilities]
-behaviors = true
-interfaces = true
-schedule_actions = true
+[[capabilities]]
+id = "workflow.default"
+contract = "behavior.default"
+kind = "effect"
+entry = "behavior"
+metadata = { behavior = { id = "default", extension_id = "workflow", interfaces = ["runs", "tasks", "artifacts", "handoffs", "status"] } }
 
-[contributes]
-behaviors = [
-  { id = "default", extension_id = "workflow", interfaces = ["runs", "tasks", "artifacts", "handoffs", "status"], entry = "behavior", version = "1" }
-]
-interfaces = [
-  { key = "run.create", method = "workflow/runs/create", version = "1" },
-  { key = "run.get", method = "workflow/runs/get", version = "1" },
-  { key = "run.list_by_conversation", method = "workflow/runs/list-by-conversation", version = "1" },
-  { key = "task.list_by_run", method = "workflow/tasks/list-by-run", version = "1" },
-  { key = "artifact.list_by_run", method = "workflow/artifacts/list-by-run", version = "1" }
-]
-schedule_actions = [
-  { id = "workflow.run", method = "workflow/schedules/run", version = "1" }
-]
+[[capabilities]]
+id = "run.create"
+contract = "run.create"
+kind = "action"
+entry = "workflow/runs/create"
+metadata = { interface = { key = "run.create" } }
+
+[[capabilities]]
+id = "run.get"
+contract = "run.get"
+kind = "query"
+entry = "workflow/runs/get"
+metadata = { interface = { key = "run.get" } }
+
+[[capabilities]]
+id = "run.list_by_conversation"
+contract = "run.list_by_conversation"
+kind = "query"
+entry = "workflow/runs/list-by-conversation"
+metadata = { interface = { key = "run.list_by_conversation" } }
+
+[[capabilities]]
+id = "task.list_by_run"
+contract = "task.list_by_run"
+kind = "query"
+entry = "workflow/tasks/list-by-run"
+metadata = { interface = { key = "task.list_by_run" } }
+
+[[capabilities]]
+id = "artifact.list_by_run"
+contract = "artifact.list_by_run"
+kind = "query"
+entry = "workflow/artifacts/list-by-run"
+metadata = { interface = { key = "artifact.list_by_run" } }
+
+[[capabilities]]
+id = "workflow.run"
+contract = "schedule.run"
+kind = "action"
+entry = "workflow/schedules/run"
+title = { key = "ext.workflow.schedule.run", fallback = "Run workflow" }
+metadata = { schedule_action = { id = "workflow.run" } }

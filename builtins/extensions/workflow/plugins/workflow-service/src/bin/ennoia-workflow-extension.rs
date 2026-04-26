@@ -90,7 +90,6 @@ async fn status(State(_state): State<WorkflowApiState>) -> Json<BehaviorStatusRe
         extension_id: "workflow".to_string(),
         behavior_id: "default".to_string(),
         healthy: true,
-        version: env!("CARGO_PKG_VERSION").to_string(),
         interfaces: vec![
             "runs".to_string(),
             "tasks".to_string(),

@@ -3,12 +3,81 @@ export type LocalizedText = {
   fallback: string;
 };
 
-export type ExtensionPageContribution = {
+export type RegisteredContributionBase = {
   extension_id: string;
   extension_kind: string;
-  extension_version: string;
   source_mode: "dev" | "package";
   install_dir: string;
+};
+
+export type ExtensionResourceType = {
+  id: string;
+  title?: LocalizedText | null;
+  content_kind: string;
+  metadata_schema?: string | null;
+  content_schema?: string | null;
+  operations: string[];
+  tags: string[];
+};
+
+export type ExtensionCapability = {
+  id: string;
+  contract: string;
+  kind: string;
+  title?: LocalizedText | null;
+  runtime?: string | null;
+  entry?: string | null;
+  input_schema?: string | null;
+  output_schema?: string | null;
+  consumes: string[];
+  produces: string[];
+  requires: string[];
+  emits: string[];
+  metadata: unknown;
+};
+
+export type ExtensionSurface = {
+  id: string;
+  kind: string;
+  mount: string;
+  title?: LocalizedText | null;
+  route?: string | null;
+  slot?: string | null;
+  icon?: string | null;
+  nav?: {
+    default_pinned?: boolean;
+    order?: number | null;
+  } | null;
+  match_resource_types: string[];
+  match_capability_contracts: string[];
+  priority?: number | null;
+};
+
+export type ExtensionSubscription = {
+  event: string;
+  capability: string;
+  match_resource_types: string[];
+  match_capability_ids: string[];
+  match_capability_contracts: string[];
+};
+
+export type ExtensionResourceTypeContribution = RegisteredContributionBase & {
+  resource_type: ExtensionResourceType;
+};
+
+export type ExtensionCapabilityContribution = RegisteredContributionBase & {
+  capability: ExtensionCapability;
+};
+
+export type ExtensionSurfaceContribution = RegisteredContributionBase & {
+  surface: ExtensionSurface;
+};
+
+export type ExtensionSubscriptionContribution = RegisteredContributionBase & {
+  subscription: ExtensionSubscription;
+};
+
+export type ExtensionPageContribution = RegisteredContributionBase & {
   page: {
     id: string;
     title: LocalizedText;
@@ -22,12 +91,7 @@ export type ExtensionPageContribution = {
   };
 };
 
-export type ExtensionPanelContribution = {
-  extension_id: string;
-  extension_kind: string;
-  extension_version: string;
-  source_mode: "dev" | "package";
-  install_dir: string;
+export type ExtensionPanelContribution = RegisteredContributionBase & {
   panel: {
     id: string;
     title: LocalizedText;
@@ -39,12 +103,7 @@ export type ExtensionPanelContribution = {
 
 export type ThemeAppearance = "light" | "dark" | "system" | "high-contrast";
 
-export type ExtensionThemeContribution = {
-  extension_id: string;
-  extension_kind: string;
-  extension_version: string;
-  source_mode: "dev" | "package";
-  install_dir: string;
+export type ExtensionThemeContribution = RegisteredContributionBase & {
   theme: {
     id: string;
     label: LocalizedText;
@@ -57,17 +116,11 @@ export type ExtensionThemeContribution = {
   };
 };
 
-export type ExtensionLocaleContribution = {
-  extension_id: string;
-  extension_kind: string;
-  extension_version: string;
-  source_mode: "dev" | "package";
-  install_dir: string;
+export type ExtensionLocaleContribution = RegisteredContributionBase & {
   locale: {
     locale: string;
     namespace: string;
     entry: string;
-    version: string;
   };
 };
 
@@ -132,12 +185,7 @@ export type ExtensionUiModule = {
   panels?: Record<string, ExtensionPanelMount>;
 };
 
-export type ExtensionCommandContribution = {
-  extension_id: string;
-  extension_kind: string;
-  extension_version: string;
-  source_mode: "dev" | "package";
-  install_dir: string;
+export type ExtensionCommandContribution = RegisteredContributionBase & {
   command: {
     id: string;
     title: LocalizedText;
@@ -146,12 +194,7 @@ export type ExtensionCommandContribution = {
   };
 };
 
-export type ExtensionProviderContribution = {
-  extension_id: string;
-  extension_kind: string;
-  extension_version: string;
-  source_mode: "dev" | "package";
-  install_dir: string;
+export type ExtensionProviderContribution = RegisteredContributionBase & {
   provider: {
     id: string;
     kind: string;
@@ -172,72 +215,43 @@ export type ExtensionProviderContribution = {
   };
 };
 
-export type ExtensionHookContribution = {
-  extension_id: string;
-  extension_kind: string;
-  extension_version: string;
-  source_mode: "dev" | "package";
-  install_dir: string;
+export type ExtensionHookContribution = RegisteredContributionBase & {
   hook: {
     event: string;
     handler?: string | null;
   };
 };
 
-export type ExtensionBehaviorContribution = {
-  extension_id: string;
-  extension_kind: string;
-  extension_version: string;
-  source_mode: "dev" | "package";
-  install_dir: string;
+export type ExtensionBehaviorContribution = RegisteredContributionBase & {
   behavior: {
     id: string;
     extension_id?: string | null;
     interfaces: string[];
     entry?: string | null;
-    version: string;
   };
 };
 
-export type ExtensionMemoryContribution = {
-  extension_id: string;
-  extension_kind: string;
-  extension_version: string;
-  source_mode: "dev" | "package";
-  install_dir: string;
+export type ExtensionMemoryContribution = RegisteredContributionBase & {
   memory: {
     id: string;
     extension_id?: string | null;
     interfaces: string[];
     entry?: string | null;
-    version: string;
   };
 };
 
-export type ExtensionInterfaceContribution = {
-  extension_id: string;
-  extension_kind: string;
-  extension_version: string;
-  source_mode: "dev" | "package";
-  install_dir: string;
+export type ExtensionInterfaceContribution = RegisteredContributionBase & {
   interface: {
     key: string;
     method: string;
-    version: string;
     schema?: string | null;
   };
 };
 
-export type ExtensionScheduleActionContribution = {
-  extension_id: string;
-  extension_kind: string;
-  extension_version: string;
-  source_mode: "dev" | "package";
-  install_dir: string;
+export type ExtensionScheduleActionContribution = RegisteredContributionBase & {
   schedule_action: {
     id: string;
     method: string;
-    version: string;
     title?: LocalizedText | null;
     schema?: string | null;
   };
@@ -269,7 +283,6 @@ export type ExtensionRuntimeExtension = {
   id: string;
   name: string;
   kind: string;
-  version: string;
   source_mode: "dev" | "package";
   source_root: string;
   install_dir: string;
@@ -277,19 +290,31 @@ export type ExtensionRuntimeExtension = {
   health: string;
   ui?: ResolvedUiEntry | null;
   worker?: ResolvedWorkerEntry | null;
-  capabilities: {
-    pages: boolean;
-    panels: boolean;
-    themes: boolean;
-    locales: boolean;
-    commands: boolean;
-    providers: boolean;
-    behaviors: boolean;
-    memories: boolean;
-    hooks: boolean;
-    interfaces: boolean;
-    schedule_actions: boolean;
+  permissions: {
+    storage?: string | null;
+    sqlite: boolean;
+    network: string[];
+    events: string[];
+    fs: string[];
+    env: string[];
   };
+  runtime: {
+    startup: string;
+    timeout_ms: number;
+    memory_limit_mb: number;
+  };
+  capabilities: {
+    resource_types: boolean;
+    capabilities: boolean;
+    surfaces: boolean;
+    locales: boolean;
+    themes: boolean;
+    commands: boolean;
+    subscriptions: boolean;
+  };
+  resource_types: ExtensionResourceType[];
+  capability_rows: ExtensionCapability[];
+  surfaces: ExtensionSurface[];
   pages: ExtensionPageContribution["page"][];
   panels: ExtensionPanelContribution["panel"][];
   themes: ExtensionThemeContribution["theme"][];
@@ -301,6 +326,7 @@ export type ExtensionRuntimeExtension = {
   hooks: ExtensionHookContribution["hook"][];
   interfaces: ExtensionInterfaceContribution["interface"][];
   schedule_actions: ExtensionScheduleActionContribution["schedule_action"][];
+  subscriptions: ExtensionSubscription[];
   diagnostics: ExtensionDiagnostic[];
 };
 
@@ -308,6 +334,10 @@ export type ExtensionRuntimeSnapshot = {
   generation: number;
   updated_at: string;
   extensions: ExtensionRuntimeExtension[];
+  resource_types: ExtensionResourceTypeContribution[];
+  capabilities: ExtensionCapabilityContribution[];
+  surfaces: ExtensionSurfaceContribution[];
+  subscriptions: ExtensionSubscriptionContribution[];
   pages: ExtensionPageContribution[];
   panels: ExtensionPanelContribution[];
   themes: ExtensionThemeContribution[];

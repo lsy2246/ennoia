@@ -22,10 +22,15 @@ Extension descriptor 包含：
 - `build`
 - `assets`
 - `watch`
+- `resource_types`
 - `capabilities`
-- `contributes`
+- `surfaces`
+- `locales`
+- `themes`
+- `commands`
+- `subscriptions`
 
-贡献类型包含：页面、面板、主题、语言包、命令、Provider、Behavior、Memory、Hook、Interface 和 Schedule Action。
+主声明模型统一只有一层：`resource_types`、`capabilities`、`surfaces`、`locales`、`themes`、`commands`、`subscriptions`。页面、面板、Provider、Behavior、Memory、Hook、Interface 和 Schedule Action 都是宿主运行时根据声明派生的视图。
 
 `ui` 是可选界面入口；`worker` 是可选执行单元，可为 Wasm，也可为进程型 stdio RPC。宿主按声明装配能力，不要求扩展同时包含 UI 和 Worker。
 
@@ -41,22 +46,24 @@ Extension descriptor 包含：
 
 ## Interface 与 Schedule Action
 
-`interfaces[]` 用于把系统稳定 `/api/...` 动作绑定到扩展 Worker 方法。典型 key 包括 `conversation.list`、`conversation.create`、`message.append_user`、`run.create`、`task.list_by_run`。
+`capabilities[].metadata.interface` 用于把系统稳定 `/api/...` 动作绑定到扩展 Worker 方法。典型 key 包括 `conversation.list`、`conversation.create`、`message.append_user`、`run.create`、`task.list_by_run`。
 
-`schedule_actions[]` 用于声明可被系统 scheduler 调用的动作。Scheduler 只保存计划和触发到期动作，不解释业务语义；业务参数通过 `params` 原样传入 Worker。
+`capabilities[].metadata.schedule_action` 用于声明可被系统 scheduler 调用的动作。Scheduler 只保存计划和触发到期动作，不解释业务语义；业务参数通过 `params` 原样传入 Worker。
 
 ```toml
-[capabilities]
-interfaces = true
-schedule_actions = true
+[[capabilities]]
+id = "run.create"
+contract = "run.create"
+kind = "action"
+entry = "workflow/runs/create"
+metadata = { interface = { key = "run.create" } }
 
-[contributes]
-interfaces = [
-  { key = "run.create", method = "workflow/runs/create", version = "1" }
-]
-schedule_actions = [
-  { id = "workflow.run", method = "workflow/schedules/run", version = "1" }
-]
+[[capabilities]]
+id = "workflow.run"
+contract = "workflow.run"
+kind = "action"
+entry = "workflow/schedules/run"
+metadata = { schedule_action = { id = "workflow.run" } }
 ```
 
 扩展源码推荐目录为 `ui/`、`worker/`、`data/` 和 `provider-presets/`。这些目录不是必备项，扩展包只声明实际提供的能力。

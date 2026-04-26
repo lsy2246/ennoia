@@ -29,15 +29,16 @@ pub use domain::{
 };
 pub use ennoia_error_utils::normalize_error_message;
 pub use extension::{
-    BehaviorContribution, CommandContribution, ContributionSet, ExtensionAssetsSpec,
+    BehaviorContribution, CapabilityContribution, CommandContribution, ExtensionAssetsSpec,
     ExtensionCapabilities, ExtensionDiagnostic, ExtensionHealth, ExtensionKind, ExtensionManifest,
     ExtensionPermissionSpec, ExtensionRpcError, ExtensionRpcRequest, ExtensionRpcResponse,
     ExtensionRuntimeEvent, ExtensionRuntimeSpec, ExtensionSourceMode, ExtensionSourceSpec,
     ExtensionUiSpec, ExtensionWatchSpec, ExtensionWorkerSpec, HookContribution,
     HookDispatchResponse, HookEventEnvelope, HookResourceRef, InterfaceContribution,
-    LocaleContribution, MemoryContribution, PageContribution, PanelContribution,
-    ProviderContribution, ProviderGenerationOption, ResolvedUiEntry, ResolvedWorkerEntry,
-    ScheduleActionContribution, ThemeContribution, HOOK_EVENT_ARTIFACT_CREATED,
+    LocaleContribution, MemoryContribution, PageContribution, PageNavContribution,
+    PanelContribution, ProviderContribution, ProviderGenerationOption, ResolvedUiEntry,
+    ResolvedWorkerEntry, ResourceTypeContribution, ScheduleActionContribution,
+    SubscriptionContribution, SurfaceContribution, ThemeContribution, HOOK_EVENT_ARTIFACT_CREATED,
     HOOK_EVENT_CONVERSATION_CREATED, HOOK_EVENT_CONVERSATION_MESSAGE_CREATED, HOOK_EVENT_JOB_DUE,
     HOOK_EVENT_RUN_REQUESTED, HOOK_EVENT_RUN_STAGE_CHANGED,
 };

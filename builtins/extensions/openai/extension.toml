@@ -1,19 +1,17 @@
 id = "openai"
 name = "OpenAI Upstream"
 kind = "extension"
-version = "0.1.0"
 
 [source]
 mode = "package"
 root = "."
 dev = false
 
-[capabilities]
-providers = true
-
-[contributes]
-providers = [
-  { id = "openai", kind = "openai", extension_id = "openai", entry = "plugins/provider/provider.js", interfaces = ["generate", "tools", "models"], model_discovery = true, recommended_model = "gpt-5.4", manual_model = true, generation_options = [
-    { id = "reasoning_effort", label = { key = "ext.openai.option.reasoning_effort", fallback = "Reasoning effort" }, value_type = "select", required = false, default_value = "medium", allowed_values = ["low", "medium", "high"] },
-  ] },
-]
+[[capabilities]]
+id = "openai.generate"
+contract = "llm.generate"
+kind = "generate"
+entry = "plugins/provider/provider.js"
+metadata = { provider = { id = "openai", kind = "openai", extension_id = "openai", interfaces = ["generate", "tools", "models"], model_discovery = true, recommended_model = "gpt-5.4", manual_model = true, generation_options = [
+  { id = "reasoning_effort", label = { key = "ext.openai.option.reasoning_effort", fallback = "Reasoning effort" }, value_type = "select", required = false, default_value = "medium", allowed_values = ["low", "medium", "high"] },
+] } }

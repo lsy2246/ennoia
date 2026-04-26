@@ -2,11 +2,9 @@ use ennoia_error_utils::normalize_error_message;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
+use crate::ui::{LocalizedText, ThemeAppearance};
 use crate::OwnerRef;
 
-use crate::ui::{LocalizedText, ThemeAppearance};
-
-/// ExtensionKind represents the top-level extension classification.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ExtensionKind {
     #[serde(alias = "extension", alias = "system", alias = "system_extension")]
@@ -15,7 +13,14 @@ pub enum ExtensionKind {
     Skill,
 }
 
-/// PageContribution describes a child page mounted inside the web content area.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PageNavContribution {
+    #[serde(default)]
+    pub default_pinned: bool,
+    #[serde(default)]
+    pub order: Option<i32>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PageContribution {
     pub id: String,
@@ -27,16 +32,6 @@ pub struct PageContribution {
     pub nav: Option<PageNavContribution>,
 }
 
-/// PageNavContribution describes optional navigation exposure for an extension page.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct PageNavContribution {
-    #[serde(default)]
-    pub default_pinned: bool,
-    #[serde(default)]
-    pub order: Option<i32>,
-}
-
-/// PanelContribution describes a panel mounted in the web dock area.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PanelContribution {
     pub id: String,
@@ -46,7 +41,6 @@ pub struct PanelContribution {
     pub icon: Option<String>,
 }
 
-/// ThemeContribution describes a UI contribution that can become the active theme.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ThemeContribution {
     pub id: String,
@@ -60,16 +54,13 @@ pub struct ThemeContribution {
     pub category: Option<String>,
 }
 
-/// LocaleContribution describes one locale bundle provided by an extension.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LocaleContribution {
     pub locale: String,
     pub namespace: String,
     pub entry: String,
-    pub version: String,
 }
 
-/// CommandContribution describes a web command palette action.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CommandContribution {
     pub id: String,
@@ -78,7 +69,6 @@ pub struct CommandContribution {
     pub shortcut: Option<String>,
 }
 
-/// ProviderGenerationOption declares optional request controls owned by a provider implementation.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProviderGenerationOption {
     pub id: String,
@@ -92,7 +82,84 @@ pub struct ProviderGenerationOption {
     pub allowed_values: Vec<String>,
 }
 
-/// ProviderContribution describes a provider capability entry.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ResourceTypeContribution {
+    pub id: String,
+    #[serde(default)]
+    pub title: Option<LocalizedText>,
+    pub content_kind: String,
+    #[serde(default)]
+    pub metadata_schema: Option<String>,
+    #[serde(default)]
+    pub content_schema: Option<String>,
+    #[serde(default)]
+    pub operations: Vec<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CapabilityContribution {
+    pub id: String,
+    pub contract: String,
+    pub kind: String,
+    #[serde(default)]
+    pub title: Option<LocalizedText>,
+    #[serde(default)]
+    pub runtime: Option<String>,
+    #[serde(default)]
+    pub entry: Option<String>,
+    #[serde(default)]
+    pub input_schema: Option<String>,
+    #[serde(default)]
+    pub output_schema: Option<String>,
+    #[serde(default)]
+    pub consumes: Vec<String>,
+    #[serde(default)]
+    pub produces: Vec<String>,
+    #[serde(default)]
+    pub requires: Vec<String>,
+    #[serde(default)]
+    pub emits: Vec<String>,
+    #[serde(default)]
+    pub metadata: JsonValue,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SurfaceContribution {
+    pub id: String,
+    pub kind: String,
+    pub mount: String,
+    #[serde(default)]
+    pub title: Option<LocalizedText>,
+    #[serde(default)]
+    pub route: Option<String>,
+    #[serde(default)]
+    pub slot: Option<String>,
+    #[serde(default)]
+    pub icon: Option<String>,
+    #[serde(default)]
+    pub nav: Option<PageNavContribution>,
+    #[serde(default)]
+    pub match_resource_types: Vec<String>,
+    #[serde(default)]
+    pub match_capability_contracts: Vec<String>,
+    #[serde(default)]
+    pub priority: Option<i32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SubscriptionContribution {
+    pub event: String,
+    pub capability: String,
+    #[serde(default)]
+    pub match_resource_types: Vec<String>,
+    #[serde(default)]
+    pub match_capability_ids: Vec<String>,
+    #[serde(default)]
+    pub match_capability_contracts: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProviderContribution {
     pub id: String,
@@ -116,14 +183,12 @@ fn default_manual_model() -> bool {
     true
 }
 
-/// HookContribution describes one event name exported by an extension.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct HookContribution {
     pub event: String,
     pub handler: Option<String>,
 }
 
-/// BehaviorContribution describes one behavior capability exported by an extension.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BehaviorContribution {
     pub id: String,
@@ -133,10 +198,8 @@ pub struct BehaviorContribution {
     pub interfaces: Vec<String>,
     #[serde(default)]
     pub entry: Option<String>,
-    pub version: String,
 }
 
-/// MemoryContribution describes one memory capability exported by an extension.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct MemoryContribution {
     pub id: String,
@@ -146,25 +209,20 @@ pub struct MemoryContribution {
     pub interfaces: Vec<String>,
     #[serde(default)]
     pub entry: Option<String>,
-    pub version: String,
 }
 
-/// InterfaceContribution describes one fine-grained system action implemented by an extension.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct InterfaceContribution {
     pub key: String,
     pub method: String,
-    pub version: String,
     #[serde(default)]
     pub schema: Option<String>,
 }
 
-/// ScheduleActionContribution describes one action that can be invoked by the host scheduler.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ScheduleActionContribution {
     pub id: String,
     pub method: String,
-    pub version: String,
     #[serde(default)]
     pub title: Option<LocalizedText>,
     #[serde(default)]
@@ -215,35 +273,24 @@ pub struct HookDispatchResponse {
     pub message: Option<String>,
 }
 
-/// ContributionSet groups all extension contributions in one place.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ContributionSet {
+pub struct ExtensionCapabilities {
     #[serde(default)]
-    pub pages: Vec<PageContribution>,
+    pub resource_types: bool,
     #[serde(default)]
-    pub panels: Vec<PanelContribution>,
+    pub capabilities: bool,
     #[serde(default)]
-    pub themes: Vec<ThemeContribution>,
+    pub surfaces: bool,
     #[serde(default)]
-    pub locales: Vec<LocaleContribution>,
+    pub locales: bool,
     #[serde(default)]
-    pub commands: Vec<CommandContribution>,
+    pub themes: bool,
     #[serde(default)]
-    pub providers: Vec<ProviderContribution>,
+    pub commands: bool,
     #[serde(default)]
-    pub behaviors: Vec<BehaviorContribution>,
-    #[serde(default)]
-    pub memories: Vec<MemoryContribution>,
-    #[serde(default)]
-    pub hooks: Vec<HookContribution>,
-    #[serde(default)]
-    pub interfaces: Vec<InterfaceContribution>,
-    #[serde(default)]
-    pub schedule_actions: Vec<ScheduleActionContribution>,
+    pub subscriptions: bool,
 }
 
-/// ExtensionSourceMode identifies whether an extension comes from a development
-/// source tree or from a packaged install directory.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ExtensionSourceMode {
@@ -257,7 +304,6 @@ impl Default for ExtensionSourceMode {
     }
 }
 
-/// ExtensionHealth represents the runtime health state of one extension.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ExtensionHealth {
@@ -269,7 +315,6 @@ pub enum ExtensionHealth {
     Stopped,
 }
 
-/// ExtensionSourceSpec describes where the descriptor is resolved from.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ExtensionSourceSpec {
     #[serde(default)]
@@ -280,7 +325,6 @@ pub struct ExtensionSourceSpec {
     pub dev: bool,
 }
 
-/// ExtensionUiSpec describes an optional UI module contributed by an extension package.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ExtensionUiSpec {
     #[serde(default)]
@@ -293,7 +337,6 @@ pub struct ExtensionUiSpec {
     pub hmr: bool,
 }
 
-/// ExtensionWorkerSpec describes an optional sandboxed execution unit.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ExtensionWorkerSpec {
     #[serde(default)]
@@ -306,7 +349,6 @@ pub struct ExtensionWorkerSpec {
     pub protocol: Option<String>,
 }
 
-/// ExtensionPermissionSpec declares host capabilities an extension may request.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ExtensionPermissionSpec {
     #[serde(default)]
@@ -323,7 +365,6 @@ pub struct ExtensionPermissionSpec {
     pub env: Vec<String>,
 }
 
-/// ExtensionRuntimeSpec describes worker lifecycle limits owned by the host.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ExtensionRuntimeSpec {
     #[serde(default = "default_worker_startup")]
@@ -356,7 +397,6 @@ fn default_worker_memory_limit_mb() -> u32 {
     128
 }
 
-/// ExtensionBuildSpec describes build outputs for release packaging.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ExtensionBuildSpec {
     #[serde(default)]
@@ -367,7 +407,6 @@ pub struct ExtensionBuildSpec {
     pub worker_bundle: Option<String>,
 }
 
-/// ExtensionAssetsSpec describes asset roots.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ExtensionAssetsSpec {
     #[serde(default)]
@@ -376,7 +415,6 @@ pub struct ExtensionAssetsSpec {
     pub themes_dir: Option<String>,
 }
 
-/// ExtensionWatchSpec describes development watch patterns.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ExtensionWatchSpec {
     #[serde(default)]
@@ -385,61 +423,12 @@ pub struct ExtensionWatchSpec {
     pub exclude: Vec<String>,
 }
 
-/// ExtensionCapabilities lets descriptors declare which contribution families
-/// they intend to expose at runtime.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ExtensionCapabilities {
-    #[serde(default)]
-    pub pages: bool,
-    #[serde(default)]
-    pub panels: bool,
-    #[serde(default)]
-    pub themes: bool,
-    #[serde(default)]
-    pub locales: bool,
-    #[serde(default)]
-    pub commands: bool,
-    #[serde(default)]
-    pub providers: bool,
-    #[serde(default)]
-    pub behaviors: bool,
-    #[serde(default)]
-    pub memories: bool,
-    #[serde(default)]
-    pub hooks: bool,
-    #[serde(default)]
-    pub interfaces: bool,
-    #[serde(default)]
-    pub schedule_actions: bool,
-}
-
-impl ExtensionCapabilities {
-    pub fn from_contributions(contributes: &ContributionSet) -> Self {
-        Self {
-            pages: !contributes.pages.is_empty(),
-            panels: !contributes.panels.is_empty(),
-            themes: !contributes.themes.is_empty(),
-            locales: !contributes.locales.is_empty(),
-            commands: !contributes.commands.is_empty(),
-            providers: !contributes.providers.is_empty(),
-            behaviors: !contributes.behaviors.is_empty(),
-            memories: !contributes.memories.is_empty(),
-            hooks: !contributes.hooks.is_empty(),
-            interfaces: !contributes.interfaces.is_empty(),
-            schedule_actions: !contributes.schedule_actions.is_empty(),
-        }
-    }
-}
-
-/// ExtensionManifest is the canonical descriptor parsed from disk and used by
-/// installed packages, built-in packages and development sources.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ExtensionManifest {
     pub id: String,
     #[serde(default)]
     pub name: Option<String>,
     pub kind: ExtensionKind,
-    pub version: String,
     #[serde(default)]
     pub source: ExtensionSourceSpec,
     #[serde(default)]
@@ -457,13 +446,23 @@ pub struct ExtensionManifest {
     #[serde(default)]
     pub watch: ExtensionWatchSpec,
     #[serde(default)]
-    pub capabilities: ExtensionCapabilities,
-    #[serde(default)]
     pub ui_bundle: Option<String>,
     #[serde(default)]
     pub worker_entry: Option<String>,
     #[serde(default)]
-    pub contributes: ContributionSet,
+    pub resource_types: Vec<ResourceTypeContribution>,
+    #[serde(default)]
+    pub capabilities: Vec<CapabilityContribution>,
+    #[serde(default)]
+    pub surfaces: Vec<SurfaceContribution>,
+    #[serde(default)]
+    pub locales: Vec<LocaleContribution>,
+    #[serde(default)]
+    pub themes: Vec<ThemeContribution>,
+    #[serde(default)]
+    pub commands: Vec<CommandContribution>,
+    #[serde(default)]
+    pub subscriptions: Vec<SubscriptionContribution>,
 }
 
 impl ExtensionManifest {
@@ -472,26 +471,18 @@ impl ExtensionManifest {
     }
 
     pub fn effective_capabilities(&self) -> ExtensionCapabilities {
-        let declared = self.capabilities.clone();
-        let inferred = ExtensionCapabilities::from_contributions(&self.contributes);
         ExtensionCapabilities {
-            pages: declared.pages || inferred.pages,
-            panels: declared.panels || inferred.panels,
-            themes: declared.themes || inferred.themes,
-            locales: declared.locales || inferred.locales,
-            commands: declared.commands || inferred.commands,
-            providers: declared.providers || inferred.providers,
-            behaviors: declared.behaviors || inferred.behaviors,
-            memories: declared.memories || inferred.memories,
-            hooks: declared.hooks || inferred.hooks,
-            interfaces: declared.interfaces || inferred.interfaces,
-            schedule_actions: declared.schedule_actions || inferred.schedule_actions,
+            resource_types: !self.resource_types.is_empty(),
+            capabilities: !self.capabilities.is_empty(),
+            surfaces: !self.surfaces.is_empty(),
+            locales: !self.locales.is_empty(),
+            themes: !self.themes.is_empty(),
+            commands: !self.commands.is_empty(),
+            subscriptions: !self.subscriptions.is_empty(),
         }
     }
 }
 
-/// ResolvedUiEntry is the runtime-facing UI result after Ennoia has
-/// interpreted the descriptor.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ResolvedUiEntry {
     pub kind: String,
@@ -500,8 +491,6 @@ pub struct ResolvedUiEntry {
     pub version: String,
 }
 
-/// ResolvedWorkerEntry is the runtime-facing Worker result after Ennoia has
-/// interpreted the descriptor.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ResolvedWorkerEntry {
     pub kind: String,
@@ -556,7 +545,6 @@ pub struct ExtensionRpcError {
     pub message: String,
 }
 
-/// ExtensionDiagnostic records one resolution or runtime observation.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ExtensionDiagnostic {
     pub level: String,
@@ -566,7 +554,6 @@ pub struct ExtensionDiagnostic {
     pub at: String,
 }
 
-/// ExtensionRuntimeEvent records one runtime event visible to API, CLI and Web.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ExtensionRuntimeEvent {
     pub event_id: String,

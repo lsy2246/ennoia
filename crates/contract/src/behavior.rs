@@ -94,7 +94,6 @@ pub struct BehaviorStatusResponse {
     pub extension_id: String,
     pub behavior_id: String,
     pub healthy: bool,
-    pub version: String,
     #[serde(default)]
     pub interfaces: Vec<String>,
 }

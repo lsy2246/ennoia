@@ -5,11 +5,13 @@ pub mod worker;
 
 pub use registry::{
     read_registry_file, write_registry_file, ExtensionRuntime, ExtensionRuntimeConfig,
-    ExtensionRuntimeSnapshot, RegisteredBehaviorContribution, RegisteredCommandContribution,
-    RegisteredHookContribution, RegisteredInterfaceContribution, RegisteredLocaleContribution,
-    RegisteredMemoryContribution, RegisteredPageContribution, RegisteredPanelContribution,
-    RegisteredProviderContribution, RegisteredScheduleActionContribution,
-    RegisteredThemeContribution, ResolvedExtensionSnapshot,
+    ExtensionRuntimeSnapshot, RegisteredBehaviorContribution, RegisteredCapabilityContribution,
+    RegisteredCommandContribution, RegisteredHookContribution, RegisteredInterfaceContribution,
+    RegisteredLocaleContribution, RegisteredMemoryContribution, RegisteredPageContribution,
+    RegisteredPanelContribution, RegisteredProviderContribution,
+    RegisteredResourceTypeContribution, RegisteredScheduleActionContribution,
+    RegisteredSubscriptionContribution, RegisteredSurfaceContribution, RegisteredThemeContribution,
+    ResolvedExtensionSnapshot,
 };
 
 /// Returns the current extension host module name.
@@ -29,6 +31,10 @@ mod tests {
             generation: 1,
             updated_at: "1".to_string(),
             extensions: Vec::new(),
+            resource_types: Vec::new(),
+            capabilities: Vec::new(),
+            surfaces: Vec::new(),
+            subscriptions: Vec::new(),
             pages: Vec::new(),
             panels: Vec::new(),
             themes: Vec::new(),

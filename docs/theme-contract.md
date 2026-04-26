@@ -8,7 +8,7 @@
 ## 协议标识
 
 - 当前标识：`ennoia.theme`
-- 扩展主题在 `contributes.themes[]` 中可选声明 `contract = "ennoia.theme"`
+- 扩展主题在 `themes[]` 中可选声明 `contract = "ennoia.theme"`
 - 未声明时默认按 `ennoia.theme` 解释
 
 ## 必选 Token
@@ -70,22 +70,15 @@
 ## Manifest 示例
 
 ```toml
-[capabilities]
-themes = true
-
-[contributes]
-themes = [
-  {
-    id = "acme.sunrise",
-    contract = "ennoia.theme",
-    label = { key = "ext.acme.theme.sunrise", fallback = "Sunrise" },
-    appearance = "light",
-    tokens_entry = "ui/themes/sunrise.css",
-    preview_color = "#f59e0b",
-    extends = "system",
-    category = "extension"
-  }
-]
+[[themes]]
+id = "acme.sunrise"
+contract = "ennoia.theme"
+label = { key = "ext.acme.theme.sunrise", fallback = "Sunrise" }
+appearance = "light"
+tokens_entry = "ui/themes/sunrise.css"
+preview_color = "#f59e0b"
+extends = "system"
+category = "extension"
 ```
 
 ## CSS 示例

@@ -6,22 +6,22 @@ use std::sync::{Arc, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use ennoia_kernel::{
-    BehaviorContribution, CommandContribution, ExtensionCapabilities, ExtensionDiagnostic,
-    ExtensionHealth, ExtensionKind, ExtensionManifest, ExtensionPermissionSpec,
-    ExtensionRegistryEntry, ExtensionRegistryFile, ExtensionRpcRequest, ExtensionRpcResponse,
-    ExtensionRuntimeEvent, ExtensionRuntimeSpec, ExtensionSourceMode, ExtensionUiSpec,
-    HookContribution, InterfaceContribution, LocaleContribution, MemoryContribution,
-    PageContribution, PanelContribution, ProviderContribution, ResolvedUiEntry,
-    ResolvedWorkerEntry, ScheduleActionContribution, ThemeContribution,
+    BehaviorContribution, CapabilityContribution, CommandContribution, ExtensionCapabilities,
+    ExtensionDiagnostic, ExtensionHealth, ExtensionKind, ExtensionManifest,
+    ExtensionPermissionSpec, ExtensionRegistryEntry, ExtensionRegistryFile, ExtensionRpcRequest,
+    ExtensionRpcResponse, ExtensionRuntimeEvent, ExtensionRuntimeSpec, ExtensionSourceMode,
+    ExtensionUiSpec, HookContribution, InterfaceContribution, LocaleContribution,
+    MemoryContribution, PageContribution, PanelContribution, ProviderContribution, ResolvedUiEntry,
+    ResolvedWorkerEntry, ResourceTypeContribution, ScheduleActionContribution,
+    SubscriptionContribution, SurfaceContribution, ThemeContribution,
 };
 use serde::Serialize;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ResolvedExtensionSnapshot {
     pub id: String,
     pub name: String,
     pub kind: ExtensionKind,
-    pub version: String,
     pub source_mode: ExtensionSourceMode,
     pub source_root: String,
     pub install_dir: String,
@@ -32,6 +32,9 @@ pub struct ResolvedExtensionSnapshot {
     pub permissions: ExtensionPermissionSpec,
     pub runtime: ExtensionRuntimeSpec,
     pub capabilities: ExtensionCapabilities,
+    pub resource_types: Vec<ResourceTypeContribution>,
+    pub capability_rows: Vec<CapabilityContribution>,
+    pub surfaces: Vec<SurfaceContribution>,
     pub pages: Vec<PageContribution>,
     pub panels: Vec<PanelContribution>,
     pub themes: Vec<ThemeContribution>,
@@ -43,14 +46,50 @@ pub struct ResolvedExtensionSnapshot {
     pub hooks: Vec<HookContribution>,
     pub interfaces: Vec<InterfaceContribution>,
     pub schedule_actions: Vec<ScheduleActionContribution>,
+    pub subscriptions: Vec<SubscriptionContribution>,
     pub diagnostics: Vec<ExtensionDiagnostic>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RegisteredResourceTypeContribution {
+    pub extension_id: String,
+    pub extension_kind: ExtensionKind,
+    pub source_mode: ExtensionSourceMode,
+    pub install_dir: String,
+    pub resource_type: ResourceTypeContribution,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct RegisteredCapabilityContribution {
+    pub extension_id: String,
+    pub extension_kind: ExtensionKind,
+    pub source_mode: ExtensionSourceMode,
+    pub install_dir: String,
+    pub capability: CapabilityContribution,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RegisteredSurfaceContribution {
+    pub extension_id: String,
+    pub extension_kind: ExtensionKind,
+    pub source_mode: ExtensionSourceMode,
+    pub install_dir: String,
+    pub surface: SurfaceContribution,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RegisteredSubscriptionContribution {
+    pub extension_id: String,
+    pub extension_kind: ExtensionKind,
+    pub source_mode: ExtensionSourceMode,
+    pub install_dir: String,
+    pub subscription: SubscriptionContribution,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RegisteredPageContribution {
     pub extension_id: String,
     pub extension_kind: ExtensionKind,
-    pub extension_version: String,
     pub source_mode: ExtensionSourceMode,
     pub install_dir: String,
     pub page: PageContribution,
@@ -60,7 +99,6 @@ pub struct RegisteredPageContribution {
 pub struct RegisteredPanelContribution {
     pub extension_id: String,
     pub extension_kind: ExtensionKind,
-    pub extension_version: String,
     pub source_mode: ExtensionSourceMode,
     pub install_dir: String,
     pub panel: PanelContribution,
@@ -70,7 +108,6 @@ pub struct RegisteredPanelContribution {
 pub struct RegisteredThemeContribution {
     pub extension_id: String,
     pub extension_kind: ExtensionKind,
-    pub extension_version: String,
     pub source_mode: ExtensionSourceMode,
     pub install_dir: String,
     pub theme: ThemeContribution,
@@ -80,7 +117,6 @@ pub struct RegisteredThemeContribution {
 pub struct RegisteredLocaleContribution {
     pub extension_id: String,
     pub extension_kind: ExtensionKind,
-    pub extension_version: String,
     pub source_mode: ExtensionSourceMode,
     pub install_dir: String,
     pub locale: LocaleContribution,
@@ -90,7 +126,6 @@ pub struct RegisteredLocaleContribution {
 pub struct RegisteredCommandContribution {
     pub extension_id: String,
     pub extension_kind: ExtensionKind,
-    pub extension_version: String,
     pub source_mode: ExtensionSourceMode,
     pub install_dir: String,
     pub command: CommandContribution,
@@ -100,7 +135,6 @@ pub struct RegisteredCommandContribution {
 pub struct RegisteredProviderContribution {
     pub extension_id: String,
     pub extension_kind: ExtensionKind,
-    pub extension_version: String,
     pub source_mode: ExtensionSourceMode,
     pub install_dir: String,
     pub provider: ProviderContribution,
@@ -110,7 +144,6 @@ pub struct RegisteredProviderContribution {
 pub struct RegisteredBehaviorContribution {
     pub extension_id: String,
     pub extension_kind: ExtensionKind,
-    pub extension_version: String,
     pub source_mode: ExtensionSourceMode,
     pub install_dir: String,
     pub behavior: BehaviorContribution,
@@ -120,7 +153,6 @@ pub struct RegisteredBehaviorContribution {
 pub struct RegisteredMemoryContribution {
     pub extension_id: String,
     pub extension_kind: ExtensionKind,
-    pub extension_version: String,
     pub source_mode: ExtensionSourceMode,
     pub install_dir: String,
     pub memory: MemoryContribution,
@@ -130,7 +162,6 @@ pub struct RegisteredMemoryContribution {
 pub struct RegisteredHookContribution {
     pub extension_id: String,
     pub extension_kind: ExtensionKind,
-    pub extension_version: String,
     pub source_mode: ExtensionSourceMode,
     pub install_dir: String,
     pub hook: HookContribution,
@@ -140,7 +171,6 @@ pub struct RegisteredHookContribution {
 pub struct RegisteredInterfaceContribution {
     pub extension_id: String,
     pub extension_kind: ExtensionKind,
-    pub extension_version: String,
     pub source_mode: ExtensionSourceMode,
     pub install_dir: String,
     pub interface: InterfaceContribution,
@@ -150,17 +180,20 @@ pub struct RegisteredInterfaceContribution {
 pub struct RegisteredScheduleActionContribution {
     pub extension_id: String,
     pub extension_kind: ExtensionKind,
-    pub extension_version: String,
     pub source_mode: ExtensionSourceMode,
     pub install_dir: String,
     pub schedule_action: ScheduleActionContribution,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ExtensionRuntimeSnapshot {
     pub generation: u64,
     pub updated_at: String,
     pub extensions: Vec<ResolvedExtensionSnapshot>,
+    pub resource_types: Vec<RegisteredResourceTypeContribution>,
+    pub capabilities: Vec<RegisteredCapabilityContribution>,
+    pub surfaces: Vec<RegisteredSurfaceContribution>,
+    pub subscriptions: Vec<RegisteredSubscriptionContribution>,
     pub pages: Vec<RegisteredPageContribution>,
     pub panels: Vec<RegisteredPanelContribution>,
     pub themes: Vec<RegisteredThemeContribution>,
@@ -417,6 +450,62 @@ impl ExtensionRuntimeState {
 }
 
 impl ResolvedExtensionSnapshot {
+    fn resource_type_rows(&self) -> Vec<RegisteredResourceTypeContribution> {
+        self.resource_types
+            .iter()
+            .cloned()
+            .map(|resource_type| RegisteredResourceTypeContribution {
+                extension_id: self.id.clone(),
+                extension_kind: self.kind.clone(),
+                source_mode: self.source_mode.clone(),
+                install_dir: self.install_dir.clone(),
+                resource_type,
+            })
+            .collect()
+    }
+
+    fn capability_rows(&self) -> Vec<RegisteredCapabilityContribution> {
+        self.capability_rows
+            .iter()
+            .cloned()
+            .map(|capability| RegisteredCapabilityContribution {
+                extension_id: self.id.clone(),
+                extension_kind: self.kind.clone(),
+                source_mode: self.source_mode.clone(),
+                install_dir: self.install_dir.clone(),
+                capability,
+            })
+            .collect()
+    }
+
+    fn surface_rows(&self) -> Vec<RegisteredSurfaceContribution> {
+        self.surfaces
+            .iter()
+            .cloned()
+            .map(|surface| RegisteredSurfaceContribution {
+                extension_id: self.id.clone(),
+                extension_kind: self.kind.clone(),
+                source_mode: self.source_mode.clone(),
+                install_dir: self.install_dir.clone(),
+                surface,
+            })
+            .collect()
+    }
+
+    fn subscription_rows(&self) -> Vec<RegisteredSubscriptionContribution> {
+        self.subscriptions
+            .iter()
+            .cloned()
+            .map(|subscription| RegisteredSubscriptionContribution {
+                extension_id: self.id.clone(),
+                extension_kind: self.kind.clone(),
+                source_mode: self.source_mode.clone(),
+                install_dir: self.install_dir.clone(),
+                subscription,
+            })
+            .collect()
+    }
+
     fn page_rows(&self) -> Vec<RegisteredPageContribution> {
         self.pages
             .iter()
@@ -424,7 +513,6 @@ impl ResolvedExtensionSnapshot {
             .map(|page| RegisteredPageContribution {
                 extension_id: self.id.clone(),
                 extension_kind: self.kind.clone(),
-                extension_version: self.version.clone(),
                 source_mode: self.source_mode.clone(),
                 install_dir: self.install_dir.clone(),
                 page,
@@ -439,7 +527,6 @@ impl ResolvedExtensionSnapshot {
             .map(|panel| RegisteredPanelContribution {
                 extension_id: self.id.clone(),
                 extension_kind: self.kind.clone(),
-                extension_version: self.version.clone(),
                 source_mode: self.source_mode.clone(),
                 install_dir: self.install_dir.clone(),
                 panel,
@@ -454,7 +541,6 @@ impl ResolvedExtensionSnapshot {
             .map(|theme| RegisteredThemeContribution {
                 extension_id: self.id.clone(),
                 extension_kind: self.kind.clone(),
-                extension_version: self.version.clone(),
                 source_mode: self.source_mode.clone(),
                 install_dir: self.install_dir.clone(),
                 theme,
@@ -469,7 +555,6 @@ impl ResolvedExtensionSnapshot {
             .map(|locale| RegisteredLocaleContribution {
                 extension_id: self.id.clone(),
                 extension_kind: self.kind.clone(),
-                extension_version: self.version.clone(),
                 source_mode: self.source_mode.clone(),
                 install_dir: self.install_dir.clone(),
                 locale,
@@ -484,7 +569,6 @@ impl ResolvedExtensionSnapshot {
             .map(|command| RegisteredCommandContribution {
                 extension_id: self.id.clone(),
                 extension_kind: self.kind.clone(),
-                extension_version: self.version.clone(),
                 source_mode: self.source_mode.clone(),
                 install_dir: self.install_dir.clone(),
                 command,
@@ -499,7 +583,6 @@ impl ResolvedExtensionSnapshot {
             .map(|provider| RegisteredProviderContribution {
                 extension_id: self.id.clone(),
                 extension_kind: self.kind.clone(),
-                extension_version: self.version.clone(),
                 source_mode: self.source_mode.clone(),
                 install_dir: self.install_dir.clone(),
                 provider,
@@ -514,7 +597,6 @@ impl ResolvedExtensionSnapshot {
             .map(|behavior| RegisteredBehaviorContribution {
                 extension_id: self.id.clone(),
                 extension_kind: self.kind.clone(),
-                extension_version: self.version.clone(),
                 source_mode: self.source_mode.clone(),
                 install_dir: self.install_dir.clone(),
                 behavior,
@@ -529,7 +611,6 @@ impl ResolvedExtensionSnapshot {
             .map(|memory| RegisteredMemoryContribution {
                 extension_id: self.id.clone(),
                 extension_kind: self.kind.clone(),
-                extension_version: self.version.clone(),
                 source_mode: self.source_mode.clone(),
                 install_dir: self.install_dir.clone(),
                 memory,
@@ -544,7 +625,6 @@ impl ResolvedExtensionSnapshot {
             .map(|hook| RegisteredHookContribution {
                 extension_id: self.id.clone(),
                 extension_kind: self.kind.clone(),
-                extension_version: self.version.clone(),
                 source_mode: self.source_mode.clone(),
                 install_dir: self.install_dir.clone(),
                 hook,
@@ -559,7 +639,6 @@ impl ResolvedExtensionSnapshot {
             .map(|interface| RegisteredInterfaceContribution {
                 extension_id: self.id.clone(),
                 extension_kind: self.kind.clone(),
-                extension_version: self.version.clone(),
                 source_mode: self.source_mode.clone(),
                 install_dir: self.install_dir.clone(),
                 interface,
@@ -574,7 +653,6 @@ impl ResolvedExtensionSnapshot {
             .map(|schedule_action| RegisteredScheduleActionContribution {
                 extension_id: self.id.clone(),
                 extension_kind: self.kind.clone(),
-                extension_version: self.version.clone(),
                 source_mode: self.source_mode.clone(),
                 install_dir: self.install_dir.clone(),
                 schedule_action,
@@ -600,6 +678,10 @@ fn build_snapshot(
     let mut extensions = resolved_by_id.into_values().collect::<Vec<_>>();
     extensions.sort_by(|left, right| left.id.cmp(&right.id));
 
+    let mut resource_types = Vec::new();
+    let mut capabilities = Vec::new();
+    let mut surfaces = Vec::new();
+    let mut subscriptions = Vec::new();
     let mut pages = Vec::new();
     let mut panels = Vec::new();
     let mut themes = Vec::new();
@@ -613,6 +695,10 @@ fn build_snapshot(
     let mut schedule_actions = Vec::new();
 
     for extension in &extensions {
+        resource_types.extend(extension.resource_type_rows());
+        capabilities.extend(extension.capability_rows());
+        surfaces.extend(extension.surface_rows());
+        subscriptions.extend(extension.subscription_rows());
         pages.extend(extension.page_rows());
         panels.extend(extension.panel_rows());
         themes.extend(extension.theme_rows());
@@ -630,6 +716,10 @@ fn build_snapshot(
         generation,
         updated_at: now_string(),
         extensions,
+        resource_types,
+        capabilities,
+        surfaces,
+        subscriptions,
         pages,
         panels,
         themes,
@@ -688,6 +778,18 @@ fn resolve_manifest(
     let install_dir = normalize_display_path(&source.root);
     let source_root = install_dir.clone();
     let capabilities = manifest.effective_capabilities();
+    let resource_types = manifest.resource_types.clone();
+    let capability_rows = manifest.capabilities.clone();
+    let surfaces = manifest.surfaces.clone();
+    let pages = derive_pages(&surfaces);
+    let panels = derive_panels(&surfaces);
+    let providers = derive_providers(&capability_rows, &manifest.id);
+    let behaviors = derive_behaviors(&capability_rows, &manifest.id);
+    let memories = derive_memories(&capability_rows, &manifest.id);
+    let interfaces = derive_interfaces(&capability_rows);
+    let schedule_actions = derive_schedule_actions(&capability_rows);
+    let subscriptions = manifest.subscriptions.clone();
+    let hooks = derive_hooks(&capability_rows, &subscriptions);
     let mut diagnostics = Vec::new();
     let ui = resolve_ui(
         &source.root,
@@ -736,7 +838,6 @@ fn resolve_manifest(
         id: manifest.id.clone(),
         name: manifest.display_name(),
         kind: manifest.kind,
-        version: manifest.version,
         source_mode: source.source_mode,
         source_root,
         install_dir,
@@ -747,19 +848,212 @@ fn resolve_manifest(
         permissions: manifest.permissions,
         runtime: manifest.runtime,
         capabilities,
-        pages: manifest.contributes.pages,
-        panels: manifest.contributes.panels,
-        themes: manifest.contributes.themes,
-        locales: manifest.contributes.locales,
-        commands: manifest.contributes.commands,
-        providers: manifest.contributes.providers,
-        behaviors: manifest.contributes.behaviors,
-        memories: manifest.contributes.memories,
-        hooks: manifest.contributes.hooks,
-        interfaces: manifest.contributes.interfaces,
-        schedule_actions: manifest.contributes.schedule_actions,
+        resource_types,
+        capability_rows,
+        surfaces,
+        pages,
+        panels,
+        themes: manifest.themes,
+        locales: manifest.locales,
+        commands: manifest.commands,
+        providers,
+        behaviors,
+        memories,
+        hooks,
+        interfaces,
+        schedule_actions,
+        subscriptions,
         diagnostics,
     }
+}
+
+fn derive_pages(surfaces: &[SurfaceContribution]) -> Vec<PageContribution> {
+    surfaces
+        .iter()
+        .filter(|surface| surface.kind == "page")
+        .filter_map(|surface| {
+            Some(PageContribution {
+                id: surface.id.clone(),
+                title: surface.title.clone()?,
+                route: surface.route.clone()?,
+                mount: surface.mount.clone(),
+                icon: surface.icon.clone(),
+                nav: surface.nav.clone(),
+            })
+        })
+        .collect()
+}
+
+fn derive_panels(surfaces: &[SurfaceContribution]) -> Vec<PanelContribution> {
+    surfaces
+        .iter()
+        .filter(|surface| surface.kind == "panel")
+        .filter_map(|surface| {
+            Some(PanelContribution {
+                id: surface.id.clone(),
+                title: surface.title.clone()?,
+                mount: surface.mount.clone(),
+                slot: surface.slot.clone()?,
+                icon: surface.icon.clone(),
+            })
+        })
+        .collect()
+}
+
+fn derive_providers(
+    capabilities: &[CapabilityContribution],
+    extension_id: &str,
+) -> Vec<ProviderContribution> {
+    capabilities
+        .iter()
+        .filter_map(|capability| {
+            let provider = capability.metadata.get("provider")?;
+            Some(ProviderContribution {
+                id: json_string(provider, "id").unwrap_or_else(|| capability.id.clone()),
+                kind: json_string(provider, "kind").unwrap_or_else(|| capability.contract.clone()),
+                entry: capability.entry.clone(),
+                extension_id: Some(
+                    json_string(provider, "extension_id")
+                        .unwrap_or_else(|| extension_id.to_string()),
+                ),
+                interfaces: json_string_array(provider, "interfaces"),
+                model_discovery: json_bool(provider, "model_discovery"),
+                recommended_model: json_string(provider, "recommended_model"),
+                manual_model: json_bool_default(provider, "manual_model", true),
+                generation_options: provider_generation_options(provider),
+            })
+        })
+        .collect()
+}
+
+fn derive_behaviors(
+    capabilities: &[CapabilityContribution],
+    extension_id: &str,
+) -> Vec<BehaviorContribution> {
+    capabilities
+        .iter()
+        .filter_map(|capability| {
+            let behavior = capability.metadata.get("behavior")?;
+            Some(BehaviorContribution {
+                id: json_string(behavior, "id").unwrap_or_else(|| capability.id.clone()),
+                extension_id: Some(
+                    json_string(behavior, "extension_id")
+                        .unwrap_or_else(|| extension_id.to_string()),
+                ),
+                interfaces: json_string_array(behavior, "interfaces"),
+                entry: capability.entry.clone(),
+            })
+        })
+        .collect()
+}
+
+fn derive_memories(
+    capabilities: &[CapabilityContribution],
+    extension_id: &str,
+) -> Vec<MemoryContribution> {
+    capabilities
+        .iter()
+        .filter_map(|capability| {
+            let memory = capability.metadata.get("memory")?;
+            Some(MemoryContribution {
+                id: json_string(memory, "id").unwrap_or_else(|| capability.id.clone()),
+                extension_id: Some(
+                    json_string(memory, "extension_id").unwrap_or_else(|| extension_id.to_string()),
+                ),
+                interfaces: json_string_array(memory, "interfaces"),
+                entry: capability.entry.clone(),
+            })
+        })
+        .collect()
+}
+
+fn derive_interfaces(capabilities: &[CapabilityContribution]) -> Vec<InterfaceContribution> {
+    capabilities
+        .iter()
+        .filter_map(|capability| {
+            let interface = capability.metadata.get("interface")?;
+            let key = json_string(interface, "key").unwrap_or_else(|| capability.contract.clone());
+            let method = capability.entry.clone()?;
+            Some(InterfaceContribution {
+                key,
+                method,
+                schema: json_string(interface, "schema"),
+            })
+        })
+        .collect()
+}
+
+fn derive_schedule_actions(
+    capabilities: &[CapabilityContribution],
+) -> Vec<ScheduleActionContribution> {
+    capabilities
+        .iter()
+        .filter_map(|capability| {
+            let schedule_action = capability.metadata.get("schedule_action")?;
+            Some(ScheduleActionContribution {
+                id: json_string(schedule_action, "id").unwrap_or_else(|| capability.id.clone()),
+                method: capability.entry.clone()?,
+                title: capability.title.clone(),
+                schema: json_string(schedule_action, "schema"),
+            })
+        })
+        .collect()
+}
+
+fn derive_hooks(
+    capabilities: &[CapabilityContribution],
+    subscriptions: &[SubscriptionContribution],
+) -> Vec<HookContribution> {
+    subscriptions
+        .iter()
+        .filter_map(|subscription| {
+            let capability = capabilities
+                .iter()
+                .find(|item| item.id == subscription.capability)?;
+            Some(HookContribution {
+                event: subscription.event.clone(),
+                handler: capability.entry.clone(),
+            })
+        })
+        .collect()
+}
+
+fn json_string(value: &serde_json::Value, key: &str) -> Option<String> {
+    value.get(key)?.as_str().map(str::to_string)
+}
+
+fn json_bool(value: &serde_json::Value, key: &str) -> bool {
+    value
+        .get(key)
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+}
+
+fn json_bool_default(value: &serde_json::Value, key: &str, default_value: bool) -> bool {
+    value
+        .get(key)
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(default_value)
+}
+
+fn json_string_array(value: &serde_json::Value, key: &str) -> Vec<String> {
+    value
+        .get(key)
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(serde_json::Value::as_str)
+        .map(str::to_string)
+        .collect()
+}
+
+fn provider_generation_options(
+    value: &serde_json::Value,
+) -> Vec<ennoia_kernel::ProviderGenerationOption> {
+    value
+        .get("generation_options")
+        .and_then(|item| serde_json::from_value(item.clone()).ok())
+        .unwrap_or_default()
 }
 
 fn resolve_ui(
@@ -928,7 +1222,6 @@ fn failed_extension_snapshot(
         id: id.clone(),
         name: id,
         kind: ExtensionKind::SystemExtension,
-        version: "0.0.0".to_string(),
         source_mode: source.source_mode,
         source_root: source_root.clone(),
         install_dir: source_root,
@@ -939,6 +1232,9 @@ fn failed_extension_snapshot(
         permissions: ExtensionPermissionSpec::default(),
         runtime: ExtensionRuntimeSpec::default(),
         capabilities: ExtensionCapabilities::default(),
+        resource_types: Vec::new(),
+        capability_rows: Vec::new(),
+        surfaces: Vec::new(),
         pages: Vec::new(),
         panels: Vec::new(),
         themes: Vec::new(),
@@ -950,6 +1246,7 @@ fn failed_extension_snapshot(
         hooks: Vec::new(),
         interfaces: Vec::new(),
         schedule_actions: Vec::new(),
+        subscriptions: Vec::new(),
         diagnostics: vec![diagnostic(
             "error",
             "descriptor resolution failed",
@@ -1011,6 +1308,10 @@ fn equivalent_snapshots(
     next: &ExtensionRuntimeSnapshot,
 ) -> bool {
     normalize_extensions(&current.extensions) == normalize_extensions(&next.extensions)
+        && current.resource_types == next.resource_types
+        && current.capabilities == next.capabilities
+        && current.surfaces == next.surfaces
+        && current.subscriptions == next.subscriptions
         && current.pages == next.pages
         && current.panels == next.panels
         && current.themes == next.themes
@@ -1040,6 +1341,10 @@ fn empty_snapshot() -> ExtensionRuntimeSnapshot {
         generation: 0,
         updated_at: now_string(),
         extensions: Vec::new(),
+        resource_types: Vec::new(),
+        capabilities: Vec::new(),
+        surfaces: Vec::new(),
+        subscriptions: Vec::new(),
         pages: Vec::new(),
         panels: Vec::new(),
         themes: Vec::new(),
@@ -1127,6 +1432,10 @@ mod tests {
         let runtime = ExtensionRuntime::bootstrap(config).expect("bootstrap runtime");
         let snapshot = runtime.snapshot();
         assert_eq!(snapshot.extensions.len(), 1);
+        assert_eq!(snapshot.resource_types.len(), 1);
+        assert_eq!(snapshot.capabilities.len(), 2);
+        assert_eq!(snapshot.surfaces.len(), 2);
+        assert_eq!(snapshot.subscriptions.len(), 1);
         assert_eq!(snapshot.pages.len(), 1);
         assert_eq!(snapshot.panels.len(), 1);
         assert_eq!(snapshot.locales.len(), 2);
@@ -1173,7 +1482,6 @@ mod tests {
 id = "{id}"
 name = "Observatory"
 kind = "extension"
-version = "0.1.0"
 
 [source]
 mode = "dev"
@@ -1191,23 +1499,70 @@ kind = "wasm"
 entry = "./worker/plugin.wasm"
 abi = "ennoia.worker"
 
-[capabilities]
-pages = true
-panels = true
-themes = true
-locales = true
-commands = true
-providers = true
-hooks = true
+[[resource_types]]
+id = "{id}.event"
+title = {{ key = "ext.{id}.resource.event", fallback = "Event" }}
+content_kind = "json"
+operations = ["read"]
+tags = ["activity"]
 
-[contributes]
-pages = [{{ id = "{id}.events", title = {{ key = "ext.{id}.page.events", fallback = "Observatory" }}, route = "/{id}", mount = "{id}.events.page", icon = "activity" }}]
-panels = [{{ id = "{id}.timeline", title = {{ key = "ext.{id}.panel.timeline", fallback = "Event Timeline" }}, mount = "{id}.timeline.panel", slot = "right", icon = "panel-right" }}]
-themes = [{{ id = "{id}.daybreak", label = {{ key = "ext.{id}.theme.daybreak", fallback = "Daybreak" }}, appearance = "Light", tokens_entry = "ui/themes/daybreak.css", preview_color = "#F4A261", extends = "system", category = "extension" }}]
-locales = [{{ locale = "zh-CN", namespace = "ext.{id}", entry = "ui/locales/zh-CN.json", version = "1" }}, {{ locale = "en-US", namespace = "ext.{id}", entry = "ui/locales/en-US.json", version = "1" }}]
-commands = [{{ id = "{id}.open", title = {{ key = "ext.{id}.command.open", fallback = "Open Observatory" }}, action = "open-page", shortcut = "Ctrl+Shift+O" }}]
-providers = [{{ id = "{id}.feed", kind = "activity-feed", entry = "worker/providers/activity-feed.js" }}]
-hooks = [{{ event = "run.completed", handler = "worker/hooks/run-completed.js" }}]
+[[surfaces]]
+id = "{id}.events"
+kind = "page"
+mount = "{id}.events.page"
+title = {{ key = "ext.{id}.page.events", fallback = "Observatory" }}
+route = "/{id}"
+icon = "activity"
+
+[[surfaces]]
+id = "{id}.timeline"
+kind = "panel"
+mount = "{id}.timeline.panel"
+title = {{ key = "ext.{id}.panel.timeline", fallback = "Event Timeline" }}
+slot = "right"
+icon = "panel-right"
+
+[[themes]]
+id = "{id}.daybreak"
+label = {{ key = "ext.{id}.theme.daybreak", fallback = "Daybreak" }}
+appearance = "Light"
+tokens_entry = "ui/themes/daybreak.css"
+preview_color = "#F4A261"
+extends = "system"
+category = "extension"
+
+[[locales]]
+locale = "zh-CN"
+namespace = "ext.{id}"
+entry = "ui/locales/zh-CN.json"
+
+[[locales]]
+locale = "en-US"
+namespace = "ext.{id}"
+entry = "ui/locales/en-US.json"
+
+[[commands]]
+id = "{id}.open"
+title = {{ key = "ext.{id}.command.open", fallback = "Open Observatory" }}
+action = "open-page"
+shortcut = "Ctrl+Shift+O"
+
+[[capabilities]]
+id = "{id}.feed"
+contract = "activity-feed"
+kind = "query"
+entry = "worker/providers/activity-feed.js"
+metadata = {{ provider = {{ id = "{id}.feed", kind = "activity-feed" }} }}
+
+[[capabilities]]
+id = "{id}.run.completed"
+contract = "hook.run.completed"
+kind = "event_handler"
+entry = "worker/hooks/run-completed.js"
+
+[[subscriptions]]
+event = "run.completed"
+capability = "{id}.run.completed"
 "##
         )
     }

@@ -2,7 +2,7 @@
 
 ## 定位
 
-Extension 是系统能力包，Skill 是 Agent 可引用的能力包。Extension 不再表示“前端 + 独立后端服务”，而是由宿主装配的一组可选贡献：`ui`、`worker`、主题、语言、命令、Provider、Behavior、Memory、Hook、Interface 和 Schedule Action。
+Extension 是系统能力包，Skill 是 Agent 可引用的能力包。Extension 不再表示“前端 + 独立后端服务”，而是由宿主装配的一组能力声明：`ui`、`worker`、`resource_types`、`capabilities`、`surfaces`、`themes`、`locales`、`commands`、`subscriptions`。
 
 ## 源码放置
 
@@ -23,8 +23,13 @@ Extension 是系统能力包，Skill 是 Agent 可引用的能力包。Extension
 - `build`
 - `assets`
 - `watch`
+- `resource_types`
 - `capabilities`
-- `contributes`
+- `surfaces`
+- `locales`
+- `themes`
+- `commands`
+- `subscriptions`
 
 `ui` 和 `worker` 都是可选声明。纯 UI 扩展不需要 `worker`，纯能力扩展不需要 `ui`。`worker.kind` 当前支持 `wasm` 和 `process`；`process` Worker 通过 stdin/stdout 的 JSON 文本协议接入宿主，不需要自行开放 HTTP 端口。需要本地 SQLite、文件和后台任务的扩展，推荐直接使用 `process` Worker。
 
@@ -57,38 +62,51 @@ memory_limit_mb = 128
 
 如果使用 Wasm Worker，则把 `worker.kind` 改为 `wasm`，并额外声明 `abi = "ennoia.worker"` 与对应的 `.wasm` 入口文件。
 
-`contributes` 可包含：
+Manifest 主声明只有一层：
 
-- `pages[]`
-- `panels[]`
-- `themes[]`
-- `locales[]`
-- `commands[]`
-- `providers[]`
-- `behaviors[]`
-- `memories[]`
-- `hooks[]`
-- `interfaces[]`
-- `schedule_actions[]`
+- `resource_types[]`：声明扩展理解或产出的资源模型。
+- `capabilities[]`：声明系统能力入口。
+- `surfaces[]`：声明 page、panel 等 UI 挂载点。
+- `locales[]`、`themes[]`、`commands[]`：声明静态 UI 资源。
+- `subscriptions[]`：声明事件订阅关系。
 
-`pages[]` 是可选 UI 贡献。声明页面后，Web 的扩展详情页会提供“打开视图”；只有页面额外声明 `nav.default_pinned = true` 时才默认进入主导航。
+运行时会从 `capabilities[].metadata` 和 `subscriptions[]` 派生旧的产品视图：
+
+- `metadata.provider` -> Provider
+- `metadata.behavior` -> Behavior
+- `metadata.memory` -> Memory
+- `metadata.interface` -> Interface
+- `metadata.schedule_action` -> Schedule Action
+- `subscriptions[] + capability.entry` -> Hook
+
+`surfaces[]` 里的 `kind = "page"` 是可选 UI 页面贡献。声明页面后，Web 的扩展详情页会提供“打开视图”；只有页面额外声明 `nav.default_pinned = true` 时才默认进入主导航。
 
 `themes[]` 是可选主题贡献。扩展主题遵循 `ennoia.theme`，通过 `tokens_entry` 提供 CSS 变量文件，详细 token 规范见 [主题协议](theme-contract.md)。
 
 ```toml
-[contributes]
-themes = [
-  { id = "acme.sunrise", contract = "ennoia.theme", label = { key = "ext.acme.theme.sunrise", fallback = "Sunrise" }, appearance = "light", tokens_entry = "ui/themes/sunrise.css", preview_color = "#f59e0b", extends = "system", category = "extension" }
-]
+[[themes]]
+id = "acme.sunrise"
+contract = "ennoia.theme"
+label = { key = "ext.acme.theme.sunrise", fallback = "Sunrise" }
+appearance = "light"
+tokens_entry = "ui/themes/sunrise.css"
+preview_color = "#f59e0b"
+extends = "system"
+category = "extension"
 ```
 
-Hook 贡献声明扩展要接收的系统时机：
+Hook 不再直接作为 manifest 顶层声明，而是拆成“能力入口 + 订阅关系”：
 
 ```toml
-[contributes]
-hooks = [
-  { event = "conversation.message.created", handler = "hooks/conversation-message-created" }
-]
+[[capabilities]]
+id = "acme.conversation_message"
+contract = "hook.conversation_message"
+kind = "event_handler"
+entry = "hooks/conversation-message-created"
+
+[[subscriptions]]
+event = "conversation.message.created"
+capability = "acme.conversation_message"
 ```
 
 系统先把 Hook 事件写入宿主事件总线，再异步转换为 Worker RPC 调用。扩展返回 `HookDispatchResponse`：
@@ -97,26 +115,36 @@ hooks = [
 - `result`：可选结构化结果，供调用方继续返回或落库。
 - `message`：可选诊断说明。
 
-Interface 贡献声明系统稳定动作的具体实现：
+Interface 实现通过 capability metadata 声明：
 
 ```toml
-[contributes]
-interfaces = [
-  { key = "conversation.list", method = "conversation/conversations/list", version = "1" },
-  { key = "message.append_user", method = "conversation/messages/append-user", version = "1" }
-]
+[[capabilities]]
+id = "conversation.list"
+contract = "conversation.list"
+kind = "query"
+entry = "conversation/conversations/list"
+metadata = { interface = { key = "conversation.list" } }
+
+[[capabilities]]
+id = "message.append_user"
+contract = "message.append_user"
+kind = "action"
+entry = "conversation/messages/append-user"
+metadata = { interface = { key = "message.append_user" } }
 ```
 
-Schedule Action 贡献声明可被系统 scheduler 调用的定时业务动作：
+Schedule Action 也通过 capability metadata 声明：
 
 ```toml
-[contributes]
-schedule_actions = [
-  { id = "workflow.run", method = "workflow/schedules/run", version = "1" }
-]
+[[capabilities]]
+id = "workflow.run"
+contract = "workflow.run"
+kind = "action"
+entry = "workflow/schedules/run"
+metadata = { schedule_action = { id = "workflow.run" } }
 ```
 
-Provider、Behavior、Memory、Hook、Interface 和 Schedule Action 贡献只声明能力入口；实际执行统一通过宿主 Worker RPC 分发或宿主事件总线投递，不允许扩展自行开放端口。
+Provider、Behavior、Memory、Hook、Interface 和 Schedule Action 都只声明能力入口；实际执行统一通过宿主 Worker RPC 分发或宿主事件总线投递，不允许扩展自行开放端口。
 扩展自己的配置、UI 文案、主题、页面实现和业务运行态都属于扩展边界，不得放入 Web 主壳的系统模块、核心配置模型或 `config/` 根目录。
 
 ## 推荐目录

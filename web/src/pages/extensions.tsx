@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   getExtension,
@@ -23,18 +23,18 @@ export function Extensions() {
   const [logs, setLogs] = useState("");
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    void refresh();
-  }, []);
-
-  async function refresh() {
+  const refresh = useCallback(async (selectedId?: string | null) => {
     setError(null);
     const next = await listExtensions();
     setExtensions(next);
-    const nextSelected = next.find((item) => item.id === selected?.id) ?? next[0] ?? null;
+    const nextSelected = next.find((item) => item.id === selectedId) ?? next[0] ?? null;
     setSelected(nextSelected);
     setDetail(nextSelected ? await getExtension(nextSelected.id).catch(() => null) : null);
-  }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
 
   async function selectExtension(extension: ExtensionRuntimeState) {
     setSelected(extension);
@@ -56,7 +56,7 @@ export function Extensions() {
       if (action === "restart") {
         await restartExtension(selected.id);
       }
-      await refresh();
+      await refresh(selected.id);
     } catch (err) {
       setError(String(err));
     }
@@ -71,6 +71,10 @@ export function Extensions() {
       runtime?.registry.pages.filter((page) => page.extension_id === selected?.id) ?? [],
     [runtime?.registry.pages, selected?.id],
   );
+  const surfaceCount = detail?.surfaces.length ?? 0;
+  const capabilityCount = detail?.capability_rows.length ?? 0;
+  const resourceTypeCount = detail?.resource_types.length ?? 0;
+  const subscriptionCount = detail?.subscriptions.length ?? 0;
 
   function openExtensionPage(pageId: string, label: string) {
     if (!workbenchApi) {
@@ -99,7 +103,7 @@ export function Extensions() {
           <p>{t("web.extensions.description", "这里按扩展包查看状态、贡献能力、重载和日志。来源目录只显示相对实例路径。")}</p>
         </div>
         {error ? <div className="error">{error}</div> : null}
-        <button type="button" className="secondary" onClick={() => void refresh()}>{t("web.action.rescan", "重新扫描")}</button>
+        <button type="button" className="secondary" onClick={() => void refresh(selected?.id)}>{t("web.action.rescan", "重新扫描")}</button>
         <div className="card-grid">
           {extensions.map((extension) => (
             <article key={extension.id} className="resource-card" onClick={() => void selectExtension(extension)}>
@@ -131,14 +135,24 @@ export function Extensions() {
             </div>
             <div className="extension-summary-grid">
               <article className="memory-lane">
-                <span>{t("web.extensions.contributes_ui", "贡献 UI")}</span>
-                <strong>{detail?.ui ? <span className="badge badge--success">active</span> : <span className="badge badge--muted">—</span>}</strong>
-                <small>{t("web.extensions.contributes_ui_help", "扩展可贡献页面、面板、主题和语言包。")}</small>
+                <span>{t("web.extensions.capabilities", "能力声明")}</span>
+                <strong><span className={`badge ${capabilityCount > 0 ? "badge--success" : "badge--muted"}`}>{capabilityCount}</span></strong>
+                <small>{t("web.extensions.capabilities_help", "manifest 的 capabilities 是系统能力入口；Provider、Interface、Memory 等视图都从这里派生。")}</small>
               </article>
               <article className="memory-lane">
-                <span>{t("web.extensions.contributes_api", "贡献 API 上游接口")}</span>
-                <strong>{detail?.worker?.status ? <span className={`badge ${detail.worker.status === "running" ? "badge--success" : "badge--muted"}`}>{detail.worker.status}</span> : <span className="badge badge--muted">—</span>}</strong>
-                <small>{t("web.extensions.contributes_api_help", "API 上游接口实现属于扩展能力，但这里只展示扩展包状态。")}</small>
+                <span>{t("web.extensions.surfaces", "界面挂载")}</span>
+                <strong><span className={`badge ${surfaceCount > 0 ? "badge--success" : "badge--muted"}`}>{surfaceCount}</span></strong>
+                <small>{t("web.extensions.surfaces_help", "surfaces 统一表达 page、panel 等 UI 挂载点。")}</small>
+              </article>
+              <article className="memory-lane">
+                <span>{t("web.extensions.subscriptions", "事件订阅")}</span>
+                <strong><span className={`badge ${subscriptionCount > 0 ? "badge--success" : "badge--muted"}`}>{subscriptionCount}</span></strong>
+                <small>{t("web.extensions.subscriptions_help", "subscriptions 只声明监听关系，实际 Hook 处理入口由 capability.entry 决定。")}</small>
+              </article>
+              <article className="memory-lane">
+                <span>{t("web.extensions.resource_types", "资源类型")}</span>
+                <strong><span className={`badge ${resourceTypeCount > 0 ? "badge--success" : "badge--muted"}`}>{resourceTypeCount}</span></strong>
+                <small>{t("web.extensions.resource_types_help", "resource_types 用来声明扩展理解和产出的资源模型。")}</small>
               </article>
               <article className="memory-lane">
                 <span>{t("web.extensions.package_state", "扩展包状态")}</span>
