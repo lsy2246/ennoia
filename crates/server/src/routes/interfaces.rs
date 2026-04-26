@@ -3,6 +3,7 @@ use ennoia_kernel::{
     HOOK_EVENT_CONVERSATION_CREATED, HOOK_EVENT_CONVERSATION_MESSAGE_CREATED,
 };
 use std::io::Write;
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 use std::time::Instant;
@@ -54,6 +55,80 @@ pub(super) struct InterfaceImplementationRecord {
     #[serde(default)]
     schema: Option<String>,
     extension_status: String,
+}
+
+#[derive(Debug, Serialize)]
+struct AgentProviderInstructions {
+    base: String,
+}
+
+#[derive(Debug, Serialize)]
+struct AgentProviderContext {
+    kind: &'static str,
+    runtime: AgentRuntimeContext,
+    conversation: AgentConversationContext,
+    extensions: Vec<AgentExtensionContext>,
+    skills: Vec<AgentSkillContext>,
+}
+
+#[derive(Debug, Serialize)]
+struct AgentRuntimeContext {
+    agent_id: String,
+    agent_display_name: String,
+    run_id: String,
+    runtime_home: String,
+    agent_working_dir: String,
+    agent_artifacts_dir: String,
+}
+
+#[derive(Debug, Serialize)]
+struct AgentConversationContext {
+    conversation_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    lane_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    message_id: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct AgentExtensionContext {
+    id: String,
+    name: String,
+    description: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    docs: Option<String>,
+    resource_types: Vec<AgentResourceTypeContext>,
+    capabilities: Vec<AgentCapabilityContext>,
+}
+
+#[derive(Debug, Serialize)]
+struct AgentResourceTypeContext {
+    id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    title: Option<String>,
+    content_kind: String,
+    operations: Vec<String>,
+    tags: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct AgentCapabilityContext {
+    id: String,
+    contract: String,
+    kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    title: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct AgentSkillContext {
+    id: String,
+    display_name: String,
+    description: String,
+    entry: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    docs: Option<String>,
+    keywords: Vec<String>,
 }
 
 pub(super) async fn extension_interfaces(
@@ -931,12 +1006,17 @@ async fn generate_real_conversation_agent_reply(
         .unwrap_or_default()
         .to_string();
     let messages = normalize_conversation_messages_for_provider(conversation_messages, agent_id);
+    let instructions = build_agent_provider_instructions(state, agent, &run_id);
+    let context =
+        build_agent_provider_context(state, agent, conversation_id, lane_id, message_id, &run_id);
     let request_payload = serde_json::json!({
         "method": "generate",
         "params": {
             "provider": provider_runtime_request_config(provider),
             "model": model_id,
+            "instructions": instructions,
             "system_prompt": build_agent_runtime_prompt(state, agent, &run_id),
+            "context": context,
             "messages": messages,
             "generation_options": agent.generation_options,
             "metadata": {
@@ -1092,7 +1172,7 @@ fn build_agent_runtime_prompt(state: &AppState, agent: &AgentConfig, run_id: &st
         sections.push(agent.system_prompt.trim().to_string());
     }
     sections.push(format!(
-        "你当前运行在 Ennoia 会话系统中。\nagent_id：{}\nagent_name：{}\nrun_id：{}\nruntime_home：{}\nworking_dir：{}\nartifacts_dir：{}\n请基于以上运行时路径理解用户请求；如果用户提到文件、目录、产物或工作区，优先参考这些路径上下文。直接回答用户，不要伪装成“系统已接收”或“正在处理中”。",
+        "你当前运行在 Ennoia 会话系统中。\nagent_id：{}\nagent_name：{}\nrun_id：{}\nruntime_home：{}\nagent_working_dir：{}\nagent_artifacts_dir：{}\n`agent_working_dir` 和 `agent_artifacts_dir` 是当前 Agent 的内部运行目录，不等同于用户项目工作区。只有在用户明确询问路径、文件位置、产物位置，或者任务确实需要读写这些目录时才使用；否则不要主动向用户复述这些内部路径。直接回答用户，不要伪装成“系统已接收”或“正在处理中”。",
         agent.id,
         agent.display_name,
         if run_id.trim().is_empty() { "unknown" } else { run_id },
@@ -1100,7 +1180,173 @@ fn build_agent_runtime_prompt(state: &AppState, agent: &AgentConfig, run_id: &st
         agent.working_dir,
         agent.artifacts_dir,
     ));
+    sections.push(
+        "系统会额外提供一份结构化 JSON 上下文，里面包含当前运行时、会话、已注入扩展目录和已启用技能目录。按字段理解并使用，不要向用户原样复述 JSON，也不要主动枚举内部路径、目录清单或所有可用能力，除非用户明确要求。"
+            .to_string(),
+    );
     sections.join("\n\n")
+}
+
+fn build_agent_provider_instructions(
+    state: &AppState,
+    agent: &AgentConfig,
+    run_id: &str,
+) -> AgentProviderInstructions {
+    AgentProviderInstructions {
+        base: build_agent_runtime_prompt(state, agent, run_id),
+    }
+}
+
+fn build_agent_provider_context(
+    state: &AppState,
+    agent: &AgentConfig,
+    conversation_id: &str,
+    lane_id: Option<&str>,
+    message_id: Option<&str>,
+    run_id: &str,
+) -> AgentProviderContext {
+    AgentProviderContext {
+        kind: "ennoia.agent_context",
+        runtime: AgentRuntimeContext {
+            agent_id: agent.id.clone(),
+            agent_display_name: agent.display_name.clone(),
+            run_id: normalize_unknown(run_id),
+            runtime_home: state
+                .runtime_paths
+                .display_for_user(state.runtime_paths.home()),
+            agent_working_dir: agent.working_dir.clone(),
+            agent_artifacts_dir: agent.artifacts_dir.clone(),
+        },
+        conversation: AgentConversationContext {
+            conversation_id: conversation_id.to_string(),
+            lane_id: lane_id.map(str::to_string),
+            message_id: message_id.map(str::to_string),
+        },
+        extensions: build_agent_extension_contexts(state),
+        skills: build_agent_skill_contexts(state, agent),
+    }
+}
+
+fn build_agent_extension_contexts(state: &AppState) -> Vec<AgentExtensionContext> {
+    state
+        .extensions
+        .snapshot()
+        .extensions
+        .into_iter()
+        .filter(|extension| extension.conversation.inject)
+        .map(|extension| {
+            let resource_types = extension
+                .resource_types
+                .iter()
+                .filter(|resource_type| {
+                    extension.conversation.resource_types.is_empty()
+                        || extension
+                            .conversation
+                            .resource_types
+                            .iter()
+                            .any(|id| id == &resource_type.id)
+                })
+                .map(|resource_type| AgentResourceTypeContext {
+                    id: resource_type.id.clone(),
+                    title: resource_type
+                        .title
+                        .as_ref()
+                        .map(|item| item.fallback.clone()),
+                    content_kind: resource_type.content_kind.clone(),
+                    operations: resource_type.operations.clone(),
+                    tags: resource_type.tags.clone(),
+                })
+                .collect::<Vec<_>>();
+            let capabilities = extension
+                .capability_rows
+                .iter()
+                .filter(|capability| {
+                    extension.conversation.capabilities.is_empty()
+                        || extension
+                            .conversation
+                            .capabilities
+                            .iter()
+                            .any(|id| id == &capability.id)
+                })
+                .map(|capability| AgentCapabilityContext {
+                    id: capability.id.clone(),
+                    contract: capability.contract.clone(),
+                    kind: capability.kind.clone(),
+                    title: capability.title.as_ref().map(|item| item.fallback.clone()),
+                })
+                .collect::<Vec<_>>();
+            AgentExtensionContext {
+                id: extension.id.clone(),
+                name: extension.name.clone(),
+                description: normalize_catalog_text(&extension.description, "无描述"),
+                docs: extension
+                    .docs
+                    .as_deref()
+                    .map(|value| resolve_catalog_path(&extension.source_root, value)),
+                resource_types,
+                capabilities,
+            }
+        })
+        .collect()
+}
+
+fn build_agent_skill_contexts(state: &AppState, agent: &AgentConfig) -> Vec<AgentSkillContext> {
+    agent
+        .skills
+        .iter()
+        .map(|item| item.trim())
+        .filter(|item| !item.is_empty())
+        .filter_map(|skill_id| {
+            state
+                .skills
+                .iter()
+                .find(|skill| skill.id == skill_id && skill.enabled)
+        })
+        .map(|skill| AgentSkillContext {
+            id: skill.id.clone(),
+            display_name: skill.display_name.clone(),
+            description: normalize_catalog_text(&skill.description, "无描述"),
+            entry: skill.entry.clone(),
+            docs: skill.docs.as_deref().map(|value| {
+                resolve_catalog_path(
+                    &state
+                        .runtime_paths
+                        .display_for_user(state.runtime_paths.skill_dir(&skill.id)),
+                    value,
+                )
+            }),
+            keywords: skill.keywords.clone(),
+        })
+        .collect()
+}
+
+fn resolve_catalog_path(base: &str, value: &str) -> String {
+    let candidate = PathBuf::from(value);
+    if candidate.is_absolute() {
+        return candidate.to_string_lossy().replace('\\', "/");
+    }
+    PathBuf::from(base)
+        .join(value)
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
+fn normalize_catalog_text(value: &str, fallback: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        fallback.to_string()
+    } else {
+        trimmed.replace('\n', " ")
+    }
+}
+
+fn normalize_unknown(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        "unknown".to_string()
+    } else {
+        trimmed.to_string()
+    }
 }
 
 fn invoke_provider_method(

@@ -687,36 +687,79 @@ fn spawn_log_pump<R>(
         let Ok(mut file) = OpenOptions::new().create(true).append(true).open(log_path) else {
             return;
         };
+        let mut pending_block = Vec::new();
         for line in BufReader::new(reader).lines() {
             let Ok(line) = line else {
                 break;
             };
             let _ = writeln!(file, "{line}");
-            mirror_dev_console_line(&label, &line, is_stderr, &console_config);
+            if pending_block.is_empty() {
+                pending_block.push(line);
+                continue;
+            }
+
+            if is_console_block_continuation(&line) {
+                let is_blank = line.trim().is_empty();
+                pending_block.push(line);
+                if is_blank {
+                    mirror_dev_console_block(&label, &pending_block, is_stderr, &console_config);
+                    pending_block.clear();
+                }
+                continue;
+            }
+
+            mirror_dev_console_block(&label, &pending_block, is_stderr, &console_config);
+            pending_block.clear();
+            pending_block.push(line);
+        }
+
+        if !pending_block.is_empty() {
+            mirror_dev_console_block(&label, &pending_block, is_stderr, &console_config);
         }
     });
 }
 
-fn mirror_dev_console_line(
+fn is_console_block_continuation(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    line.trim().is_empty()
+        || line.starts_with(' ')
+        || line.starts_with('\t')
+        || trimmed.starts_with("-->")
+        || trimmed.starts_with('|')
+        || trimmed.starts_with(":::")
+        || trimmed.starts_with('=')
+        || trimmed.starts_with("help:")
+        || trimmed.starts_with("note:")
+}
+
+fn mirror_dev_console_block(
     label: &str,
-    line: &str,
+    lines: &[String],
     is_stderr: bool,
     console_config: &DevConsoleMirrorConfig,
 ) {
+    if lines.is_empty() {
+        return;
+    }
     if !console_config.enabled {
         return;
     }
-    let level = detect_console_log_level(line, is_stderr);
+    let level = detect_console_log_level(&lines[0], is_stderr);
     if level < console_config.min_level {
         return;
     }
 
+    let formatted = if lines.len() == 1 {
+        format!("[{label}] {}", lines[0])
+    } else {
+        format!("[{label}] {}\n{}", lines[0], lines[1..].join("\n"))
+    };
     let lock = DEV_CONSOLE_OUTPUT_LOCK.get_or_init(|| Mutex::new(()));
     let _guard = lock.lock().ok();
     if is_stderr || matches!(level, ConsoleLogLevel::Warn | ConsoleLogLevel::Error) {
-        eprintln!("[{label}] {line}");
+        eprintln!("{formatted}");
     } else {
-        println!("[{label}] {line}");
+        println!("{formatted}");
     }
 }
 

@@ -42,11 +42,14 @@ export async function generate(request = {}) {
   const config = normalizeProviderConfig(request.provider ?? {});
   const model = request.model ?? config.default_model ?? DEFAULT_MODEL;
   const generationOptions = normalizeGenerationOptions(request.generation_options ?? request.generationOptions);
+  const instructions = normalizeInstructions(request.instructions ?? request.system_prompt);
+  const visibleContext = normalizeVisibleContext(request.context ?? request.runtime_context);
   const payload = {
     model,
     messages: toChatCompletionMessages(
       request.messages ?? request.input ?? request.prompt ?? "",
-      request.instructions ?? request.system_prompt,
+      instructions,
+      visibleContext,
     ),
   };
   applyChatCompletionGenerationOptions(payload, generationOptions);
@@ -284,10 +287,13 @@ function parseSseEvent(chunk) {
   return dataLines.join("\n");
 }
 
-function toChatCompletionMessages(input, instructions) {
+function toChatCompletionMessages(input, instructions, visibleContext) {
   const messages = [];
-  if (instructions) {
-    messages.push({ role: "system", content: String(instructions) });
+  if (instructions.base) {
+    messages.push({ role: "system", content: instructions.base });
+  }
+  if (visibleContext) {
+    messages.push({ role: "system", content: visibleContext });
   }
   if (typeof input === "string") {
     messages.push({ role: "user", content: input });
@@ -338,6 +344,40 @@ function normalizeMessageContent(content) {
       return "";
     })
     .join("\n");
+}
+
+function normalizeInstructions(value) {
+  if (!value) {
+    return {};
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    return trimmed ? { base: trimmed } : {};
+  }
+  if (typeof value !== "object" || Array.isArray(value)) {
+    const normalized = String(value ?? "").trim();
+    return normalized ? { base: normalized } : {};
+  }
+
+  const base = typeof value.base === "string" ? value.base.trim() : "";
+  return base ? { ...value, base } : {};
+}
+
+function normalizeVisibleContext(context) {
+  if (context == null) {
+    return "";
+  }
+  if (typeof context === "string") {
+    return context.trim();
+  }
+  if (typeof context !== "object") {
+    return String(context).trim();
+  }
+  try {
+    return JSON.stringify(context, null, 2);
+  } catch {
+    return "";
+  }
 }
 
 function normalizeChatCompletionTools(tools) {

@@ -19,6 +19,14 @@ storage = "extension"
 sqlite = true
 events = ["publish", "subscribe"]
 
+[conversation]
+inject = true
+capabilities = [
+  "run.create",
+  "run.get",
+  "artifact.list_by_run",
+]
+
 [[capabilities]]
 id = "workflow.default"
 contract = "behavior.default"

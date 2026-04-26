@@ -26,6 +26,15 @@ storage = "extension"
 sqlite = true
 events = ["publish", "subscribe"]
 
+[conversation]
+inject = true
+capabilities = [
+  "memory.remember",
+  "memory.recall",
+  "memory.review",
+  "memory.assemble_context",
+]
+
 [assets]
 locales_dir = "ui/locales"
 

@@ -139,7 +139,7 @@
 - `skills`
 - `enabled`
 
-`kind`、`default_model`、`skills_dir`、`working_dir`、`artifacts_dir` 作为运行时派生/内部字段存在，前端产品模型以显式字段为主。Agent 工作目录按 `agents/<agent_id>/work` 自动派生。
+`kind`、`default_model`、`skills_dir`、`working_dir`、`artifacts_dir` 作为运行时派生/内部字段存在，前端产品模型以显式字段为主。`working_dir` / `artifacts_dir` 表示 Agent 自己的运行目录，不等同于用户项目工作区；默认分别按 `agents/<agent_id>/work` 与 `agents/<agent_id>/artifacts` 自动派生。
 
 ## Skill 域
 

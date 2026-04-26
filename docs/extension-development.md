@@ -34,7 +34,7 @@ Extension 负责系统能力，Skill 负责工具与用法。Extension 不再表
 - `subscriptions`
 - `conversation`
 
-扩展可以带能力说明文档，但这类说明仍然属于扩展本身，不进入 skill 语义。扩展默认不进入会话；只有显式声明 `conversation` 规则时，宿主才会把它加入会话目录。进入会话时只暴露扩展自身的 `description` 和声明过的资源/能力目录，不自动把 `docs` 正文塞进每轮上下文。
+扩展可以带能力说明文档，但这类说明仍然属于扩展本身，不进入 skill 语义。扩展默认不进入会话；只有显式声明 `conversation` 规则时，宿主才会把它加入会话目录。进入会话时宿主只整理扩展自身的 `description`、声明过的资源/能力目录和 `docs` 入口，放入结构化 `context.extensions`；不会把 `docs` 正文直接塞进每轮上下文。
 
 `ui` 和 `worker` 都是可选声明。纯 UI 扩展不需要 `worker`，纯能力扩展不需要 `ui`。`worker.kind` 当前支持 `wasm` 和 `process`；`process` Worker 通过 stdin/stdout 的 JSON 文本协议接入宿主，不需要自行开放 HTTP 端口。需要本地 SQLite、文件和后台任务的扩展，推荐直接使用 `process` Worker。
 
