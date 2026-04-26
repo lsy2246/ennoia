@@ -284,15 +284,11 @@ export type ExtensionRuntimeExtension = {
   name: string;
   description: string;
   docs?: string | null;
-  links: {
-    label: string;
-    target: string;
-  }[];
-  examples: {
-    title: string;
-    summary?: string | null;
-    input_hint?: string | null;
-  }[];
+  conversation: {
+    inject: boolean;
+    resource_types: string[];
+    capabilities: string[];
+  };
   kind: string;
   source_mode: "dev" | "package";
   source_root: string;

@@ -16,6 +16,7 @@ Extension descriptor 包含：
 
 - `description`
 - `docs`
+- `conversation`
 - `source`
 - `ui`
 - `worker`
@@ -36,17 +37,16 @@ Skill descriptor 包含：
 
 - `description`
 - `docs`
-- `requires`
-- `examples`
-- `tool`
+- `keywords`
 - `entry`
-- `tags`
 
 主声明模型统一只有一层：`resource_types`、`capabilities`、`surfaces`、`locales`、`themes`、`commands`、`subscriptions`。页面、面板、Provider、Behavior、Memory、Hook、Interface 和 Schedule Action 都是宿主运行时根据声明派生的视图。
 
 `ui` 是可选界面入口；`worker` 是可选执行单元，可为 Wasm，也可为进程型 stdio RPC。宿主按声明装配能力，不要求扩展同时包含 UI 和 Worker。
 
-Skill 不声明系统能力入口。`requires` 只依赖能力契约，例如 `llm.generate`、`run.create`，不依赖具体扩展 ID；`tool` 用于暴露可执行工具入口，`docs/examples` 用于表达使用方式。
+Skill 不声明系统能力入口。它只提供最小目录元信息和 `docs` 入口；CLI、参数和完整用法都保留在文档中。
+
+Extension 默认不进入会话目录。只有显式声明了 `conversation.inject = true` 时，宿主才会把它作为会话可见目录项暴露给模型；`conversation.resource_types` 和 `conversation.capabilities` 用于限定进入会话时附带的资源范围和能力入口。进入会话时复用扩展唯一那份 `description`，`docs` 仍然只作为按需查阅入口。
 
 ## 运行流程
 

@@ -4,15 +4,6 @@ description = "提供 run、task、artifact 与调度动作的系统编排能力
 docs = "docs/overview.md"
 kind = "extension"
 
-[[links]]
-label = "Workflow Runtime"
-target = "docs/runtime.md"
-
-[[examples]]
-title = "创建运行"
-summary = "从会话消息或调度器触发一个新的编排运行。"
-input_hint = "run.create"
-
 [source]
 mode = "package"
 root = "."

@@ -229,19 +229,14 @@ pub struct ScheduleActionContribution {
     pub schema: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ExtensionDocLink {
-    pub label: String,
-    pub target: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ExtensionExample {
-    pub title: String,
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ExtensionConversationSpec {
     #[serde(default)]
-    pub summary: Option<String>,
+    pub inject: bool,
     #[serde(default)]
-    pub input_hint: Option<String>,
+    pub resource_types: Vec<String>,
+    #[serde(default)]
+    pub capabilities: Vec<String>,
 }
 
 pub const HOOK_EVENT_CONVERSATION_CREATED: &str = "conversation.created";
@@ -447,10 +442,6 @@ pub struct ExtensionManifest {
     pub description: Option<String>,
     #[serde(default)]
     pub docs: Option<String>,
-    #[serde(default)]
-    pub links: Vec<ExtensionDocLink>,
-    #[serde(default)]
-    pub examples: Vec<ExtensionExample>,
     pub kind: ExtensionKind,
     #[serde(default)]
     pub source: ExtensionSourceSpec,
@@ -469,10 +460,6 @@ pub struct ExtensionManifest {
     #[serde(default)]
     pub watch: ExtensionWatchSpec,
     #[serde(default)]
-    pub ui_bundle: Option<String>,
-    #[serde(default)]
-    pub worker_entry: Option<String>,
-    #[serde(default)]
     pub resource_types: Vec<ResourceTypeContribution>,
     #[serde(default)]
     pub capabilities: Vec<CapabilityContribution>,
@@ -486,6 +473,8 @@ pub struct ExtensionManifest {
     pub commands: Vec<CommandContribution>,
     #[serde(default)]
     pub subscriptions: Vec<SubscriptionContribution>,
+    #[serde(default)]
+    pub conversation: ExtensionConversationSpec,
 }
 
 impl ExtensionManifest {

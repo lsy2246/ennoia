@@ -7,7 +7,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use ennoia_kernel::{
     BehaviorContribution, CapabilityContribution, CommandContribution, ExtensionCapabilities,
-    ExtensionDiagnostic, ExtensionDocLink, ExtensionExample, ExtensionHealth, ExtensionKind,
+    ExtensionConversationSpec, ExtensionDiagnostic, ExtensionHealth, ExtensionKind,
     ExtensionManifest, ExtensionPermissionSpec, ExtensionRegistryEntry, ExtensionRegistryFile,
     ExtensionRpcRequest, ExtensionRpcResponse, ExtensionRuntimeEvent, ExtensionRuntimeSpec,
     ExtensionSourceMode, ExtensionUiSpec, HookContribution, InterfaceContribution,
@@ -23,8 +23,7 @@ pub struct ResolvedExtensionSnapshot {
     pub name: String,
     pub description: String,
     pub docs: Option<String>,
-    pub links: Vec<ExtensionDocLink>,
-    pub examples: Vec<ExtensionExample>,
+    pub conversation: ExtensionConversationSpec,
     pub kind: ExtensionKind,
     pub source_mode: ExtensionSourceMode,
     pub source_root: String,
@@ -843,8 +842,7 @@ fn resolve_manifest(
         name: manifest.display_name(),
         description: manifest.display_description(),
         docs: manifest.docs,
-        links: manifest.links,
-        examples: manifest.examples,
+        conversation: manifest.conversation,
         kind: manifest.kind,
         source_mode: source.source_mode,
         source_root,
@@ -1092,12 +1090,7 @@ fn resolve_ui(
         }
     }
 
-    if let Some(bundle) = manifest
-        .build
-        .ui_bundle
-        .clone()
-        .or_else(|| manifest.ui_bundle.clone())
-    {
+    if let Some(bundle) = manifest.build.ui_bundle.clone() {
         let path = root.join(bundle);
         let version = regular_file_version(&path)?;
         return Ok(Some(ResolvedUiEntry {
@@ -1137,7 +1130,6 @@ fn resolve_worker(
         .entry
         .clone()
         .or_else(|| manifest.build.worker_bundle.clone())
-        .or_else(|| manifest.worker_entry.clone())
     else {
         return Ok(None);
     };
@@ -1231,8 +1223,7 @@ fn failed_extension_snapshot(
         name: id,
         description: String::new(),
         docs: None,
-        links: Vec::new(),
-        examples: Vec::new(),
+        conversation: ExtensionConversationSpec::default(),
         kind: ExtensionKind::SystemExtension,
         source_mode: source.source_mode,
         source_root: source_root.clone(),
@@ -1494,11 +1485,18 @@ mod tests {
 id = "{id}"
 name = "Observatory"
 kind = "extension"
+description = "Test extension"
+docs = "docs/overview.md"
 
 [source]
 mode = "dev"
 root = "."
 dev = true
+
+[conversation]
+inject = true
+resource_types = ["{id}.event"]
+capabilities = ["{id}.feed"]
 
 [ui]
 runtime = "browser-esm"

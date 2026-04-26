@@ -112,12 +112,13 @@ Web
 - 扩展 UI、语言、主题和业务配置归扩展自身所有；Web 主壳只按 runtime snapshot 发现并挂载，不在系统前端包中静态注册某个扩展页面或文案。
 - 扩展 UI 通过独立 ESM bundle 动态加载；主壳只导入 `/api/extensions/{extension_id}/ui/module` 暴露的模块包装器，再按 mount id 调用扩展自己的 `mount/unmount`。
 - 扩展主题通过 `ennoia.theme` 与主壳对接；主壳只消费稳定语义 token 和 dockview token，不把内部 class 结构暴露给扩展。
+- 扩展默认不进入会话目录；只有显式声明 `conversation.inject` 时，宿主才会把该扩展作为会话可见目录项暴露给模型。进入会话时只注入扩展自身的 `description` 与受限能力目录，不自动注入 `docs` 正文。
 
 ## Skill 模型
 
 - Skill 不负责实现系统能力；它只描述工具与用法。
-- Skill 可以声明 `docs`、`requires`、`examples` 和 `tool`，分别表达说明文档、依赖的能力契约、使用示例和 CLI/工具入口。
-- Skill 只依赖能力契约，不依赖扩展 ID；这样同一份 skill 可以随着接口绑定切换到底层不同实现。
+- Skill 只保留最小目录元信息与 `docs` 入口；CLI、参数和完整操作流程都放在文档中。
+- Skill 可以声明 `keywords` 供宿主做发现和路由，但不会因为这些字段自动把正文塞进每轮会话。
 - 扩展可以带自己的能力说明文档，但扩展说明不等于 skill；前者回答“系统里这块能力是什么”，后者回答“Agent 怎么使用它”。
 
 ## 存储划分

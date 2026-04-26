@@ -18,7 +18,7 @@ pub mod ui;
 pub use config::{
     AgentConfig, AppConfig, ExtensionRegistryEntry, ExtensionRegistryFile, InterfaceBindingConfig,
     InterfaceBindingsConfig, ProviderConfig, ProviderModelDiscoveryConfig, ServerConfig,
-    SkillConfig, SkillExample, SkillRegistryEntry, SkillRegistryFile, SkillToolSpec, UiConfig,
+    SkillConfig, SkillRegistryEntry, SkillRegistryFile, UiConfig,
 };
 pub use context::{ContextFrame, ContextLayer, RunContext};
 pub use decision::{Decision, DecisionSnapshot, NextAction};
@@ -30,8 +30,8 @@ pub use domain::{
 pub use ennoia_error_utils::normalize_error_message;
 pub use extension::{
     BehaviorContribution, CapabilityContribution, CommandContribution, ExtensionAssetsSpec,
-    ExtensionCapabilities, ExtensionDiagnostic, ExtensionDocLink, ExtensionExample,
-    ExtensionHealth, ExtensionKind, ExtensionManifest, ExtensionPermissionSpec, ExtensionRpcError,
+    ExtensionCapabilities, ExtensionConversationSpec, ExtensionDiagnostic, ExtensionHealth,
+    ExtensionKind, ExtensionManifest, ExtensionPermissionSpec, ExtensionRpcError,
     ExtensionRpcRequest, ExtensionRpcResponse, ExtensionRuntimeEvent, ExtensionRuntimeSpec,
     ExtensionSourceMode, ExtensionSourceSpec, ExtensionUiSpec, ExtensionWatchSpec,
     ExtensionWorkerSpec, HookContribution, HookDispatchResponse, HookEventEnvelope,

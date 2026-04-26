@@ -32,8 +32,9 @@ Extension 负责系统能力，Skill 负责工具与用法。Extension 不再表
 - `themes`
 - `commands`
 - `subscriptions`
+- `conversation`
 
-扩展可以带能力说明文档，但这类说明仍然属于扩展本身，不进入 skill 语义。推荐通过 `description`、`docs`、`links[]` 和 `examples[]` 表达“这个扩展提供什么能力、适合怎么被系统调用”。
+扩展可以带能力说明文档，但这类说明仍然属于扩展本身，不进入 skill 语义。扩展默认不进入会话；只有显式声明 `conversation` 规则时，宿主才会把它加入会话目录。进入会话时只暴露扩展自身的 `description` 和声明过的资源/能力目录，不自动把 `docs` 正文塞进每轮上下文。
 
 `ui` 和 `worker` 都是可选声明。纯 UI 扩展不需要 `worker`，纯能力扩展不需要 `ui`。`worker.kind` 当前支持 `wasm` 和 `process`；`process` Worker 通过 stdin/stdout 的 JSON 文本协议接入宿主，不需要自行开放 HTTP 端口。需要本地 SQLite、文件和后台任务的扩展，推荐直接使用 `process` Worker。
 
@@ -62,6 +63,11 @@ env = []
 startup = "lazy"
 timeout_ms = 30000
 memory_limit_mb = 128
+
+[conversation]
+inject = true
+resource_types = ["canvas.document"]
+capabilities = ["canvas.read", "canvas.patch"]
 ```
 
 如果使用 Wasm Worker，则把 `worker.kind` 改为 `wasm`，并额外声明 `abi = "ennoia.worker"` 与对应的 `.wasm` 入口文件。
@@ -176,11 +182,9 @@ Skill 目录独立：
 `skill.toml` 推荐额外声明：
 
 - `docs`
-- `requires[]`
-- `examples[]`
-- `tool`
+- `keywords[]`
 
-其中 `requires[]` 只依赖能力契约，例如 `llm.generate`、`run.create`，不要依赖某个具体扩展 ID。
+其中 `keywords[]` 只用于路由和发现，不承载完整用法；CLI、参数和具体操作流程统一写在 `docs` 中。
 
 ## 运行链路
 

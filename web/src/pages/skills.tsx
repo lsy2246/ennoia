@@ -96,43 +96,17 @@ export function Skills() {
                 <strong>{skill.docs ? formatRelativePath(skill.docs) : t("web.common.none", "无")}</strong>
               </div>
               <div className="stack">
-                <div className="panel-title">{t("web.skills.requires", "依赖能力")}</div>
-                {skill.requires.length === 0 ? (
-                  <div className="empty-card">{t("web.skills.requires_empty", "这个技能没有声明能力契约依赖。")}</div>
+                <div className="panel-title">{t("web.skills.keywords", "关键词")}</div>
+                {skill.keywords.length === 0 ? (
+                  <div className="empty-card">{t("web.skills.keywords_empty", "这个技能没有声明路由关键词。")}</div>
                 ) : (
                   <div className="chip-grid">
-                    {skill.requires.map((item) => (
+                    {skill.keywords.map((item) => (
                       <span key={item} className="chip chip--active">
                         {item}
                       </span>
                     ))}
                   </div>
-                )}
-              </div>
-              <div className="stack">
-                <div className="panel-title">{t("web.skills.tool", "工具入口")}</div>
-                {skill.tool ? (
-                  <article className="mini-card">
-                    <strong>{skill.tool.kind}</strong>
-                    <span className="badge badge--muted">
-                      {[skill.tool.command, ...skill.tool.args].join(" ")}
-                    </span>
-                  </article>
-                ) : (
-                  <div className="empty-card">{t("web.skills.tool_empty", "这个技能没有声明 CLI 或工具入口。")}</div>
-                )}
-              </div>
-              <div className="stack">
-                <div className="panel-title">{t("web.skills.examples", "使用示例")}</div>
-                {skill.examples.length === 0 ? (
-                  <div className="empty-card">{t("web.skills.examples_empty", "这个技能还没有声明示例。")}</div>
-                ) : (
-                  skill.examples.map((example) => (
-                    <article key={`${skill.id}:${example.title}`} className="mini-card">
-                      <strong>{example.title}</strong>
-                      <p>{example.prompt}</p>
-                    </article>
-                  ))
                 )}
               </div>
               <div className="stack">

@@ -6,9 +6,9 @@
 
 - 工作台：核心只提供宿主、配置、路径、日志和 Worker RPC；业务能力由扩展提供。
 - Agents：维护协作者档案、上游渠道、模型、技能和启用状态。
-- 技能：Agent 可引用的工具与用法定义，可声明文档、CLI 入口、依赖能力契约与示例，和扩展严格分离。
+- 技能：Agent 可引用的工具与用法定义，只保留最小目录元信息与文档入口，和扩展严格分离。
 - API 上游渠道：Agent 绑定的具体模型访问实例。
-- 扩展：系统插件包，manifest 统一声明 `resource_types`、`capabilities`、`surfaces`、`locales`、`themes`、`commands`、`subscriptions`；页面、面板、接口实现和定时动作都从这些声明派生。
+- 扩展：系统插件包，manifest 统一声明 `resource_types`、`capabilities`、`surfaces`、`locales`、`themes`、`commands`、`subscriptions`；如需进入会话目录，再额外声明 `conversation` 规则，进入会话时只复用扩展自身说明，不自动注入文档正文。
 - 会话：系统保留稳定 `/api/conversations` 入口，实际读写由 `conversation.*`、`message.*`、`lane.*` 等接口绑定到内置 `conversation` 扩展。
 - 记忆：以内置 `memory` 扩展形式提供记忆、上下文、审查和图谱能力；会话事件先进入宿主事件总线，再异步投递给 `memory`。
 - 编排：以内置 `workflow` 扩展承载 run、task、artifact；定时器里的 Agent 执行通过编排接口落地。

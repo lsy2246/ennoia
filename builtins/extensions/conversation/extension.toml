@@ -4,15 +4,6 @@ description = "提供会话、消息与 lane 的系统级读写接口。"
 docs = "docs/overview.md"
 kind = "extension"
 
-[[links]]
-label = "Interface Contracts"
-target = "docs/interfaces.md"
-
-[[examples]]
-title = "创建会话"
-summary = "供系统会话页创建 direct 或 group 会话。"
-input_hint = "conversation.create / message.append_user"
-
 [source]
 mode = "package"
 root = "."

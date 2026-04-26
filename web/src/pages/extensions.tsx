@@ -3,14 +3,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   getExtension,
   getExtensionLogs,
-  listSkills,
   listExtensions,
   reloadExtension,
   restartExtension,
   setExtensionEnabled,
   type ExtensionDetail,
   type ExtensionRuntimeState,
-  type SkillConfig,
 } from "@ennoia/api-client";
 import { formatRelativePath } from "@/lib/pathDisplay";
 import { useUiHelpers } from "@/stores/ui";
@@ -20,7 +18,6 @@ export function Extensions() {
   const { resolveText, runtime, t } = useUiHelpers();
   const workbenchApi = useWorkbenchStore((state) => state.api);
   const [extensions, setExtensions] = useState<ExtensionRuntimeState[]>([]);
-  const [skills, setSkills] = useState<SkillConfig[]>([]);
   const [selected, setSelected] = useState<ExtensionRuntimeState | null>(null);
   const [detail, setDetail] = useState<ExtensionDetail | null>(null);
   const [logs, setLogs] = useState("");
@@ -28,9 +25,8 @@ export function Extensions() {
 
   const refresh = useCallback(async (selectedId?: string | null) => {
     setError(null);
-    const [next, nextSkills] = await Promise.all([listExtensions(), listSkills()]);
+    const next = await listExtensions();
     setExtensions(next);
-    setSkills(nextSkills);
     const nextSelected = next.find((item) => item.id === selectedId) ?? next[0] ?? null;
     setSelected(nextSelected);
     setDetail(nextSelected ? await getExtension(nextSelected.id).catch(() => null) : null);
@@ -79,15 +75,6 @@ export function Extensions() {
   const capabilityCount = detail?.capability_rows.length ?? 0;
   const resourceTypeCount = detail?.resource_types.length ?? 0;
   const subscriptionCount = detail?.subscriptions.length ?? 0;
-  const capabilityContracts = useMemo(
-    () => new Set(detail?.capability_rows.map((item) => item.contract) ?? []),
-    [detail?.capability_rows],
-  );
-  const relatedSkills = useMemo(
-    () =>
-      skills.filter((skill) => skill.requires.some((contract) => capabilityContracts.has(contract))),
-    [capabilityContracts, skills],
-  );
 
   function openExtensionPage(pageId: string, label: string) {
     if (!workbenchApi) {
@@ -153,14 +140,6 @@ export function Extensions() {
                 <strong>{t("web.extensions.docs", "文档入口")}</strong>
                 <span className="badge badge--muted">{detail?.docs ? formatRelativePath(detail.docs) : t("web.common.none", "无")}</span>
               </article>
-              {detail?.links.length ? (
-                detail.links.map((link) => (
-                  <article key={`${selected.id}:${link.label}:${link.target}`} className="mini-card">
-                    <strong>{link.label}</strong>
-                    <span className="badge badge--muted">{formatRelativePath(link.target)}</span>
-                  </article>
-                ))
-              ) : null}
             </div>
             <div className="extension-summary-grid">
               <article className="memory-lane">
@@ -196,29 +175,44 @@ export function Extensions() {
               <button type="button" className="secondary" onClick={() => void loadLogs(selected.id)}>{t("web.extensions.view_logs", "查看日志")}</button>
             </div>
             <div className="stack">
-              <div className="panel-title">{t("web.extensions.examples", "使用示例")}</div>
-              {detail?.examples.length ? (
-                detail.examples.map((example) => (
-                  <article key={`${selected.id}:${example.title}`} className="mini-card">
-                    <strong>{example.title}</strong>
-                    <p>{example.summary || example.input_hint || t("web.common.none", "无")}</p>
+              <div className="panel-title">{t("web.extensions.conversation", "会话装配")}</div>
+              {detail?.conversation.inject ? (
+                <>
+                  <article className="mini-card">
+                    <strong>{t("web.extensions.conversation_enabled", "进入会话目录")}</strong>
+                    <span className="badge badge--success">{t("web.common.yes", "是")}</span>
                   </article>
-                ))
-              ) : (
-                <div className="empty-card">{t("web.extensions.examples_empty", "这个扩展还没有声明示例说明。")}</div>
-              )}
-            </div>
-            <div className="stack">
-              <div className="panel-title">{t("web.extensions.related_skills", "相关技能")}</div>
-              {relatedSkills.length ? (
-                relatedSkills.map((skill) => (
-                  <article key={skill.id} className="mini-card">
-                    <strong>{skill.display_name}</strong>
-                    <p>{skill.description || t("web.common.none", "无")}</p>
+                  <article className="mini-card">
+                    <strong>{t("web.extensions.conversation_material", "会话注入内容")}</strong>
+                    <span>{t("web.extensions.conversation_material_help", "只复用扩展说明和这里声明的能力目录，不自动注入文档正文。")}</span>
                   </article>
-                ))
+                  <article className="mini-card">
+                    <strong>{t("web.extensions.conversation_resource_types", "资源类型条件")}</strong>
+                    {detail.conversation.resource_types.length > 0 ? (
+                      <div className="chip-grid">
+                        {detail.conversation.resource_types.map((item) => (
+                          <span key={item} className="chip chip--active">{item}</span>
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="badge badge--muted">{t("web.common.none", "无")}</span>
+                    )}
+                  </article>
+                  <article className="mini-card">
+                    <strong>{t("web.extensions.conversation_capabilities", "能力入口")}</strong>
+                    {detail.conversation.capabilities.length > 0 ? (
+                      <div className="chip-grid">
+                        {detail.conversation.capabilities.map((item) => (
+                          <span key={item} className="chip chip--active">{item}</span>
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="badge badge--muted">{t("web.common.none", "无")}</span>
+                    )}
+                  </article>
+                </>
               ) : (
-                <div className="empty-card">{t("web.extensions.related_skills_empty", "当前没有技能声明依赖这个扩展提供的能力契约。")}</div>
+                <div className="empty-card">{t("web.extensions.conversation_empty", "这个扩展没有声明进入会话目录的规则。")}</div>
               )}
             </div>
             <div className="stack">

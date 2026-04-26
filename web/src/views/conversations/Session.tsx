@@ -742,7 +742,7 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
           skill.id.toLowerCase(),
           skill.display_name.toLowerCase(),
           skill.display_name.toLowerCase().replace(/\s+/g, "-"),
-          ...skill.tags.map((tag) => tag.toLowerCase()),
+          ...skill.keywords.map((tag) => tag.toLowerCase()),
         ];
         return haystacks.some((item) => item.includes(query));
       })

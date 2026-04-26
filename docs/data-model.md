@@ -115,7 +115,7 @@
 
 ## Skill 域
 
-`SkillConfig` 字段：`id`、`display_name`、`description`、`source`、`entry`、`docs`、`requires`、`examples`、`tool`、`tags`、`enabled`。
+`SkillConfig` 字段：`id`、`display_name`、`description`、`source`、`entry`、`docs`、`keywords`、`enabled`。
 
 ## API 上游渠道域
 
@@ -125,7 +125,7 @@
 
 ## Extension 域
 
-扩展运行态以 `ExtensionRuntimeState` 为准。扩展 manifest 可以额外声明 `description`、`docs`、`links` 和 `examples`，用于表达能力说明；这类说明不等同于 skill。
+扩展运行态以 `ExtensionRuntimeState` 为准。扩展 manifest 只保留一份 `description` 与一份 `docs`；如果需要进入会话目录，再通过 `conversation.inject`、`conversation.resource_types` 和 `conversation.capabilities` 声明会话装配规则。会话里只复用这一份 `description`，`docs` 仍然只是按需查阅的文档入口。
 
 ## 存储快照
 
