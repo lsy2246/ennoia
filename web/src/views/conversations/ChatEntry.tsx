@@ -19,6 +19,9 @@ export function ChatEntry({
   skills,
   formatDateTime,
   t,
+  onCopy,
+  onBranchFrom,
+  onEditAndResend,
   onRetry,
   onRemove,
 }: {
@@ -27,6 +30,9 @@ export function ChatEntry({
   skills: SkillConfig[];
   formatDateTime: (value: string) => string;
   t: (key: string, fallback: string) => string;
+  onCopy: (entryId: string, body: string) => void;
+  onBranchFrom: (messageId: string) => void;
+  onEditAndResend: (messageId: string) => void;
   onRetry: (id: string) => void;
   onRemove: (id: string) => void;
 }) {
@@ -107,8 +113,18 @@ export function ChatEntry({
   return (
     <article className={bubbleClassNames}>
       <header className="message-bubble__header">
-        <strong>{entry.sender}</strong>
-        <small>{formatDateTime(entry.createdAt)}</small>
+        <div className="message-bubble__title">
+          <strong>{entry.sender}</strong>
+          <div className="message-bubble__meta">
+            {entry.rewriteFromMessageId ? (
+              <span className="badge badge--warn">{t("web.conversations.rewrite_badge", "改写分支")}</span>
+            ) : null}
+            {entry.replyToMessageId && !entry.rewriteFromMessageId ? (
+              <span className="badge badge--muted">{t("web.conversations.branch_badge", "分支消息")}</span>
+            ) : null}
+            <small>{formatDateTime(entry.createdAt)}</small>
+          </div>
+        </div>
       </header>
       <div className="message-bubble__body">
         <ChatContent
@@ -119,6 +135,21 @@ export function ChatEntry({
           mentionAgentIds={entry.mentions}
         />
       </div>
+      {entry.source === "remote" ? (
+        <div className="message-actions">
+          <button type="button" className="secondary" onClick={() => onCopy(entry.messageId, entry.body)}>
+            {t("web.conversations.copy", "复制")}
+          </button>
+          <button type="button" className="secondary" onClick={() => onBranchFrom(entry.messageId)}>
+            {t("web.conversations.branch_from_here", "从这里分支")}
+          </button>
+          {isOperator ? (
+            <button type="button" className="secondary" onClick={() => onEditAndResend(entry.messageId)}>
+              {t("web.conversations.edit_and_resend", "编辑后重发")}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
       {isOperator ? (
         <footer className="message-bubble__footer">
           <div className="message-route">

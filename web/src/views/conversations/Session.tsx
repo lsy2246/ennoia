@@ -2,16 +2,21 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent }
 
 import {
   ApiError,
+  createChatBranch,
+  createChatCheckpoint,
   getChat,
   listAgents,
   listSkills,
   sendChatMessage,
+  switchChatBranch,
+  type ChatBranch,
   type AgentProfile,
   type ChatMessage,
   type ChatThreadDetail,
   type SkillConfig,
 } from "@ennoia/api-client";
 import { useConversationsStore } from "@/stores/conversations";
+import { useSessionCommandsStore } from "@/stores/sessionCommands";
 import { useUiHelpers } from "@/stores/ui";
 import { useWorkbenchStore } from "@/stores/workbench";
 import { ChatStream } from "./ChatStream";
@@ -46,6 +51,25 @@ type ComposerSnapshot = {
   segments: ComposerSegment[];
 };
 
+type ComposerModeState =
+  | {
+      kind: "normal";
+    }
+  | {
+      kind: "branch";
+      sourceMessageId: string;
+      sourceBranchId?: string;
+    }
+  | {
+      kind: "rewrite";
+      sourceMessageId: string;
+      sourceBranchId?: string;
+    }
+  | {
+      kind: "reset";
+      sourceBranchId?: string;
+    };
+
 const EMPTY_PICKER_STATE: ComposerPickerState = {
   open: false,
   mode: "mention",
@@ -66,7 +90,11 @@ function nowIso() {
   return new Date().toISOString();
 }
 
-function createLocalDraft(snapshot: ComposerSnapshot): LocalMessageDraft {
+function createLocalDraft(
+  snapshot: ComposerSnapshot,
+  mode: ComposerModeState,
+  activeBranchId?: string | null,
+): LocalMessageDraft {
   return {
     clientId: `local-${Math.random().toString(36).slice(2, 10)}`,
     body: snapshot.body,
@@ -75,6 +103,12 @@ function createLocalDraft(snapshot: ComposerSnapshot): LocalMessageDraft {
     segments: snapshot.segments,
     createdAt: nowIso(),
     status: "queued",
+    branchId: mode.kind === "normal"
+      ? activeBranchId ?? undefined
+      : mode.sourceBranchId,
+    forkFromMessageId: mode.kind === "branch" ? mode.sourceMessageId : undefined,
+    rewriteFromMessageId: mode.kind === "rewrite" ? mode.sourceMessageId : undefined,
+    resetContext: mode.kind === "reset",
   };
 }
 
@@ -393,6 +427,26 @@ function summarizeBody(body: string) {
   return `${normalized.slice(0, 56)}…`;
 }
 
+function findMessageById(messages: ChatMessage[], messageId: string) {
+  return messages.find((message) => message.id === messageId) ?? null;
+}
+
+function branchKindLabel(
+  branch: ChatBranch | null | undefined,
+  t: (key: string, fallback: string) => string,
+) {
+  switch (branch?.kind) {
+    case "rewrite":
+      return t("web.conversations.branch_kind_rewrite", "改写");
+    case "reset":
+      return t("web.conversations.branch_kind_reset", "新上下文");
+    case "fork":
+      return t("web.conversations.branch_kind_fork", "分支");
+    default:
+      return t("web.conversations.branch_kind_main", "主线");
+  }
+}
+
 function outboxStorageKey(sessionId: string) {
   return `${OUTBOX_STORAGE_PREFIX}:${sessionId}`;
 }
@@ -482,6 +536,12 @@ function matchesRemoteMessage(draft: LocalMessageDraft, message: ChatMessage) {
   if (draftMentions !== remoteMentions) {
     return false;
   }
+  if ((draft.rewriteFromMessageId ?? "") !== (message.rewrite_from_message_id ?? "")) {
+    return false;
+  }
+  if ((draft.forkFromMessageId ?? "") !== (message.reply_to_message_id ?? "")) {
+    return false;
+  }
   return message.created_at >= draft.createdAt;
 }
 
@@ -530,6 +590,8 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
   const { formatDateTime, t } = useUiHelpers();
   const openView = useWorkbenchStore((state) => state.openView);
   const closeView = useWorkbenchStore((state) => state.closeView);
+  const registerSessionCommands = useSessionCommandsStore((state) => state.register);
+  const unregisterSessionCommands = useSessionCommandsStore((state) => state.unregister);
   const conversationRevision = useConversationsStore((state) => state.revision);
   const deletedSessionMark = useConversationsStore((state) => state.deletedSessionMarks[sessionId]);
   const notifyChanged = useConversationsStore((state) => state.notifyChanged);
@@ -540,6 +602,7 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
   const [pendingReplies, setPendingReplies] = useState<PendingReplyMarker[]>(() => loadPersistedPendingReplies(sessionId));
   const [pickerState, setPickerState] = useState<ComposerPickerState>(EMPTY_PICKER_STATE);
   const [composerSnapshot, setComposerSnapshot] = useState<ComposerSnapshot>({ body: "", addressedAgents: [], segments: [] });
+  const [composerMode, setComposerMode] = useState<ComposerModeState>({ kind: "normal" });
   const [error, setError] = useState<string | null>(null);
   const editorRef = useRef<HTMLDivElement | null>(null);
   const isMountedRef = useRef(true);
@@ -550,6 +613,10 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
     return agents.filter((agent) => ids.has(agent.id));
   }, [agents, detail]);
   const conversation = detail?.conversation ?? null;
+  const activeBranch = useMemo(
+    () => detail?.branches.find((branch) => branch.id === detail.conversation.active_branch_id) ?? detail?.branches[0] ?? null,
+    [detail],
+  );
 
   const canMention = activeAgents.length > 1;
   const enabledSkills = useMemo(
@@ -629,6 +696,7 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
   useEffect(() => {
     setLocalDrafts(loadPersistedDrafts(sessionId));
     setPendingReplies(loadPersistedPendingReplies(sessionId));
+    setComposerMode({ kind: "normal" });
   }, [sessionId]);
 
   useEffect(() => {
@@ -848,6 +916,33 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
     [chatEntries, statusEntries],
   );
 
+  const composerModeStatus = useMemo(() => {
+    if (composerMode.kind === "branch") {
+      const source = findMessageById(detail?.messages ?? [], composerMode.sourceMessageId);
+      return {
+        tone: "warn" as const,
+        label: t("web.conversations.mode_branch", "下一条消息会从这里分支"),
+        detail: source ? summarizeBody(source.body) : composerMode.sourceMessageId,
+      };
+    }
+    if (composerMode.kind === "rewrite") {
+      const source = findMessageById(detail?.messages ?? [], composerMode.sourceMessageId);
+      return {
+        tone: "accent" as const,
+        label: t("web.conversations.mode_rewrite", "下一条消息会作为改写分支发送"),
+        detail: source ? summarizeBody(source.body) : composerMode.sourceMessageId,
+      };
+    }
+    if (composerMode.kind === "reset") {
+      return {
+        tone: "warn" as const,
+        label: t("web.conversations.mode_reset", "下一条消息会开启新上下文"),
+        detail: t("web.conversations.mode_reset_detail", "旧历史会保留，但这条消息会从新的分支继续。"),
+      };
+    }
+    return null;
+  }, [composerMode, detail?.messages, t]);
+
   const composerStatus = useMemo(() => {
     if (sendingItem) {
       return {
@@ -911,6 +1006,7 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
   const resetComposer = useCallback(() => {
     clearComposer(editorRef.current);
     setComposerSnapshot({ body: "", addressedAgents: [], segments: [] });
+    setComposerMode({ kind: "normal" });
     setPickerState(EMPTY_PICKER_STATE);
     focusComposerEnd(editorRef.current);
   }, []);
@@ -922,6 +1018,15 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
       explicitMentions: draft.explicitMentions,
       segments: draft.segments,
     });
+    if (draft.rewriteFromMessageId) {
+      setComposerMode({ kind: "rewrite", sourceMessageId: draft.rewriteFromMessageId, sourceBranchId: draft.branchId });
+    } else if (draft.forkFromMessageId) {
+      setComposerMode({ kind: "branch", sourceMessageId: draft.forkFromMessageId, sourceBranchId: draft.branchId });
+    } else if (draft.resetContext) {
+      setComposerMode({ kind: "reset", sourceBranchId: draft.branchId });
+    } else {
+      setComposerMode({ kind: "normal" });
+    }
     syncComposerState();
     focusComposerEnd(editorRef.current);
   }, [syncComposerState]);
@@ -942,10 +1047,10 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
       addressedAgents: recipients,
       explicitMentions: snapshot.addressedAgents,
       segments: snapshot.segments,
-    });
+    }, composerMode, activeBranch?.id ?? conversation.active_branch_id);
     setLocalDrafts((current) => [...current, queued]);
     resetComposer();
-  }, [activeAgents, conversation, resetComposer]);
+  }, [activeAgents, activeBranch?.id, composerMode, conversation, resetComposer]);
 
   useEffect(() => {
     if (!conversation || sendingItem || inFlightDraftIdRef.current) {
@@ -965,10 +1070,15 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
     void (async () => {
       try {
         const response = await sendChatMessage(conversation.id, {
-          lane_id: conversation.default_lane_id ?? undefined,
+          lane_id: next.branchId ?? conversation.default_lane_id ?? undefined,
+          branch_id: next.branchId ?? conversation.active_branch_id ?? undefined,
           body: next.body,
           addressed_agents: next.addressedAgents,
           mentions: next.explicitMentions,
+          fork_from_message_id: next.forkFromMessageId,
+          rewrite_from_message_id: next.rewriteFromMessageId,
+          reset_context: next.resetContext,
+          branch_name: next.branchName,
         });
         if (!isMountedRef.current) {
           return;
@@ -982,11 +1092,22 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
             createdAt: response.message.created_at,
           })),
         ]);
+        const switchedBranch = response.conversation.active_branch_id !== conversation.active_branch_id;
+        if (switchedBranch) {
+          setDetail((current) => current ? {
+            ...current,
+            conversation: response.conversation,
+          } : current);
+          notifyChanged();
+          await refreshThread();
+          return;
+        }
         setDetail((current) => {
           if (!current) {
             return current;
           }
           const nextLane = response.lane;
+          const nextBranch = response.branch;
           const nextMessages = current.messages.some((message) => message.id === response.message.id)
             ? current.messages
             : [...current.messages, response.message].sort((left, right) =>
@@ -997,6 +1118,9 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
             lanes: current.lanes.some((lane) => lane.id === nextLane.id)
               ? current.lanes.map((lane) => lane.id === nextLane.id ? nextLane : lane)
               : [...current.lanes, nextLane],
+            branches: current.branches.some((branch) => branch.id === nextBranch.id)
+              ? current.branches.map((branch) => branch.id === nextBranch.id ? nextBranch : branch)
+              : [...current.branches, nextBranch],
             messages: nextMessages,
           };
         });
@@ -1044,12 +1168,172 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
     setLocalDrafts((current) => current.filter((item) => item.clientId !== clientId));
   }, [localDrafts, restoreDraftToComposer]);
 
+  const copyMessageBody = useCallback(async (_entryId: string, body: string) => {
+    if (typeof navigator === "undefined" || !navigator.clipboard) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(body);
+    } catch (err) {
+      setError(String(err));
+    }
+  }, []);
+
+  const startBranchFromMessage = useCallback((messageId: string) => {
+    const source = findMessageById(detail?.messages ?? [], messageId);
+    setComposerMode({
+      kind: "branch",
+      sourceMessageId: messageId,
+      sourceBranchId: source?.branch_id ?? source?.lane_id ?? activeBranch?.id ?? undefined,
+    });
+    focusComposerEnd(editorRef.current);
+  }, [activeBranch?.id, detail?.messages]);
+
+  const startRewriteFromMessage = useCallback((messageId: string) => {
+    const source = findMessageById(detail?.messages ?? [], messageId);
+    if (!source) {
+      return;
+    }
+    writeComposerSnapshot(editorRef.current, {
+      body: source.body,
+      addressedAgents: source.mentions ?? [],
+      explicitMentions: source.mentions ?? [],
+      segments: [{ kind: "text", value: source.body }],
+    });
+    setComposerMode({
+      kind: "rewrite",
+      sourceMessageId: messageId,
+      sourceBranchId: source.branch_id ?? source.lane_id ?? activeBranch?.id ?? undefined,
+    });
+    syncComposerState();
+    focusComposerEnd(editorRef.current);
+  }, [activeBranch?.id, detail?.messages, syncComposerState]);
+
+  const startResetContext = useCallback(() => {
+    setComposerMode({
+      kind: "reset",
+      sourceBranchId: activeBranch?.id ?? conversation?.active_branch_id ?? undefined,
+    });
+    focusComposerEnd(editorRef.current);
+  }, [activeBranch?.id, conversation?.active_branch_id]);
+
+  const switchBranch = useCallback(async (branchId: string) => {
+    if (!conversation) {
+      return;
+    }
+    setError(null);
+    try {
+      const nextDetail = await switchChatBranch(conversation.id, branchId);
+      if (!isMountedRef.current) {
+        return;
+      }
+      setDetail(nextDetail);
+      setComposerMode({ kind: "normal" });
+    } catch (err) {
+      if (isMountedRef.current) {
+        setError(String(err));
+      }
+    }
+  }, [conversation]);
+
+  const createCheckpoint = useCallback(async () => {
+    if (!conversation) {
+      return;
+    }
+    const latestMessage = [...(detail?.messages ?? [])]
+      .reverse()
+      .find((message) => (message.branch_id ?? message.lane_id) === (activeBranch?.id ?? conversation.active_branch_id));
+    setError(null);
+    try {
+      const checkpoint = await createChatCheckpoint(conversation.id, {
+        branch_id: activeBranch?.id ?? conversation.active_branch_id ?? undefined,
+        message_id: latestMessage?.id,
+        kind: "manual",
+        label: latestMessage
+          ? `${t("web.conversations.checkpoint_prefix", "检查点")} · ${summarizeBody(latestMessage.body)}`
+          : t("web.conversations.checkpoint_prefix", "检查点"),
+      });
+      if (!isMountedRef.current) {
+        return;
+      }
+      setDetail((current) => current ? {
+        ...current,
+        checkpoints: [checkpoint, ...current.checkpoints],
+      } : current);
+    } catch (err) {
+      if (isMountedRef.current) {
+        setError(String(err));
+      }
+    }
+  }, [activeBranch?.id, conversation, detail?.messages, t]);
+
+  const branchFromCheckpoint = useCallback(async (checkpointId: string) => {
+    if (!conversation) {
+      return;
+    }
+    setError(null);
+    try {
+      await createChatBranch(conversation.id, {
+        source_checkpoint_id: checkpointId,
+        mode: "fork",
+        activate: true,
+      });
+      if (!isMountedRef.current) {
+        return;
+      }
+      setComposerMode({ kind: "normal" });
+      await refreshThread();
+    } catch (err) {
+      if (isMountedRef.current) {
+        setError(String(err));
+      }
+    }
+  }, [conversation, refreshThread]);
+
   const choosePickerOption = useCallback((option: ComposerPickerOption) => {
     if (replaceComposerTriggerAtCaret(editorRef.current, option)) {
       syncComposerState();
     }
     setPickerState(EMPTY_PICKER_STATE);
   }, [syncComposerState]);
+
+  useEffect(() => {
+    if (!panelId || !conversation) {
+      return;
+    }
+    registerSessionCommands({
+      panelId,
+      sessionId: conversation.id,
+      title: conversation.title,
+      activeBranchId: conversation.active_branch_id,
+      branches: detail?.branches ?? [],
+      checkpoints: detail?.checkpoints ?? [],
+      actions: {
+        resetContext: startResetContext,
+        createCheckpoint,
+        switchBranch: (branchId) => {
+          void switchBranch(branchId);
+        },
+        branchFromCheckpoint: (checkpointId) => {
+          void branchFromCheckpoint(checkpointId);
+        },
+      },
+    });
+    return () => {
+      unregisterSessionCommands(panelId);
+    };
+  }, [
+    branchFromCheckpoint,
+    conversation,
+    createCheckpoint,
+    detail?.branches,
+    detail?.checkpoints,
+    panelId,
+    registerSessionCommands,
+    startResetContext,
+    switchBranch,
+    unregisterSessionCommands,
+  ]);
 
   const handleComposerKeyDown = useCallback((event: KeyboardEvent<HTMLDivElement>) => {
     if (pickerState.open && pickerOptions.length > 0) {
@@ -1126,6 +1410,12 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
               </p>
             </div>
             <div className="button-row">
+              <button type="button" className="secondary" onClick={() => void createCheckpoint()}>
+                {t("web.conversations.create_checkpoint", "创建检查点")}
+              </button>
+              <button type="button" className="secondary" onClick={startResetContext}>
+                {t("web.conversations.reset_context", "清空上下文")}
+              </button>
               <button type="button" className="secondary" onClick={() => void hydrate()}>
                 {t("web.action.refresh", "刷新")}
               </button>
@@ -1151,6 +1441,36 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
                 </button>
               ))}
             </div>
+            {detail.branches.length > 0 ? (
+              <div className="branch-strip">
+                {detail.branches.map((branch) => (
+                  <button
+                    key={branch.id}
+                    type="button"
+                    className={branch.id === activeBranch?.id ? "chip chip--active" : "chip"}
+                    onClick={() => void switchBranch(branch.id)}
+                  >
+                    {branch.name}
+                    {" · "}
+                    {branchKindLabel(branch, t)}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+            {detail.checkpoints.length > 0 ? (
+              <div className="branch-strip">
+                {detail.checkpoints.map((checkpoint) => (
+                  <button
+                    key={checkpoint.id}
+                    type="button"
+                    className="chip"
+                    onClick={() => void branchFromCheckpoint(checkpoint.id)}
+                  >
+                    {checkpoint.label}
+                  </button>
+                ))}
+              </div>
+            ) : null}
           </div>
 
           <div ref={scrollRef} className="message-stream message-stream--chat">
@@ -1161,12 +1481,24 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
               emptyMessage={t("web.conversations.empty_messages", "还没有消息。在输入框用 @agent_id 指定某个 Agent。")}
               formatDateTime={formatDateTime}
               t={t}
+              onCopy={copyMessageBody}
+              onBranchFrom={startBranchFromMessage}
+              onEditAndResend={startRewriteFromMessage}
               onRetry={retryLocalMessage}
               onRemove={removeLocalMessage}
             />
           </div>
 
           <div className="composer-shell">
+            {composerModeStatus ? (
+              <section className={`composer-status composer-status--${composerModeStatus.tone}`}>
+                <strong>{composerModeStatus.label}</strong>
+                <span>{composerModeStatus.detail}</span>
+                <button type="button" className="secondary" onClick={resetComposer}>
+                  {t("web.action.cancel", "取消")}
+                </button>
+              </section>
+            ) : null}
             {composerStatus ? (
               <section className={`composer-status composer-status--${composerStatus.tone}`}>
                 <strong>{composerStatus.label}</strong>

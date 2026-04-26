@@ -196,6 +196,18 @@ pub fn build_router(state: AppState) -> Router {
             get(conversation_messages).post(conversation_messages_create),
         )
         .route(
+            "/api/conversations/{conversation_id}/branches",
+            get(conversation_branches).post(conversation_branches_create),
+        )
+        .route(
+            "/api/conversations/{conversation_id}/branches/{branch_id}/switch",
+            post(conversation_branch_switch),
+        )
+        .route(
+            "/api/conversations/{conversation_id}/checkpoints",
+            get(conversation_checkpoints).post(conversation_checkpoints_create),
+        )
+        .route(
             "/api/conversations/{conversation_id}/lanes",
             get(conversation_lanes),
         )

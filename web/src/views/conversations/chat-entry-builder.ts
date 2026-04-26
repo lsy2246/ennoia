@@ -135,6 +135,10 @@ export function buildChatEntries(params: {
       entry: {
         ...base,
         kind: "message",
+        messageId: message.id,
+        branchId: message.branch_id ?? message.lane_id ?? undefined,
+        replyToMessageId: message.reply_to_message_id ?? undefined,
+        rewriteFromMessageId: message.rewrite_from_message_id ?? undefined,
         recipients,
         mentions: message.mentions,
         source: "remote",
@@ -149,6 +153,7 @@ export function buildChatEntries(params: {
     }));
     const messageEntry: ChatEntryViewModel = {
       id: draft.clientId,
+      messageId: draft.clientId,
       role: "operator",
       kind: "message",
       format: detectMessageFormat(draft.body),
@@ -156,6 +161,9 @@ export function buildChatEntries(params: {
       sender: "Operator",
       body: draft.body,
       createdAt: draft.createdAt,
+      branchId: draft.branchId,
+      replyToMessageId: draft.forkFromMessageId,
+      rewriteFromMessageId: draft.rewriteFromMessageId,
       recipients,
       mentions: draft.explicitMentions ?? [],
       source: "local",

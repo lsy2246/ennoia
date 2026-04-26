@@ -23,9 +23,10 @@ pub use config::{
 pub use context::{ContextFrame, ContextLayer, RunContext};
 pub use decision::{Decision, DecisionSnapshot, NextAction};
 pub use domain::{
-    AgentSpec, ArtifactKind, ArtifactSpec, ConversationSpec, ConversationTopology, HandoffSpec,
-    LaneSpec, MessageRole, MessageSpec, OwnerKind, OwnerRef, ParticipantRef, ParticipantType,
-    RunSpec, RuntimeProfile, SpaceSpec, TaskKind, TaskSpec, TaskStatus,
+    AgentSpec, ArtifactKind, ArtifactSpec, ConversationBranchSpec, ConversationCheckpointSpec,
+    ConversationSpec, ConversationTopology, HandoffSpec, LaneSpec, MessageRole, MessageSpec,
+    OwnerKind, OwnerRef, ParticipantRef, ParticipantType, RunSpec, RuntimeProfile, SpaceSpec,
+    TaskKind, TaskSpec, TaskStatus,
 };
 pub use ennoia_error_utils::normalize_error_message;
 pub use extension::{

@@ -10,6 +10,9 @@ export function ChatStream({
   emptyMessage,
   formatDateTime,
   t,
+  onCopy,
+  onBranchFrom,
+  onEditAndResend,
   onRetry,
   onRemove,
 }: {
@@ -19,6 +22,9 @@ export function ChatStream({
   emptyMessage: string;
   formatDateTime: (value: string) => string;
   t: (key: string, fallback: string) => string;
+  onCopy: (entryId: string, body: string) => void;
+  onBranchFrom: (messageId: string) => void;
+  onEditAndResend: (messageId: string) => void;
   onRetry: (id: string) => void;
   onRemove: (id: string) => void;
 }) {
@@ -34,6 +40,9 @@ export function ChatStream({
       skills={skills}
       formatDateTime={formatDateTime}
       t={t}
+      onCopy={onCopy}
+      onBranchFrom={onBranchFrom}
+      onEditAndResend={onEditAndResend}
       onRetry={onRetry}
       onRemove={onRemove}
     />

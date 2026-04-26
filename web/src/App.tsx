@@ -17,6 +17,8 @@ import { AgentEditorView } from "@/views/agents/Editor";
 import { ApiChannelEditorView } from "@/views/providers/Editor";
 import { SessionView } from "@/views/conversations/Session";
 import { useWorkbenchStore, type WorkbenchViewDescriptor } from "@/stores/workbench";
+import { useSessionCommandsStore } from "@/stores/sessionCommands";
+import { CommandPalette, type CommandPaletteAction } from "@/components/layout/CommandPalette";
 import {
   OmniDock,
   ENNOIA_ROUTE_DRAG_MIME,
@@ -347,6 +349,7 @@ export function App() {
   const { describeAppliedTheme, resolveText, runtime, t } = useUiHelpers();
   const uiState = useUiStore();
   const workbenchApi = useWorkbenchStore((state) => state.api);
+  const sessionCommandItems = useSessionCommandsStore((state) => state.items);
   const registerApi = useWorkbenchStore((state) => state.registerApi);
   const updateViewDescriptor = useWorkbenchStore((state) => state.updateViewDescriptor);
   const initialWorkbenchPreferences = useMemo(() => readWorkbenchPreferences(), []);
@@ -357,7 +360,9 @@ export function App() {
   const [dockPosition, setDockPosition] = useState<DockPosition>(initialWorkbenchPreferences.dockPosition);
   const [dockExpanded, setDockExpanded] = useState(initialWorkbenchPreferences.dockExpanded);
   const [activeNavId, setActiveNavId] = useState<string | undefined>(initialWorkbenchPreferences.mobileActiveNavId);
+  const [activePanelId, setActivePanelId] = useState<string | undefined>();
   const [hasDesktopViews, setHasDesktopViews] = useState(false);
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const dockPositionRef = useRef(dockPosition);
   const dockExpandedRef = useRef(dockExpanded);
   const pendingDropOpenRef = useRef<number | null>(null);
@@ -423,6 +428,8 @@ export function App() {
     }
     return t(descriptor.subtitleKey, descriptor.subtitleFallback ?? descriptor.subtitle ?? "");
   }, [t]);
+
+  const activeSessionCommands = activePanelId ? sessionCommandItems[activePanelId] : undefined;
 
   const normalizeDescriptorLocalization = useCallback((descriptor: WorkbenchViewDescriptor) => {
     if (descriptor.titleKey) {
@@ -547,6 +554,66 @@ export function App() {
       openRoutePanel(payload, options);
     }, 0);
   }, [openRoutePanel]);
+
+  const commandPaletteActions = useMemo<CommandPaletteAction[]>(() => {
+    const navActions = navItems.map<CommandPaletteAction>((item) => ({
+      id: `nav:${item.id}`,
+      title: item.label,
+      hint: item.hint,
+      keywords: [item.id, item.href, item.source],
+      run: () => openRoutePanel(item),
+    }));
+
+    const systemActions: CommandPaletteAction[] = [
+      {
+        id: "system:new-conversation",
+        title: t("web.conversations.create_direct", "创建私聊"),
+        hint: t("web.command_palette.new_conversation_hint", "打开会话页并创建新的会话"),
+        keywords: ["conversation", "new", "create", "session", "chat"],
+        run: () => {
+          const target = navItems.find((item) => item.id === "conversations");
+          if (target) {
+            openRoutePanel(target);
+          }
+        },
+      },
+    ];
+
+    const sessionActions = activeSessionCommands
+      ? [
+          {
+            id: `session:${activeSessionCommands.sessionId}:reset`,
+            title: t("web.conversations.reset_context", "清空上下文"),
+            hint: activeSessionCommands.title,
+            keywords: ["session", "conversation", "reset", "branch"],
+            run: () => activeSessionCommands.actions.resetContext(),
+          },
+          {
+            id: `session:${activeSessionCommands.sessionId}:checkpoint`,
+            title: t("web.conversations.create_checkpoint", "创建检查点"),
+            hint: activeSessionCommands.title,
+            keywords: ["session", "conversation", "checkpoint"],
+            run: () => activeSessionCommands.actions.createCheckpoint(),
+          },
+          ...activeSessionCommands.branches.map<CommandPaletteAction>((branch) => ({
+            id: `session:${activeSessionCommands.sessionId}:branch:${branch.id}`,
+            title: `${t("web.command_palette.switch_branch", "切换到分支")} · ${branch.name}`,
+            hint: branch.kind,
+            keywords: ["branch", "switch", branch.name, branch.kind],
+            run: () => activeSessionCommands.actions.switchBranch(branch.id),
+          })),
+          ...activeSessionCommands.checkpoints.map<CommandPaletteAction>((checkpoint) => ({
+            id: `session:${activeSessionCommands.sessionId}:checkpoint:${checkpoint.id}`,
+            title: `${t("web.command_palette.branch_from_checkpoint", "从检查点创建分支")} · ${checkpoint.label}`,
+            hint: checkpoint.kind,
+            keywords: ["checkpoint", "branch", checkpoint.label, checkpoint.kind],
+            run: () => activeSessionCommands.actions.branchFromCheckpoint(checkpoint.id),
+          })),
+        ]
+      : [];
+
+    return [...systemActions, ...navActions, ...sessionActions];
+  }, [activeSessionCommands, navItems, openRoutePanel, t]);
 
   const openDraggedRoutePanel = (event: DockviewDidDropEvent) => {
     const payload = resolveNavDragPayload(event.nativeEvent.dataTransfer);
@@ -674,6 +741,16 @@ export function App() {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (
+        uiState.runtime?.ui_config.show_command_palette !== false
+        && (e.metaKey || e.ctrlKey)
+        && !e.shiftKey
+        && e.key.toLowerCase() === "k"
+      ) {
+        e.preventDefault();
+        setCommandPaletteOpen((current) => !current);
+        return;
+      }
       if (e.metaKey && e.shiftKey && e.key === "d") {
         setDockPosition(p => {
           if (p === "left") return "bottom";
@@ -685,7 +762,7 @@ export function App() {
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  }, [uiState.runtime?.ui_config.show_command_palette]);
 
   useEffect(() => {
     dockPositionRef.current = dockPosition;
@@ -816,6 +893,7 @@ export function App() {
               });
               api.onDidActivePanelChange?.((panel: IDockviewPanel | undefined) => {
                 setActiveNavId(isRoutePanelParams(panel?.params) ? panel.params.routeId : undefined);
+                setActivePanelId(panel?.id);
               });
               api.onUnhandledDragOverEvent?.((dragEvent: DockviewDndOverlayEvent) => {
                 if (resolveNavDragPayload(dragEvent.nativeEvent.dataTransfer)) {
@@ -857,6 +935,15 @@ export function App() {
         onExpandedChange={isMobileViewport ? () => undefined : setDockExpanded}
         onOpenItem={openRoutePanel}
       />
+
+      {uiState.runtime?.ui_config.show_command_palette !== false ? (
+        <CommandPalette
+          open={commandPaletteOpen}
+          actions={commandPaletteActions}
+          onClose={() => setCommandPaletteOpen(false)}
+          t={t}
+        />
+      ) : null}
     </div>
   );
 }

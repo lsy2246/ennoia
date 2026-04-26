@@ -24,6 +24,11 @@ export type LocalMessageDraft = {
   segments: ComposerSegment[];
   createdAt: string;
   status: LocalMessageStatus;
+  branchId?: string;
+  forkFromMessageId?: string;
+  rewriteFromMessageId?: string;
+  resetContext?: boolean;
+  branchName?: string;
   error?: string;
 };
 
@@ -56,6 +61,10 @@ type ChatEntryBase = {
 
 export type ChatMessageEntry = ChatEntryBase & {
   kind: "message";
+  messageId: string;
+  branchId?: string;
+  replyToMessageId?: string;
+  rewriteFromMessageId?: string;
   recipients: ChatEntryRecipient[];
   mentions: string[];
   source: "remote" | "local";

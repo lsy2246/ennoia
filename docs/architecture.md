@@ -45,7 +45,7 @@ Web
 
 - 核心不再内置 `journal` 文件记录层。
 - `/api/conversations`、`/api/conversations/{id}/messages` 等稳定入口通过接口层路由，不直接绑定某个 memory 大能力。
-- 内置 `conversation` 扩展当前声明会话、线路和消息接口；内置 `memory` 扩展只负责记忆、上下文、审查和图谱侧车。
+- 内置 `conversation` 扩展当前声明会话、分支、检查点、线路和消息接口；内置 `memory` 扩展只负责记忆、上下文、审查和图谱侧车。
 - `memory` 的系统入口固定为 `/api/memory/*`，底层通过 `memory.*` 接口键解析到扩展 Worker。
 - `conversation` 不直接调用 `memory`；它只把稳定事件交给宿主事件总线。
 - `memory` 不直接读取 `conversation.db`；它只消费宿主持久化的系统事件。

@@ -73,6 +73,7 @@
 - `space_id`
 - `title`
 - `participants`
+- `active_branch_id`
 - `default_lane_id`
 - `created_at`
 - `updated_at`
@@ -82,7 +83,31 @@
 - `agent_ids.len() == 1` 创建 `direct`。
 - `agent_ids.len() >= 2` 创建 `group`。
 - 产品文案可以称为“会话”，系统 API 使用 `conversation`。
-- 具体持久化格式由绑定到 `conversation.*`、`lane.*`、`message.*` 的扩展决定。
+- 具体持久化格式由绑定到 `conversation.*`、`branch.*`、`checkpoint.*`、`lane.*`、`message.*` 的扩展决定。
+
+`ConversationBranchSpec` 字段：
+
+- `id`
+- `conversation_id`
+- `name`
+- `kind`
+- `status`
+- `parent_branch_id`
+- `source_message_id`
+- `source_checkpoint_id`
+- `inherit_mode`
+- `created_at`
+- `updated_at`
+
+`ConversationCheckpointSpec` 字段：
+
+- `id`
+- `conversation_id`
+- `branch_id`
+- `message_id`
+- `kind`
+- `label`
+- `created_at`
 
 ## Message 接口域
 
@@ -90,11 +115,14 @@
 
 - `id`
 - `conversation_id`
+- `branch_id`
 - `lane_id`
 - `sender`
 - `role`
 - `body`
 - `mentions`
+- `reply_to_message_id`
+- `rewrite_from_message_id`
 - `created_at`
 
 ## Agent 域

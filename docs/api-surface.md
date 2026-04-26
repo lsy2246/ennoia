@@ -87,6 +87,11 @@
 - `DELETE /api/conversations/{conversation_id}`
 - `GET /api/conversations/{conversation_id}/messages`
 - `POST /api/conversations/{conversation_id}/messages`
+- `GET /api/conversations/{conversation_id}/branches`
+- `POST /api/conversations/{conversation_id}/branches`
+- `POST /api/conversations/{conversation_id}/branches/{branch_id}/switch`
+- `GET /api/conversations/{conversation_id}/checkpoints`
+- `POST /api/conversations/{conversation_id}/checkpoints`
 - `GET /api/conversations/{conversation_id}/lanes`
 
 Conversation API 是稳定产品入口，实际由以下接口键解析到扩展 Worker：
@@ -96,6 +101,11 @@ Conversation API 是稳定产品入口，实际由以下接口键解析到扩展
 - `conversation.get`
 - `conversation.delete`
 - `lane.list_by_conversation`
+- `branch.list_by_conversation`
+- `branch.create`
+- `branch.switch`
+- `checkpoint.list_by_conversation`
+- `checkpoint.create`
 - `message.list`
 - `message.append_user`
 - `message.append_agent`

@@ -178,6 +178,95 @@ pub(super) async fn conversation_messages(
     .await
 }
 
+pub(super) async fn conversation_branches(
+    State(state): State<AppState>,
+    Extension(request): Extension<RequestContext>,
+    Path(conversation_id): Path<String>,
+) -> ApiResult<JsonValue> {
+    dispatch_interface_json(
+        &state,
+        &request,
+        "branch.list_by_conversation",
+        serde_json::json!({ "conversation_id": conversation_id }),
+    )
+    .await
+}
+
+pub(super) async fn conversation_branches_create(
+    State(state): State<AppState>,
+    Extension(request): Extension<RequestContext>,
+    Path(conversation_id): Path<String>,
+    Json(payload): Json<JsonValue>,
+) -> ApiResult<JsonValue> {
+    dispatch_interface_json(
+        &state,
+        &request,
+        "branch.create",
+        serde_json::json!({
+            "conversation_id": conversation_id,
+            "from_branch_id": payload.get("from_branch_id").cloned(),
+            "source_message_id": payload.get("source_message_id").cloned(),
+            "source_checkpoint_id": payload.get("source_checkpoint_id").cloned(),
+            "name": payload.get("name").cloned(),
+            "mode": payload.get("mode").cloned(),
+            "activate": payload.get("activate").cloned(),
+        }),
+    )
+    .await
+}
+
+pub(super) async fn conversation_branch_switch(
+    State(state): State<AppState>,
+    Extension(request): Extension<RequestContext>,
+    Path((conversation_id, branch_id)): Path<(String, String)>,
+) -> ApiResult<JsonValue> {
+    dispatch_interface_json(
+        &state,
+        &request,
+        "branch.switch",
+        serde_json::json!({
+            "conversation_id": conversation_id,
+            "branch_id": branch_id,
+        }),
+    )
+    .await
+}
+
+pub(super) async fn conversation_checkpoints(
+    State(state): State<AppState>,
+    Extension(request): Extension<RequestContext>,
+    Path(conversation_id): Path<String>,
+) -> ApiResult<JsonValue> {
+    dispatch_interface_json(
+        &state,
+        &request,
+        "checkpoint.list_by_conversation",
+        serde_json::json!({ "conversation_id": conversation_id }),
+    )
+    .await
+}
+
+pub(super) async fn conversation_checkpoints_create(
+    State(state): State<AppState>,
+    Extension(request): Extension<RequestContext>,
+    Path(conversation_id): Path<String>,
+    Json(payload): Json<JsonValue>,
+) -> ApiResult<JsonValue> {
+    dispatch_interface_json(
+        &state,
+        &request,
+        "checkpoint.create",
+        serde_json::json!({
+            "conversation_id": conversation_id,
+            "branch_id": payload.get("branch_id").cloned(),
+            "message_id": payload.get("message_id").cloned(),
+            "kind": payload.get("kind").cloned(),
+            "label": payload.get("label").cloned(),
+        }),
+    )
+    .await
+}
+
 pub(super) async fn conversation_messages_create(
     State(state): State<AppState>,
     Extension(request): Extension<RequestContext>,

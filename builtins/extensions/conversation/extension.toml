@@ -61,6 +61,41 @@ entry = "conversation/messages/list"
 metadata = { interface = { key = "message.list" } }
 
 [[capabilities]]
+id = "branch.list_by_conversation"
+contract = "branch.list_by_conversation"
+kind = "query"
+entry = "conversation/branches/list-by-conversation"
+metadata = { interface = { key = "branch.list_by_conversation" } }
+
+[[capabilities]]
+id = "branch.create"
+contract = "branch.create"
+kind = "action"
+entry = "conversation/branches/create"
+metadata = { interface = { key = "branch.create" } }
+
+[[capabilities]]
+id = "branch.switch"
+contract = "branch.switch"
+kind = "action"
+entry = "conversation/branches/switch"
+metadata = { interface = { key = "branch.switch" } }
+
+[[capabilities]]
+id = "checkpoint.list_by_conversation"
+contract = "checkpoint.list_by_conversation"
+kind = "query"
+entry = "conversation/checkpoints/list-by-conversation"
+metadata = { interface = { key = "checkpoint.list_by_conversation" } }
+
+[[capabilities]]
+id = "checkpoint.create"
+contract = "checkpoint.create"
+kind = "action"
+entry = "conversation/checkpoints/create"
+metadata = { interface = { key = "checkpoint.create" } }
+
+[[capabilities]]
 id = "message.append_user"
 contract = "message.append_user"
 kind = "action"

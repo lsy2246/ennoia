@@ -1867,6 +1867,20 @@ label {
   margin-bottom: 8px;
 }
 
+.message-bubble__title {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.message-bubble__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
 .message-bubble__footer {
   margin-top: 12px;
   align-items: flex-start;
@@ -1895,6 +1909,17 @@ label {
 .message-delivery {
   color: var(--text-muted);
   font-size: var(--text-xs);
+}
+
+.message-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.message-actions .secondary {
+  min-height: 30px;
 }
 
 .message-bubble p,
@@ -2194,6 +2219,77 @@ label {
   color: var(--text-muted);
 }
 
+.branch-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.command-palette-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 10vh 20px 20px;
+  background: color-mix(in srgb, var(--bg) 48%, transparent);
+  backdrop-filter: blur(10px);
+}
+
+.command-palette {
+  width: min(760px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid color-mix(in srgb, var(--accent) 16%, var(--line));
+  border-radius: 22px;
+  background: color-mix(in srgb, var(--bg-panel) 94%, transparent);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.16);
+}
+
+.command-palette__input {
+  min-height: 52px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: var(--bg-elevated);
+  padding: 0 16px;
+  font-size: var(--text-md);
+}
+
+.command-palette__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: min(56vh, 520px);
+  overflow: auto;
+}
+
+.command-palette__item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: left;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--bg-elevated);
+  transition: border-color var(--transition-fast), transform var(--transition-fast), background var(--transition-fast);
+}
+
+.command-palette__item--active,
+.command-palette__item:hover {
+  border-color: color-mix(in srgb, var(--accent) 26%, transparent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-elevated));
+  transform: translateY(-1px);
+}
+
+.command-palette__item span,
+.command-palette__footer {
+  color: var(--text-muted);
+}
+
 .composer-shell {
   display: flex;
   flex-direction: column;
@@ -2206,7 +2302,7 @@ label {
 .composer-status {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 8px;
   padding: 12px 14px;
   border: 1px solid var(--line);
   border-radius: var(--radius-md);

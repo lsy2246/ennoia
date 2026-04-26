@@ -211,9 +211,34 @@ export type ChatThread = {
   space_id?: string | null;
   title: string;
   participants: string[];
+  active_branch_id?: string | null;
   default_lane_id?: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type ChatBranch = {
+  id: string;
+  conversation_id: string;
+  name: string;
+  kind: string;
+  status: string;
+  parent_branch_id?: string | null;
+  source_message_id?: string | null;
+  source_checkpoint_id?: string | null;
+  inherit_mode: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ChatCheckpoint = {
+  id: string;
+  conversation_id: string;
+  branch_id: string;
+  message_id?: string | null;
+  kind: string;
+  label: string;
+  created_at: string;
 };
 
 export type ChatLane = {
@@ -232,11 +257,14 @@ export type ChatLane = {
 export type ChatMessage = {
   id: string;
   conversation_id: string;
+  branch_id?: string | null;
   lane_id?: string | null;
   sender: string;
   role: "operator" | "agent" | "system" | "tool";
   body: string;
   mentions: string[];
+  reply_to_message_id?: string | null;
+  rewrite_from_message_id?: string | null;
   created_at: string;
 };
 
@@ -279,6 +307,8 @@ export type RunOutput = {
 export type ChatThreadDetail = {
   conversation: ChatThread;
   lanes: ChatLane[];
+  branches: ChatBranch[];
+  checkpoints: ChatCheckpoint[];
   messages: ChatMessage[];
   runs: ExecutionRun[];
   tasks: ExecutionStep[];
@@ -288,6 +318,7 @@ export type ChatThreadDetail = {
 export type ChatSendResponse = {
   conversation: ChatThread;
   lane: ChatLane;
+  branch: ChatBranch;
   message: ChatMessage;
   run?: ExecutionRun;
   runs?: ExecutionRun[];

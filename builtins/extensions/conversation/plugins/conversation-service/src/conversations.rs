@@ -1,7 +1,9 @@
 use ennoia_kernel::{
-    ConversationSpec, ConversationTopology, LaneSpec, MessageRole, MessageSpec, OwnerKind, OwnerRef,
+    ConversationBranchSpec, ConversationCheckpointSpec, ConversationSpec, ConversationTopology,
+    LaneSpec, MessageRole, MessageSpec, OwnerKind, OwnerRef,
 };
 use sqlx::{Row, SqlitePool};
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone)]
 pub struct ConversationStore {
@@ -15,7 +17,7 @@ impl ConversationStore {
 
     pub async fn list_conversations(&self) -> Result<Vec<ConversationSpec>, sqlx::Error> {
         let rows = sqlx::query(
-            "SELECT id, topology, owner_kind, owner_id, space_id, title, default_lane_id, created_at, updated_at
+            "SELECT id, topology, owner_kind, owner_id, space_id, title, active_branch_id, default_lane_id, created_at, updated_at
              FROM conversations ORDER BY updated_at DESC",
         )
         .fetch_all(&self.pool)
@@ -33,7 +35,7 @@ impl ConversationStore {
         conversation_id: &str,
     ) -> Result<Option<ConversationSpec>, sqlx::Error> {
         let row = sqlx::query(
-            "SELECT id, topology, owner_kind, owner_id, space_id, title, default_lane_id, created_at, updated_at
+            "SELECT id, topology, owner_kind, owner_id, space_id, title, active_branch_id, default_lane_id, created_at, updated_at
              FROM conversations WHERE id = ?",
         )
         .bind(conversation_id)
@@ -52,14 +54,15 @@ impl ConversationStore {
     ) -> Result<(), sqlx::Error> {
         sqlx::query(
             "INSERT INTO conversations
-             (id, topology, owner_kind, owner_id, space_id, title, default_lane_id, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+             (id, topology, owner_kind, owner_id, space_id, title, active_branch_id, default_lane_id, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(id) DO UPDATE SET
                topology = excluded.topology,
                owner_kind = excluded.owner_kind,
                owner_id = excluded.owner_id,
                space_id = excluded.space_id,
                title = excluded.title,
+               active_branch_id = excluded.active_branch_id,
                default_lane_id = excluded.default_lane_id,
                updated_at = excluded.updated_at",
         )
@@ -69,6 +72,7 @@ impl ConversationStore {
         .bind(&conversation.owner.id)
         .bind(&conversation.space_id)
         .bind(&conversation.title)
+        .bind(&conversation.active_branch_id)
         .bind(&conversation.default_lane_id)
         .bind(&conversation.created_at)
         .bind(&conversation.updated_at)
@@ -105,7 +109,128 @@ impl ConversationStore {
             .bind(conversation_id)
             .execute(&self.pool)
             .await?;
+        sqlx::query("DELETE FROM checkpoints WHERE conversation_id = ?")
+            .bind(conversation_id)
+            .execute(&self.pool)
+            .await?;
+        sqlx::query("DELETE FROM branches WHERE conversation_id = ?")
+            .bind(conversation_id)
+            .execute(&self.pool)
+            .await?;
         Ok(result.rows_affected() > 0)
+    }
+
+    pub async fn list_branches(
+        &self,
+        conversation_id: &str,
+    ) -> Result<Vec<ConversationBranchSpec>, sqlx::Error> {
+        let rows = sqlx::query(
+            "SELECT id, conversation_id, name, kind, status, parent_branch_id, source_message_id, source_checkpoint_id, inherit_mode, created_at, updated_at
+             FROM branches WHERE conversation_id = ? ORDER BY created_at ASC",
+        )
+        .bind(conversation_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows.into_iter().map(map_branch).collect())
+    }
+
+    pub async fn get_branch(
+        &self,
+        branch_id: &str,
+    ) -> Result<Option<ConversationBranchSpec>, sqlx::Error> {
+        let row = sqlx::query(
+            "SELECT id, conversation_id, name, kind, status, parent_branch_id, source_message_id, source_checkpoint_id, inherit_mode, created_at, updated_at
+             FROM branches WHERE id = ?",
+        )
+        .bind(branch_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(map_branch))
+    }
+
+    pub async fn upsert_branch(&self, branch: &ConversationBranchSpec) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "INSERT INTO branches
+             (id, conversation_id, name, kind, status, parent_branch_id, source_message_id, source_checkpoint_id, inherit_mode, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(id) DO UPDATE SET
+               conversation_id = excluded.conversation_id,
+               name = excluded.name,
+               kind = excluded.kind,
+               status = excluded.status,
+               parent_branch_id = excluded.parent_branch_id,
+               source_message_id = excluded.source_message_id,
+               source_checkpoint_id = excluded.source_checkpoint_id,
+               inherit_mode = excluded.inherit_mode,
+               updated_at = excluded.updated_at",
+        )
+        .bind(&branch.id)
+        .bind(&branch.conversation_id)
+        .bind(&branch.name)
+        .bind(&branch.kind)
+        .bind(&branch.status)
+        .bind(&branch.parent_branch_id)
+        .bind(&branch.source_message_id)
+        .bind(&branch.source_checkpoint_id)
+        .bind(&branch.inherit_mode)
+        .bind(&branch.created_at)
+        .bind(&branch.updated_at)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn list_checkpoints(
+        &self,
+        conversation_id: &str,
+    ) -> Result<Vec<ConversationCheckpointSpec>, sqlx::Error> {
+        let rows = sqlx::query(
+            "SELECT id, conversation_id, branch_id, message_id, kind, label, created_at
+             FROM checkpoints WHERE conversation_id = ? ORDER BY created_at DESC",
+        )
+        .bind(conversation_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows.into_iter().map(map_checkpoint).collect())
+    }
+
+    pub async fn get_checkpoint(
+        &self,
+        checkpoint_id: &str,
+    ) -> Result<Option<ConversationCheckpointSpec>, sqlx::Error> {
+        let row = sqlx::query(
+            "SELECT id, conversation_id, branch_id, message_id, kind, label, created_at
+             FROM checkpoints WHERE id = ?",
+        )
+        .bind(checkpoint_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        Ok(row.map(map_checkpoint))
+    }
+
+    pub async fn insert_checkpoint(
+        &self,
+        checkpoint: &ConversationCheckpointSpec,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "INSERT INTO checkpoints
+             (id, conversation_id, branch_id, message_id, kind, label, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&checkpoint.id)
+        .bind(&checkpoint.conversation_id)
+        .bind(&checkpoint.branch_id)
+        .bind(&checkpoint.message_id)
+        .bind(&checkpoint.kind)
+        .bind(&checkpoint.label)
+        .bind(&checkpoint.created_at)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 
     pub async fn list_lanes(&self, conversation_id: &str) -> Result<Vec<LaneSpec>, sqlx::Error> {
@@ -157,31 +282,45 @@ impl ConversationStore {
     pub async fn list_messages(
         &self,
         conversation_id: &str,
+        branch_id: Option<&str>,
     ) -> Result<Vec<MessageSpec>, sqlx::Error> {
         let rows = sqlx::query(
-            "SELECT id, conversation_id, lane_id, sender, role, body, mentions_json, created_at
+            "SELECT id, conversation_id, branch_id, lane_id, sender, role, body, mentions_json, reply_to_message_id, rewrite_from_message_id, created_at
              FROM messages WHERE conversation_id = ? ORDER BY created_at ASC",
         )
         .bind(conversation_id)
         .fetch_all(&self.pool)
         .await?;
 
-        Ok(rows.into_iter().map(map_message).collect())
+        let all_messages = rows.into_iter().map(map_message).collect::<Vec<_>>();
+        let Some(target_branch_id) = branch_id else {
+            return Ok(all_messages);
+        };
+
+        let branches = self.list_branches(conversation_id).await?;
+        Ok(filter_visible_messages(
+            &all_messages,
+            &branches,
+            target_branch_id,
+        ))
     }
 
     pub async fn insert_message(&self, message: &MessageSpec) -> Result<(), sqlx::Error> {
         sqlx::query(
             "INSERT INTO messages
-             (id, conversation_id, lane_id, sender, role, body, mentions_json, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+             (id, conversation_id, branch_id, lane_id, sender, role, body, mentions_json, reply_to_message_id, rewrite_from_message_id, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&message.id)
         .bind(&message.conversation_id)
+        .bind(&message.branch_id)
         .bind(&message.lane_id)
         .bind(&message.sender)
         .bind(role_str(message.role))
         .bind(&message.body)
         .bind(serde_json::to_string(&message.mentions).unwrap_or_else(|_| "[]".to_string()))
+        .bind(&message.reply_to_message_id)
+        .bind(&message.rewrite_from_message_id)
         .bind(&message.created_at)
         .execute(&self.pool)
         .await?;
@@ -203,6 +342,7 @@ impl ConversationStore {
             space_id: row.get("space_id"),
             title: row.get("title"),
             participants: self.list_participants(&id).await?,
+            active_branch_id: row.get("active_branch_id"),
             default_lane_id: row.get("default_lane_id"),
             created_at: row.get("created_at"),
             updated_at: row.get("updated_at"),
@@ -298,16 +438,141 @@ async fn list_ordered_strings(
     Ok(rows.into_iter().map(|row| row.get(0)).collect())
 }
 
+fn map_branch(row: sqlx::sqlite::SqliteRow) -> ConversationBranchSpec {
+    ConversationBranchSpec {
+        id: row.get("id"),
+        conversation_id: row.get("conversation_id"),
+        name: row.get("name"),
+        kind: row.get("kind"),
+        status: row.get("status"),
+        parent_branch_id: row.get("parent_branch_id"),
+        source_message_id: row.get("source_message_id"),
+        source_checkpoint_id: row.get("source_checkpoint_id"),
+        inherit_mode: row.get("inherit_mode"),
+        created_at: row.get("created_at"),
+        updated_at: row.get("updated_at"),
+    }
+}
+
+fn map_checkpoint(row: sqlx::sqlite::SqliteRow) -> ConversationCheckpointSpec {
+    ConversationCheckpointSpec {
+        id: row.get("id"),
+        conversation_id: row.get("conversation_id"),
+        branch_id: row.get("branch_id"),
+        message_id: row.get("message_id"),
+        kind: row.get("kind"),
+        label: row.get("label"),
+        created_at: row.get("created_at"),
+    }
+}
+
 fn map_message(row: sqlx::sqlite::SqliteRow) -> MessageSpec {
     MessageSpec {
         id: row.get("id"),
         conversation_id: row.get("conversation_id"),
+        branch_id: row.get("branch_id"),
         lane_id: row.get("lane_id"),
         sender: row.get("sender"),
         role: role_from_str(&row.get::<String, _>("role")),
         body: row.get("body"),
         mentions: serde_json::from_str(&row.get::<String, _>("mentions_json")).unwrap_or_default(),
+        reply_to_message_id: row.get("reply_to_message_id"),
+        rewrite_from_message_id: row.get("rewrite_from_message_id"),
         created_at: row.get("created_at"),
+    }
+}
+
+fn filter_visible_messages(
+    messages: &[MessageSpec],
+    branches: &[ConversationBranchSpec],
+    branch_id: &str,
+) -> Vec<MessageSpec> {
+    let branch_map = branches
+        .iter()
+        .cloned()
+        .map(|branch| (branch.id.clone(), branch))
+        .collect::<HashMap<_, _>>();
+    let messages_by_branch = messages.iter().cloned().fold(
+        HashMap::<String, Vec<MessageSpec>>::new(),
+        |mut acc, message| {
+            let key = message
+                .branch_id
+                .clone()
+                .or_else(|| message.lane_id.clone())
+                .unwrap_or_default();
+            acc.entry(key).or_default().push(message);
+            acc
+        },
+    );
+
+    let mut visiting = HashSet::new();
+    collect_branch_messages(branch_id, &branch_map, &messages_by_branch, &mut visiting)
+}
+
+fn collect_branch_messages(
+    branch_id: &str,
+    branches: &HashMap<String, ConversationBranchSpec>,
+    messages_by_branch: &HashMap<String, Vec<MessageSpec>>,
+    visiting: &mut HashSet<String>,
+) -> Vec<MessageSpec> {
+    if !visiting.insert(branch_id.to_string()) {
+        return Vec::new();
+    }
+
+    let Some(branch) = branches.get(branch_id) else {
+        visiting.remove(branch_id);
+        return messages_by_branch
+            .get(branch_id)
+            .cloned()
+            .unwrap_or_default();
+    };
+
+    let mut inherited = if let Some(parent_id) = branch.parent_branch_id.as_deref() {
+        let parent_visible =
+            collect_branch_messages(parent_id, branches, messages_by_branch, visiting);
+        trim_parent_messages(&parent_visible, branch)
+    } else {
+        Vec::new()
+    };
+
+    let mut own = messages_by_branch
+        .get(branch_id)
+        .cloned()
+        .unwrap_or_default();
+    own.sort_by(|left, right| left.created_at.cmp(&right.created_at));
+    inherited.extend(own);
+    visiting.remove(branch_id);
+    inherited
+}
+
+fn trim_parent_messages(
+    parent_messages: &[MessageSpec],
+    branch: &ConversationBranchSpec,
+) -> Vec<MessageSpec> {
+    match branch.inherit_mode.as_str() {
+        "none" => Vec::new(),
+        "exclusive" => {
+            if let Some(source_message_id) = branch.source_message_id.as_deref() {
+                if let Some(index) = parent_messages
+                    .iter()
+                    .position(|message| message.id == source_message_id)
+                {
+                    return parent_messages[..index].to_vec();
+                }
+            }
+            parent_messages.to_vec()
+        }
+        _ => {
+            if let Some(source_message_id) = branch.source_message_id.as_deref() {
+                if let Some(index) = parent_messages
+                    .iter()
+                    .position(|message| message.id == source_message_id)
+                {
+                    return parent_messages[..=index].to_vec();
+                }
+            }
+            parent_messages.to_vec()
+        }
     }
 }
 
