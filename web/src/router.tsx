@@ -4,6 +4,7 @@ import { App } from "@/App";
 import { Agents } from "@/pages/agents";
 import { Extensions } from "@/pages/extensions";
 import { Observability } from "@/pages/observability";
+import { Permissions } from "@/pages/permissions";
 import { Schedules } from "@/pages/schedules";
 import { Settings } from "@/pages/settings";
 import { Skills } from "@/pages/skills";
@@ -117,6 +118,12 @@ const observabilityRoute = createRoute({
   component: Observability,
 });
 
+const permissionsRoute = createRoute({
+  getParentRoute: () => webRoute,
+  path: "/permissions",
+  component: Permissions,
+});
+
 const settingsRoute = createRoute({
   getParentRoute: () => webRoute,
   path: "/settings",
@@ -134,6 +141,7 @@ const routeTree = rootRoute.addChildren([
     extensionPageRoute,
     extensionsRoute,
     observabilityRoute,
+    permissionsRoute,
     settingsRoute,
   ]),
 ]);

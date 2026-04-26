@@ -55,6 +55,14 @@ impl RuntimePaths {
         self.config_dir().join("providers")
     }
 
+    pub fn agent_policies_dir(&self) -> PathBuf {
+        self.config_dir().join("agent-policies")
+    }
+
+    pub fn agent_policy_file(&self, agent_id: &str) -> PathBuf {
+        self.agent_policies_dir().join(format!("{agent_id}.toml"))
+    }
+
     pub fn app_config_file(&self) -> PathBuf {
         self.config_dir().join("ennoia.toml")
     }
@@ -134,6 +142,10 @@ impl RuntimePaths {
 
     pub fn observability_db(&self) -> PathBuf {
         self.system_sqlite_dir().join("observability.db")
+    }
+
+    pub fn permissions_db(&self) -> PathBuf {
+        self.system_sqlite_dir().join("permissions.db")
     }
 
     pub fn extension_state_dir(&self, extension_id: &str) -> PathBuf {
@@ -248,6 +260,7 @@ impl RuntimePaths {
         for dir in [
             self.agents_config_dir(),
             self.providers_config_dir(),
+            self.agent_policies_dir(),
             self.preferences_dir(),
             self.space_preferences_dir(),
             self.extensions_dir(),

@@ -7,6 +7,7 @@ pub mod domain;
 pub mod extension;
 pub mod gate;
 pub mod overview;
+pub mod permission;
 pub mod policy;
 pub mod server_settings;
 pub mod signals;
@@ -46,6 +47,11 @@ pub use extension::{
 };
 pub use gate::{GateRecord, GateSeverity, GateVerdict};
 pub use overview::{core_modules, PlatformOverview};
+pub use permission::{
+    AgentPermissionPolicy, AgentPermissionRule, CapabilityPermissionMetadata,
+    PermissionApprovalRecord, PermissionDecision, PermissionEventRecord, PermissionRequest,
+    PermissionScope, PermissionTarget, PermissionTrigger,
+};
 pub use policy::{
     GlobPattern, MemoryPolicy, RuntimeRule, RuntimeRuleCondition, RuntimeRuleTarget, StagePolicy,
 };

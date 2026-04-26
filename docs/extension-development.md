@@ -133,15 +133,25 @@ id = "conversation.list"
 contract = "conversation.list"
 kind = "query"
 entry = "conversation/conversations/list"
-metadata = { interface = { key = "conversation.list" } }
+metadata = { interface = { key = "conversation.list" }, permission = { action = "conversation.read", target_kind = "conversation", risk_level = "low", default_decision = "allow", scope_kind = "none" } }
 
 [[capabilities]]
 id = "message.append_user"
 contract = "message.append_user"
 kind = "action"
 entry = "conversation/messages/append-user"
-metadata = { interface = { key = "message.append_user" } }
+metadata = { interface = { key = "message.append_user" }, permission = { action = "conversation.write", target_kind = "conversation", risk_level = "medium", default_decision = "allow", scope_kind = "conversation" } }
 ```
+
+`metadata.permission` 是 Agent 权限系统的能力声明，不是最终授权结果。推荐字段：
+
+- `action`：系统级动作名，例如 `conversation.read`、`memory.write`、`provider.generate`。
+- `target_kind`：权限目标类型，例如 `conversation`、`memory`、`run`、`artifact`。
+- `risk_level`：能力风险分级，当前主要用于说明和前端展示。
+- `default_decision`：建议默认裁决，用于表达扩展设计意图；真正是否放行仍由宿主 policy / grant 决定。
+- `scope_kind`：作用域粒度，例如 `none`、`conversation`、`run`。
+
+扩展不直接判断 Agent 是否有权执行某项能力。扩展只声明 `permission` 元数据，宿主在 Interface Router 和 Provider 调用前统一完成裁决、审批和事件落库。
 
 Schedule Action 也通过 capability metadata 声明：
 

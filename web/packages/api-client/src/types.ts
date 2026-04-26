@@ -204,6 +204,82 @@ export type ProviderModelsResponse = {
   generation_options: ExtensionProviderContribution["provider"]["generation_options"];
 };
 
+export type PermissionTarget = {
+  kind: string;
+  id: string;
+  conversation_id?: string | null;
+  run_id?: string | null;
+  path?: string | null;
+  host?: string | null;
+};
+
+export type PermissionScope = {
+  conversation_id?: string | null;
+  run_id?: string | null;
+  extension_id?: string | null;
+  path?: string | null;
+  host?: string | null;
+};
+
+export type PermissionTrigger = {
+  kind: string;
+  user_initiated: boolean;
+};
+
+export type AgentPermissionRule = {
+  id: string;
+  effect: string;
+  actions: string[];
+  extension_scope: string[];
+  conversation_scope?: string | null;
+  run_scope?: string | null;
+  path_include: string[];
+  path_exclude: string[];
+  host_scope: string[];
+};
+
+export type AgentPermissionPolicy = {
+  mode: string;
+  rules: AgentPermissionRule[];
+};
+
+export type PermissionPolicySummary = {
+  agent_id: string;
+  mode: string;
+  allow_count: number;
+  ask_count: number;
+  deny_count: number;
+};
+
+export type PermissionEventRecord = {
+  event_id: string;
+  agent_id: string;
+  action: string;
+  decision: string;
+  target: PermissionTarget;
+  scope: PermissionScope;
+  extension_id?: string | null;
+  matched_rule_id?: string | null;
+  approval_id?: string | null;
+  trace_id?: string | null;
+  created_at: string;
+};
+
+export type PermissionApprovalRecord = {
+  approval_id: string;
+  status: string;
+  agent_id: string;
+  action: string;
+  target: PermissionTarget;
+  scope: PermissionScope;
+  trigger: PermissionTrigger;
+  matched_rule_id?: string | null;
+  reason: string;
+  created_at: string;
+  resolved_at?: string | null;
+  resolution?: string | null;
+};
+
 export type ChatThread = {
   id: string;
   topology: "direct" | "group";

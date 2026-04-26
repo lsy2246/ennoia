@@ -6,6 +6,7 @@
 
 - 工作台：核心只提供宿主、配置、路径、日志和 Worker RPC；业务能力由扩展提供。
 - Agents：维护协作者档案、上游渠道、模型、技能和启用状态。
+- Agent 权限：系统级权限策略、审批和事件记录统一由宿主裁决，扩展只声明能力风险，不直接放权。
 - 技能：Agent 可引用的工具与用法定义，只保留最小目录元信息与文档入口，和扩展严格分离。
 - API 上游渠道：Agent 绑定的具体模型访问实例。
 - 扩展：系统插件包，manifest 统一声明 `resource_types`、`capabilities`、`surfaces`、`locales`、`themes`、`commands`、`subscriptions`；如需进入会话目录，再额外声明 `conversation` 规则。宿主把扩展/技能目录整理成结构化 `context` 交给 provider 渲染，不再把它们直接硬拼进自然语言 prompt，也不自动注入文档正文。
@@ -49,6 +50,7 @@
 - 系统定时计划写入 `~/.ennoia/data/system/schedules.json`，到期后由宿主运行命令或触发 Agent，并可把完整结果、摘要或最终结论投递到会话 / lane。
 - 系统事件总线写入 `~/.ennoia/data/system/sqlite/events.db`，用于持久化会话等系统事件及其 Hook 投递状态。
 - 系统观测数据写入 `~/.ennoia/data/system/sqlite/observability.db`，统一承载 logs、traces 和 span links。
+- Agent 权限策略写入 `~/.ennoia/config/agent-policies/{agent_id}.toml`，权限事件与审批写入 `~/.ennoia/data/system/sqlite/permissions.db`。
 - 核心日志写入 `~/.ennoia/logs/`。
 - 扩展私有数据写入 `~/.ennoia/data/extensions/{extension_id}/`。
 - 核心不提供主业务 SQLite，不内建语义记忆、编排、任务或产物索引表。

@@ -15,6 +15,7 @@ Web
       -> Extension Host / Process Worker
       -> Observability Store
       -> Event Bus
+      -> Agent Permission Store
       -> Interface Router
         -> Memory Worker / Workflow Worker / Other Extension Workers
       -> Scheduler
@@ -28,6 +29,16 @@ Web
 - `Paths`：统一解析运行目录，所有运行时文件位置都通过 `RuntimePaths` 推导。
 - `Extension Host`：负责扩展扫描、attach / detach、reload / restart、诊断、Worker 解析和 Worker RPC 分发；Worker 可以是 Wasm，也可以是进程型 stdio RPC。
 - `Server`：负责 HTTP API、配置读写、接口绑定、定时调度、Worker RPC 路由、Observability、事件总线和系统内置组件装配。
+
+## Agent 权限裁决
+
+- Agent 权限属于系统核心，不做成扩展，也不交给 Wasm / Process Worker 自行裁决。
+- 扩展只通过 `capabilities[].metadata.permission` 声明动作、目标类型、风险等级和作用域；最终允许、拒绝、审批都由宿主 `AgentPermissionStore` 决定。
+- 当前宿主会在两类入口做权限判断：
+  - Interface Router：当内部 Agent 以 `permission_actor` 身份调用 `conversation.*`、`memory.*`、`run.*` 等稳定接口时。
+  - Provider 调用：Agent 真正发起 `provider.generate` 上游请求前。
+- 裁决结果固定为 `allow`、`deny`、`ask`。`ask` 会生成待审批记录，审批通过后可落成单次 grant、当前会话 grant、当前 run grant 或永久 policy。
+- 系统默认只管 Agent 身份，不拦截操作者直接发起的 HTTP 调用。
 
 ## 细粒度接口层
 
@@ -113,6 +124,7 @@ Web
 - 扩展 UI 通过独立 ESM bundle 动态加载；主壳只导入 `/api/extensions/{extension_id}/ui/module` 暴露的模块包装器，再按 mount id 调用扩展自己的 `mount/unmount`。
 - 扩展主题通过 `ennoia.theme` 与主壳对接；主壳只消费稳定语义 token 和 dockview token，不把内部 class 结构暴露给扩展。
 - 扩展默认不进入会话目录；只有显式声明 `conversation.inject` 时，宿主才会把该扩展作为会话可见目录项暴露给模型。进入会话时只注入扩展自身的 `description`、受限资源/能力目录与 `docs` 入口，不自动注入 `docs` 正文。
+- 如需参与 Agent 权限裁决，扩展应在 capability metadata 中额外声明 `permission`，例如 `action`、`target_kind`、`scope_kind`；没有声明 `permission` 的 capability 不会自动进入 Agent 权限系统。
 - Agent 调用上游模型时，宿主统一构造结构化 `context`，至少包含 `runtime`、`conversation`、`extensions`、`skills` 四块，再由 provider 适配层渲染成模型可见消息；`metadata` 只保留给链路追踪和调试，不承担模型上下文职责。
 - `runtime.agent_working_dir` 与 `runtime.agent_artifacts_dir` 表示 Agent 自己的内部运行目录，不等同于用户项目工作区；模型只应在路径相关任务里按需使用，不能默认向用户主动播报。
 
@@ -130,6 +142,8 @@ Web
 - 接口绑定：`~/.ennoia/config/interfaces.toml`
 - 系统级观测：`~/.ennoia/data/system/sqlite/observability.db`
 - 系统级事件总线：`~/.ennoia/data/system/sqlite/events.db`
+- Agent 权限事件与审批：`~/.ennoia/data/system/sqlite/permissions.db`
+- Agent 权限策略：`~/.ennoia/config/agent-policies/{agent_id}.toml`
 - 系统定时计划：`~/.ennoia/data/system/schedules.json`
 - 扩展私有数据：`~/.ennoia/data/extensions/{extension_id}/`
 - 扩展私有配置：`~/.ennoia/data/extensions/{extension_id}/` 下由扩展自行定义

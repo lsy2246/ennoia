@@ -1,6 +1,7 @@
 use ennoia_kernel::{
-    HookEventEnvelope, HookResourceRef, InterfaceBindingConfig, InterfaceBindingsConfig, OwnerRef,
-    HOOK_EVENT_CONVERSATION_CREATED, HOOK_EVENT_CONVERSATION_MESSAGE_CREATED,
+    CapabilityPermissionMetadata, HookEventEnvelope, HookResourceRef, InterfaceBindingConfig,
+    InterfaceBindingsConfig, OwnerRef, PermissionRequest, PermissionScope, PermissionTarget,
+    PermissionTrigger, HOOK_EVENT_CONVERSATION_CREATED, HOOK_EVENT_CONVERSATION_MESSAGE_CREATED,
 };
 use std::io::Write;
 use std::path::PathBuf;
@@ -129,6 +130,18 @@ struct AgentSkillContext {
     #[serde(skip_serializing_if = "Option::is_none")]
     docs: Option<String>,
     keywords: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PermissionActorContext {
+    agent_id: String,
+    kind: String,
+    #[serde(default)]
+    user_initiated: bool,
+    #[serde(default)]
+    conversation_id: Option<String>,
+    #[serde(default)]
+    run_id: Option<String>,
 }
 
 pub(super) async fn extension_interfaces(
@@ -497,6 +510,9 @@ pub(super) async fn dispatch_interface_value_with_context(
         ));
     }
 
+    let permission_grant_id =
+        authorize_interface_dispatch(state, request, key, &binding, &params, &context)?;
+
     let span_trace = request.child_trace("interface_rpc");
     let started = Instant::now();
     let started_at = now_iso();
@@ -526,6 +542,27 @@ pub(super) async fn dispatch_interface_value_with_context(
         .map_err(|error| scoped(ApiError::internal(error.to_string()), request))?;
 
     if response.ok {
+        if let Some(grant_id) = permission_grant_id.as_deref() {
+            if let Err(error) = state.agent_permissions.consume_grant(grant_id) {
+                let _ = state.observability.append_log_scoped(
+                    ObservationLogWrite {
+                        event: "runtime.permission.consume_grant_failed".to_string(),
+                        level: "warn".to_string(),
+                        component: OBSERVABILITY_COMPONENT_PROXY.to_string(),
+                        source_kind: "permission".to_string(),
+                        source_id: Some(grant_id.to_string()),
+                        message: "permission grant consume failed".to_string(),
+                        attributes: serde_json::json!({
+                            "interface": key,
+                            "extension_id": binding.extension_id,
+                            "error": error.to_string(),
+                        }),
+                        created_at: None,
+                    },
+                    Some(&span_trace),
+                );
+            }
+        }
         record_trace_span(
             state,
             ObservationSpanWrite {
@@ -575,6 +612,71 @@ pub(super) async fn dispatch_interface_value_with_context(
         },
     );
     Err(scoped(ApiError::bad_request(error), request))
+}
+
+fn authorize_interface_dispatch(
+    state: &AppState,
+    request: &RequestContext,
+    key: &str,
+    binding: &InterfaceBindingConfig,
+    params: &JsonValue,
+    context: &JsonValue,
+) -> Result<Option<String>, ApiError> {
+    let Some(actor) = permission_actor_from_context(context) else {
+        return Ok(None);
+    };
+    let Some(capability) = find_interface_capability(state, &binding.extension_id, key) else {
+        return Ok(None);
+    };
+    let Some(permission) = capability_permission_metadata(&capability.capability.metadata) else {
+        return Ok(None);
+    };
+    let permission_request =
+        build_interface_permission_request(&actor, binding, &capability, &permission, params);
+    let decision = state
+        .agent_permissions
+        .evaluate_request(&permission_request, Some(request))
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), request))?;
+    match decision.decision.as_str() {
+        "allow" => Ok(decision.grant_id),
+        "ask" => {
+            let approval_id = decision
+                .approval_id
+                .clone()
+                .unwrap_or_else(|| "unknown".to_string());
+            Err(scoped(
+                ApiError::forbidden(format!(
+                    "approval required: action={}, approval_id={approval_id}",
+                    permission_request.action
+                ))
+                .with_details(serde_json::json!({
+                    "decision": decision.decision,
+                    "approval_id": decision.approval_id,
+                    "agent_id": permission_request.agent_id,
+                    "action": permission_request.action,
+                    "target": permission_request.target,
+                    "scope": permission_request.scope,
+                    "reason": decision.reason,
+                })),
+                request,
+            ))
+        }
+        _ => Err(scoped(
+            ApiError::forbidden(format!(
+                "permission denied: action={}, reason={}",
+                permission_request.action, decision.reason
+            ))
+            .with_details(serde_json::json!({
+                "decision": decision.decision,
+                "agent_id": permission_request.agent_id,
+                "action": permission_request.action,
+                "target": permission_request.target,
+                "scope": permission_request.scope,
+                "reason": decision.reason,
+            })),
+            request,
+        )),
+    }
 }
 
 pub(super) fn resolve_interface_binding(
@@ -865,41 +967,49 @@ async fn generate_conversation_agent_reply(
         return Ok(());
     }
 
-    let conversation_messages = dispatch_interface_value(
-        state,
-        request,
-        "message.list",
-        serde_json::json!({ "conversation_id": conversation_id }),
-    )
-    .await?;
-    let run_response = dispatch_interface_value(
-        state,
-        request,
-        "run.create",
-        serde_json::json!({
-            "owner": payload_owner(payload).unwrap_or_else(|| OwnerRef::global("runtime")),
-            "goal": body,
-            "trigger": "conversation_message",
-            "participants": addressed_agents,
-            "addressed_agents": addressed_agents,
-            "source_refs": [{
-                "kind": "conversation",
-                "id": conversation_id,
-                "conversation_id": conversation_id,
-                "lane_id": lane_id,
-                "message_id": message_id,
-            }],
-            "metadata": {
-                "origin": "conversation.message.created",
-                "message_id": message_id,
-                "runtime_home": state.runtime_paths.display_for_user(state.runtime_paths.home()),
-                "agent_paths": agent_runtime_paths,
-            }
-        }),
-    )
-    .await?;
-
     for agent_id in &addressed_agents {
+        let actor_context = permission_actor_context(
+            agent_id,
+            "conversation.message.created",
+            true,
+            Some(&conversation_id),
+            None,
+        );
+        let conversation_messages = dispatch_interface_value_with_context(
+            state,
+            request,
+            "message.list",
+            serde_json::json!({ "conversation_id": conversation_id }),
+            actor_context.clone(),
+        )
+        .await?;
+        let run_response = dispatch_interface_value_with_context(
+            state,
+            request,
+            "run.create",
+            serde_json::json!({
+                "owner": payload_owner(payload).unwrap_or_else(|| OwnerRef::global("runtime")),
+                "goal": body,
+                "trigger": "conversation_message",
+                "participants": [agent_id.clone()],
+                "addressed_agents": [agent_id.clone()],
+                "source_refs": [{
+                    "kind": "conversation",
+                    "id": conversation_id,
+                    "conversation_id": conversation_id,
+                    "lane_id": lane_id,
+                    "message_id": message_id,
+                }],
+                "metadata": {
+                    "origin": "conversation.message.created",
+                    "message_id": message_id,
+                    "runtime_home": state.runtime_paths.display_for_user(state.runtime_paths.home()),
+                    "agent_paths": agent_runtime_paths,
+                }
+            }),
+            actor_context.clone(),
+        )
+        .await?;
         let reply_body = match generate_real_conversation_agent_reply(
             state,
             request,
@@ -917,7 +1027,11 @@ async fn generate_conversation_agent_reply(
             Ok(reply) => reply,
             Err(error) => error.to_string(),
         };
-        let append_response = dispatch_interface_value(
+        let run_id = run_response
+            .get("run")
+            .and_then(|item| item.get("id"))
+            .and_then(JsonValue::as_str);
+        let append_response = dispatch_interface_value_with_context(
             state,
             request,
             "message.append_agent",
@@ -931,6 +1045,13 @@ async fn generate_conversation_agent_reply(
                     "addressed_agents": ["operator"],
                 }
             }),
+            permission_actor_context(
+                agent_id,
+                "conversation.message.created",
+                true,
+                Some(&conversation_id),
+                run_id,
+            ),
         )
         .await?;
         let resource_id = append_response
@@ -1032,8 +1153,23 @@ async fn generate_real_conversation_agent_reply(
             }
         }
     });
+    let provider_grant_id = authorize_provider_generate(
+        state,
+        request,
+        agent,
+        provider,
+        &contribution,
+        conversation_id,
+        &run_id,
+    )?;
     let response = invoke_provider_method(&entry, &request_payload, provider)
         .map_err(|error| scoped(ApiError::internal(error), request))?;
+    if let Some(grant_id) = provider_grant_id.as_deref() {
+        state
+            .agent_permissions
+            .consume_grant(grant_id)
+            .map_err(|error| scoped(ApiError::internal(error.to_string()), request))?;
+    }
     let text = response
         .get("result")
         .and_then(|item| item.get("text"))
@@ -1053,6 +1189,81 @@ fn provider_runtime_request_config(provider: &ProviderConfig) -> JsonValue {
         "api_key_env": provider.api_key_env,
         "default_model": provider.default_model,
     })
+}
+
+fn authorize_provider_generate(
+    state: &AppState,
+    request: &RequestContext,
+    agent: &AgentConfig,
+    provider: &ProviderConfig,
+    contribution: &RegisteredProviderContribution,
+    conversation_id: &str,
+    run_id: &str,
+) -> Result<Option<String>, ApiError> {
+    let permission_request = PermissionRequest {
+        agent_id: agent.id.clone(),
+        action: "provider.generate".to_string(),
+        target: PermissionTarget {
+            kind: "provider".to_string(),
+            id: provider.id.clone(),
+            conversation_id: Some(conversation_id.to_string()),
+            run_id: Some(run_id.to_string()),
+            path: None,
+            host: normalize_optional_runtime_value(&provider.base_url),
+        },
+        scope: PermissionScope {
+            conversation_id: Some(conversation_id.to_string()),
+            run_id: Some(run_id.to_string()),
+            extension_id: Some(contribution.extension_id.clone()),
+            path: None,
+            host: normalize_optional_runtime_value(&provider.base_url),
+        },
+        trigger: PermissionTrigger {
+            kind: "conversation.message.created".to_string(),
+            user_initiated: true,
+        },
+    };
+    let decision = state
+        .agent_permissions
+        .evaluate_request(&permission_request, Some(request))
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), request))?;
+    match decision.decision.as_str() {
+        "allow" => Ok(decision.grant_id),
+        "ask" => Err(scoped(
+            ApiError::forbidden(format!(
+                "approval required: action=provider.generate, approval_id={}",
+                decision
+                    .approval_id
+                    .clone()
+                    .unwrap_or_else(|| "unknown".to_string())
+            ))
+            .with_details(serde_json::json!({
+                "decision": decision.decision,
+                "approval_id": decision.approval_id,
+                "agent_id": permission_request.agent_id,
+                "action": permission_request.action,
+                "target": permission_request.target,
+                "scope": permission_request.scope,
+                "reason": decision.reason,
+            })),
+            request,
+        )),
+        _ => Err(scoped(
+            ApiError::forbidden(format!(
+                "permission denied: action=provider.generate, reason={}",
+                decision.reason
+            ))
+            .with_details(serde_json::json!({
+                "decision": decision.decision,
+                "agent_id": permission_request.agent_id,
+                "action": permission_request.action,
+                "target": permission_request.target,
+                "scope": permission_request.scope,
+                "reason": decision.reason,
+            })),
+            request,
+        )),
+    }
 }
 
 fn resolve_provider_contribution_for_generate(
@@ -1347,6 +1558,193 @@ fn normalize_unknown(value: &str) -> String {
     } else {
         trimmed.to_string()
     }
+}
+
+fn normalize_optional_runtime_value(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn permission_actor_context(
+    agent_id: &str,
+    kind: &str,
+    user_initiated: bool,
+    conversation_id: Option<&str>,
+    run_id: Option<&str>,
+) -> JsonValue {
+    serde_json::json!({
+        "permission_actor": {
+            "agent_id": agent_id,
+            "kind": kind,
+            "user_initiated": user_initiated,
+            "conversation_id": conversation_id,
+            "run_id": run_id,
+        }
+    })
+}
+
+fn permission_actor_from_context(context: &JsonValue) -> Option<PermissionActorContext> {
+    serde_json::from_value::<PermissionActorContext>(context.get("permission_actor")?.clone()).ok()
+}
+
+fn find_interface_capability(
+    state: &AppState,
+    extension_id: &str,
+    key: &str,
+) -> Option<RegisteredCapabilityContribution> {
+    state
+        .extensions
+        .snapshot()
+        .capabilities
+        .into_iter()
+        .find(|item| {
+            item.extension_id == extension_id
+                && item
+                    .capability
+                    .metadata
+                    .get("interface")
+                    .and_then(|value| value.get("key"))
+                    .and_then(JsonValue::as_str)
+                    .is_some_and(|interface_key| interface_key == key)
+        })
+}
+
+fn capability_permission_metadata(metadata: &JsonValue) -> Option<CapabilityPermissionMetadata> {
+    serde_json::from_value(metadata.get("permission")?.clone()).ok()
+}
+
+fn build_interface_permission_request(
+    actor: &PermissionActorContext,
+    binding: &InterfaceBindingConfig,
+    capability: &RegisteredCapabilityContribution,
+    permission: &CapabilityPermissionMetadata,
+    params: &JsonValue,
+) -> PermissionRequest {
+    let conversation_id =
+        permission_conversation_id(params).or_else(|| actor.conversation_id.clone());
+    let run_id = permission_run_id(params).or_else(|| actor.run_id.clone());
+    let path = permission_path(params);
+    let host = permission_host(params);
+    let target = PermissionTarget {
+        kind: permission.target_kind.clone(),
+        id: permission_target_id(
+            permission,
+            capability,
+            params,
+            conversation_id.as_deref(),
+            run_id.as_deref(),
+        ),
+        conversation_id: conversation_id.clone(),
+        run_id: run_id.clone(),
+        path: path.clone(),
+        host: host.clone(),
+    };
+    let scope = PermissionScope {
+        conversation_id: permission_scope_conversation_id(permission, conversation_id.clone()),
+        run_id: permission_scope_run_id(permission, run_id.clone()),
+        extension_id: Some(binding.extension_id.clone()),
+        path,
+        host,
+    };
+    PermissionRequest {
+        agent_id: actor.agent_id.clone(),
+        action: permission.action.clone(),
+        target,
+        scope,
+        trigger: PermissionTrigger {
+            kind: actor.kind.clone(),
+            user_initiated: actor.user_initiated,
+        },
+    }
+}
+
+fn permission_scope_conversation_id(
+    permission: &CapabilityPermissionMetadata,
+    conversation_id: Option<String>,
+) -> Option<String> {
+    match permission.scope_kind.trim().to_ascii_lowercase().as_str() {
+        "none" => None,
+        "run" | "conversation" | "extension" | "" => conversation_id,
+        _ => conversation_id,
+    }
+}
+
+fn permission_scope_run_id(
+    permission: &CapabilityPermissionMetadata,
+    run_id: Option<String>,
+) -> Option<String> {
+    match permission.scope_kind.trim().to_ascii_lowercase().as_str() {
+        "run" => run_id,
+        _ => None,
+    }
+}
+
+fn permission_target_id(
+    permission: &CapabilityPermissionMetadata,
+    capability: &RegisteredCapabilityContribution,
+    params: &JsonValue,
+    conversation_id: Option<&str>,
+    run_id: Option<&str>,
+) -> String {
+    let normalized_kind = permission.target_kind.trim().to_ascii_lowercase();
+    let candidate = match normalized_kind.as_str() {
+        "conversation" => json_string_at(params, &["conversation_id"])
+            .or_else(|| json_string_at(params, &["conversation", "id"]))
+            .or_else(|| conversation_id.map(str::to_string)),
+        "branch" => json_string_at(params, &["branch_id"])
+            .or_else(|| json_string_at(params, &["from_branch_id"]))
+            .or_else(|| conversation_id.map(str::to_string)),
+        "checkpoint" => json_string_at(params, &["checkpoint_id"])
+            .or_else(|| json_string_at(params, &["source_checkpoint_id"]))
+            .or_else(|| json_string_at(params, &["message_id"]))
+            .or_else(|| conversation_id.map(str::to_string)),
+        "run" => json_string_at(params, &["run_id"]).or_else(|| run_id.map(str::to_string)),
+        "task" => json_string_at(params, &["task_id"]).or_else(|| run_id.map(str::to_string)),
+        "artifact" => {
+            json_string_at(params, &["artifact_id"]).or_else(|| run_id.map(str::to_string))
+        }
+        "memory" => json_string_at(params, &["memory_id"])
+            .or_else(|| json_string_at(params, &["workspace_id"]))
+            .or_else(|| Some("memory".to_string())),
+        _ => None,
+    };
+    candidate.unwrap_or_else(|| capability.capability.id.clone())
+}
+
+fn permission_conversation_id(params: &JsonValue) -> Option<String> {
+    json_string_at(params, &["conversation_id"])
+        .or_else(|| json_string_at(params, &["conversation", "id"]))
+        .or_else(|| json_string_at(params, &["message", "conversation_id"]))
+}
+
+fn permission_run_id(params: &JsonValue) -> Option<String> {
+    json_string_at(params, &["run_id"]).or_else(|| json_string_at(params, &["run", "id"]))
+}
+
+fn permission_path(params: &JsonValue) -> Option<String> {
+    json_string_at(params, &["path"])
+        .or_else(|| json_string_at(params, &["cwd"]))
+        .or_else(|| json_string_at(params, &["file_path"]))
+}
+
+fn permission_host(params: &JsonValue) -> Option<String> {
+    json_string_at(params, &["host"]).or_else(|| json_string_at(params, &["base_url"]))
+}
+
+fn json_string_at(value: &JsonValue, path: &[&str]) -> Option<String> {
+    let mut current = value;
+    for segment in path {
+        current = current.get(*segment)?;
+    }
+    current
+        .as_str()
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+        .map(ToOwned::to_owned)
 }
 
 fn invoke_provider_method(

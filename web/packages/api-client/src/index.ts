@@ -7,4 +7,5 @@ export * from "./extensions";
 export * from "./interfaces";
 export * from "./logs";
 export * from "./observability";
+export * from "./permissions";
 export * from "./schedules";

@@ -15,6 +15,7 @@ use ennoia_paths::{default_home_dir, RuntimePaths};
 use tokio::net::TcpListener;
 use tracing::info;
 
+use crate::agent_permissions::AgentPermissionStore;
 use crate::event_bus::EventBusStore;
 use crate::middleware::RateLimitState;
 use crate::observability::{
@@ -47,6 +48,7 @@ pub struct AppState {
     pub schedule_lock: Arc<tokio::sync::Mutex<()>>,
     pub observability: Arc<ObservabilityStore>,
     pub event_bus: Arc<EventBusStore>,
+    pub agent_permissions: Arc<AgentPermissionStore>,
     pub observability_guard: Option<Arc<ObservabilityGuard>>,
 }
 
@@ -59,6 +61,8 @@ pub fn default_app_state() -> AppState {
         ExtensionRuntime::bootstrap(extension_runtime_config(&runtime_paths)).expect("runtime");
     let observability = Arc::new(ObservabilityStore::new(&runtime_paths).expect("observability"));
     let event_bus = Arc::new(EventBusStore::new(&runtime_paths).expect("event bus"));
+    let agent_permissions =
+        Arc::new(AgentPermissionStore::new(&runtime_paths).expect("agent permissions"));
 
     AppState {
         app_config,
@@ -75,6 +79,7 @@ pub fn default_app_state() -> AppState {
         schedule_lock: Arc::new(tokio::sync::Mutex::new(())),
         observability,
         event_bus,
+        agent_permissions,
         observability_guard: None,
     }
 }
@@ -106,6 +111,7 @@ pub async fn bootstrap_app_state(home_dir: impl AsRef<Path>) -> Result<AppState,
     let extensions = ExtensionRuntime::bootstrap(extension_runtime_config(&runtime_paths))?;
     let observability = Arc::new(ObservabilityStore::new(&runtime_paths)?);
     let event_bus = Arc::new(EventBusStore::new(&runtime_paths)?);
+    let agent_permissions = Arc::new(AgentPermissionStore::new(&runtime_paths)?);
 
     Ok(AppState {
         app_config,
@@ -122,6 +128,7 @@ pub async fn bootstrap_app_state(home_dir: impl AsRef<Path>) -> Result<AppState,
         schedule_lock: Arc::new(tokio::sync::Mutex::new(())),
         observability,
         event_bus,
+        agent_permissions,
         observability_guard,
     })
 }

@@ -49,6 +49,7 @@ mod interfaces;
 mod logs;
 mod memory;
 mod observability;
+mod permissions;
 mod resources;
 mod runtime;
 mod schedules;
@@ -59,6 +60,7 @@ use interfaces::*;
 use logs::*;
 use memory::*;
 use observability::*;
+use permissions::*;
 use resources::*;
 use runtime::*;
 use schedules::*;
@@ -224,6 +226,10 @@ pub fn build_router(state: AppState) -> Router {
             "/api/agents/{agent_id}",
             get(agent_detail).put(agent_update).delete(agent_delete),
         )
+        .route(
+            "/api/agents/{agent_id}/policy",
+            get(agent_policy_detail).put(agent_policy_put),
+        )
         .route("/api/skills", get(skills).post(skill_create))
         .route(
             "/api/skills/{skill_id}",
@@ -260,6 +266,16 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/api/observability/traces/{trace_id}",
             get(observability_trace_detail),
+        )
+        .route(
+            "/api/permissions/policies",
+            get(permission_policy_summaries),
+        )
+        .route("/api/permissions/events", get(permission_events))
+        .route("/api/permissions/approvals", get(permission_approvals))
+        .route(
+            "/api/permissions/approvals/{approval_id}/resolve",
+            post(permission_approval_resolve),
         )
         .route("/api/logs/frontend", post(frontend_log_create))
         .merge(bootstrap)

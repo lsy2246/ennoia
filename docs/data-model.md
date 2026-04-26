@@ -141,6 +141,61 @@
 
 `kind`、`default_model`、`skills_dir`、`working_dir`、`artifacts_dir` 作为运行时派生/内部字段存在，前端产品模型以显式字段为主。`working_dir` / `artifacts_dir` 表示 Agent 自己的运行目录，不等同于用户项目工作区；默认分别按 `agents/<agent_id>/work` 与 `agents/<agent_id>/artifacts` 自动派生。
 
+## Agent 权限域
+
+`AgentPermissionPolicy` 字段：
+
+- `mode`
+- `rules`
+
+`AgentPermissionRule` 字段：
+
+- `id`
+- `effect`
+- `actions`
+- `extension_scope`
+- `conversation_scope`
+- `run_scope`
+- `path_include`
+- `path_exclude`
+- `host_scope`
+
+`PermissionApprovalRecord` 字段：
+
+- `approval_id`
+- `status`
+- `agent_id`
+- `action`
+- `target`
+- `scope`
+- `trigger`
+- `matched_rule_id`
+- `reason`
+- `created_at`
+- `resolved_at`
+- `resolution`
+
+`PermissionEventRecord` 字段：
+
+- `event_id`
+- `agent_id`
+- `action`
+- `decision`
+- `target`
+- `scope`
+- `extension_id`
+- `matched_rule_id`
+- `approval_id`
+- `trace_id`
+- `created_at`
+
+约定：
+
+- Policy 是系统级主模型，扩展只声明 `capabilities[].metadata.permission`，不保存最终授权结果。
+- `effect` 固定使用 `allow`、`deny`、`ask`。
+- 审批通过后可以产生临时 grant，也可以直接写回 policy。
+- 事件记录只表达“谁、在什么作用域、请求了什么、系统如何裁决”，不复写业务结果。
+
 ## Skill 域
 
 `SkillConfig` 字段：`id`、`display_name`、`description`、`source`、`entry`、`docs`、`keywords`、`enabled`。
@@ -159,7 +214,9 @@
 
 - 核心系统配置：`~/.ennoia/config/*.toml`。
 - 接口绑定：`~/.ennoia/config/interfaces.toml`。
+- Agent 权限策略：`~/.ennoia/config/agent-policies/{agent_id}.toml`。
 - 定时计划：`~/.ennoia/data/system/schedules.json`。
+- Agent 权限事件与审批：`~/.ennoia/data/system/sqlite/permissions.db`。
 - 核心前端日志：`~/.ennoia/logs/frontend.jsonl`。
 - 扩展私有数据：`~/.ennoia/data/extensions/{extension_id}/`。
 - 核心不维护主业务数据库快照。
