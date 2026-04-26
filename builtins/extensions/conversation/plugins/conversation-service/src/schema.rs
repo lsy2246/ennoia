@@ -3,13 +3,25 @@ use sqlx::{Row, SqlitePool};
 pub const CONVERSATION_SCHEMA_SQL: &str = include_str!("../../../data/schema.sql");
 
 pub async fn initialize_conversation_schema(pool: &SqlitePool) -> Result<(), sqlx::Error> {
-    for statement in split_sql_statements(CONVERSATION_SCHEMA_SQL) {
+    let statements = split_sql_statements(CONVERSATION_SCHEMA_SQL);
+    let (table_statements, other_statements): (Vec<_>, Vec<_>) =
+        statements.into_iter().partition(|statement| {
+            statement
+                .trim_start()
+                .to_ascii_uppercase()
+                .starts_with("CREATE TABLE")
+        });
+
+    for statement in table_statements {
         sqlx::query(&statement).execute(pool).await?;
     }
     ensure_column(pool, "conversations", "active_branch_id", "TEXT").await?;
     ensure_column(pool, "messages", "branch_id", "TEXT").await?;
     ensure_column(pool, "messages", "reply_to_message_id", "TEXT").await?;
     ensure_column(pool, "messages", "rewrite_from_message_id", "TEXT").await?;
+    for statement in other_statements {
+        sqlx::query(&statement).execute(pool).await?;
+    }
     backfill_branch_rows(pool).await?;
     Ok(())
 }
