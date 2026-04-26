@@ -1,6 +1,17 @@
 id = "openai"
 name = "OpenAI Upstream"
+description = "提供 llm.generate 能力，并把 OpenAI 兼容上游接入系统 provider 槽位。"
+docs = "docs/overview.md"
 kind = "extension"
+
+[[links]]
+label = "Provider Usage"
+target = "docs/provider.md"
+
+[[examples]]
+title = "生成回复"
+summary = "供 Agent 通过 llm.generate 调用上游模型生成文本。"
+input_hint = "llm.generate"
 
 [source]
 mode = "package"

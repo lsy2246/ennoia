@@ -7,13 +7,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use ennoia_kernel::{
     BehaviorContribution, CapabilityContribution, CommandContribution, ExtensionCapabilities,
-    ExtensionDiagnostic, ExtensionHealth, ExtensionKind, ExtensionManifest,
-    ExtensionPermissionSpec, ExtensionRegistryEntry, ExtensionRegistryFile, ExtensionRpcRequest,
-    ExtensionRpcResponse, ExtensionRuntimeEvent, ExtensionRuntimeSpec, ExtensionSourceMode,
-    ExtensionUiSpec, HookContribution, InterfaceContribution, LocaleContribution,
-    MemoryContribution, PageContribution, PanelContribution, ProviderContribution, ResolvedUiEntry,
-    ResolvedWorkerEntry, ResourceTypeContribution, ScheduleActionContribution,
-    SubscriptionContribution, SurfaceContribution, ThemeContribution,
+    ExtensionDiagnostic, ExtensionDocLink, ExtensionExample, ExtensionHealth, ExtensionKind,
+    ExtensionManifest, ExtensionPermissionSpec, ExtensionRegistryEntry, ExtensionRegistryFile,
+    ExtensionRpcRequest, ExtensionRpcResponse, ExtensionRuntimeEvent, ExtensionRuntimeSpec,
+    ExtensionSourceMode, ExtensionUiSpec, HookContribution, InterfaceContribution,
+    LocaleContribution, MemoryContribution, PageContribution, PanelContribution,
+    ProviderContribution, ResolvedUiEntry, ResolvedWorkerEntry, ResourceTypeContribution,
+    ScheduleActionContribution, SubscriptionContribution, SurfaceContribution, ThemeContribution,
 };
 use serde::Serialize;
 
@@ -21,6 +21,10 @@ use serde::Serialize;
 pub struct ResolvedExtensionSnapshot {
     pub id: String,
     pub name: String,
+    pub description: String,
+    pub docs: Option<String>,
+    pub links: Vec<ExtensionDocLink>,
+    pub examples: Vec<ExtensionExample>,
     pub kind: ExtensionKind,
     pub source_mode: ExtensionSourceMode,
     pub source_root: String,
@@ -837,6 +841,10 @@ fn resolve_manifest(
     ResolvedExtensionSnapshot {
         id: manifest.id.clone(),
         name: manifest.display_name(),
+        description: manifest.display_description(),
+        docs: manifest.docs,
+        links: manifest.links,
+        examples: manifest.examples,
         kind: manifest.kind,
         source_mode: source.source_mode,
         source_root,
@@ -1221,6 +1229,10 @@ fn failed_extension_snapshot(
     ResolvedExtensionSnapshot {
         id: id.clone(),
         name: id,
+        description: String::new(),
+        docs: None,
+        links: Vec::new(),
+        examples: Vec::new(),
         kind: ExtensionKind::SystemExtension,
         source_mode: source.source_mode,
         source_root: source_root.clone(),

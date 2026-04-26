@@ -3,12 +3,14 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   getExtension,
   getExtensionLogs,
+  listSkills,
   listExtensions,
   reloadExtension,
   restartExtension,
   setExtensionEnabled,
   type ExtensionDetail,
   type ExtensionRuntimeState,
+  type SkillConfig,
 } from "@ennoia/api-client";
 import { formatRelativePath } from "@/lib/pathDisplay";
 import { useUiHelpers } from "@/stores/ui";
@@ -18,6 +20,7 @@ export function Extensions() {
   const { resolveText, runtime, t } = useUiHelpers();
   const workbenchApi = useWorkbenchStore((state) => state.api);
   const [extensions, setExtensions] = useState<ExtensionRuntimeState[]>([]);
+  const [skills, setSkills] = useState<SkillConfig[]>([]);
   const [selected, setSelected] = useState<ExtensionRuntimeState | null>(null);
   const [detail, setDetail] = useState<ExtensionDetail | null>(null);
   const [logs, setLogs] = useState("");
@@ -25,8 +28,9 @@ export function Extensions() {
 
   const refresh = useCallback(async (selectedId?: string | null) => {
     setError(null);
-    const next = await listExtensions();
+    const [next, nextSkills] = await Promise.all([listExtensions(), listSkills()]);
     setExtensions(next);
+    setSkills(nextSkills);
     const nextSelected = next.find((item) => item.id === selectedId) ?? next[0] ?? null;
     setSelected(nextSelected);
     setDetail(nextSelected ? await getExtension(nextSelected.id).catch(() => null) : null);
@@ -75,6 +79,15 @@ export function Extensions() {
   const capabilityCount = detail?.capability_rows.length ?? 0;
   const resourceTypeCount = detail?.resource_types.length ?? 0;
   const subscriptionCount = detail?.subscriptions.length ?? 0;
+  const capabilityContracts = useMemo(
+    () => new Set(detail?.capability_rows.map((item) => item.contract) ?? []),
+    [detail?.capability_rows],
+  );
+  const relatedSkills = useMemo(
+    () =>
+      skills.filter((skill) => skill.requires.some((contract) => capabilityContracts.has(contract))),
+    [capabilityContracts, skills],
+  );
 
   function openExtensionPage(pageId: string, label: string) {
     if (!workbenchApi) {
@@ -99,8 +112,8 @@ export function Extensions() {
       <section className="work-panel">
         <div className="page-heading">
           <span>{t("web.extensions.eyebrow", "Extensions")}</span>
-          <h1>{t("web.extensions.title", "扩展包是系统插件，不是技能。")}</h1>
-          <p>{t("web.extensions.description", "这里按扩展包查看状态、贡献能力、重载和日志。来源目录只显示相对实例路径。")}</p>
+          <h1>{t("web.extensions.title", "扩展负责系统能力，不和技能混用。")}</h1>
+          <p>{t("web.extensions.description", "这里按扩展查看运行状态、能力说明、重载和日志。来源目录只显示相对实例路径。")}</p>
         </div>
         {error ? <div className="error">{error}</div> : null}
         <button type="button" className="secondary" onClick={() => void refresh(selected?.id)}>{t("web.action.rescan", "重新扫描")}</button>
@@ -128,10 +141,26 @@ export function Extensions() {
           <>
             <div className="kv-list">
               <span>ID</span><strong>{selected.id}</strong>
+              <span>{t("web.extensions.summary", "说明")}</span><strong>{detail?.description || t("web.common.none", "无")}</strong>
               <span>{t("web.common.status", "状态")}</span><strong><span className={`badge ${selected.status === "running" ? "badge--success" : selected.status === "error" ? "badge--danger" : "badge--muted"}`}>{selected.status}</span></strong>
-              <span>{t("web.extensions.install_dir", "扩展包目录")}</span><strong>{formatRelativePath(selected.install_dir)}</strong>
+              <span>{t("web.extensions.install_dir", "扩展目录")}</span><strong>{formatRelativePath(selected.install_dir)}</strong>
               <span>{t("web.extensions.source_root", "来源目录")}</span><strong>{formatRelativePath(selected.source_root)}</strong>
               <span>{t("web.extensions.diagnostics", "诊断")}</span><strong><span className={`badge ${selected.diagnostics.length > 0 ? "badge--warn" : "badge--muted"}`}>{selected.diagnostics.length}</span></strong>
+            </div>
+            <div className="stack">
+              <div className="panel-title">{t("web.extensions.documentation", "扩展说明")}</div>
+              <article className="mini-card">
+                <strong>{t("web.extensions.docs", "文档入口")}</strong>
+                <span className="badge badge--muted">{detail?.docs ? formatRelativePath(detail.docs) : t("web.common.none", "无")}</span>
+              </article>
+              {detail?.links.length ? (
+                detail.links.map((link) => (
+                  <article key={`${selected.id}:${link.label}:${link.target}`} className="mini-card">
+                    <strong>{link.label}</strong>
+                    <span className="badge badge--muted">{formatRelativePath(link.target)}</span>
+                  </article>
+                ))
+              ) : null}
             </div>
             <div className="extension-summary-grid">
               <article className="memory-lane">
@@ -155,7 +184,7 @@ export function Extensions() {
                 <small>{t("web.extensions.resource_types_help", "resource_types 用来声明扩展理解和产出的资源模型。")}</small>
               </article>
               <article className="memory-lane">
-                <span>{t("web.extensions.package_state", "扩展包状态")}</span>
+                <span>{t("web.extensions.package_state", "扩展运行状态")}</span>
                 <strong><span className={`badge ${(detail?.health ?? selected.status) === "running" ? "badge--success" : (detail?.health ?? selected.status) === "error" ? "badge--danger" : "badge--muted"}`}>{detail?.health ?? selected.status}</span></strong>
                 <small>{detail?.generation ? `generation ${detail.generation}` : ""}</small>
               </article>
@@ -165,6 +194,32 @@ export function Extensions() {
               <button type="button" className="secondary" onClick={() => void handleAction("reload")}>{t("web.action.reload", "重载")}</button>
               <button type="button" className="secondary" onClick={() => void handleAction("restart")}>{t("web.action.restart", "重启")}</button>
               <button type="button" className="secondary" onClick={() => void loadLogs(selected.id)}>{t("web.extensions.view_logs", "查看日志")}</button>
+            </div>
+            <div className="stack">
+              <div className="panel-title">{t("web.extensions.examples", "使用示例")}</div>
+              {detail?.examples.length ? (
+                detail.examples.map((example) => (
+                  <article key={`${selected.id}:${example.title}`} className="mini-card">
+                    <strong>{example.title}</strong>
+                    <p>{example.summary || example.input_hint || t("web.common.none", "无")}</p>
+                  </article>
+                ))
+              ) : (
+                <div className="empty-card">{t("web.extensions.examples_empty", "这个扩展还没有声明示例说明。")}</div>
+              )}
+            </div>
+            <div className="stack">
+              <div className="panel-title">{t("web.extensions.related_skills", "相关技能")}</div>
+              {relatedSkills.length ? (
+                relatedSkills.map((skill) => (
+                  <article key={skill.id} className="mini-card">
+                    <strong>{skill.display_name}</strong>
+                    <p>{skill.description || t("web.common.none", "无")}</p>
+                  </article>
+                ))
+              ) : (
+                <div className="empty-card">{t("web.extensions.related_skills_empty", "当前没有技能声明依赖这个扩展提供的能力契约。")}</div>
+              )}
             </div>
             <div className="stack">
               <div className="panel-title">{t("web.extensions.pages", "扩展视图")}</div>

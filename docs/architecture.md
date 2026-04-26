@@ -2,7 +2,7 @@
 
 ## 目标
 
-`Ennoia` 是单操作者、多 Agent 的本地 AI 工作台。系统核心只负责运行时骨架：配置、路径、Observability、扩展生命周期、能力路由和 Worker RPC；具体业务能力通过内置实现或扩展能力包接入。
+`Ennoia` 是单操作者、多 Agent 的本地 AI 工作台。系统核心只负责运行时骨架：配置、路径、Observability、扩展生命周期、能力路由和 Worker RPC；具体业务能力通过内置实现或扩展接入。
 
 ## 总体分层
 
@@ -104,14 +104,21 @@ Web
 ## 扩展能力模型
 
 - 扩展 manifest 只保留当前协议，不再声明独立协议版本号。
-- 扩展是能力包，可选声明 `ui` 和 `worker`，主声明模型统一为：`resource_types`、`capabilities`、`surfaces`、`locales`、`themes`、`commands`、`subscriptions`。
+- 扩展负责系统能力，可选声明 `ui` 和 `worker`，主声明模型统一为：`resource_types`、`capabilities`、`surfaces`、`locales`、`themes`、`commands`、`subscriptions`。
 - `pages`、`panels`、`providers`、`behaviors`、`memories`、`hooks`、`interfaces`、`schedule_actions` 都是运行时派生视图，不再是 manifest 顶层主声明。
 - UI 工作台读取扩展快照时，同时获得通用声明和派生视图。
 - `workflow` 和 `memory` 都只是内置扩展实现；系统依赖接口键和动作 ID，不反向依赖具体扩展。
 - 扩展不自行开放端口；Provider、Behavior、Memory、Hook、Interface 和 Schedule Action 的执行统一走宿主 Worker RPC，Worker 通过 Wasm ABI 或进程 stdio 协议接入。
-- 扩展 UI、语言、主题和业务配置归扩展包所有；Web 主壳只按 runtime snapshot 发现并挂载，不在系统前端包中静态注册某个扩展页面或文案。
+- 扩展 UI、语言、主题和业务配置归扩展自身所有；Web 主壳只按 runtime snapshot 发现并挂载，不在系统前端包中静态注册某个扩展页面或文案。
 - 扩展 UI 通过独立 ESM bundle 动态加载；主壳只导入 `/api/extensions/{extension_id}/ui/module` 暴露的模块包装器，再按 mount id 调用扩展自己的 `mount/unmount`。
 - 扩展主题通过 `ennoia.theme` 与主壳对接；主壳只消费稳定语义 token 和 dockview token，不把内部 class 结构暴露给扩展。
+
+## Skill 模型
+
+- Skill 不负责实现系统能力；它只描述工具与用法。
+- Skill 可以声明 `docs`、`requires`、`examples` 和 `tool`，分别表达说明文档、依赖的能力契约、使用示例和 CLI/工具入口。
+- Skill 只依赖能力契约，不依赖扩展 ID；这样同一份 skill 可以随着接口绑定切换到底层不同实现。
+- 扩展可以带自己的能力说明文档，但扩展说明不等于 skill；前者回答“系统里这块能力是什么”，后者回答“Agent 怎么使用它”。
 
 ## 存储划分
 

@@ -229,6 +229,21 @@ pub struct ScheduleActionContribution {
     pub schema: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ExtensionDocLink {
+    pub label: String,
+    pub target: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ExtensionExample {
+    pub title: String,
+    #[serde(default)]
+    pub summary: Option<String>,
+    #[serde(default)]
+    pub input_hint: Option<String>,
+}
+
 pub const HOOK_EVENT_CONVERSATION_CREATED: &str = "conversation.created";
 pub const HOOK_EVENT_CONVERSATION_MESSAGE_CREATED: &str = "conversation.message.created";
 pub const HOOK_EVENT_RUN_REQUESTED: &str = "run.requested";
@@ -428,6 +443,14 @@ pub struct ExtensionManifest {
     pub id: String,
     #[serde(default)]
     pub name: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub docs: Option<String>,
+    #[serde(default)]
+    pub links: Vec<ExtensionDocLink>,
+    #[serde(default)]
+    pub examples: Vec<ExtensionExample>,
     pub kind: ExtensionKind,
     #[serde(default)]
     pub source: ExtensionSourceSpec,
@@ -468,6 +491,10 @@ pub struct ExtensionManifest {
 impl ExtensionManifest {
     pub fn display_name(&self) -> String {
         self.name.clone().unwrap_or_else(|| self.id.clone())
+    }
+
+    pub fn display_description(&self) -> String {
+        self.description.clone().unwrap_or_default()
     }
 
     pub fn effective_capabilities(&self) -> ExtensionCapabilities {

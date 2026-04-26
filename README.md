@@ -6,7 +6,7 @@
 
 - 工作台：核心只提供宿主、配置、路径、日志和 Worker RPC；业务能力由扩展提供。
 - Agents：维护协作者档案、上游渠道、模型、技能和启用状态。
-- 技能：Agent 可引用的能力包，和扩展严格分离。
+- 技能：Agent 可引用的工具与用法定义，可声明文档、CLI 入口、依赖能力契约与示例，和扩展严格分离。
 - API 上游渠道：Agent 绑定的具体模型访问实例。
 - 扩展：系统插件包，manifest 统一声明 `resource_types`、`capabilities`、`surfaces`、`locales`、`themes`、`commands`、`subscriptions`；页面、面板、接口实现和定时动作都从这些声明派生。
 - 会话：系统保留稳定 `/api/conversations` 入口，实际读写由 `conversation.*`、`message.*`、`lane.*` 等接口绑定到内置 `conversation` 扩展。

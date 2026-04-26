@@ -175,6 +175,17 @@ export type SkillConfig = {
   source: string;
   entry: string;
   tags: string[];
+  docs?: string | null;
+  requires: string[];
+  examples: {
+    title: string;
+    prompt: string;
+  }[];
+  tool?: {
+    kind: string;
+    command: string;
+    args: string[];
+  } | null;
   enabled: boolean;
 };
 
@@ -320,6 +331,17 @@ export type ExtensionRuntimeEvent = {
 export type ExtensionDetail = {
   id: string;
   name: string;
+  description: string;
+  docs?: string | null;
+  links: {
+    label: string;
+    target: string;
+  }[];
+  examples: {
+    title: string;
+    summary?: string | null;
+    input_hint?: string | null;
+  }[];
   kind: string;
   source_mode: string;
   source_root: string;

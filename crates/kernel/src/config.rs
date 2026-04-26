@@ -150,8 +150,30 @@ pub struct SkillConfig {
     pub entry: String,
     #[serde(default)]
     pub tags: Vec<String>,
+    #[serde(default)]
+    pub docs: Option<String>,
+    #[serde(default)]
+    pub requires: Vec<String>,
+    #[serde(default)]
+    pub examples: Vec<SkillExample>,
+    #[serde(default)]
+    pub tool: Option<SkillToolSpec>,
     #[serde(default = "default_enabled")]
     pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SkillExample {
+    pub title: String,
+    pub prompt: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SkillToolSpec {
+    pub kind: String,
+    pub command: String,
+    #[serde(default)]
+    pub args: Vec<String>,
 }
 
 /// ExtensionRegistryFile stores extension package registration records under `config/extensions.toml`.

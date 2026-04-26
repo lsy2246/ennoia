@@ -282,6 +282,17 @@ export type ExtensionDiagnostic = {
 export type ExtensionRuntimeExtension = {
   id: string;
   name: string;
+  description: string;
+  docs?: string | null;
+  links: {
+    label: string;
+    target: string;
+  }[];
+  examples: {
+    title: string;
+    summary?: string | null;
+    input_hint?: string | null;
+  }[];
   kind: string;
   source_mode: "dev" | "package";
   source_root: string;

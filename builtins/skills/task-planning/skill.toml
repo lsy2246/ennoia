@@ -3,5 +3,11 @@ display_name = "Task Planning"
 description = "面向需求澄清、任务拆解、优先级排序与执行规划的技能定义。"
 source = "builtin"
 entry = "builtin://skills/task-planning"
+docs = "README.md"
+requires = ["run.create", "task.list_by_run"]
+examples = [
+  { title = "拆解需求", prompt = "把这个需求拆成 3 到 5 个可执行步骤，并标出优先级。" },
+  { title = "生成执行计划", prompt = "根据当前目标整理一份短计划，说明先做什么后做什么。" }
+]
 tags = ["planning", "decomposition", "strategy"]
 enabled = true

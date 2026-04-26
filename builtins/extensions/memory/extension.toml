@@ -1,6 +1,17 @@
 id = "memory"
 name = "Memory"
+description = "提供记忆工作台、回忆、审查与上下文组装能力。"
+docs = "docs/overview.md"
 kind = "extension"
+
+[[links]]
+label = "Memory Capabilities"
+target = "docs/capabilities.md"
+
+[[examples]]
+title = "组装上下文"
+summary = "把会话与记忆片段整理成可供 Agent 使用的上下文。"
+input_hint = "memory.assemble_context"
 
 [source]
 mode = "package"

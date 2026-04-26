@@ -2,7 +2,7 @@
 
 ## 定位
 
-Extension 是系统能力包，Skill 是 Agent 可引用的能力包。Extension 不再表示“前端 + 独立后端服务”，而是由宿主装配的一组能力声明：`ui`、`worker`、`resource_types`、`capabilities`、`surfaces`、`themes`、`locales`、`commands`、`subscriptions`。
+Extension 负责系统能力，Skill 负责工具与用法。Extension 不再表示“前端 + 独立后端服务”，而是由宿主装配的一组能力声明：`ui`、`worker`、`resource_types`、`capabilities`、`surfaces`、`themes`、`locales`、`commands`、`subscriptions`。
 
 ## 源码放置
 
@@ -15,6 +15,8 @@ Extension 是系统能力包，Skill 是 Agent 可引用的能力包。Extension
 
 系统扩展只使用 `extension.toml`。推荐字段：
 
+- `description`
+- `docs`
 - `source`
 - `ui`
 - `worker`
@@ -30,6 +32,8 @@ Extension 是系统能力包，Skill 是 Agent 可引用的能力包。Extension
 - `themes`
 - `commands`
 - `subscriptions`
+
+扩展可以带能力说明文档，但这类说明仍然属于扩展本身，不进入 skill 语义。推荐通过 `description`、`docs`、`links[]` 和 `examples[]` 表达“这个扩展提供什么能力、适合怎么被系统调用”。
 
 `ui` 和 `worker` 都是可选声明。纯 UI 扩展不需要 `worker`，纯能力扩展不需要 `ui`。`worker.kind` 当前支持 `wasm` 和 `process`；`process` Worker 通过 stdin/stdout 的 JSON 文本协议接入宿主，不需要自行开放 HTTP 端口。需要本地 SQLite、文件和后台任务的扩展，推荐直接使用 `process` Worker。
 
@@ -164,9 +168,19 @@ Skill 目录独立：
 ```text
 <skill_id>/
 ├─ skill.toml
+├─ README.md
 ├─ entry.js
 └─ schemas/
 ```
+
+`skill.toml` 推荐额外声明：
+
+- `docs`
+- `requires[]`
+- `examples[]`
+- `tool`
+
+其中 `requires[]` 只依赖能力契约，例如 `llm.generate`、`run.create`，不要依赖某个具体扩展 ID。
 
 ## 运行链路
 
@@ -174,7 +188,7 @@ Skill 目录独立：
 2. CLI 把内置扩展同步到 `<ENNOIA_HOME>/extensions/<extension_id>/`，并更新 `config/extensions.toml`。
 3. CLI 扫描内置扩展中的 `provider-presets/*.toml`，把默认渠道实例写入 `config/providers/`。
 4. CLI 把仓库内 `builtins/extensions/*` 追加为开发来源，供开发模式覆盖安装目录。
-5. Extension Host 扫描扩展包，解析 `ui`、`worker` 和贡献能力，不启动扩展私有进程。
+5. Extension Host 扫描扩展，解析 `ui`、`worker` 和贡献能力，不启动扩展私有进程。
 6. Server 暴露 runtime snapshot、事件流、诊断、日志、资源贡献接口、接口绑定 API、scheduler API，以及 `/api/extensions/{extension_id}/rpc/{method}` Worker RPC 入口。
 7. Core 只维护稳定接口、绑定、计划与 Hook 派发；扩展内部按 Worker ABI 和 capability 组织自己的业务逻辑。
 8. Web 工作台根据 runtime snapshot 动态导入扩展 UI 模块，并按 mount id 挂载页面、面板、主题、语言和命令。
@@ -264,8 +278,8 @@ export default ui;
 
 - 扩展注册表：`<ENNOIA_HOME>/config/extensions.toml`
 - 技能注册表：`<ENNOIA_HOME>/config/skills.toml`
-- 扩展包目录：`<ENNOIA_HOME>/extensions/<extension_id>/`
-- 技能包目录：`<ENNOIA_HOME>/skills/<skill_id>/`
+- 扩展目录：`<ENNOIA_HOME>/extensions/<extension_id>/`
+- 技能目录：`<ENNOIA_HOME>/skills/<skill_id>/`
 - 扩展私有数据目录：`<ENNOIA_HOME>/data/extensions/<extension_id>/`
 
 扩展自己的数据库、缓存和私有运行态文件都应放在扩展私有数据目录。核心不提供主业务 SQLite；扩展通过 Worker capability 使用宿主授予的存储、SQLite、网络、事件和日志能力。

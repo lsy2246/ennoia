@@ -5,15 +5,17 @@
 ## 当前目录
 
 - 扩展注册表：`<ENNOIA_HOME>/config/extensions.toml`
-- 安装扩展包：`<ENNOIA_HOME>/extensions/<extension_id>/`
+- 安装扩展：`<ENNOIA_HOME>/extensions/<extension_id>/`
 - 扩展私有数据：`<ENNOIA_HOME>/data/extensions/<extension_id>/`
 
 ## 当前协议
 
-Extension 使用 `extension.toml` 描述系统能力包。Skill 使用 `skill.toml` 描述 Agent 能力包，两者互不兼容、互不混用。
+Extension 使用 `extension.toml` 描述系统能力。Skill 使用 `skill.toml` 描述工具与用法，两者互不兼容、互不混用。
 
 Extension descriptor 包含：
 
+- `description`
+- `docs`
 - `source`
 - `ui`
 - `worker`
@@ -30,9 +32,21 @@ Extension descriptor 包含：
 - `commands`
 - `subscriptions`
 
+Skill descriptor 包含：
+
+- `description`
+- `docs`
+- `requires`
+- `examples`
+- `tool`
+- `entry`
+- `tags`
+
 主声明模型统一只有一层：`resource_types`、`capabilities`、`surfaces`、`locales`、`themes`、`commands`、`subscriptions`。页面、面板、Provider、Behavior、Memory、Hook、Interface 和 Schedule Action 都是宿主运行时根据声明派生的视图。
 
 `ui` 是可选界面入口；`worker` 是可选执行单元，可为 Wasm，也可为进程型 stdio RPC。宿主按声明装配能力，不要求扩展同时包含 UI 和 Worker。
+
+Skill 不声明系统能力入口。`requires` 只依赖能力契约，例如 `llm.generate`、`run.create`，不依赖具体扩展 ID；`tool` 用于暴露可执行工具入口，`docs/examples` 用于表达使用方式。
 
 ## 运行流程
 
@@ -66,7 +80,7 @@ entry = "workflow/schedules/run"
 metadata = { schedule_action = { id = "workflow.run" } }
 ```
 
-扩展源码推荐目录为 `ui/`、`worker/`、`data/` 和 `provider-presets/`。这些目录不是必备项，扩展包只声明实际提供的能力。
+扩展源码推荐目录为 `ui/`、`worker/`、`data/` 和 `provider-presets/`。这些目录不是必备项，扩展只声明实际提供的能力。
 
 ## 开发热加载
 

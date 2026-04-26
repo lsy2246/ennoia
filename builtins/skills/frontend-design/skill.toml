@@ -3,5 +3,11 @@ display_name = "Frontend Design"
 description = "面向前端界面设计、视觉系统和交互细节的技能定义。"
 source = "builtin"
 entry = "builtin://skills/frontend-design"
+docs = "README.md"
+requires = ["llm.generate"]
+examples = [
+  { title = "设计页面", prompt = "给这个功能设计一个有明确视觉方向的页面结构与交互。" },
+  { title = "优化交互", prompt = "保持现有设计语言，优化这个页面的状态反馈和信息层次。" }
+]
 tags = ["ui", "ux", "frontend"]
 enabled = true

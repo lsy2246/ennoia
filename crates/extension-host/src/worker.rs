@@ -795,6 +795,10 @@ mod tests {
         ResolvedExtensionSnapshot {
             id: "test".to_string(),
             name: "Test".to_string(),
+            description: String::new(),
+            docs: None,
+            links: Vec::new(),
+            examples: Vec::new(),
             kind: ExtensionKind::SystemExtension,
             source_mode: ennoia_kernel::ExtensionSourceMode::Dev,
             source_root: root.to_string_lossy().replace('\\', "/"),

@@ -115,7 +115,7 @@
 
 ## Skill 域
 
-`SkillConfig` 字段：`id`、`display_name`、`description`、`source`、`entry`、`tags`、`enabled`。
+`SkillConfig` 字段：`id`、`display_name`、`description`、`source`、`entry`、`docs`、`requires`、`examples`、`tool`、`tags`、`enabled`。
 
 ## API 上游渠道域
 
@@ -125,7 +125,7 @@
 
 ## Extension 域
 
-扩展运行态以 `ExtensionRuntimeState` 为准，扩展包通过 manifest 贡献页面、面板、主题、语言、命令、Hook、Provider、Interface 和 Schedule Action 实现。
+扩展运行态以 `ExtensionRuntimeState` 为准。扩展 manifest 可以额外声明 `description`、`docs`、`links` 和 `examples`，用于表达能力说明；这类说明不等同于 skill。
 
 ## 存储快照
 

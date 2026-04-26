@@ -3,5 +3,11 @@ display_name = "Implementation"
 description = "面向代码实现、修复、重构与验证闭环的技能定义。"
 source = "builtin"
 entry = "builtin://skills/implementation"
+docs = "README.md"
+requires = ["llm.generate", "artifact.list_by_run"]
+examples = [
+  { title = "修复问题", prompt = "先定位根因，再直接实现修复并做最小验证。" },
+  { title = "完成闭环", prompt = "实现后说明改了什么、怎么验证、还有什么风险。" }
+]
 tags = ["code", "delivery", "verification"]
 enabled = true
