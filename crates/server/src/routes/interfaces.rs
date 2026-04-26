@@ -670,7 +670,14 @@ async fn generate_conversation_agent_reply(
         .trim()
         .to_string();
     let message_id = payload_string_field(payload, &["message", "id"]);
-    let addressed_agents = payload_string_array_field(payload, &["message", "mentions"]);
+    let addressed_agents = {
+        let explicit = payload_string_array_field(payload, &["addressed_agents"]);
+        if explicit.is_empty() {
+            payload_string_array_field(payload, &["message", "addressed_agents"])
+        } else {
+            explicit
+        }
+    };
     let agents = load_agent_configs(&state.runtime_paths)
         .map_err(|error| scoped(ApiError::internal(error.to_string()), request))?;
     let providers = load_provider_configs(&state.runtime_paths)
@@ -836,7 +843,7 @@ async fn generate_real_conversation_agent_reply(
         .and_then(JsonValue::as_str)
         .unwrap_or_default()
         .to_string();
-    let messages = normalize_conversation_messages_for_provider(conversation_messages);
+    let messages = normalize_conversation_messages_for_provider(conversation_messages, agent_id);
     let request_payload = serde_json::json!({
         "method": "generate",
         "params": {
@@ -932,17 +939,64 @@ fn resolve_provider_entry_path(
 
 fn normalize_conversation_messages_for_provider(
     conversation_messages: &JsonValue,
+    agent_id: &str,
 ) -> Vec<JsonValue> {
     let mut messages = conversation_messages
         .as_array()
         .cloned()
         .unwrap_or_default()
         .into_iter()
+        .filter(|message| message_visible_to_agent(message, agent_id))
         .rev()
         .take(24)
         .collect::<Vec<_>>();
     messages.reverse();
     messages
+}
+
+fn message_visible_to_agent(message: &JsonValue, agent_id: &str) -> bool {
+    let role = message
+        .get("role")
+        .and_then(JsonValue::as_str)
+        .unwrap_or_default();
+    let sender = message
+        .get("sender")
+        .and_then(JsonValue::as_str)
+        .unwrap_or_default();
+    match role {
+        "operator" => {
+            let mentions = message_mentions(message);
+            mentions.is_empty() || mentions.iter().any(|mention| mention == agent_id)
+        }
+        "agent" => sender == agent_id && !looks_like_synthetic_agent_error(message),
+        _ => false,
+    }
+}
+
+fn message_mentions(message: &JsonValue) -> Vec<String> {
+    message
+        .get("mentions")
+        .and_then(JsonValue::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(JsonValue::as_str)
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+        .map(ToOwned::to_owned)
+        .collect()
+}
+
+fn looks_like_synthetic_agent_error(message: &JsonValue) -> bool {
+    let body = message
+        .get("body")
+        .and_then(JsonValue::as_str)
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    body.starts_with("error:")
+        || body.contains("request failed:")
+        || body.contains("empty completion")
+        || body.contains("provider returned empty text")
 }
 
 fn build_agent_runtime_prompt(state: &AppState, agent: &AgentConfig, run_id: &str) -> String {

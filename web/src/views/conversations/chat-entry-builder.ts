@@ -156,12 +156,12 @@ export function buildChatEntries(params: {
       sender: "Operator",
       body: draft.body,
       createdAt: draft.createdAt,
-        recipients,
-        mentions: draft.addressedAgents,
-        source: "local",
-        localStatus: draft.status,
-        localError: draft.error,
-      };
+      recipients,
+      mentions: draft.explicitMentions ?? [],
+      source: "local",
+      localStatus: draft.status,
+      localError: draft.error,
+    };
     entries.push({ order: order++, entry: messageEntry });
   }
 

@@ -41,6 +41,7 @@ export async function listModels(context = {}) {
 export async function generate(request = {}) {
   const config = normalizeProviderConfig(request.provider ?? {});
   const model = request.model ?? config.default_model ?? DEFAULT_MODEL;
+  const generationOptions = normalizeGenerationOptions(request.generation_options ?? request.generationOptions);
   const payload = {
     model,
     messages: toChatCompletionMessages(
@@ -48,6 +49,7 @@ export async function generate(request = {}) {
       request.instructions ?? request.system_prompt,
     ),
   };
+  applyChatCompletionGenerationOptions(payload, generationOptions);
 
   const tools = normalizeChatCompletionTools(request.tools ?? []);
   if (tools.length > 0) {
@@ -59,6 +61,13 @@ export async function generate(request = {}) {
     payload.metadata = request.metadata;
   }
 
+  if (tools.length === 0) {
+    const streamed = await generateByChatCompletionStream(config, model, payload);
+    if (streamed.text) {
+      return streamed;
+    }
+  }
+
   const response = await openaiFetch(config, "/chat/completions", {
     method: "POST",
     body: JSON.stringify(payload),
@@ -68,7 +77,7 @@ export async function generate(request = {}) {
   const toolCalls = collectChatCompletionToolCalls(data);
 
   if (!text && toolCalls.length === 0) {
-    throw new Error(`OpenAI response missing assistant text: ${JSON.stringify(data)}`);
+    throw new Error(describeEmptyChatCompletion(data, model));
   }
 
   return {
@@ -77,6 +86,34 @@ export async function generate(request = {}) {
     text,
     tool_calls: toolCalls,
     raw: data,
+  };
+}
+
+async function generateByChatCompletionStream(config, fallbackModel, payload) {
+  const response = await openaiFetch(config, "/chat/completions", {
+    method: "POST",
+    body: JSON.stringify({
+      ...payload,
+      stream: true,
+    }),
+  });
+  const data = await collectChatCompletionStream(response, fallbackModel);
+  const text = data.text.trim();
+  if (!text) {
+    return {
+      id: data.id,
+      model: data.model ?? fallbackModel,
+      text: "",
+      tool_calls: [],
+      raw: data.raw,
+    };
+  }
+  return {
+    id: data.id,
+    model: data.model ?? fallbackModel,
+    text,
+    tool_calls: [],
+    raw: data.raw,
   };
 }
 
@@ -117,6 +154,134 @@ async function openaiFetch(config, path, init) {
   }
 
   return response;
+}
+
+async function collectChatCompletionStream(response, fallbackModel) {
+  if (!response.body) {
+    throw new Error("OpenAI stream response body is missing");
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffered = "";
+  let text = "";
+  let responseId = "";
+  let model = fallbackModel ?? "";
+  let finishReason = "";
+  const events = [];
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    buffered += decoder.decode(value, { stream: true });
+    const parts = buffered.split(/\r?\n\r?\n/);
+    buffered = parts.pop() ?? "";
+    for (const part of parts) {
+      const event = parseSseEvent(part);
+      if (!event) {
+        continue;
+      }
+      if (event === "[DONE]") {
+        buffered = "";
+        break;
+      }
+      let parsed;
+      try {
+        parsed = JSON.parse(event);
+      } catch {
+        continue;
+      }
+      events.push(parsed);
+      if (typeof parsed?.id === "string" && parsed.id.trim()) {
+        responseId = parsed.id;
+      }
+      if (typeof parsed?.model === "string" && parsed.model.trim()) {
+        model = parsed.model;
+      }
+      for (const choice of parsed?.choices ?? []) {
+        const delta = choice?.delta;
+        if (typeof delta?.content === "string") {
+          text += delta.content;
+        } else if (Array.isArray(delta?.content)) {
+          for (const item of delta.content) {
+            if (typeof item?.text === "string") {
+              text += item.text;
+            } else if (typeof item?.content === "string") {
+              text += item.content;
+            }
+          }
+        }
+        if (typeof choice?.finish_reason === "string" && choice.finish_reason.trim()) {
+          finishReason = choice.finish_reason;
+        }
+      }
+    }
+  }
+
+  const flushed = decoder.decode();
+  if (flushed) {
+    buffered += flushed;
+  }
+
+  if (buffered.trim()) {
+    const event = parseSseEvent(buffered);
+    if (event && event !== "[DONE]") {
+      try {
+        const parsed = JSON.parse(event);
+        events.push(parsed);
+        if (typeof parsed?.id === "string" && parsed.id.trim()) {
+          responseId = parsed.id;
+        }
+        if (typeof parsed?.model === "string" && parsed.model.trim()) {
+          model = parsed.model;
+        }
+        for (const choice of parsed?.choices ?? []) {
+          const delta = choice?.delta;
+          if (typeof delta?.content === "string") {
+            text += delta.content;
+          }
+          if (typeof choice?.finish_reason === "string" && choice.finish_reason.trim()) {
+            finishReason = choice.finish_reason;
+          }
+        }
+      } catch {
+        // ignore trailing incomplete payload
+      }
+    }
+  }
+
+  return {
+    id: responseId || "unknown",
+    model: model || fallbackModel || DEFAULT_MODEL,
+    text,
+    finish_reason: finishReason || "unknown",
+    raw: {
+      object: "chat.completion.stream",
+      id: responseId || "unknown",
+      model: model || fallbackModel || DEFAULT_MODEL,
+      finish_reason: finishReason || "unknown",
+      events,
+    },
+  };
+}
+
+function parseSseEvent(chunk) {
+  const lines = chunk
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (lines.length === 0) {
+    return "";
+  }
+  const dataLines = lines
+    .filter((line) => line.startsWith("data:"))
+    .map((line) => line.slice(5).trim());
+  if (dataLines.length === 0) {
+    return "";
+  }
+  return dataLines.join("\n");
 }
 
 function toChatCompletionMessages(input, instructions) {
@@ -191,35 +356,159 @@ function normalizeChatCompletionTools(tools) {
   });
 }
 
+function normalizeGenerationOptions(options) {
+  if (!options || typeof options !== "object" || Array.isArray(options)) {
+    return {};
+  }
+  return options;
+}
+
+function applyChatCompletionGenerationOptions(payload, options) {
+  const reasoningEffort = normalizeReasoningEffort(options.reasoning_effort);
+  if (reasoningEffort) {
+    payload.reasoning_effort = reasoningEffort;
+  }
+
+  applyNumericOption(payload, "temperature", options.temperature);
+  applyNumericOption(payload, "top_p", options.top_p);
+  applyNumericOption(payload, "presence_penalty", options.presence_penalty);
+  applyNumericOption(payload, "frequency_penalty", options.frequency_penalty);
+  applyIntegerOption(payload, "max_completion_tokens", options.max_completion_tokens);
+}
+
+function normalizeReasoningEffort(value) {
+  if (typeof value !== "string") {
+    return "";
+  }
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) {
+    return "";
+  }
+  const supportedValues = new Set(["none", "minimal", "low", "medium", "high", "xhigh"]);
+  return supportedValues.has(normalized) ? normalized : "";
+}
+
+function applyNumericOption(payload, key, value) {
+  const normalized = normalizeFiniteNumber(value);
+  if (normalized == null) {
+    return;
+  }
+  payload[key] = normalized;
+}
+
+function applyIntegerOption(payload, key, value) {
+  const normalized = normalizeFiniteNumber(value);
+  if (normalized == null) {
+    return;
+  }
+  payload[key] = Math.trunc(normalized);
+}
+
+function normalizeFiniteNumber(value) {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return null;
+    }
+    const parsed = Number(trimmed);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return null;
+}
+
 function collectChatCompletionText(response) {
-  return (response.choices ?? [])
-    .map((choice) => normalizeAssistantContent(choice?.message?.content))
-    .filter((item) => typeof item === "string" && item.trim().length > 0)
+  const texts = [];
+
+  for (const choice of response.choices ?? []) {
+    pushTextCandidate(texts, choice?.message?.content);
+    pushTextCandidate(texts, choice?.message?.reasoning_content);
+    pushTextCandidate(texts, choice?.message?.text);
+    pushTextCandidate(texts, choice?.message?.refusal);
+    pushTextCandidate(texts, choice?.text);
+  }
+
+  pushTextCandidate(texts, response?.output_text);
+  pushTextCandidate(texts, response?.output);
+
+  return texts
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0)
     .join("\n");
 }
 
-function normalizeAssistantContent(content) {
-  if (typeof content === "string") {
-    return content;
+function pushTextCandidate(target, value) {
+  if (value == null) {
+    return;
   }
-  if (!Array.isArray(content)) {
-    return "";
+
+  if (typeof value === "string") {
+    if (value.trim()) {
+      target.push(value);
+    }
+    return;
   }
-  return content
-    .map((part) => {
-      if (typeof part === "string") {
-        return part;
-      }
-      if (typeof part?.text === "string") {
-        return part.text;
-      }
-      if (typeof part?.content === "string") {
-        return part.content;
-      }
-      return "";
-    })
-    .filter((item) => item.trim().length > 0)
-    .join("\n");
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      pushTextCandidate(target, item);
+    }
+    return;
+  }
+
+  if (typeof value !== "object") {
+    return;
+  }
+
+  if (typeof value.output_text === "string") {
+    pushTextCandidate(target, value.output_text);
+  }
+  if (typeof value.content === "string") {
+    pushTextCandidate(target, value.content);
+  }
+  if (typeof value.text === "string") {
+    pushTextCandidate(target, value.text);
+  }
+  if (typeof value.refusal === "string") {
+    pushTextCandidate(target, value.refusal);
+  }
+  if (typeof value.reasoning_content === "string") {
+    pushTextCandidate(target, value.reasoning_content);
+  }
+  if (typeof value.value === "string") {
+    pushTextCandidate(target, value.value);
+  }
+
+  if (value.text && typeof value.text === "object") {
+    pushTextCandidate(target, value.text.value);
+    pushTextCandidate(target, value.text.content);
+    pushTextCandidate(target, value.text.text);
+  }
+
+  if (value.content && typeof value.content === "object") {
+    pushTextCandidate(target, value.content.value);
+    pushTextCandidate(target, value.content.text);
+    pushTextCandidate(target, value.content.content);
+  }
+
+  if (value.message && typeof value.message === "object") {
+    pushTextCandidate(target, value.message.content);
+    pushTextCandidate(target, value.message.text);
+    pushTextCandidate(target, value.message.reasoning_content);
+    pushTextCandidate(target, value.message.refusal);
+  }
+
+  if (Array.isArray(value.content_parts)) {
+    pushTextCandidate(target, value.content_parts);
+  }
+
+  if (Array.isArray(value.output)) {
+    pushTextCandidate(target, value.output);
+  }
 }
 
 function collectChatCompletionToolCalls(response) {
@@ -230,6 +519,36 @@ function collectChatCompletionToolCalls(response) {
       name: item.function?.name,
       arguments: safeJsonParse(item.function?.arguments, item.function?.arguments ?? {}),
     }));
+}
+
+function describeEmptyChatCompletion(response, fallbackModel) {
+  const choice = Array.isArray(response?.choices) ? response.choices[0] : undefined;
+  const finishReason = choice?.finish_reason ?? "unknown";
+  const model = response?.model ?? fallbackModel ?? "unknown";
+  const responseId = response?.id ?? "unknown";
+  const usage = summarizeUsage(response?.usage);
+  const details = [
+    `finish_reason=${finishReason}`,
+    `model=${model}`,
+    `response_id=${responseId}`,
+    usage ? `usage=${usage}` : "",
+  ].filter(Boolean).join(", ");
+  return `OpenAI empty completion: ${details}`;
+}
+
+function summarizeUsage(usage) {
+  if (!usage || typeof usage !== "object") {
+    return "";
+  }
+  const promptTokens = typeof usage.prompt_tokens === "number" ? usage.prompt_tokens : null;
+  const completionTokens = typeof usage.completion_tokens === "number" ? usage.completion_tokens : null;
+  const totalTokens = typeof usage.total_tokens === "number" ? usage.total_tokens : null;
+  const parts = [
+    promptTokens == null ? "" : `prompt=${promptTokens}`,
+    completionTokens == null ? "" : `completion=${completionTokens}`,
+    totalTokens == null ? "" : `total=${totalTokens}`,
+  ].filter(Boolean);
+  return parts.join("/");
 }
 
 function summarizeOpenAiErrorBody(body) {

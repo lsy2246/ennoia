@@ -13,16 +13,6 @@ import remarkGfm from "remark-gfm";
 
 import type { ChatEntryFormat } from "./chat-types";
 
-function buildMentionMap(agents: AgentProfile[]) {
-  const mentionMap = new Map<string, string>();
-  for (const agent of agents) {
-    mentionMap.set(agent.id.toLowerCase(), agent.display_name);
-    mentionMap.set(agent.display_name.toLowerCase(), agent.display_name);
-    mentionMap.set(agent.display_name.toLowerCase().replace(/\s+/g, "-"), agent.display_name);
-  }
-  return mentionMap;
-}
-
 function buildSkillMap(skills: SkillConfig[]) {
   const skillMap = new Map<string, string>();
   for (const skill of skills) {
@@ -33,8 +23,29 @@ function buildSkillMap(skills: SkillConfig[]) {
   return skillMap;
 }
 
-function renderInlineTokens(text: string, agents: AgentProfile[], skills: SkillConfig[]) {
-  const mentionMap = buildMentionMap(agents);
+function buildAllowedMentionMap(agents: AgentProfile[], mentionAgentIds: string[]) {
+  const allowedIds = new Set(mentionAgentIds.map((item) => item.toLowerCase()));
+  const mentionMap = new Map<string, string>();
+  for (const agent of agents) {
+    if (!allowedIds.has(agent.id.toLowerCase())) {
+      continue;
+    }
+    mentionMap.set(agent.id.toLowerCase(), agent.display_name);
+    mentionMap.set(agent.display_name.toLowerCase(), agent.display_name);
+    mentionMap.set(agent.display_name.toLowerCase().replace(/\s+/g, "-"), agent.display_name);
+  }
+  return mentionMap;
+}
+
+function renderInlineTokens(
+  text: string,
+  agents: AgentProfile[],
+  skills: SkillConfig[],
+  mentionAgentIds: string[],
+) {
+  const mentionMap = mentionAgentIds.length > 0
+    ? buildAllowedMentionMap(agents, mentionAgentIds)
+    : new Map<string, string>();
   const skillMap = buildSkillMap(skills);
   const parts = text.split(/([@/][\p{L}\p{N}_.-]+)/gu);
 
@@ -67,10 +78,15 @@ function renderInlineTokens(text: string, agents: AgentProfile[], skills: SkillC
   });
 }
 
-function decorateChildren(children: ReactNode, agents: AgentProfile[], skills: SkillConfig[]): ReactNode {
+function decorateChildren(
+  children: ReactNode,
+  agents: AgentProfile[],
+  skills: SkillConfig[],
+  mentionAgentIds: string[],
+): ReactNode {
   return Children.map(children, (child) => {
     if (typeof child === "string") {
-      return renderInlineTokens(child, agents, skills);
+      return renderInlineTokens(child, agents, skills, mentionAgentIds);
     }
     if (!isValidElement(child)) {
       return child;
@@ -82,22 +98,23 @@ function decorateChildren(children: ReactNode, agents: AgentProfile[], skills: S
     }
 
     return cloneElement(element, {
-      children: decorateChildren(element.props.children, agents, skills),
+      children: decorateChildren(element.props.children, agents, skills, mentionAgentIds),
     });
   });
 }
 
-function PlainTextContent({ body, agents, skills }: {
+function PlainTextContent({ body, agents, skills, mentionAgentIds }: {
   body: string;
   agents: AgentProfile[];
   skills: SkillConfig[];
+  mentionAgentIds: string[];
 }) {
   const lines = body.split("\n");
   return (
     <div className="message-plain">
       {lines.map((line, index) => (
         <Fragment key={`line:${index}`}>
-          {renderInlineTokens(line, agents, skills)}
+          {renderInlineTokens(line, agents, skills, mentionAgentIds)}
           {index < lines.length - 1 ? <br /> : null}
         </Fragment>
       ))}
@@ -141,29 +158,30 @@ function DiagramContent({ body }: { body: string }) {
   );
 }
 
-function MarkdownContent({ body, agents, skills }: {
+function MarkdownContent({ body, agents, skills, mentionAgentIds }: {
   body: string;
   agents: AgentProfile[];
   skills: SkillConfig[];
+  mentionAgentIds: string[];
 }) {
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
       components={{
-        h1: ({ children }) => <h1 className="message-markdown__heading message-markdown__heading--1">{decorateChildren(children, agents, skills)}</h1>,
-        h2: ({ children }) => <h2 className="message-markdown__heading message-markdown__heading--2">{decorateChildren(children, agents, skills)}</h2>,
-        h3: ({ children }) => <h3 className="message-markdown__heading message-markdown__heading--3">{decorateChildren(children, agents, skills)}</h3>,
-        p: ({ children }) => <p className="message-markdown__paragraph">{decorateChildren(children, agents, skills)}</p>,
-        ul: ({ children }) => <ul className="message-markdown__list">{decorateChildren(children, agents, skills)}</ul>,
-        ol: ({ children }) => <ol className="message-markdown__list message-markdown__list--ordered">{decorateChildren(children, agents, skills)}</ol>,
-        li: ({ children }) => <li className="message-markdown__item">{decorateChildren(children, agents, skills)}</li>,
-        blockquote: ({ children }) => <blockquote className="message-markdown__quote">{decorateChildren(children, agents, skills)}</blockquote>,
-        table: ({ children }) => <div className="message-markdown__table-wrap"><table className="message-markdown__table">{decorateChildren(children, agents, skills)}</table></div>,
-        th: ({ children }) => <th>{decorateChildren(children, agents, skills)}</th>,
-        td: ({ children }) => <td>{decorateChildren(children, agents, skills)}</td>,
+        h1: ({ children }) => <h1 className="message-markdown__heading message-markdown__heading--1">{decorateChildren(children, agents, skills, mentionAgentIds)}</h1>,
+        h2: ({ children }) => <h2 className="message-markdown__heading message-markdown__heading--2">{decorateChildren(children, agents, skills, mentionAgentIds)}</h2>,
+        h3: ({ children }) => <h3 className="message-markdown__heading message-markdown__heading--3">{decorateChildren(children, agents, skills, mentionAgentIds)}</h3>,
+        p: ({ children }) => <p className="message-markdown__paragraph">{decorateChildren(children, agents, skills, mentionAgentIds)}</p>,
+        ul: ({ children }) => <ul className="message-markdown__list">{decorateChildren(children, agents, skills, mentionAgentIds)}</ul>,
+        ol: ({ children }) => <ol className="message-markdown__list message-markdown__list--ordered">{decorateChildren(children, agents, skills, mentionAgentIds)}</ol>,
+        li: ({ children }) => <li className="message-markdown__item">{decorateChildren(children, agents, skills, mentionAgentIds)}</li>,
+        blockquote: ({ children }) => <blockquote className="message-markdown__quote">{decorateChildren(children, agents, skills, mentionAgentIds)}</blockquote>,
+        table: ({ children }) => <div className="message-markdown__table-wrap"><table className="message-markdown__table">{decorateChildren(children, agents, skills, mentionAgentIds)}</table></div>,
+        th: ({ children }) => <th>{decorateChildren(children, agents, skills, mentionAgentIds)}</th>,
+        td: ({ children }) => <td>{decorateChildren(children, agents, skills, mentionAgentIds)}</td>,
         a: ({ children, href }) => (
           <a className="message-markdown__link" href={href} target="_blank" rel="noreferrer">
-            {decorateChildren(children, agents, skills)}
+            {decorateChildren(children, agents, skills, mentionAgentIds)}
           </a>
         ),
         code: (props) => {
@@ -193,11 +211,12 @@ function MarkdownContent({ body, agents, skills }: {
   );
 }
 
-export function ChatContent({ body, format, agents, skills }: {
+export function ChatContent({ body, format, agents, skills, mentionAgentIds = [] }: {
   body: string;
   format: ChatEntryFormat;
   agents: AgentProfile[];
   skills: SkillConfig[];
+  mentionAgentIds?: string[];
 }) {
   if (format === "code") {
     return <CodeContent body={body} />;
@@ -209,7 +228,7 @@ export function ChatContent({ body, format, agents, skills }: {
     return <DiagramContent body={body} />;
   }
   if (format === "plain") {
-    return <PlainTextContent body={body} agents={agents} skills={skills} />;
+    return <PlainTextContent body={body} agents={agents} skills={skills} mentionAgentIds={mentionAgentIds} />;
   }
-  return <MarkdownContent body={body} agents={agents} skills={skills} />;
+  return <MarkdownContent body={body} agents={agents} skills={skills} mentionAgentIds={mentionAgentIds} />;
 }

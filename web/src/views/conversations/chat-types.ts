@@ -20,6 +20,7 @@ export type LocalMessageDraft = {
   clientId: string;
   body: string;
   addressedAgents: string[];
+  explicitMentions: string[];
   segments: ComposerSegment[];
   createdAt: string;
   status: LocalMessageStatus;

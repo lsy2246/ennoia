@@ -42,6 +42,7 @@ type ComposerPickerOption = {
 type ComposerSnapshot = {
   body: string;
   addressedAgents: string[];
+  explicitMentions?: string[];
   segments: ComposerSegment[];
 };
 
@@ -70,6 +71,7 @@ function createLocalDraft(snapshot: ComposerSnapshot): LocalMessageDraft {
     clientId: `local-${Math.random().toString(36).slice(2, 10)}`,
     body: snapshot.body,
     addressedAgents: snapshot.addressedAgents,
+    explicitMentions: snapshot.explicitMentions ?? snapshot.addressedAgents,
     segments: snapshot.segments,
     createdAt: nowIso(),
     status: "queued",
@@ -475,7 +477,7 @@ function matchesRemoteMessage(draft: LocalMessageDraft, message: ChatMessage) {
   if (normalizeDraftBody(message.body) !== normalizeDraftBody(draft.body)) {
     return false;
   }
-  const draftMentions = uniqueStrings(draft.addressedAgents).sort().join("|");
+  const draftMentions = uniqueStrings(draft.explicitMentions ?? []).sort().join("|");
   const remoteMentions = uniqueStrings(message.mentions ?? []).sort().join("|");
   if (draftMentions !== remoteMentions) {
     return false;
@@ -916,7 +918,8 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
   const restoreDraftToComposer = useCallback((draft: LocalMessageDraft) => {
     writeComposerSnapshot(editorRef.current, {
       body: draft.body,
-      addressedAgents: draft.addressedAgents,
+      addressedAgents: draft.explicitMentions,
+      explicitMentions: draft.explicitMentions,
       segments: draft.segments,
     });
     syncComposerState();
@@ -937,6 +940,7 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
     const queued = createLocalDraft({
       body: snapshot.body.trim(),
       addressedAgents: recipients,
+      explicitMentions: snapshot.addressedAgents,
       segments: snapshot.segments,
     });
     setLocalDrafts((current) => [...current, queued]);
@@ -964,6 +968,7 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
           lane_id: conversation.default_lane_id ?? undefined,
           body: next.body,
           addressed_agents: next.addressedAgents,
+          mentions: next.explicitMentions,
         });
         if (!isMountedRef.current) {
           return;

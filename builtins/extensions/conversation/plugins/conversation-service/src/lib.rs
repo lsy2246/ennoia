@@ -61,6 +61,8 @@ struct ConversationMessagePayload {
     #[serde(default)]
     addressed_agents: Vec<String>,
     #[serde(default)]
+    mentions: Vec<String>,
+    #[serde(default)]
     sender: Option<String>,
     #[serde(default)]
     role: Option<String>,
@@ -91,6 +93,7 @@ struct ConversationMessageResponse {
     conversation: ConversationSpec,
     lane: LaneSpec,
     message: MessageSpec,
+    addressed_agents: Vec<String>,
     runs: Vec<JsonValue>,
     tasks: Vec<JsonValue>,
     artifacts: Vec<JsonValue>,
@@ -456,6 +459,14 @@ async fn append_message(
         .clone()
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| default_sender.to_string());
+    let explicit_mentions = payload
+        .message
+        .mentions
+        .iter()
+        .map(|item| item.trim())
+        .filter(|item| !item.is_empty())
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
     let message = MessageSpec {
         id: format!("msg-{}", Uuid::new_v4()),
         conversation_id: conversation.id.clone(),
@@ -463,7 +474,7 @@ async fn append_message(
         sender,
         role,
         body,
-        mentions: target_agents,
+        mentions: explicit_mentions,
         created_at: now.clone(),
     };
     state
@@ -499,6 +510,7 @@ async fn append_message(
         conversation,
         lane,
         message,
+        addressed_agents: target_agents,
         runs: Vec::new(),
         tasks: Vec::new(),
         artifacts: Vec::new(),

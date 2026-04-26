@@ -78,6 +78,7 @@ export async function sendChatMessage(
     body: string;
     goal?: string;
     addressed_agents?: string[];
+    mentions?: string[];
   },
 ) {
   return fetchJson<ChatSendResponse>(`${CONVERSATIONS_API}/${chatId}/messages`, {

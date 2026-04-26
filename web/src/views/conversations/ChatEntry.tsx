@@ -111,7 +111,13 @@ export function ChatEntry({
         <small>{formatDateTime(entry.createdAt)}</small>
       </header>
       <div className="message-bubble__body">
-        <ChatContent body={entry.body} format={entry.format} agents={agents} skills={skills} />
+        <ChatContent
+          body={entry.body}
+          format={entry.format}
+          agents={agents}
+          skills={skills}
+          mentionAgentIds={entry.mentions}
+        />
       </div>
       {isOperator ? (
         <footer className="message-bubble__footer">
