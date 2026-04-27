@@ -24,6 +24,7 @@ export function ChatEntry({
   onEditAndResend,
   onRetry,
   onRemove,
+  onResolveApproval,
 }: {
   entry: ChatEntryViewModel;
   agents: AgentProfile[];
@@ -35,6 +36,10 @@ export function ChatEntry({
   onEditAndResend: (messageId: string) => void;
   onRetry: (id: string) => void;
   onRemove: (id: string) => void;
+  onResolveApproval: (
+    approvalId: string,
+    resolution: "allow_once" | "allow_conversation" | "allow_run" | "allow_policy" | "deny",
+  ) => void;
 }) {
   if (entry.kind === "system") {
     return (
@@ -96,6 +101,56 @@ export function ChatEntry({
         <div className="message-bubble__body">
           <ChatContent body={entry.body} format={entry.format} agents={agents} skills={skills} />
         </div>
+      </article>
+    );
+  }
+
+  if (entry.kind === "approval") {
+    const statusTone = entry.approval.status === "approved"
+      ? "success"
+      : entry.approval.status === "pending"
+        ? "warn"
+        : entry.approval.status === "expired"
+          ? "muted"
+          : "danger";
+    return (
+      <article className="chat-approval-card">
+        <header className="chat-approval-card__header">
+          <div>
+            <strong>{entry.agentLabel}</strong>
+            <small>{formatDateTime(entry.createdAt)}</small>
+          </div>
+          <span className={`badge badge--${statusTone}`}>{entry.approval.status}</span>
+        </header>
+        <div className="chat-approval-card__body">
+          <strong>{entry.approval.action}</strong>
+          <p>{entry.approval.reason}</p>
+          <div className="chat-approval-card__meta">
+            <span>{entry.approval.target.kind}:{entry.approval.target.id}</span>
+            {entry.approval.expires_at ? (
+              <span>{t("web.permissions.expires_at", "截止")} {formatDateTime(entry.approval.expires_at)}</span>
+            ) : null}
+          </div>
+        </div>
+        {entry.approval.status === "pending" ? (
+          <div className="chat-approval-card__actions">
+            <button type="button" onClick={() => onResolveApproval(entry.approval.approval_id, "allow_once")}>
+              {t("web.permissions.allow_once", "允许一次")}
+            </button>
+            <button type="button" className="secondary" onClick={() => onResolveApproval(entry.approval.approval_id, "allow_conversation")}>
+              {t("web.permissions.allow_conversation", "允许本会话")}
+            </button>
+            <button type="button" className="secondary" onClick={() => onResolveApproval(entry.approval.approval_id, "allow_run")}>
+              {t("web.permissions.allow_run", "允许本次 run")}
+            </button>
+            <button type="button" className="secondary" onClick={() => onResolveApproval(entry.approval.approval_id, "allow_policy")}>
+              {t("web.permissions.allow_policy", "写入策略")}
+            </button>
+            <button type="button" className="secondary" onClick={() => onResolveApproval(entry.approval.approval_id, "deny")}>
+              {t("web.action.reject", "拒绝")}
+            </button>
+          </div>
+        ) : null}
       </article>
     );
   }

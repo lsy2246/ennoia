@@ -216,6 +216,7 @@ export type PermissionTarget = {
 export type PermissionScope = {
   conversation_id?: string | null;
   run_id?: string | null;
+  message_id?: string | null;
   extension_id?: string | null;
   path?: string | null;
   host?: string | null;
@@ -276,6 +277,7 @@ export type PermissionApprovalRecord = {
   matched_rule_id?: string | null;
   reason: string;
   created_at: string;
+  expires_at?: string | null;
   resolved_at?: string | null;
   resolution?: string | null;
 };

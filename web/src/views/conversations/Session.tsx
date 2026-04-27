@@ -6,13 +6,16 @@ import {
   createChatCheckpoint,
   getChat,
   listAgents,
+  listConversationPermissionApprovals,
   listSkills,
+  resolvePermissionApproval,
   sendChatMessage,
   switchChatBranch,
   type ChatBranch,
   type AgentProfile,
   type ChatMessage,
   type ChatThreadDetail,
+  type PermissionApprovalRecord,
   type SkillConfig,
 } from "@ennoia/api-client";
 import { useConversationsStore } from "@/stores/conversations";
@@ -573,16 +576,24 @@ function reconcileDraftsWithRemote(
 function reconcilePendingRepliesWithRemote(
   pendingReplies: PendingReplyMarker[],
   messages: ChatMessage[],
+  approvals: PermissionApprovalRecord[],
 ) {
   if (pendingReplies.length === 0 || messages.length === 0) {
-    return pendingReplies;
+    return pendingReplies.filter((marker) =>
+      !approvals.some((approval) =>
+        approval.agent_id === marker.agentId
+        && approval.created_at >= marker.createdAt),
+    );
   }
 
   return pendingReplies.filter((marker) =>
     !messages.some((message) =>
       message.role === "agent"
       && message.sender === marker.agentId
-      && message.created_at >= marker.createdAt),
+      && message.created_at >= marker.createdAt)
+    && !approvals.some((approval) =>
+      approval.agent_id === marker.agentId
+      && approval.created_at >= marker.createdAt),
   );
 }
 
@@ -598,6 +609,7 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
   const [agents, setAgents] = useState<AgentProfile[]>([]);
   const [skills, setSkills] = useState<SkillConfig[]>([]);
   const [detail, setDetail] = useState<ChatThreadDetail | null>(null);
+  const [approvals, setApprovals] = useState<PermissionApprovalRecord[]>([]);
   const [localDrafts, setLocalDrafts] = useState<LocalMessageDraft[]>(() => loadPersistedDrafts(sessionId));
   const [pendingReplies, setPendingReplies] = useState<PendingReplyMarker[]>(() => loadPersistedPendingReplies(sessionId));
   const [pickerState, setPickerState] = useState<ComposerPickerState>(EMPTY_PICKER_STATE);
@@ -634,11 +646,15 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
 
   const refreshThread = useCallback(async () => {
     try {
-      const nextDetail = await getChat(sessionId);
+      const [nextDetail, nextApprovals] = await Promise.all([
+        getChat(sessionId),
+        listConversationPermissionApprovals(sessionId, { limit: 80 }),
+      ]);
       if (!isMountedRef.current) {
         return;
       }
       setDetail(nextDetail);
+      setApprovals(nextApprovals);
     } catch (err) {
       if (err instanceof ApiError && err.status === 404 && panelId) {
         closeView(panelId);
@@ -654,10 +670,11 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
     setError(null);
     setDetail(null);
     try {
-      const [nextAgents, nextSkills, nextDetail] = await Promise.all([
+      const [nextAgents, nextSkills, nextDetail, nextApprovals] = await Promise.all([
         listAgents(),
         listSkills(),
         getChat(sessionId),
+        listConversationPermissionApprovals(sessionId, { limit: 80 }),
       ]);
       if (!isMountedRef.current) {
         return;
@@ -665,6 +682,7 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
       setAgents(nextAgents);
       setSkills(nextSkills);
       setDetail(nextDetail);
+      setApprovals(nextApprovals);
     } catch (err) {
       if (err instanceof ApiError && err.status === 404 && panelId) {
         closeView(panelId);
@@ -696,6 +714,7 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
   useEffect(() => {
     setLocalDrafts(loadPersistedDrafts(sessionId));
     setPendingReplies(loadPersistedPendingReplies(sessionId));
+    setApprovals([]);
     setComposerMode({ kind: "normal" });
   }, [sessionId]);
 
@@ -712,8 +731,9 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
       return;
     }
     setLocalDrafts((current) => reconcileDraftsWithRemote(current, detail.messages));
-    setPendingReplies((current) => reconcilePendingRepliesWithRemote(current, detail.messages));
-  }, [detail?.messages]);
+    setPendingReplies((current) =>
+      reconcilePendingRepliesWithRemote(current, detail.messages, approvals));
+  }, [approvals, detail?.messages]);
 
   useEffect(() => {
     if (!conversation) {
@@ -886,6 +906,23 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
     return activeAgents;
   }, [activeAgents, agentMap]);
 
+  const resolveAgentLabel = useCallback((agentId: string) => {
+    return agentMap.get(agentId)?.display_name
+      ?? agents.find((agent) => agent.id === agentId)?.display_name
+      ?? agentId;
+  }, [agentMap, agents]);
+
+  const visibleMessageIds = useMemo(
+    () => new Set((detail?.messages ?? []).map((message) => message.id)),
+    [detail?.messages],
+  );
+
+  const visibleApprovals = useMemo(
+    () => approvals.filter((approval) =>
+      !approval.scope.message_id || visibleMessageIds.has(approval.scope.message_id)),
+    [approvals, visibleMessageIds],
+  );
+
   const typingAgents = useMemo(() => {
     const typingIds = new Set<string>();
     for (const marker of pendingReplies) {
@@ -898,9 +935,11 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
 
   const chatEntries = useMemo(() => buildChatEntries({
     messages: detail?.messages ?? [],
+    approvals: visibleApprovals,
     localDrafts,
     resolveRecipients,
-  }), [detail?.messages, localDrafts, resolveRecipients]);
+    resolveAgentLabel,
+  }), [detail?.messages, localDrafts, resolveAgentLabel, resolveRecipients, visibleApprovals]);
 
   const statusEntries = useMemo(() => buildStatusEntries({
     typingAgents,
@@ -1158,6 +1197,32 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
   const removeLocalMessage = useCallback((clientId: string) => {
     setLocalDrafts((current) => current.filter((item) => item.clientId !== clientId));
   }, []);
+
+  const resolveApproval = useCallback(async (
+    approvalId: string,
+    resolution: "allow_once" | "allow_conversation" | "allow_run" | "allow_policy" | "deny",
+  ) => {
+    setError(null);
+    const approval = approvals.find((item) => item.approval_id === approvalId) ?? null;
+    try {
+      await resolvePermissionApproval(approvalId, resolution);
+      if (approval && resolution !== "deny") {
+        setPendingReplies((current) => [
+          ...current,
+          {
+            id: `approval:${approval.approval_id}`,
+            agentId: approval.agent_id,
+            createdAt: new Date().toISOString(),
+          },
+        ]);
+      }
+      await refreshThread();
+    } catch (err) {
+      if (isMountedRef.current) {
+        setError(String(err));
+      }
+    }
+  }, [approvals, refreshThread]);
 
   const editQueuedMessage = useCallback((clientId: string) => {
     const target = localDrafts.find((item) => item.clientId === clientId && item.status === "queued");
@@ -1486,6 +1551,7 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
               onEditAndResend={startRewriteFromMessage}
               onRetry={retryLocalMessage}
               onRemove={removeLocalMessage}
+              onResolveApproval={resolveApproval}
             />
           </div>
 

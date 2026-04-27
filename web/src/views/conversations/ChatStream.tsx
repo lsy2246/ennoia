@@ -15,6 +15,7 @@ export function ChatStream({
   onEditAndResend,
   onRetry,
   onRemove,
+  onResolveApproval,
 }: {
   entries: ChatEntryViewModel[];
   agents: AgentProfile[];
@@ -27,6 +28,10 @@ export function ChatStream({
   onEditAndResend: (messageId: string) => void;
   onRetry: (id: string) => void;
   onRemove: (id: string) => void;
+  onResolveApproval: (
+    approvalId: string,
+    resolution: "allow_once" | "allow_conversation" | "allow_run" | "allow_policy" | "deny",
+  ) => void;
 }) {
   if (entries.length === 0) {
     return <div className="empty-card conversation-empty-card">{emptyMessage}</div>;
@@ -45,6 +50,7 @@ export function ChatStream({
       onEditAndResend={onEditAndResend}
       onRetry={onRetry}
       onRemove={onRemove}
+      onResolveApproval={onResolveApproval}
     />
   ));
 }

@@ -1991,6 +1991,59 @@ label {
   color: var(--text-muted);
 }
 
+.chat-approval-card {
+  align-self: flex-start;
+  width: min(82%, 860px);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 18px;
+  border: 1px solid color-mix(in srgb, var(--warn) 32%, var(--border));
+  border-radius: 20px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--warn) 8%, var(--bg-panel)) 0%, var(--bg-panel) 100%);
+  box-shadow: var(--shadow-1);
+}
+
+.chat-approval-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.chat-approval-card__header > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.chat-approval-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.chat-approval-card__body p {
+  margin: 0;
+  line-height: 1.7;
+  color: var(--text);
+}
+
+.chat-approval-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.chat-approval-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .message-inline-error {
   display: flex;
   flex-direction: column;
@@ -2580,6 +2633,7 @@ label {
   height: 100%;
 }
 
+.resource-editor--agent,
 .session-view {
   overflow: hidden;
 }
@@ -2596,6 +2650,117 @@ label {
   text-transform: uppercase;
   letter-spacing: 0.14em;
   color: var(--text-muted);
+}
+
+.resource-editor__scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 4px;
+}
+
+.resource-editor__footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.agent-editor__canvas {
+  width: min(100%, 1160px);
+  margin: 0 auto;
+  padding: 0 10px 20px;
+}
+
+.agent-editor__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.08fr) minmax(320px, 0.92fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.agent-editor__column {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.agent-editor__section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.agent-editor__form-grid {
+  gap: 12px;
+}
+
+.agent-editor__check-row {
+  align-self: end;
+  min-height: 100%;
+  justify-content: center;
+}
+
+.agent-editor__textarea {
+  min-height: 140px;
+}
+
+.agent-editor__textarea--code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.agent-editor__card-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  max-height: 320px;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.agent-editor__mini-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.agent-editor__mini-card strong,
+.agent-editor__mini-card span {
+  word-break: break-word;
+}
+
+.agent-policy-editor,
+.agent-policy-editor__rules,
+.agent-policy-rule {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.agent-policy-editor__header,
+.agent-policy-rule__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.agent-policy-rule__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.agent-policy-rule__wide {
+  grid-column: 1 / -1;
 }
 
 .session-view__meta {
@@ -3135,6 +3300,29 @@ label {
 
   .conversation-grid {
     min-height: auto;
+  }
+
+  .agent-editor__grid {
+    grid-template-columns: 1fr;
+  }
+
+  .agent-editor__canvas {
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  .agent-editor__check-row {
+    align-self: stretch;
+  }
+
+  .agent-policy-rule__grid {
+    grid-template-columns: 1fr;
+  }
+
+  .agent-policy-rule__header,
+  .agent-policy-editor__header {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .composer,

@@ -5,6 +5,7 @@ use crate::agent_permissions::{
     PermissionPolicySummary,
 };
 
+use super::interfaces::spawn_approved_conversation_agent_reply;
 use super::*;
 
 #[derive(Debug, Deserialize)]
@@ -23,6 +24,8 @@ pub(super) struct PermissionEventsQueryPayload {
 pub(super) struct PermissionApprovalsQueryPayload {
     #[serde(default)]
     agent_id: Option<String>,
+    #[serde(default)]
+    conversation_id: Option<String>,
     #[serde(default)]
     status: Option<String>,
     #[serde(default)]
@@ -95,6 +98,7 @@ pub(super) async fn permission_approvals(
         .agent_permissions
         .list_approvals(&PermissionApprovalsQuery {
             agent_id: query.agent_id,
+            conversation_id: query.conversation_id,
             status: query.status,
             limit: query.limit.unwrap_or(100),
         })
@@ -108,15 +112,18 @@ pub(super) async fn permission_approval_resolve(
     Path(approval_id): Path<String>,
     Json(payload): Json<ApprovalResolutionPayload>,
 ) -> ApiResult<PermissionApprovalRecord> {
-    state
+    let approval = state
         .agent_permissions
         .resolve_approval(&approval_id, &payload.resolution)
         .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?
-        .map(Json)
         .ok_or_else(|| {
             scoped(
                 ApiError::not_found("permission approval not found"),
                 &request,
             )
-        })
+        })?;
+    if approval.status == "approved" {
+        spawn_approved_conversation_agent_reply(state.clone(), request.clone(), approval.clone());
+    }
+    Ok(Json(approval))
 }

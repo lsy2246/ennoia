@@ -35,6 +35,8 @@ pub struct PermissionScope {
     #[serde(default)]
     pub run_id: Option<String>,
     #[serde(default)]
+    pub message_id: Option<String>,
+    #[serde(default)]
     pub extension_id: Option<String>,
     #[serde(default)]
     pub path: Option<String>,
@@ -203,6 +205,8 @@ pub struct PermissionApprovalRecord {
     pub matched_rule_id: Option<String>,
     pub reason: String,
     pub created_at: String,
+    #[serde(default)]
+    pub expires_at: Option<String>,
     #[serde(default)]
     pub resolved_at: Option<String>,
     #[serde(default)]

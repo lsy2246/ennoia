@@ -51,12 +51,16 @@ export async function listPermissionEvents(query?: {
 
 export async function listPermissionApprovals(query?: {
   agent_id?: string;
+  conversation_id?: string;
   status?: string;
   limit?: number;
 }) {
   const params = new URLSearchParams();
   if (query?.agent_id) {
     params.set("agent_id", query.agent_id);
+  }
+  if (query?.conversation_id) {
+    params.set("conversation_id", query.conversation_id);
   }
   if (query?.status) {
     params.set("status", query.status);
@@ -68,6 +72,20 @@ export async function listPermissionApprovals(query?: {
   return fetchJson<PermissionApprovalRecord[]>(
     `/api/permissions/approvals${suffix ? `?${suffix}` : ""}`,
   );
+}
+
+export async function listConversationPermissionApprovals(
+  conversationId: string,
+  query?: {
+    status?: string;
+    limit?: number;
+  },
+) {
+  return listPermissionApprovals({
+    conversation_id: conversationId,
+    status: query?.status,
+    limit: query?.limit,
+  });
 }
 
 export async function resolvePermissionApproval(

@@ -1,4 +1,4 @@
-import type { AgentProfile, ChatMessage } from "@ennoia/api-client";
+import type { AgentProfile, ChatMessage, PermissionApprovalRecord } from "@ennoia/api-client";
 
 import type {
   ChatEntryRecipient,
@@ -69,8 +69,10 @@ function createErrorDetail(message: string) {
 
 export function buildChatEntries(params: {
   messages: ChatMessage[];
+  approvals: PermissionApprovalRecord[];
   localDrafts: LocalMessageDraft[];
   resolveRecipients: (mentions: string[]) => AgentProfile[];
+  resolveAgentLabel: (agentId: string) => string;
 }): ChatEntryViewModel[] {
   const entries: Array<{ order: number; entry: ChatEntryViewModel }> = [];
   let order = 0;
@@ -142,6 +144,25 @@ export function buildChatEntries(params: {
         recipients,
         mentions: message.mentions,
         source: "remote",
+      },
+    });
+  }
+
+  for (const approval of params.approvals) {
+    entries.push({
+      order: order++,
+      entry: {
+        id: `approval:${approval.approval_id}`,
+        role: "system",
+        kind: "approval",
+        format: "plain",
+        state: approval.status === "pending" ? "pending" : "done",
+        sender: params.resolveAgentLabel(approval.agent_id),
+        agentLabel: params.resolveAgentLabel(approval.agent_id),
+        title: approval.action,
+        body: approval.reason,
+        createdAt: approval.created_at,
+        approval,
       },
     });
   }

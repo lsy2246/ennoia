@@ -30,7 +30,6 @@ import { Agents } from "@/pages/agents";
 import { Conversations } from "@/pages/conversations";
 import { Extensions } from "@/pages/extensions";
 import { Observability } from "@/pages/observability";
-import { Permissions } from "@/pages/permissions";
 import { Schedules } from "@/pages/schedules";
 import { Settings } from "@/pages/settings";
 import { Skills } from "@/pages/skills";
@@ -141,7 +140,6 @@ const BUILTIN_NAV = [
   { id: "schedules", href: "/schedules", icon: "T", labelKey: "web.nav.schedules", fallback: "定时器", hintKey: "web.nav.schedules_hint", hint: "管理定时触发的命令、Agent 与会话投递" },
   { id: "extensions", href: "/extensions", icon: "E", labelKey: "web.nav.extensions", fallback: "扩展", hintKey: "web.nav.extensions_hint", hint: "系统插件与贡献能力" },
   { id: "observability", href: "/observability", icon: "L", labelKey: "web.nav.observability", fallback: "观测", hintKey: "web.nav.observability_hint", hint: "统一日志与 trace 观测台" },
-  { id: "permissions", href: "/permissions", icon: "P", labelKey: "web.nav.permissions", fallback: "权限", hintKey: "web.nav.permissions_hint", hint: "Agent 权限策略、审批与事件" },
   { id: "settings", href: "/settings", icon: "⚙", labelKey: "web.nav.settings", fallback: "设置", hintKey: "web.nav.settings_hint", hint: "运行时配置表单" },
 ] as const;
 
@@ -249,8 +247,6 @@ function RoutedWorkbenchPanel(props: IDockviewPanelProps<RoutePanelParams>) {
         return <Extensions />;
       case "observability":
         return <Observability />;
-      case "permissions":
-        return <Permissions />;
       case "settings":
         return <Settings />;
       default:

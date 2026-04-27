@@ -1,3 +1,5 @@
+import type { PermissionApprovalRecord } from "@ennoia/api-client";
+
 export type LocalMessageStatus = "queued" | "sending" | "failed";
 
 export type ComposerSegment =
@@ -50,7 +52,7 @@ export type ChatEntryRecipient = {
 type ChatEntryBase = {
   id: string;
   role: "operator" | "agent" | "system" | "tool";
-  kind: "message" | "error" | "system" | "status" | "tool_result";
+  kind: "message" | "error" | "system" | "status" | "tool_result" | "approval";
   format: ChatEntryFormat;
   state: ChatEntryState;
   sender?: string;
@@ -96,9 +98,16 @@ export type ChatToolResultEntry = ChatEntryBase & {
   kind: "tool_result";
 };
 
+export type ChatApprovalEntry = ChatEntryBase & {
+  kind: "approval";
+  approval: PermissionApprovalRecord;
+  agentLabel: string;
+};
+
 export type ChatEntryViewModel =
   | ChatMessageEntry
   | ChatErrorEntry
   | ChatSystemEntry
   | ChatStatusEntry
-  | ChatToolResultEntry;
+  | ChatToolResultEntry
+  | ChatApprovalEntry;

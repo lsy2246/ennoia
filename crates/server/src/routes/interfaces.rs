@@ -1,7 +1,8 @@
 use ennoia_kernel::{
     CapabilityPermissionMetadata, HookEventEnvelope, HookResourceRef, InterfaceBindingConfig,
-    InterfaceBindingsConfig, OwnerRef, PermissionRequest, PermissionScope, PermissionTarget,
-    PermissionTrigger, HOOK_EVENT_CONVERSATION_CREATED, HOOK_EVENT_CONVERSATION_MESSAGE_CREATED,
+    InterfaceBindingsConfig, OwnerRef, PermissionApprovalRecord, PermissionRequest,
+    PermissionScope, PermissionTarget, PermissionTrigger, HOOK_EVENT_CONVERSATION_CREATED,
+    HOOK_EVENT_CONVERSATION_MESSAGE_CREATED,
 };
 use std::io::Write;
 use std::path::PathBuf;
@@ -142,6 +143,8 @@ struct PermissionActorContext {
     conversation_id: Option<String>,
     #[serde(default)]
     run_id: Option<String>,
+    #[serde(default)]
+    message_id: Option<String>,
 }
 
 pub(super) async fn extension_interfaces(
@@ -913,6 +916,91 @@ fn spawn_conversation_agent_reply(state: AppState, request: RequestContext, payl
     });
 }
 
+pub(super) fn spawn_approved_conversation_agent_reply(
+    state: AppState,
+    request: RequestContext,
+    approval: PermissionApprovalRecord,
+) {
+    let conversation_id = approval.scope.conversation_id.clone();
+    let message_id = approval.scope.message_id.clone();
+    let agent_id = approval.agent_id.clone();
+    tokio::spawn(async move {
+        let Some(conversation_id) = conversation_id else {
+            return;
+        };
+        let Some(message_id) = message_id else {
+            return;
+        };
+        tokio::time::sleep(Duration::from_millis(AGENT_REPLY_DELAY_MS)).await;
+        if let Err(error) = generate_conversation_agent_reply_from_permission(
+            &state,
+            &request,
+            &conversation_id,
+            &message_id,
+            &agent_id,
+        )
+        .await
+        {
+            let _ = state.observability.append_log_scoped(
+                ObservationLogWrite {
+                    event: "runtime.permission.resume_reply_failed".to_string(),
+                    level: "warn".to_string(),
+                    component: OBSERVABILITY_COMPONENT_PROXY.to_string(),
+                    source_kind: "permission".to_string(),
+                    source_id: Some(approval.approval_id),
+                    message: "approved permission could not resume agent reply".to_string(),
+                    attributes: serde_json::json!({
+                        "agent_id": agent_id,
+                        "conversation_id": conversation_id,
+                        "message_id": message_id,
+                        "error": error.to_string(),
+                    }),
+                    created_at: None,
+                },
+                Some(&request.trace_context()),
+            );
+        }
+    });
+}
+
+async fn generate_conversation_agent_reply_from_permission(
+    state: &AppState,
+    request: &RequestContext,
+    conversation_id: &str,
+    message_id: &str,
+    agent_id: &str,
+) -> Result<(), ApiError> {
+    let messages = dispatch_interface_value(
+        state,
+        request,
+        "message.list",
+        serde_json::json!({ "conversation_id": conversation_id }),
+    )
+    .await?;
+    let Some(message) = messages
+        .as_array()
+        .and_then(|items| {
+            items
+                .iter()
+                .find(|item| item.get("id").and_then(JsonValue::as_str) == Some(message_id))
+        })
+        .cloned()
+    else {
+        return Err(scoped(
+            ApiError::not_found(format!("conversation message '{message_id}' not found")),
+            request,
+        ));
+    };
+    let payload = serde_json::json!({
+        "conversation": {
+            "id": conversation_id,
+        },
+        "message": message,
+        "addressed_agents": [agent_id],
+    });
+    generate_conversation_agent_reply(state, request, &payload).await
+}
+
 async fn generate_conversation_agent_reply(
     state: &AppState,
     request: &RequestContext,
@@ -974,6 +1062,7 @@ async fn generate_conversation_agent_reply(
             true,
             Some(&conversation_id),
             None,
+            message_id.as_deref(),
         );
         let conversation_messages = dispatch_interface_value_with_context(
             state,
@@ -1025,6 +1114,7 @@ async fn generate_conversation_agent_reply(
         .await
         {
             Ok(reply) => reply,
+            Err(error) if is_permission_approval_error(&error) => continue,
             Err(error) => error.to_string(),
         };
         let run_id = run_response
@@ -1051,6 +1141,7 @@ async fn generate_conversation_agent_reply(
                 true,
                 Some(&conversation_id),
                 run_id,
+                message_id.as_deref(),
             ),
         )
         .await?;
@@ -1161,6 +1252,7 @@ async fn generate_real_conversation_agent_reply(
         &contribution,
         conversation_id,
         &run_id,
+        message_id,
     )?;
     let response = invoke_provider_method(&entry, &request_payload, provider)
         .map_err(|error| scoped(ApiError::internal(error), request))?;
@@ -1199,6 +1291,7 @@ fn authorize_provider_generate(
     contribution: &RegisteredProviderContribution,
     conversation_id: &str,
     run_id: &str,
+    message_id: Option<&str>,
 ) -> Result<Option<String>, ApiError> {
     let permission_request = PermissionRequest {
         agent_id: agent.id.clone(),
@@ -1214,6 +1307,7 @@ fn authorize_provider_generate(
         scope: PermissionScope {
             conversation_id: Some(conversation_id.to_string()),
             run_id: Some(run_id.to_string()),
+            message_id: message_id.map(str::to_string),
             extension_id: Some(contribution.extension_id.clone()),
             path: None,
             host: normalize_optional_runtime_value(&provider.base_url),
@@ -1569,12 +1663,17 @@ fn normalize_optional_runtime_value(value: &str) -> Option<String> {
     }
 }
 
+fn is_permission_approval_error(error: &ApiError) -> bool {
+    error.message().starts_with("approval required:")
+}
+
 fn permission_actor_context(
     agent_id: &str,
     kind: &str,
     user_initiated: bool,
     conversation_id: Option<&str>,
     run_id: Option<&str>,
+    message_id: Option<&str>,
 ) -> JsonValue {
     serde_json::json!({
         "permission_actor": {
@@ -1583,6 +1682,7 @@ fn permission_actor_context(
             "user_initiated": user_initiated,
             "conversation_id": conversation_id,
             "run_id": run_id,
+            "message_id": message_id,
         }
     })
 }
@@ -1627,6 +1727,7 @@ fn build_interface_permission_request(
     let conversation_id =
         permission_conversation_id(params).or_else(|| actor.conversation_id.clone());
     let run_id = permission_run_id(params).or_else(|| actor.run_id.clone());
+    let message_id = permission_message_id(params).or_else(|| actor.message_id.clone());
     let path = permission_path(params);
     let host = permission_host(params);
     let target = PermissionTarget {
@@ -1646,6 +1747,7 @@ fn build_interface_permission_request(
     let scope = PermissionScope {
         conversation_id: permission_scope_conversation_id(permission, conversation_id.clone()),
         run_id: permission_scope_run_id(permission, run_id.clone()),
+        message_id,
         extension_id: Some(binding.extension_id.clone()),
         path,
         host,
@@ -1723,6 +1825,10 @@ fn permission_conversation_id(params: &JsonValue) -> Option<String> {
 
 fn permission_run_id(params: &JsonValue) -> Option<String> {
     json_string_at(params, &["run_id"]).or_else(|| json_string_at(params, &["run", "id"]))
+}
+
+fn permission_message_id(params: &JsonValue) -> Option<String> {
+    json_string_at(params, &["message_id"]).or_else(|| json_string_at(params, &["message", "id"]))
 }
 
 fn permission_path(params: &JsonValue) -> Option<String> {
