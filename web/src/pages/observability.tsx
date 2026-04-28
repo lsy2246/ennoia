@@ -11,25 +11,19 @@ import {
   type ObservationTraceDetail,
   type ObservationSpanRecord,
 } from "@ennoia/api-client";
-import { Select } from "@/components/Select";
+import { MultiSelect, type MultiSelectOption } from "@/components/MultiSelect";
 import { useUiHelpers } from "@/stores/ui";
 
-type LogFilters = {
+type UnifiedFilters = {
   q: string;
-  level: string;
-  component: string;
-  sourceKind: string;
+  scopes: Array<"error" | "warn" | "slow">;
+  signalTypes: Array<"log" | "trace">;
+  components: string[];
+  sourceKinds: string[];
   requestId: string;
   traceId: string;
-};
-
-type TraceFilters = {
-  q: string;
-  component: string;
-  kind: string;
-  sourceKind: string;
-  requestId: string;
-  status: string;
+  logLevels: string[];
+  traceStatuses: string[];
 };
 
 type TraceSummary = {
@@ -48,23 +42,37 @@ type TraceSummary = {
   lastSeq: number;
 };
 
-const INITIAL_LOG_FILTERS: LogFilters = {
-  q: "",
-  level: "",
-  component: "",
-  sourceKind: "",
-  requestId: "",
-  traceId: "",
+type DiagnosticFeedItem = {
+  key: string;
+  kind: "log" | "trace";
+  timestamp: string;
+  title: string;
+  summary: string;
+  component: string;
+  sourceKind: string;
+  requestId?: string | null;
+  traceId?: string | null;
+  durationMs?: number;
+  badgeValue: string;
+  badgeClass: string;
+  priority: "error" | "warn" | "slow" | "normal";
+  log?: ObservationLogEntry;
+  trace?: TraceSummary;
 };
 
-const INITIAL_TRACE_FILTERS: TraceFilters = {
+const INITIAL_FILTERS: UnifiedFilters = {
   q: "",
-  component: "",
-  kind: "",
-  sourceKind: "",
+  scopes: [],
+  signalTypes: [],
+  components: [],
+  sourceKinds: [],
   requestId: "",
-  status: "",
+  traceId: "",
+  logLevels: [],
+  traceStatuses: [],
 };
+
+const SLOW_TRACE_THRESHOLD_MS = 1200;
 
 function stringifyJson(value: unknown) {
   try {
@@ -103,6 +111,78 @@ function statusBadgeClass(status: string) {
     return "badge--success";
   }
   return "badge--muted";
+}
+
+function localizeLogLevel(level: string, t: (key: string, fallback: string) => string) {
+  switch (level.toLowerCase()) {
+    case "fatal":
+      return t("web.observability.level.fatal", "致命");
+    case "error":
+      return t("web.observability.level.error", "错误");
+    case "warn":
+    case "warning":
+      return t("web.observability.level.warn", "警告");
+    case "info":
+      return t("web.observability.level.info", "信息");
+    case "debug":
+      return t("web.observability.level.debug", "调试");
+    case "trace":
+      return t("web.observability.level.trace", "跟踪");
+    default:
+      return level;
+  }
+}
+
+function localizeTraceStatus(status: string, t: (key: string, fallback: string) => string) {
+  switch (status.toLowerCase()) {
+    case "slow":
+      return t("web.observability.status.slow", "慢");
+    case "error":
+    case "fail":
+    case "failed":
+      return t("web.observability.status.error", "错误");
+    case "warn":
+    case "warning":
+      return t("web.observability.status.warn", "警告");
+    case "timeout":
+      return t("web.observability.status.timeout", "超时");
+    case "cancel":
+    case "cancelled":
+      return t("web.observability.status.cancel", "已取消");
+    case "ok":
+    case "success":
+    case "done":
+      return t("web.observability.status.ok", "正常");
+    default:
+      return status;
+  }
+}
+
+function localizeSignalType(kind: "log" | "trace", t: (key: string, fallback: string) => string) {
+  return kind === "log"
+    ? t("web.observability.kind.log", "日志")
+    : t("web.observability.kind.trace", "链路");
+}
+
+function localizeSourceKind(sourceKind: string, t: (key: string, fallback: string) => string) {
+  switch (sourceKind.toLowerCase()) {
+    case "system":
+      return t("web.observability.source.system", "系统");
+    case "extension":
+      return t("web.observability.source.extension", "扩展");
+    case "route":
+      return t("web.observability.source.route", "路由");
+    case "permission":
+      return t("web.observability.source.permission", "权限");
+    case "interface":
+      return t("web.observability.source.interface", "接口");
+    case "hook":
+      return t("web.observability.source.hook", "钩子");
+    case "conversation":
+      return t("web.observability.source.conversation", "会话");
+    default:
+      return sourceKind;
+  }
 }
 
 function collectOptionValues(values: Array<string | null | undefined>) {
@@ -154,107 +234,251 @@ function buildTraceSummaries(spans: ObservationSpanRecord[]): TraceSummary[] {
     .sort((left, right) => right.lastSeq - left.lastSeq);
 }
 
+function buildDiagnosticFeed(logs: ObservationLogEntry[], traces: TraceSummary[]): DiagnosticFeedItem[] {
+  const logItems = logs.map<DiagnosticFeedItem>((item) => {
+    const badgeClass = levelBadgeClass(item.level);
+    const priority = badgeClass === "badge--danger"
+      ? "error"
+      : badgeClass === "badge--warn"
+        ? "warn"
+        : "normal";
+    return {
+      key: `log:${item.id}`,
+      kind: "log",
+      timestamp: item.created_at,
+      title: item.event,
+      summary: item.message,
+      component: item.component,
+      sourceKind: item.source_kind,
+      requestId: item.request_id,
+      traceId: item.trace_id,
+      badgeValue: item.level,
+      badgeClass,
+      priority,
+      log: item,
+    };
+  });
+
+  const traceItems = traces.map<DiagnosticFeedItem>((item) => {
+    const statusClass = statusBadgeClass(item.status);
+    const isSlow = item.durationMs >= SLOW_TRACE_THRESHOLD_MS;
+    const priority = statusClass === "badge--danger"
+      ? "error"
+      : statusClass === "badge--warn"
+        ? "warn"
+        : isSlow
+          ? "slow"
+          : "normal";
+    return {
+      key: `trace:${item.traceId}`,
+      kind: "trace",
+      timestamp: item.endedAt,
+      title: item.name,
+      summary: `${item.spanCount} spans · ${item.durationMs} ms · ${item.traceId}`,
+      component: item.component,
+      sourceKind: item.sourceKind,
+      requestId: item.requestId,
+      traceId: item.traceId,
+      durationMs: item.durationMs,
+      badgeValue: isSlow && statusClass === "badge--muted" ? "slow" : item.status,
+      badgeClass: isSlow && statusClass === "badge--muted" ? "badge--warn" : statusClass,
+      priority,
+      trace: item,
+    };
+  });
+
+  return [...logItems, ...traceItems].sort((left, right) => right.timestamp.localeCompare(left.timestamp));
+}
+
 export function Observability() {
   const { formatDateTime, t } = useUiHelpers();
   const [overview, setOverview] = useState<ObservationOverview | null>(null);
   const [logs, setLogs] = useState<ObservationLogEntry[]>([]);
   const [traceSpans, setTraceSpans] = useState<ObservationSpanRecord[]>([]);
-  const [selectedLogId, setSelectedLogId] = useState<string | null>(null);
-  const [selectedTraceId, setSelectedTraceId] = useState<string | null>(null);
+  const [filters, setFilters] = useState<UnifiedFilters>(INITIAL_FILTERS);
+  const [selectedItemKey, setSelectedItemKey] = useState<string | null>(null);
   const [selectedTrace, setSelectedTrace] = useState<ObservationTraceDetail | null>(null);
-  const [logFilters, setLogFilters] = useState<LogFilters>(INITIAL_LOG_FILTERS);
-  const [traceFilters, setTraceFilters] = useState<TraceFilters>(INITIAL_TRACE_FILTERS);
   const [busy, setBusy] = useState(false);
   const [loadingTraceDetail, setLoadingTraceDetail] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const traceSummaries = useMemo(() => buildTraceSummaries(traceSpans), [traceSpans]);
-  const selectedLog = useMemo(
-    () => logs.find((item) => item.id === selectedLogId) ?? null,
-    [logs, selectedLogId],
+  const feed = useMemo(() => buildDiagnosticFeed(logs, traceSummaries), [logs, traceSummaries]);
+
+  const componentOptions = useMemo(
+    () => collectOptionValues([...logs.map((item) => item.component), ...traceSummaries.map((item) => item.component)]),
+    [logs, traceSummaries],
+  );
+  const sourceKindOptions = useMemo(
+    () => collectOptionValues([...logs.map((item) => item.source_kind), ...traceSummaries.map((item) => item.sourceKind)]),
+    [logs, traceSummaries],
+  );
+  const logLevelOptions = useMemo(() => collectOptionValues(logs.map((item) => item.level)), [logs]);
+  const traceStatusOptions = useMemo(() => collectOptionValues(traceSummaries.map((item) => item.status)), [traceSummaries]);
+  const scopeFilterOptions = useMemo<MultiSelectOption[]>(
+    () => [
+      { value: "error", label: t("web.observability.filters.scope_error", "异常") },
+      { value: "warn", label: t("web.observability.filters.scope_warn", "告警") },
+      { value: "slow", label: t("web.observability.filters.scope_slow", "慢链路") },
+    ],
+    [t],
+  );
+  const signalTypeFilterOptions = useMemo<MultiSelectOption[]>(
+    () => [
+      { value: "log", label: t("web.observability.filters.signal_type_log", "日志") },
+      { value: "trace", label: t("web.observability.filters.signal_type_trace", "链路") },
+    ],
+    [t],
+  );
+  const componentFilterOptions = useMemo<MultiSelectOption[]>(
+    () => componentOptions.map((item) => ({ value: item, label: item })),
+    [componentOptions],
+  );
+  const sourceKindFilterOptions = useMemo<MultiSelectOption[]>(
+    () => sourceKindOptions.map((item) => ({ value: item, label: localizeSourceKind(item, t) })),
+    [sourceKindOptions, t],
+  );
+  const logLevelFilterOptions = useMemo<MultiSelectOption[]>(
+    () => logLevelOptions.map((item) => ({ value: item, label: localizeLogLevel(item, t) })),
+    [logLevelOptions, t],
+  );
+  const traceStatusFilterOptions = useMemo<MultiSelectOption[]>(
+    () => traceStatusOptions.map((item) => ({ value: item, label: localizeTraceStatus(item, t) })),
+    [traceStatusOptions, t],
   );
 
-  const logLevelOptions = useMemo(() => collectOptionValues(logs.map((item) => item.level)), [logs]);
-  const logComponentOptions = useMemo(() => collectOptionValues(logs.map((item) => item.component)), [logs]);
-  const logSourceKindOptions = useMemo(() => collectOptionValues(logs.map((item) => item.source_kind)), [logs]);
-
-  const traceComponentOptions = useMemo(() => collectOptionValues(traceSummaries.map((item) => item.component)), [traceSummaries]);
-  const traceKindOptions = useMemo(() => collectOptionValues(traceSummaries.map((item) => item.kind)), [traceSummaries]);
-  const traceSourceKindOptions = useMemo(() => collectOptionValues(traceSummaries.map((item) => item.sourceKind)), [traceSummaries]);
-  const traceStatusOptions = useMemo(() => collectOptionValues(traceSummaries.map((item) => item.status)), [traceSummaries]);
-
-  const filteredLogs = useMemo(() => {
-    return logs.filter((item) => {
-      if (logFilters.level && item.level !== logFilters.level) {
+  const filteredFeed = useMemo(() => {
+    return feed.filter((item) => {
+      if (filters.scopes.length > 0) {
+        const matchesSelectedScope = filters.scopes.some((scope) => {
+          if (scope === "error") {
+            return item.priority === "error";
+          }
+          if (scope === "warn") {
+            return item.priority === "warn";
+          }
+          return item.kind === "trace" && (item.durationMs ?? 0) >= SLOW_TRACE_THRESHOLD_MS;
+        });
+        if (!matchesSelectedScope) {
+          return false;
+        }
+      }
+      if (filters.signalTypes.length > 0 && !filters.signalTypes.includes(item.kind)) {
         return false;
       }
-      if (logFilters.component && item.component !== logFilters.component) {
+      if (filters.components.length > 0 && !filters.components.includes(item.component)) {
         return false;
       }
-      if (logFilters.sourceKind && item.source_kind !== logFilters.sourceKind) {
+      if (filters.sourceKinds.length > 0 && !filters.sourceKinds.includes(item.sourceKind)) {
         return false;
       }
-      if (logFilters.requestId && item.request_id !== logFilters.requestId.trim()) {
+      if (filters.requestId && item.requestId !== filters.requestId.trim()) {
         return false;
       }
-      if (logFilters.traceId && item.trace_id !== logFilters.traceId.trim()) {
+      if (filters.traceId && item.traceId !== filters.traceId.trim()) {
         return false;
       }
-      if (!logFilters.q.trim()) {
+      if (filters.logLevels.length > 0) {
+        if (item.kind !== "log" || !item.log || !filters.logLevels.includes(item.log.level)) {
+          return false;
+        }
+      }
+      if (filters.traceStatuses.length > 0) {
+        if (item.kind !== "trace" || !item.trace || !filters.traceStatuses.includes(item.trace.status)) {
+          return false;
+        }
+      }
+      if (!filters.q.trim()) {
         return true;
       }
       const haystack = [
-        item.event,
-        item.message,
+        item.title,
+        item.summary,
         item.component,
-        item.source_kind,
-        item.source_id,
-        item.request_id,
-        item.trace_id,
-        stringifyJson(item.attributes),
-      ]
-        .filter(Boolean)
-        .join("\n")
-        .toLowerCase();
-      return haystack.includes(logFilters.q.trim().toLowerCase());
-    });
-  }, [logFilters, logs]);
-
-  const filteredTraces = useMemo(() => {
-    return traceSummaries.filter((item) => {
-      if (traceFilters.component && item.component !== traceFilters.component) {
-        return false;
-      }
-      if (traceFilters.kind && item.kind !== traceFilters.kind) {
-        return false;
-      }
-      if (traceFilters.sourceKind && item.sourceKind !== traceFilters.sourceKind) {
-        return false;
-      }
-      if (traceFilters.requestId && item.requestId !== traceFilters.requestId.trim()) {
-        return false;
-      }
-      if (traceFilters.status && item.status !== traceFilters.status) {
-        return false;
-      }
-      if (!traceFilters.q.trim()) {
-        return true;
-      }
-      const haystack = [
-        item.traceId,
-        item.requestId,
-        item.name,
-        item.component,
-        item.kind,
         item.sourceKind,
-        item.sourceId,
+        item.requestId,
+        item.traceId,
+        item.kind === "log" ? stringifyJson(item.log?.attributes) : stringifyJson(item.trace),
       ]
         .filter(Boolean)
         .join("\n")
         .toLowerCase();
-      return haystack.includes(traceFilters.q.trim().toLowerCase());
+      return haystack.includes(filters.q.trim().toLowerCase());
     });
-  }, [traceFilters, traceSummaries]);
+  }, [feed, filters]);
+
+  const selectedItem = useMemo(
+    () => filteredFeed.find((item) => item.key === selectedItemKey) ?? null,
+    [filteredFeed, selectedItemKey],
+  );
+
+  const selectedTraceId = selectedItem?.kind === "trace"
+    ? selectedItem.trace?.traceId ?? null
+    : selectedItem?.log?.trace_id ?? null;
+
+  const selectedTraceSummary = useMemo(
+    () => (selectedTraceId ? traceSummaries.find((item) => item.traceId === selectedTraceId) ?? null : null),
+    [selectedTraceId, traceSummaries],
+  );
+
+  const relatedLogs = useMemo(() => {
+    if (!selectedItem) {
+      return [];
+    }
+    const scoped = logs.filter((item) => {
+      if (selectedTraceId && item.trace_id === selectedTraceId) {
+        return true;
+      }
+      return Boolean(selectedItem.requestId && item.request_id === selectedItem.requestId);
+    });
+    return scoped
+      .filter((item) => item.id !== selectedItem.log?.id)
+      .sort((left, right) => right.seq - left.seq)
+      .slice(0, 6);
+  }, [logs, selectedItem, selectedTraceId]);
+
+  const sortedTraceSpans = useMemo(() => {
+    if (!selectedTrace) {
+      return [];
+    }
+    return [...selectedTrace.spans].sort((left, right) => left.seq - right.seq);
+  }, [selectedTrace]);
+
+  const previewTraceSpans = useMemo(() => {
+    if (!selectedItem) {
+      return [];
+    }
+    if (selectedItem.kind === "trace") {
+      return sortedTraceSpans;
+    }
+    return sortedTraceSpans.slice(0, 4);
+  }, [selectedItem, sortedTraceSpans]);
+
+  const issueLogCount = useMemo(
+    () => logs.filter((item) => {
+      const badge = levelBadgeClass(item.level);
+      return badge === "badge--danger" || badge === "badge--warn";
+    }).length,
+    [logs],
+  );
+  const issueTraceCount = useMemo(
+    () => traceSummaries.filter((item) => {
+      const badge = statusBadgeClass(item.status);
+      return badge === "badge--danger" || badge === "badge--warn";
+    }).length,
+    [traceSummaries],
+  );
+  const slowTraceCount = useMemo(
+    () => traceSummaries.filter((item) => item.durationMs >= SLOW_TRACE_THRESHOLD_MS).length,
+    [traceSummaries],
+  );
+  const activeRequestCount = useMemo(
+    () => new Set(
+      [...logs.map((item) => item.request_id), ...traceSummaries.map((item) => item.requestId)]
+        .filter((item): item is string => Boolean(item && item.trim())),
+    ).size,
+    [logs, traceSummaries],
+  );
 
   async function refresh() {
     setBusy(true);
@@ -266,12 +490,11 @@ export function Observability() {
         listObservabilityTraces({ limit: 200 }),
       ]);
       const nextTraceSummaries = buildTraceSummaries(nextTraces);
+      const nextFeed = buildDiagnosticFeed(nextLogs, nextTraceSummaries);
       setOverview(nextOverview);
       setLogs(nextLogs);
       setTraceSpans(nextTraces);
-      setSelectedLogId((current) => nextLogs.some((item) => item.id === current) ? current : nextLogs[0]?.id ?? null);
-      setSelectedTraceId((current) =>
-        nextTraceSummaries.some((item) => item.traceId === current) ? current : nextTraceSummaries[0]?.traceId ?? null);
+      setSelectedItemKey((current) => nextFeed.some((item) => item.key === current) ? current : nextFeed[0]?.key ?? null);
     } catch (err) {
       setError(String(err));
     } finally {
@@ -284,14 +507,9 @@ export function Observability() {
   }, []);
 
   useEffect(() => {
-    setSelectedLogId((current) =>
-      filteredLogs.some((item) => item.id === current) ? current : filteredLogs[0]?.id ?? null);
-  }, [filteredLogs]);
-
-  useEffect(() => {
-    setSelectedTraceId((current) =>
-      filteredTraces.some((item) => item.traceId === current) ? current : filteredTraces[0]?.traceId ?? null);
-  }, [filteredTraces]);
+    setSelectedItemKey((current) =>
+      filteredFeed.some((item) => item.key === current) ? current : filteredFeed[0]?.key ?? null);
+  }, [filteredFeed]);
 
   useEffect(() => {
     if (!selectedTraceId) {
@@ -329,313 +547,409 @@ export function Observability() {
 
   return (
     <div className="observability-layout">
-      <section className="work-panel">
-        <div className="page-heading">
-          <span>{t("web.observability.eyebrow", "Observability")}</span>
-          <h1>{t("web.observability.title", "统一查看宿主日志、trace 链路和系统运行脉络。")}</h1>
-          <p>{t("web.observability.description", "页面展示最近样本；筛选作用于当前已加载的数据，点击刷新会重新拉取最新记录。")}</p>
+      <section className="work-panel observability-header-card">
+        <div className="observability-toolbar">
+          <div className="page-heading">
+            <span>{t("web.observability.eyebrow", "Observability")}</span>
+            <h1>{t("web.observability.title", "统一诊断最近异常、日志与链路上下文。")}</h1>
+            <p>{t("web.observability.description", "先定位异常与慢链路，再按 request 或 trace 深挖上下文，不再把日志和观测拆成两套页面心智。")}</p>
+          </div>
+          <button type="button" className="secondary" onClick={() => void refresh()} disabled={busy}>
+            {busy ? t("web.common.loading", "加载中…") : t("web.action.refresh", "刷新")}
+          </button>
         </div>
+
         {error ? <div className="error">{error}</div> : null}
-        <div className="metric-grid">
-          <article className="metric-card">
-            <span>{t("web.observability.metrics.logs", "日志总量")}</span>
-            <strong>{overview?.log_count ?? "—"}</strong>
+
+        <div className="observability-summary-grid">
+          <article className="metric-card observability-metric-card">
+            <span>{t("web.observability.metrics.issue_logs", "异常日志")}</span>
+            <strong>{issueLogCount}</strong>
+            <small>{overview ? `${t("web.observability.metrics.total_label", "总量")} ${overview.log_count}` : "—"}</small>
           </article>
-          <article className="metric-card">
-            <span>{t("web.observability.metrics.spans", "Span 总量")}</span>
-            <strong>{overview?.span_count ?? "—"}</strong>
+          <article className="metric-card observability-metric-card">
+            <span>{t("web.observability.metrics.issue_traces", "异常链路")}</span>
+            <strong>{issueTraceCount}</strong>
+            <small>{overview ? `${t("web.observability.metrics.total_label", "总量")} ${overview.trace_count}` : "—"}</small>
           </article>
-          <article className="metric-card">
-            <span>{t("web.observability.metrics.traces", "Trace 总量")}</span>
-            <strong>{overview?.trace_count ?? "—"}</strong>
+          <article className="metric-card observability-metric-card">
+            <span>{t("web.observability.metrics.slow_traces", "慢链路")}</span>
+            <strong>{slowTraceCount}</strong>
+            <small>{`>${SLOW_TRACE_THRESHOLD_MS} ms`}</small>
           </article>
-          <article className="metric-card">
-            <span>{t("web.observability.metrics.loaded", "当前加载")}</span>
-            <strong>{logs.length + traceSummaries.length}</strong>
+          <article className="metric-card observability-metric-card">
+            <span>{t("web.observability.metrics.active_requests", "活跃 request")}</span>
+            <strong>{activeRequestCount}</strong>
+            <small>{overview ? `${overview.span_count} ${t("web.observability.metrics.spans_suffix", "spans")}` : "—"}</small>
           </article>
         </div>
       </section>
 
-      <div className="observability-grid">
-        <section className="work-panel observability-panel">
+      <section className="work-panel observability-diagnostic-grid observability-workbench">
+        <div className="observability-panel observability-panel--feed observability-column">
           <div className="observability-section-header">
             <div className="page-heading">
-              <span>{t("web.observability.logs.eyebrow", "Logs")}</span>
-              <h1>{t("web.observability.logs.title", "最近日志")}</h1>
-              <p>{t("web.observability.logs.description", "按等级、组件、来源或 request/trace 精确定位，再展开看属性详情。")}</p>
+              <span>{t("web.observability.feed.eyebrow", "Diagnostic feed")}</span>
+              <h1>{t("web.observability.feed.title", "统一诊断流")}</h1>
+              <p>{t("web.observability.feed.description", "列表按时间统一展示事件；需要收窄范围时，展开高级筛选按类型、严重程度或 ID 精确定位。")}</p>
             </div>
-            <button type="button" className="secondary" onClick={() => void refresh()} disabled={busy}>
-              {busy ? t("web.common.loading", "加载中…") : t("web.action.refresh", "刷新")}
-            </button>
-          </div>
-
-          <div className="observability-filter-grid">
-            <input
-              value={logFilters.q}
-              onChange={(event) => setLogFilters((current) => ({ ...current, q: event.target.value }))}
-              placeholder={t("web.observability.logs.search", "搜索 event、message、trace_id 或 attributes")}
-            />
-            <Select
-              value={logFilters.level}
-              onChange={(value) => setLogFilters((current) => ({ ...current, level: value }))}
-              placeholder={t("web.observability.logs.level", "全部等级")}
-              options={[
-                { value: "", label: t("web.observability.logs.level", "全部等级") },
-                ...logLevelOptions.map((item) => ({ value: item, label: item })),
-              ]}
-            />
-            <Select
-              value={logFilters.component}
-              onChange={(value) => setLogFilters((current) => ({ ...current, component: value }))}
-              placeholder={t("web.observability.logs.component", "全部组件")}
-              options={[
-                { value: "", label: t("web.observability.logs.component", "全部组件") },
-                ...logComponentOptions.map((item) => ({ value: item, label: item })),
-              ]}
-            />
-            <Select
-              value={logFilters.sourceKind}
-              onChange={(value) => setLogFilters((current) => ({ ...current, sourceKind: value }))}
-              placeholder={t("web.observability.logs.source_kind", "全部来源类型")}
-              options={[
-                { value: "", label: t("web.observability.logs.source_kind", "全部来源类型") },
-                ...logSourceKindOptions.map((item) => ({ value: item, label: item })),
-              ]}
-            />
-            <input
-              value={logFilters.requestId}
-              onChange={(event) => setLogFilters((current) => ({ ...current, requestId: event.target.value }))}
-              placeholder={t("web.observability.logs.request_id", "按 request_id 过滤")}
-            />
-            <input
-              value={logFilters.traceId}
-              onChange={(event) => setLogFilters((current) => ({ ...current, traceId: event.target.value }))}
-              placeholder={t("web.observability.logs.trace_id", "按 trace_id 过滤")}
-            />
-          </div>
-
-          <div className="observability-scroll stack">
-            {filteredLogs.length === 0 ? (
-              <div className="empty-card">{t("web.observability.logs.empty", "当前筛选下没有日志。")}</div>
-            ) : (
-              filteredLogs.map((item) => (
-                <article
-                  key={item.id}
-                  className={`log-card observability-item ${selectedLogId === item.id ? "observability-item--active" : ""}`}
-                  onClick={() => setSelectedLogId(item.id)}
-                  role="button"
-                  tabIndex={0}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
-                      setSelectedLogId(item.id);
-                    }
-                  }}
-                >
-                  <header>
-                    <strong>{item.event}</strong>
-                    <span className="observability-meta">
-                      <span className={`badge ${levelBadgeClass(item.level)}`}>{item.level}</span>
-                      <span className="badge badge--muted">{item.component}</span>
-                      <span className="badge badge--muted">{item.source_kind}</span>
-                    </span>
-                  </header>
-                  <p>{item.message}</p>
-                  <small>{formatDateTime(item.created_at)}</small>
-                </article>
-              ))
-            )}
-          </div>
-
-          <div className="details-panel observability-detail">
-            <div className="observability-section-header">
-              <strong>{t("web.observability.logs.detail", "日志详情")}</strong>
+            <div className="observability-feed-count">
+              {`${filteredFeed.length} ${t("web.observability.feed.count", "条")}`}
             </div>
-            {selectedLog ? (
-              <div className="stack">
-                <div className="kv-list">
-                  <span>ID</span><strong>{selectedLog.id}</strong>
-                  <span>event</span><strong>{selectedLog.event}</strong>
-                  <span>level</span><strong><span className={`badge ${levelBadgeClass(selectedLog.level)}`}>{selectedLog.level}</span></strong>
-                  <span>component</span><strong>{selectedLog.component}</strong>
-                  <span>source</span><strong>{selectedLog.source_kind}{selectedLog.source_id ? `:${selectedLog.source_id}` : ""}</strong>
-                  <span>request_id</span><strong>{selectedLog.request_id ?? "—"}</strong>
-                  <span>trace_id</span><strong>{selectedLog.trace_id ?? "—"}</strong>
-                  <span>span_id</span><strong>{selectedLog.span_id ?? "—"}</strong>
-                </div>
-                <div className="stack">
-                  <div>
-                    <strong>{t("web.observability.common.message", "消息")}</strong>
-                    <p>{selectedLog.message}</p>
-                  </div>
-                  <div>
-                    <strong>{t("web.observability.common.attributes", "属性")}</strong>
-                    <pre className="observability-json">{stringifyJson(selectedLog.attributes)}</pre>
-                  </div>
+          </div>
+
+          <div className="observability-feed-tools">
+            <input
+              className="observability-search"
+              value={filters.q}
+              onChange={(event) => setFilters((current) => ({ ...current, q: event.target.value }))}
+              placeholder={t("web.observability.feed.search", "搜索消息、事件、trace_id、request_id 或组件")}
+            />
+            <details className="observability-filter-popover">
+              <summary className="secondary">{t("web.observability.filters.title", "高级筛选")}</summary>
+              <div className="observability-filter-popover__panel">
+                <div className="observability-filter-grid">
+                  <label className="observability-filter-field">
+                    <span>{t("web.observability.filters.scope", "范围")}</span>
+                    <MultiSelect
+                      values={filters.scopes}
+                      onChange={(values) => setFilters((current) => ({ ...current, scopes: values as UnifiedFilters["scopes"] }))}
+                      options={scopeFilterOptions}
+                      placeholder={t("web.observability.filters.scope_all", "全部范围")}
+                    />
+                  </label>
+                  <label className="observability-filter-field">
+                    <span>{t("web.observability.filters.signal_type", "类型")}</span>
+                    <MultiSelect
+                      values={filters.signalTypes}
+                      onChange={(values) => setFilters((current) => ({ ...current, signalTypes: values as UnifiedFilters["signalTypes"] }))}
+                      options={signalTypeFilterOptions}
+                      placeholder={t("web.observability.filters.signal_type_all", "全部类型")}
+                    />
+                  </label>
+                  <label className="observability-filter-field">
+                    <span>{t("web.observability.filters.component", "组件")}</span>
+                    <MultiSelect
+                      values={filters.components}
+                      onChange={(values) => setFilters((current) => ({ ...current, components: values }))}
+                      options={componentFilterOptions}
+                      placeholder={t("web.observability.filters.all", "全部")}
+                    />
+                  </label>
+                  <label className="observability-filter-field">
+                    <span>{t("web.observability.filters.source_kind", "来源")}</span>
+                    <MultiSelect
+                      values={filters.sourceKinds}
+                      onChange={(values) => setFilters((current) => ({ ...current, sourceKinds: values }))}
+                      options={sourceKindFilterOptions}
+                      placeholder={t("web.observability.filters.all", "全部")}
+                    />
+                  </label>
+                  <label className="observability-filter-field">
+                    <span>{t("web.observability.filters.log_level", "日志等级")}</span>
+                    <MultiSelect
+                      values={filters.logLevels}
+                      onChange={(values) => setFilters((current) => ({ ...current, logLevels: values }))}
+                      options={logLevelFilterOptions}
+                      placeholder={t("web.observability.filters.all", "全部")}
+                    />
+                  </label>
+                  <label className="observability-filter-field">
+                    <span>{t("web.observability.filters.trace_status", "链路结果")}</span>
+                    <MultiSelect
+                      values={filters.traceStatuses}
+                      onChange={(values) => setFilters((current) => ({ ...current, traceStatuses: values }))}
+                      options={traceStatusFilterOptions}
+                      placeholder={t("web.observability.filters.all", "全部")}
+                    />
+                  </label>
+                  <label className="observability-filter-field">
+                    <span>{t("web.observability.filters.request_id", "请求编号")}</span>
+                    <input
+                      value={filters.requestId}
+                      onChange={(event) => setFilters((current) => ({ ...current, requestId: event.target.value }))}
+                      placeholder={t("web.observability.filters.request_id_placeholder", "输入 request_id")}
+                    />
+                  </label>
+                  <label className="observability-filter-field">
+                    <span>{t("web.observability.filters.trace_id", "链路编号")}</span>
+                    <input
+                      value={filters.traceId}
+                      onChange={(event) => setFilters((current) => ({ ...current, traceId: event.target.value }))}
+                      placeholder={t("web.observability.filters.trace_id_placeholder", "输入 trace_id")}
+                    />
+                  </label>
                 </div>
               </div>
-            ) : (
-              <div className="empty-card">{t("web.observability.logs.detail_empty", "选择一条日志后在这里查看完整详情。")}</div>
-            )}
-          </div>
-        </section>
-
-        <section className="work-panel observability-panel">
-          <div className="observability-section-header">
-            <div className="page-heading">
-              <span>{t("web.observability.traces.eyebrow", "Traces")}</span>
-              <h1>{t("web.observability.traces.title", "最近 traces")}</h1>
-              <p>{t("web.observability.traces.description", "以 trace 为单位汇总 span，再展开查看链路顺序和 link 关系。")}</p>
-            </div>
-            <button type="button" className="secondary" onClick={() => void refresh()} disabled={busy}>
-              {busy ? t("web.common.loading", "加载中…") : t("web.action.refresh", "刷新")}
-            </button>
-          </div>
-
-          <div className="observability-filter-grid">
-            <input
-              value={traceFilters.q}
-              onChange={(event) => setTraceFilters((current) => ({ ...current, q: event.target.value }))}
-              placeholder={t("web.observability.traces.search", "搜索 trace_id、name、component 或 request_id")}
-            />
-            <Select
-              value={traceFilters.component}
-              onChange={(value) => setTraceFilters((current) => ({ ...current, component: value }))}
-              placeholder={t("web.observability.traces.component", "全部组件")}
-              options={[
-                { value: "", label: t("web.observability.traces.component", "全部组件") },
-                ...traceComponentOptions.map((item) => ({ value: item, label: item })),
-              ]}
-            />
-            <Select
-              value={traceFilters.kind}
-              onChange={(value) => setTraceFilters((current) => ({ ...current, kind: value }))}
-              placeholder={t("web.observability.traces.kind", "全部 kind")}
-              options={[
-                { value: "", label: t("web.observability.traces.kind", "全部 kind") },
-                ...traceKindOptions.map((item) => ({ value: item, label: item })),
-              ]}
-            />
-            <Select
-              value={traceFilters.sourceKind}
-              onChange={(value) => setTraceFilters((current) => ({ ...current, sourceKind: value }))}
-              placeholder={t("web.observability.traces.source_kind", "全部来源类型")}
-              options={[
-                { value: "", label: t("web.observability.traces.source_kind", "全部来源类型") },
-                ...traceSourceKindOptions.map((item) => ({ value: item, label: item })),
-              ]}
-            />
-            <input
-              value={traceFilters.requestId}
-              onChange={(event) => setTraceFilters((current) => ({ ...current, requestId: event.target.value }))}
-              placeholder={t("web.observability.traces.request_id", "按 request_id 过滤")}
-            />
-            <Select
-              value={traceFilters.status}
-              onChange={(value) => setTraceFilters((current) => ({ ...current, status: value }))}
-              placeholder={t("web.observability.traces.status", "全部状态")}
-              options={[
-                { value: "", label: t("web.observability.traces.status", "全部状态") },
-                ...traceStatusOptions.map((item) => ({ value: item, label: item })),
-              ]}
-            />
+            </details>
           </div>
 
           <div className="observability-scroll stack">
-            {filteredTraces.length === 0 ? (
-              <div className="empty-card">{t("web.observability.traces.empty", "当前筛选下没有 trace。")}</div>
+            {filteredFeed.length === 0 ? (
+              <div className="empty-card">{t("web.observability.feed.empty", "当前筛选下没有可显示的诊断事件。")}</div>
             ) : (
-              filteredTraces.map((item) => (
+              filteredFeed.map((item) => (
                 <article
-                  key={item.traceId}
-                  className={`resource-card observability-item ${selectedTraceId === item.traceId ? "observability-item--active" : ""}`}
-                  onClick={() => setSelectedTraceId(item.traceId)}
-                  role="button"
-                  tabIndex={0}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
-                      setSelectedTraceId(item.traceId);
-                    }
-                  }}
+                  key={item.key}
+                  className={`resource-card observability-feed-card observability-feed-card--${item.priority} ${selectedItemKey === item.key ? "observability-item--active" : ""}`}
                 >
-                  <header>
-                    <strong>{item.name}</strong>
-                    <span className="observability-meta">
-                      <span className={`badge ${statusBadgeClass(item.status)}`}>{item.status}</span>
-                      <span className="badge badge--muted">{item.component}</span>
-                      <span className="badge badge--muted">{item.kind}</span>
-                    </span>
-                  </header>
-                  <p>{item.traceId}</p>
-                  <small>
-                    {item.spanCount} spans · {item.durationMs} ms · {formatDateTime(item.endedAt)}
-                  </small>
+                  <button type="button" className="plain-card-button" onClick={() => setSelectedItemKey(item.key)}>
+                    <header className="observability-feed-card__header">
+                      <div className="stack">
+                        <strong>{item.title}</strong>
+                        <span className="observability-feed-card__kind">
+                          {localizeSignalType(item.kind, t)}
+                        </span>
+                      </div>
+                      <span className="observability-meta">
+                        <span className={`badge ${item.badgeClass}`}>
+                          {item.kind === "log"
+                            ? localizeLogLevel(item.badgeValue, t)
+                            : localizeTraceStatus(item.badgeValue, t)}
+                        </span>
+                        <span className="badge badge--muted">{item.component}</span>
+                      </span>
+                    </header>
+                    <p>{item.summary}</p>
+                    <div className="observability-inline-meta">
+                      <span>{formatDateTime(item.timestamp)}</span>
+                      {item.requestId ? <span>request:{item.requestId}</span> : null}
+                      {item.traceId ? <span>trace:{item.traceId}</span> : null}
+                    </div>
+                  </button>
                 </article>
               ))
             )}
           </div>
+        </div>
+
+        <div className="observability-panel observability-panel--detail observability-column">
+          <div className="observability-section-header">
+            <div className="page-heading">
+              <span>{t("web.observability.detail.eyebrow", "Context")}</span>
+              <h1>{t("web.observability.detail.title", "关联上下文")}</h1>
+              <p>{t("web.observability.detail.description", "这里统一展示选中事件的关键信息、关联日志和 trace 链路。")}</p>
+            </div>
+            {loadingTraceDetail ? <span>{t("web.common.loading", "加载中…")}</span> : null}
+          </div>
 
           <div className="details-panel observability-detail">
-            <div className="observability-section-header">
-              <strong>{t("web.observability.traces.detail", "Trace 详情")}</strong>
-              {loadingTraceDetail ? <span>{t("web.common.loading", "加载中…")}</span> : null}
-            </div>
-            {selectedTrace ? (
+            {selectedItem ? (
               <div className="stack">
-                <div className="kv-list">
-                  <span>trace_id</span><strong>{selectedTrace.trace_id}</strong>
-                  <span>spans</span><strong>{selectedTrace.spans.length}</strong>
-                  <span>links</span><strong>{selectedTrace.links.length}</strong>
-                  <span>started_at</span><strong>{formatDateTime(selectedTrace.spans[0]?.started_at ?? "")}</strong>
-                </div>
-
-                {selectedTrace.links.length > 0 ? (
-                  <div className="stack">
-                    <strong>{t("web.observability.traces.links", "Trace links")}</strong>
-                    {selectedTrace.links.map((link) => (
-                      <article key={link.id} className="mini-card">
-                        <strong>{link.link_type}</strong>
-                        <span>{link.span_id} → {link.linked_span_id}</span>
-                        <span>{link.linked_trace_id}</span>
-                      </article>
-                    ))}
+                <section className="observability-detail-block">
+                  <div className="observability-detail-block__header">
+                    <strong>{t("web.observability.detail.summary", "概览")}</strong>
                   </div>
+                  <div className="kv-list observability-kv-list">
+                    <span>{t("web.observability.detail.signal", "类型")}</span>
+                    <strong>{localizeSignalType(selectedItem.kind, t)}</strong>
+                    <span>{t("web.observability.detail.time", "时间")}</span>
+                    <strong>{formatDateTime(selectedItem.timestamp)}</strong>
+                    <span>{t("web.observability.detail.component", "组件")}</span>
+                    <strong>{selectedItem.component}</strong>
+                    <span>{t("web.observability.detail.source", "来源")}</span>
+                    <strong>{localizeSourceKind(selectedItem.sourceKind, t)}</strong>
+                    <span>{t("web.observability.filters.request_id", "请求编号")}</span>
+                    <strong>{selectedItem.requestId ?? t("web.common.none", "无")}</strong>
+                    <span>{t("web.observability.filters.trace_id", "链路编号")}</span>
+                    <strong>{selectedItem.traceId ?? t("web.common.none", "无")}</strong>
+                  </div>
+                </section>
+
+                {selectedItem.kind === "log" && selectedItem.log ? (
+                  <section className="observability-detail-block">
+                    <div className="observability-detail-block__header">
+                      <strong>{t("web.observability.detail.core", "核心信息")}</strong>
+                    </div>
+                    <div className="mini-card observability-context-card">
+                      <strong>{selectedItem.log.event}</strong>
+                      <p>{selectedItem.log.message}</p>
+                      <div className="observability-meta">
+                        <span className={`badge ${levelBadgeClass(selectedItem.log.level)}`}>{localizeLogLevel(selectedItem.log.level, t)}</span>
+                        {selectedItem.log.span_id ? <span className="badge badge--muted">span:{selectedItem.log.span_id}</span> : null}
+                      </div>
+                    </div>
+                  </section>
                 ) : null}
 
-                <div className="timeline-list">
-                  {selectedTrace.spans.map((span) => (
-                    <article key={span.id} className="timeline-item">
-                      <div className="stack">
-                        <strong>{span.duration_ms} ms</strong>
-                        <small>{formatDateTime(span.started_at)}</small>
+                {selectedItem.kind === "trace" && selectedItem.trace ? (
+                  <section className="observability-detail-block">
+                    <div className="observability-detail-block__header">
+                      <strong>{t("web.observability.detail.core", "核心信息")}</strong>
+                    </div>
+                    <div className="mini-card observability-context-card">
+                      <strong>{selectedItem.trace.name}</strong>
+                      <p>{`${selectedItem.trace.spanCount} ${t("web.observability.metrics.spans_suffix", "spans")} · ${selectedItem.trace.durationMs} ms`}</p>
+                      <div className="observability-meta">
+                        <span className={`badge ${statusBadgeClass(selectedItem.trace.status)}`}>{localizeTraceStatus(selectedItem.trace.status, t)}</span>
+                        <span className="badge badge--muted">{selectedItem.trace.kind}</span>
+                        {selectedItem.trace.sourceId ? <span className="badge badge--muted">{selectedItem.trace.sourceId}</span> : null}
                       </div>
-                      <div className="stack">
-                        <div className="observability-section-header">
-                          <strong>{span.name}</strong>
+                    </div>
+                    {selectedTraceSummary ? (
+                      <div className="kv-list observability-kv-list">
+                        <span>{t("web.observability.detail.duration", "耗时")}</span>
+                        <strong>{`${selectedTraceSummary.durationMs} ms`}</strong>
+                        <span>{t("web.observability.detail.spans", "Span 数")}</span>
+                        <strong>{selectedTraceSummary.spanCount}</strong>
+                        <span>{t("web.observability.detail.started_at", "开始时间")}</span>
+                        <strong>{formatDateTime(selectedTraceSummary.startedAt)}</strong>
+                        <span>{t("web.observability.detail.ended_at", "结束时间")}</span>
+                        <strong>{formatDateTime(selectedTraceSummary.endedAt)}</strong>
+                      </div>
+                    ) : null}
+                  </section>
+                ) : null}
+
+                {selectedTraceSummary ? (
+                  <section className="observability-detail-block">
+                    <div className="observability-detail-block__header">
+                      <strong>{t("web.observability.detail.related_trace", "关联链路")}</strong>
+                    </div>
+                    <div className="mini-card observability-context-card">
+                      <strong>{selectedTraceSummary.name}</strong>
+                      <div className="observability-inline-meta">
+                        <span>{selectedTraceSummary.traceId}</span>
+                        <span>{`${selectedTraceSummary.spanCount} ${t("web.observability.metrics.spans_suffix", "spans")}`}</span>
+                        <span>{`${selectedTraceSummary.durationMs} ms`}</span>
+                      </div>
+                    </div>
+
+                    {previewTraceSpans.length > 0 ? (
+                      <div className="timeline-list">
+                        {previewTraceSpans.map((span) => (
+                          <article key={span.id} className="timeline-item observability-timeline-item">
+                            <div className="stack">
+                              <strong>{span.duration_ms} ms</strong>
+                              <small>{formatDateTime(span.started_at)}</small>
+                            </div>
+                            <div className="stack">
+                              <div className="observability-section-header">
+                                <strong>{span.name}</strong>
+                                <span className="observability-meta">
+                                  <span className={`badge ${statusBadgeClass(span.status)}`}>{localizeTraceStatus(span.status, t)}</span>
+                                  <span className="badge badge--muted">{span.kind}</span>
+                                </span>
+                              </div>
+                              <div className="observability-meta">
+                                <span className="badge badge--muted">{span.component}</span>
+                                <span className="badge badge--muted">{localizeSourceKind(span.source_kind, t)}</span>
+                                {span.parent_span_id ? <span className="badge badge--muted">parent:{span.parent_span_id}</span> : null}
+                              </div>
+                            </div>
+                          </article>
+                        ))}
+                      </div>
+                    ) : null}
+
+                    {selectedItem.kind === "log" && sortedTraceSpans.length > previewTraceSpans.length ? (
+                      <details className="details-panel observability-detail-disclosure">
+                        <summary>{t("web.observability.detail.expand_timeline", "展开完整链路")}</summary>
+                        <div className="timeline-list">
+                          {sortedTraceSpans.map((span) => (
+                            <article key={span.id} className="timeline-item observability-timeline-item">
+                              <div className="stack">
+                                <strong>{span.duration_ms} ms</strong>
+                                <small>{formatDateTime(span.started_at)}</small>
+                              </div>
+                              <div className="stack">
+                                <div className="observability-section-header">
+                                  <strong>{span.name}</strong>
+                                  <span className="observability-meta">
+                                    <span className={`badge ${statusBadgeClass(span.status)}`}>{localizeTraceStatus(span.status, t)}</span>
+                                    <span className="badge badge--muted">{span.kind}</span>
+                                  </span>
+                                </div>
+                                <div className="observability-meta">
+                                  <span className="badge badge--muted">{span.component}</span>
+                                  <span className="badge badge--muted">{localizeSourceKind(span.source_kind, t)}</span>
+                                  {span.source_id ? <span className="badge badge--muted">{span.source_id}</span> : null}
+                                  {span.parent_span_id ? <span className="badge badge--muted">parent:{span.parent_span_id}</span> : null}
+                                </div>
+                                <pre className="observability-json">{stringifyJson(span.attributes)}</pre>
+                              </div>
+                            </article>
+                          ))}
+                        </div>
+                      </details>
+                    ) : null}
+                  </section>
+                ) : null}
+
+                <section className="observability-detail-block">
+                  <div className="observability-detail-block__header">
+                    <strong>{t("web.observability.detail.related_logs", "关联日志")}</strong>
+                  </div>
+                  <div className="observability-related-logs">
+                    {selectedItem.kind === "log" && selectedItem.log ? (
+                      <article className="log-card observability-related-log observability-related-log--current">
+                        <header className="observability-related-log__header">
+                          <div className="stack observability-related-log__title">
+                            <small>{t("web.observability.detail.current_log", "当前日志")}</small>
+                            <strong>{selectedItem.log.event}</strong>
+                          </div>
                           <span className="observability-meta">
-                            <span className={`badge ${statusBadgeClass(span.status)}`}>{span.status}</span>
-                            <span className="badge badge--muted">{span.kind}</span>
+                            <span className={`badge ${levelBadgeClass(selectedItem.log.level)}`}>{localizeLogLevel(selectedItem.log.level, t)}</span>
+                            <span className="badge badge--muted">{selectedItem.log.component}</span>
                           </span>
+                        </header>
+                        <p className="observability-related-log__message">{selectedItem.log.message}</p>
+                        <div className="observability-inline-meta observability-related-log__meta">
+                          <span>{formatDateTime(selectedItem.log.created_at)}</span>
+                          {selectedItem.log.request_id ? <span>request:{selectedItem.log.request_id}</span> : null}
+                          {selectedItem.log.trace_id ? <span>trace:{selectedItem.log.trace_id}</span> : null}
+                          {selectedItem.log.span_id ? <span>span:{selectedItem.log.span_id}</span> : null}
+                          <span>{localizeSourceKind(selectedItem.log.source_kind, t)}</span>
                         </div>
-                        <div className="observability-meta">
-                          <span className="badge badge--muted">{span.component}</span>
-                          <span className="badge badge--muted">{span.source_kind}</span>
-                          {span.source_id ? <span className="badge badge--muted">{span.source_id}</span> : null}
-                          {span.parent_span_id ? <span className="badge badge--muted">parent:{span.parent_span_id}</span> : null}
-                        </div>
-                        <pre className="observability-json">{stringifyJson(span.attributes)}</pre>
+                      </article>
+                    ) : null}
+
+                    {relatedLogs.length > 0 ? (
+                      relatedLogs.map((item) => (
+                        <article key={item.id} className="log-card observability-related-log">
+                          <header className="observability-related-log__header">
+                            <div className="stack observability-related-log__title">
+                              <strong>{item.event}</strong>
+                              <small>{formatDateTime(item.created_at)}</small>
+                            </div>
+                            <span className="observability-meta">
+                              <span className={`badge ${levelBadgeClass(item.level)}`}>{localizeLogLevel(item.level, t)}</span>
+                              <span className="badge badge--muted">{item.component}</span>
+                            </span>
+                          </header>
+                          <p className="observability-related-log__message">{item.message}</p>
+                          <div className="observability-inline-meta observability-related-log__meta">
+                            <span>{localizeSourceKind(item.source_kind, t)}</span>
+                            {item.request_id ? <span>request:{item.request_id}</span> : null}
+                            {item.trace_id ? <span>trace:{item.trace_id}</span> : null}
+                            {item.span_id ? <span>span:{item.span_id}</span> : null}
+                          </div>
+                        </article>
+                      ))
+                    ) : (
+                      <div className="empty-card observability-related-log-empty">
+                        <strong>{t("web.observability.detail.related_logs_empty_title", "没有更多关联日志")}</strong>
+                        <p>{t("web.observability.detail.related_logs_empty", "当前上下文里没有更多关联日志。")}</p>
                       </div>
-                    </article>
-                  ))}
-                </div>
+                    )}
+                  </div>
+                </section>
+
+                {selectedItem.kind === "log" && selectedItem.log ? (
+                  <section className="observability-detail-block">
+                    <div className="observability-detail-block__header">
+                      <strong>{t("web.observability.common.attributes", "属性")}</strong>
+                    </div>
+                    <pre className="observability-json">{stringifyJson(selectedItem.log.attributes)}</pre>
+                  </section>
+                ) : null}
               </div>
             ) : (
-              <div className="empty-card">{t("web.observability.traces.detail_empty", "选择一条 trace 后在这里查看 span 链路。")}</div>
+              <div className="empty-card">{t("web.observability.detail.empty", "选择一条事件后在这里查看关联日志和链路。")}</div>
             )}
           </div>
-        </section>
-      </div>
+        </div>
+      </section>
     </div>
   );
 }
