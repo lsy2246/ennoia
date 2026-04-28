@@ -8,7 +8,7 @@ import { useProvidersStore } from "@/stores/providers";
 import { useUiHelpers } from "@/stores/ui";
 import { useWorkbenchStore } from "@/stores/workbench";
 
-export function Providers() {
+export function Providers({ embedded = false }: { embedded?: boolean }) {
   const { t } = useUiHelpers();
   const openView = useWorkbenchStore((state) => state.openView);
   const providersRevision = useProvidersStore((state) => state.revision);
@@ -29,15 +29,30 @@ export function Providers() {
   }
 
   return (
-    <div className="resource-layout resource-layout--single">
-      <section className="work-panel">
-        <div className="page-heading">
-          <span>{t("web.channels.eyebrow", "API 上游渠道")}</span>
-          <h1>{t("web.channels.title", "API 上游渠道是 Agent 访问模型能力的具体渠道实例。")}</h1>
-          <p>{t("web.channels.description", "接口类型只在创建渠道时选择；日常使用和绑定都围绕渠道实例展开。")}</p>
-        </div>
+    <div
+      className={`resource-layout resource-layout--single ${embedded ? "providers-shell providers-shell--embedded" : ""}`}
+    >
+      <section className={embedded ? "providers-panel providers-panel--embedded" : "work-panel"}>
+        {embedded ? (
+          <div className="providers-embedded-header">
+            <span className="settings-panel__eyebrow">{t("web.channels.embedded_eyebrow", "模型渠道")}</span>
+            <div className="panel-title">{t("web.channels.embedded_title", "渠道实例")}</div>
+            <p className="helper-text">
+              {t(
+                "web.channels.embedded_description",
+                "在这里维护模型访问入口，日常绑定和调用都围绕具体渠道实例展开。",
+              )}
+            </p>
+          </div>
+        ) : (
+          <div className="page-heading">
+            <span>{t("web.channels.eyebrow", "API 上游渠道")}</span>
+            <h1>{t("web.channels.title", "API 上游渠道是 Agent 访问模型能力的具体渠道实例。")}</h1>
+            <p>{t("web.channels.description", "接口类型只在创建渠道时选择；日常使用和绑定都围绕渠道实例展开。")}</p>
+          </div>
+        )}
         {error ? <div className="error">{error}</div> : null}
-        <div className="button-row">
+        <div className={`button-row ${embedded ? "button-row--wrap" : ""}`}>
           <button
             type="button"
             onClick={() =>
@@ -58,9 +73,9 @@ export function Providers() {
             {t("web.action.refresh", "刷新")}
           </button>
         </div>
-        <div className="card-grid">
+        <div className={`card-grid ${embedded ? "providers-card-grid--embedded" : ""}`}>
           {channels.map((channel) => (
-            <article key={channel.id} className="resource-card">
+            <article key={channel.id} className={`resource-card ${embedded ? "providers-card--embedded" : ""}`}>
               <header>
                 <strong>{channel.display_name}</strong>
                 <span>{channel.enabled ? t("web.common.enabled", "启用") : t("web.common.disabled", "停用")}</span>
