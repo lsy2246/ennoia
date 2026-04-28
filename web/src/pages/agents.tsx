@@ -98,19 +98,6 @@ export function Agents() {
                 >
                   {t("web.action.open", "打开")}
                 </button>
-                <button
-                  type="button"
-                  className="secondary"
-                  onClick={() =>
-                    openView({
-                      kind: "api-channel",
-                      entityId: agent.provider_id,
-                      title: providerLabel(agent.provider_id),
-                      subtitle: t("web.channels.eyebrow", "API 上游渠道"),
-                    })}
-                >
-                  {t("web.agents.open_channel", "打开渠道")}
-                </button>
               </div>
             </article>
           ))}

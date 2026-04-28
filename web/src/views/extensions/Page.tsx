@@ -85,6 +85,26 @@ export function ExtensionPageView({ pageId: explicitPageId }: ExtensionPageViewP
 
   return (
     <div className="extension-view">
+      <section className="work-panel extensions-host-bar">
+        <div className="extensions-section__header">
+          <div className="page-heading">
+            <span>{t("web.extension_page.eyebrow", "Extension View")}</span>
+            <h1>{page ? resolveText(page.page.title) : t("web.extension_page.not_found", "扩展视图未找到")}</h1>
+            <p>
+              {page
+                ? t("web.extension_page.host_description", "这个区域由扩展自身渲染，宿主壳层会保留扩展来源和挂载上下文。")
+                : t("web.extension_page.description", "这是由扩展注册表贡献并挂接到 Web 工作台的动态视图。")}
+            </p>
+          </div>
+          <div className="extensions-inline-meta">
+            <span className="badge badge--muted">{page?.extension_id ?? "unknown"}</span>
+            <span className="badge badge--muted">{page?.page.mount ?? "no mount"}</span>
+            <span className="badge badge--muted">{page?.source_mode ?? "unknown"}</span>
+            <span className="badge badge--muted">{`${t("web.extension_page.panels", "关联面板")} ${panels.length}`}</span>
+          </div>
+        </div>
+      </section>
+
       {page ? <div ref={containerRef} data-extension-page={page.page.mount} /> : null}
       {mountStatus === "ready" ? null : (
       <section className="work-panel hero-empty">

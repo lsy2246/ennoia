@@ -51,10 +51,8 @@ const EMPTY_POLICY: AgentPermissionPolicy = {
 
 export function AgentEditorView({
   agentId,
-  onOpenApiChannel,
 }: {
   agentId: string;
-  onOpenApiChannel: (channelId: string) => void;
 }) {
   const { formatDateTime, resolveText, runtime, t } = useUiHelpers();
   const [agents, setAgents] = useState<AgentProfile[]>([]);
@@ -201,17 +199,19 @@ export function AgentEditorView({
 
   return (
     <form className="resource-editor resource-editor--agent" onSubmit={handleSubmit}>
-      <div className="resource-editor__header">
-        <div>
+      <div className="resource-editor__header agent-editor__header">
+        <div className="page-heading agent-editor__hero-copy">
           <span className="resource-editor__eyebrow">{t("web.agents.eyebrow", "Agent Registry")}</span>
           <h2>{isNew ? t("web.agents.new", "新建 Agent") : form.display_name || form.id}</h2>
           <p>{t("web.agents.editor_description", "一个 Agent 就是一个可长期维护的协作者档案。")}</p>
         </div>
-        {form.provider_id ? (
-          <button type="button" className="secondary" onClick={() => onOpenApiChannel(form.provider_id)}>
-            {t("web.agents.open_channel", "打开渠道")}
-          </button>
-        ) : null}
+        <div className="agent-editor__hero-meta">
+          <span className={`badge ${form.enabled ? "badge--success" : "badge--muted"}`}>
+            {form.enabled ? t("web.common.enabled", "启用") : t("web.common.disabled", "停用")}
+          </span>
+          {form.provider_id ? <span className="badge badge--muted">{form.provider_id}</span> : null}
+          {form.model_id ? <span className="badge badge--muted">{form.model_id}</span> : null}
+        </div>
       </div>
 
       {error ? <div className="error">{error}</div> : null}
@@ -421,7 +421,10 @@ export function AgentEditorView({
 
                       <div className="agent-policy-editor__rules">
                         {policyForm.rules.length === 0 ? (
-                          <div className="empty-card">{t("web.permissions.no_rules", "当前没有规则。")}</div>
+                          <div className="empty-card agent-editor__empty-state">
+                            <strong>{t("web.agents.empty_rules_title", "当前没有规则")}</strong>
+                            <p>{t("web.agents.empty_rules_body", "你可以先新增一条规则，再为动作、路径或主机范围补充匹配条件。")}</p>
+                          </div>
                         ) : (
                           policyForm.rules.map((rule, index) => (
                             <article key={rule.id || `rule-${index}`} className="resource-card agent-policy-rule">
@@ -494,6 +497,7 @@ export function AgentEditorView({
 
                               <div className="agent-policy-rule__grid">
                                 <PermissionRuleListEditor
+                                  t={t}
                                   label={t("web.permissions.actions", "动作")}
                                   placeholder={t("web.permissions.actions_placeholder", "例如 provider.generate")}
                                   values={rule.actions}
@@ -501,6 +505,7 @@ export function AgentEditorView({
                                     updatePermissionRule(setPolicyForm, index, { actions: values })}
                                 />
                                 <PermissionRuleListEditor
+                                  t={t}
                                   label={t("web.permissions.extension_scope", "扩展范围")}
                                   placeholder={t("web.permissions.extension_scope_placeholder", "例如 openai")}
                                   values={rule.extension_scope}
@@ -508,6 +513,7 @@ export function AgentEditorView({
                                     updatePermissionRule(setPolicyForm, index, { extension_scope: values })}
                                 />
                                 <PermissionRuleListEditor
+                                  t={t}
                                   label={t("web.permissions.path_include", "允许路径")}
                                   placeholder={t("web.permissions.path_include_placeholder", "例如 ~/.ennoia/agents/**")}
                                   values={rule.path_include}
@@ -515,6 +521,7 @@ export function AgentEditorView({
                                     updatePermissionRule(setPolicyForm, index, { path_include: values })}
                                 />
                                 <PermissionRuleListEditor
+                                  t={t}
                                   label={t("web.permissions.path_exclude", "排除路径")}
                                   placeholder={t("web.permissions.path_exclude_placeholder", "例如 ~/.ennoia/tmp/**")}
                                   values={rule.path_exclude}
@@ -523,6 +530,7 @@ export function AgentEditorView({
                                 />
                                 <div className="agent-policy-rule__wide">
                                   <PermissionRuleListEditor
+                                    t={t}
                                     label={t("web.permissions.host_scope", "主机范围")}
                                     placeholder={t("web.permissions.host_scope_placeholder", "例如 api.openai.com")}
                                     values={rule.host_scope}
@@ -550,7 +558,10 @@ export function AgentEditorView({
                     <div className="panel-title">{t("web.permissions.approvals", "最近审批")}</div>
                     <div className="agent-editor__card-list">
                       {permissionApprovals.length === 0 ? (
-                        <div className="empty-card">{t("web.permissions.no_approvals", "当前没有审批记录。")}</div>
+                        <div className="empty-card agent-editor__empty-state">
+                          <strong>{t("web.agents.empty_approvals_title", "当前没有审批记录")}</strong>
+                          <p>{t("web.agents.empty_approvals_body", "当 Agent 触发需要确认的动作后，这里会显示最近的审批结果。")}</p>
+                        </div>
                       ) : (
                         permissionApprovals.slice(0, 8).map((approval) => (
                           <article key={approval.approval_id} className="mini-card agent-editor__mini-card">
@@ -569,7 +580,10 @@ export function AgentEditorView({
                     <div className="panel-title">{t("web.permissions.events", "最近权限事件")}</div>
                     <div className="agent-editor__card-list">
                       {permissionEvents.length === 0 ? (
-                        <div className="empty-card">{t("web.permissions.no_events", "当前没有权限事件。")}</div>
+                        <div className="empty-card agent-editor__empty-state">
+                          <strong>{t("web.agents.empty_events_title", "当前没有权限事件")}</strong>
+                          <p>{t("web.agents.empty_events_body", "Agent 产生 allow、ask 或 deny 判断后，这里会保留最近的权限事件。")}</p>
+                        </div>
                       ) : (
                         permissionEvents.slice(0, 8).map((event) => (
                           <article key={event.event_id} className="mini-card agent-editor__mini-card">
@@ -714,11 +728,13 @@ function updatePermissionRule(
 }
 
 function PermissionRuleListEditor({
+  t,
   label,
   placeholder,
   values,
   onChange,
 }: {
+  t: (key: string, fallback: string, params?: Record<string, string | number>) => string;
   label: string;
   placeholder: string;
   values: string[];
@@ -760,7 +776,10 @@ function PermissionRuleListEditor({
             </div>
           ))
         ) : (
-          <div className="empty-card">当前没有条目。</div>
+          <div className="empty-card agent-editor__empty-state agent-policy-list-empty">
+            <strong>{t("web.agents.empty_items_title", "当前没有条目")}</strong>
+            <p>{t("web.agents.empty_items_body", "点击下方“新增条目”后，再补充这个范围的匹配规则。")}</p>
+          </div>
         )}
         <button type="button" className="secondary" onClick={handleItemAdd}>
           新增条目

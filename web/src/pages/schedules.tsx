@@ -263,6 +263,9 @@ export function Schedules() {
   }, [form.deliveryConversationId, form.deliveryLaneId, lanesByConversation, t]);
 
   const selectedAgent = agents.find((item) => item.id === form.agentId);
+  const totalEnabled = schedules.filter((schedule) => schedule.enabled).length;
+  const totalCommand = schedules.filter((schedule) => schedule.executor.kind === "command").length;
+  const totalAgent = schedules.filter((schedule) => schedule.executor.kind === "agent").length;
 
   async function hydrate() {
     setError(null);
@@ -498,288 +501,341 @@ export function Schedules() {
   }
 
   return (
-    <div className="resource-layout resource-layout--single">
-      <section className="work-panel">
-        <div className="page-heading">
-          <span>{t("web.schedules.eyebrow", "Schedules")}</span>
-          <h1>{t("web.schedules.title", "定时器按计划触发命令或 Agent。")}</h1>
-          <p>
-            {t(
-              "web.schedules.description",
-              "系统负责保存计划、计算到期、运行命令或触发 Agent，并可把结果投递到某个会话。",
-            )}
-          </p>
+    <div className="schedules-page">
+      <section className="work-panel schedules-toolbar">
+        <div className="schedules-toolbar__row">
+          <div className="page-heading">
+            <span>{t("web.schedules.eyebrow", "Schedules")}</span>
+            <h1>{t("web.schedules.title", "定时器按计划触发命令或 Agent。")}</h1>
+            <p>{t("web.schedules.description", "系统负责保存计划、计算到期、运行命令或触发 Agent，并可把结果投递到某个会话。")}</p>
+          </div>
+          <div className="schedules-toolbar__actions">
+            <button type="button" className="secondary" onClick={() => void hydrate()} disabled={busy}>
+              {busy ? t("web.common.loading", "加载中…") : t("web.action.refresh", "刷新")}
+            </button>
+          </div>
         </div>
         {error ? <div className="error">{error}</div> : null}
         {message ? <div className="success">{message}</div> : null}
+        <div className="schedules-overview-grid">
+          <article className="metric-card schedules-metric-card">
+            <span>{t("web.schedules.summary_total", "计划总数")}</span>
+            <strong>{schedules.length}</strong>
+            <small>{t("web.schedules.list", "定时器列表")}</small>
+          </article>
+          <article className="metric-card schedules-metric-card">
+            <span>{t("web.schedules.summary_enabled", "启用中")}</span>
+            <strong>{totalEnabled}</strong>
+            <small>{t("web.common.enabled", "启用")}</small>
+          </article>
+          <article className="metric-card schedules-metric-card">
+            <span>{t("web.schedules.summary_command", "命令任务")}</span>
+            <strong>{totalCommand}</strong>
+            <small>{t("web.schedules.executor_command", "运行命令")}</small>
+          </article>
+          <article className="metric-card schedules-metric-card">
+            <span>{t("web.schedules.summary_agent", "Agent 任务")}</span>
+            <strong>{totalAgent}</strong>
+            <small>{t("web.schedules.executor_agent", "让 Agent 执行")}</small>
+          </article>
+        </div>
+      </section>
 
-        <form className="editor-form" onSubmit={handleSubmit}>
-          <div className="form-grid">
-            <label>
-              {t("web.schedules.name", "名称")}
-              <input
-                value={form.name}
-                onChange={(event) => updateForm({ name: event.target.value })}
-                placeholder={t("web.schedules.name_placeholder", "例如：每天早上同步日报")}
-              />
-            </label>
-            <label>
-              {t("web.schedules.executor", "执行方式")}
-              <Select
-                value={form.executorKind}
-                onChange={(value) => updateForm({ executorKind: value as ExecutorKind })}
-                options={[
-                  { value: "command", label: t("web.schedules.executor_command", "运行命令") },
-                  { value: "agent", label: t("web.schedules.executor_agent", "让 Agent 执行") },
-                ]}
-              />
-            </label>
-            <label>
-              {t("web.schedules.trigger", "触发器")}
-              <Select
-                value={form.triggerKind}
-                onChange={(value) => updateForm({ triggerKind: value as TriggerKind })}
-                options={[
-                  { value: "interval", label: t("web.schedules.interval", "间隔") },
-                  { value: "once", label: t("web.schedules.once", "一次性") },
-                  { value: "cron", label: t("web.schedules.cron", "Cron") },
-                ]}
-              />
-            </label>
+      <div className="schedules-shell">
+        <section className="work-panel schedules-editor-panel">
+          <div className="schedules-section__header">
+            <div className="page-heading">
+              <span>{editingId ? t("web.schedules.editing", "Editing") : t("web.schedules.create_eyebrow", "Create")}</span>
+              <h1>{editingId ? t("web.schedules.edit_title", "编辑定时器") : t("web.schedules.create_title", "新建定时器")}</h1>
+              <p>{t("web.schedules.editor_description", "把执行方式、触发器、投递规则和失败重试放在同一个编辑工作区里。")}</p>
+            </div>
           </div>
 
-          <label>
-            {t("web.schedules.description_label", "说明")}
-            <input
-              value={form.description}
-              onChange={(event) => updateForm({ description: event.target.value })}
-              placeholder={t("web.schedules.description_placeholder", "可选：补充这个定时器的用途")}
-            />
-          </label>
-
-          {form.triggerKind === "interval" ? (
-            <label>
-              {t("web.schedules.every_seconds", "间隔秒数")}
-              <input
-                value={form.intervalSeconds}
-                inputMode="numeric"
-                onChange={(event) => updateForm({ intervalSeconds: event.target.value })}
-              />
-            </label>
-          ) : null}
-
-          {form.triggerKind === "once" ? (
-            <label>
-              {t("web.schedules.once_at", "触发时间")}
-              <input
-                type="datetime-local"
-                value={form.onceAt}
-                onChange={(event) => updateForm({ onceAt: event.target.value })}
-              />
-            </label>
-          ) : null}
-
-          {form.triggerKind === "cron" ? (
-            <div className="form-grid">
-              <label>
-                {t("web.schedules.cron_expression", "Cron 表达式")}
-                <input
-                  value={form.cronExpression}
-                  onChange={(event) => updateForm({ cronExpression: event.target.value })}
-                />
-              </label>
-              <label>
-                {t("web.schedules.cron_next_run", "下一次触发时间")}
-                <input
-                  type="datetime-local"
-                  value={form.cronNextRunAt}
-                  onChange={(event) => updateForm({ cronNextRunAt: event.target.value })}
-                />
-              </label>
-            </div>
-          ) : null}
-
-          {form.executorKind === "command" ? (
-            <div className="stack">
-              <label>
-                {t("web.schedules.command", "命令")}
-                <textarea
-                  value={form.commandText}
-                  onChange={(event) => updateForm({ commandText: event.target.value })}
-                  rows={4}
-                  placeholder={t("web.schedules.command_placeholder", "例如 bun run --cwd web build")}
-                />
-              </label>
+          <form className="editor-form schedules-editor-form" onSubmit={handleSubmit}>
+            <section className="schedules-form-section">
+              <div className="schedules-subtitle">{t("web.schedules.basic_info", "基本信息")}</div>
               <div className="form-grid">
                 <label>
-                  {t("web.schedules.command_cwd", "工作目录")}
+                  {t("web.schedules.name", "名称")}
                   <input
-                    value={form.commandCwd}
-                    onChange={(event) => updateForm({ commandCwd: event.target.value })}
-                    placeholder={t("web.schedules.command_cwd_placeholder", "可选，默认使用服务进程目录")}
+                    value={form.name}
+                    onChange={(event) => updateForm({ name: event.target.value })}
+                    placeholder={t("web.schedules.name_placeholder", "例如：每天早上同步日报")}
                   />
                 </label>
                 <label>
-                  {t("web.schedules.command_timeout", "超时毫秒")}
-                  <input
-                    value={form.commandTimeoutMs}
-                    inputMode="numeric"
-                    onChange={(event) => updateForm({ commandTimeoutMs: event.target.value })}
-                  />
-                </label>
-              </div>
-            </div>
-          ) : (
-            <div className="stack">
-              <div className="form-grid">
-                <label>
-                  {t("web.schedules.agent", "Agent")}
+                  {t("web.schedules.executor", "执行方式")}
                   <Select
-                    value={form.agentId}
-                    onChange={(value) => updateForm({ agentId: value })}
-                    options={agentOptions}
-                    placeholder={t("web.schedules.agent_placeholder", "请选择 Agent")}
-                  />
-                </label>
-                <label>
-                  {t("web.schedules.model", "模型")}
-                  <input
-                    value={form.modelId}
-                    onChange={(event) => updateForm({ modelId: event.target.value })}
-                    placeholder={selectedAgent?.model_id || selectedAgent?.default_model || t("web.schedules.model_placeholder", "留空则跟随 Agent 默认模型")}
-                  />
-                </label>
-              </div>
-              <div className="form-grid">
-                <label>
-                  {t("web.schedules.max_turns", "最大轮数")}
-                  <input
-                    value={form.maxTurns}
-                    inputMode="numeric"
-                    onChange={(event) => updateForm({ maxTurns: event.target.value })}
-                    placeholder={t("web.schedules.max_turns_placeholder", "可选")}
-                  />
-                </label>
-                <label>
-                  {t("web.schedules.agent_run_mode", "运行方式")}
-                  <Select
-                    value={form.agentRunMode}
-                    onChange={(value) =>
-                      updateForm({
-                        agentRunMode: value as AgentRunMode,
-                        contextConversationId: value === "conversation" ? form.contextConversationId : "",
-                      })
-                    }
+                    value={form.executorKind}
+                    onChange={(value) => updateForm({ executorKind: value as ExecutorKind })}
                     options={[
-                      { value: "independent", label: t("web.schedules.agent_run_mode_independent", "独立运行") },
-                      { value: "conversation", label: t("web.schedules.agent_run_mode_conversation", "参考某个会话") },
+                      { value: "command", label: t("web.schedules.executor_command", "运行命令") },
+                      { value: "agent", label: t("web.schedules.executor_agent", "让 Agent 执行") },
+                    ]}
+                  />
+                </label>
+                <label>
+                  {t("web.schedules.trigger", "触发器")}
+                  <Select
+                    value={form.triggerKind}
+                    onChange={(value) => updateForm({ triggerKind: value as TriggerKind })}
+                    options={[
+                      { value: "interval", label: t("web.schedules.interval", "间隔") },
+                      { value: "once", label: t("web.schedules.once", "一次性") },
+                      { value: "cron", label: t("web.schedules.cron", "Cron") },
                     ]}
                   />
                 </label>
               </div>
-              {form.agentRunMode === "conversation" ? (
+              <label>
+                {t("web.schedules.description_label", "说明")}
+                <input
+                  value={form.description}
+                  onChange={(event) => updateForm({ description: event.target.value })}
+                  placeholder={t("web.schedules.description_placeholder", "可选：补充这个定时器的用途")}
+                />
+              </label>
+            </section>
+
+            <section className="schedules-form-section">
+              <div className="schedules-subtitle">{t("web.schedules.trigger", "触发器")}</div>
+              {form.triggerKind === "interval" ? (
                 <label>
-                  {t("web.schedules.context_conversation", "运行参考会话")}
-                  <Select
-                    value={form.contextConversationId}
-                    onChange={(value) => updateForm({ contextConversationId: value })}
-                    options={agentContextConversationOptions}
+                  {t("web.schedules.every_seconds", "间隔秒数")}
+                  <input
+                    value={form.intervalSeconds}
+                    inputMode="numeric"
+                    onChange={(event) => updateForm({ intervalSeconds: event.target.value })}
                   />
                 </label>
               ) : null}
-              <label>
-                {t("web.schedules.agent_prompt", "任务内容")}
-                <textarea
-                  value={form.agentPrompt}
-                  onChange={(event) => updateForm({ agentPrompt: event.target.value })}
-                  rows={6}
-                  placeholder={t("web.schedules.agent_prompt_placeholder", "例如：整理今天的待办并输出一条晨会提醒")}
-                />
-              </label>
-            </div>
-          )}
 
-          <label>
-            {t("web.schedules.delivery", "投递到会话")}
-            <Select
-              value={form.deliveryConversationId}
-              onChange={(value) => {
-                updateForm({ deliveryConversationId: value, deliveryLaneId: "" });
-                if (value) {
-                  void ensureConversationLanes(value);
-                }
-              }}
-              options={deliveryConversationOptions}
-            />
-          </label>
-
-          {form.deliveryConversationId ? (
-            <div className="form-grid">
+              {form.triggerKind === "once" ? (
                 <label>
-                  {t("web.schedules.delivery_lane", "投递到 lane")}
-                  <Select
-                    value={form.deliveryLaneId}
-                    onChange={(value) => updateForm({ deliveryLaneId: value })}
-                    options={deliveryLaneOptions}
+                  {t("web.schedules.once_at", "触发时间")}
+                  <input
+                    type="datetime-local"
+                    value={form.onceAt}
+                    onChange={(event) => updateForm({ onceAt: event.target.value })}
                   />
                 </label>
+              ) : null}
+
+              {form.triggerKind === "cron" ? (
+                <div className="form-grid">
+                  <label>
+                    {t("web.schedules.cron_expression", "Cron 表达式")}
+                    <input
+                      value={form.cronExpression}
+                      onChange={(event) => updateForm({ cronExpression: event.target.value })}
+                    />
+                  </label>
+                  <label>
+                    {t("web.schedules.cron_next_run", "下一次触发时间")}
+                    <input
+                      type="datetime-local"
+                      value={form.cronNextRunAt}
+                      onChange={(event) => updateForm({ cronNextRunAt: event.target.value })}
+                    />
+                  </label>
+                </div>
+              ) : null}
+            </section>
+
+            <section className="schedules-form-section">
+              <div className="schedules-subtitle">{t("web.schedules.executor", "执行方式")}</div>
+              {form.executorKind === "command" ? (
+                <div className="stack">
+                  <label>
+                    {t("web.schedules.command", "命令")}
+                    <textarea
+                      value={form.commandText}
+                      onChange={(event) => updateForm({ commandText: event.target.value })}
+                      rows={4}
+                      placeholder={t("web.schedules.command_placeholder", "例如 bun run --cwd web build")}
+                    />
+                  </label>
+                  <div className="form-grid">
+                    <label>
+                      {t("web.schedules.command_cwd", "工作目录")}
+                      <input
+                        value={form.commandCwd}
+                        onChange={(event) => updateForm({ commandCwd: event.target.value })}
+                        placeholder={t("web.schedules.command_cwd_placeholder", "可选，默认使用服务进程目录")}
+                      />
+                    </label>
+                    <label>
+                      {t("web.schedules.command_timeout", "超时毫秒")}
+                      <input
+                        value={form.commandTimeoutMs}
+                        inputMode="numeric"
+                        onChange={(event) => updateForm({ commandTimeoutMs: event.target.value })}
+                      />
+                    </label>
+                  </div>
+                </div>
+              ) : (
+                <div className="stack">
+                  <div className="form-grid">
+                    <label>
+                      {t("web.schedules.agent", "Agent")}
+                      <Select
+                        value={form.agentId}
+                        onChange={(value) => updateForm({ agentId: value })}
+                        options={agentOptions}
+                        placeholder={t("web.schedules.agent_placeholder", "请选择 Agent")}
+                      />
+                    </label>
+                    <label>
+                      {t("web.schedules.model", "模型")}
+                      <input
+                        value={form.modelId}
+                        onChange={(event) => updateForm({ modelId: event.target.value })}
+                        placeholder={selectedAgent?.model_id || selectedAgent?.default_model || t("web.schedules.model_placeholder", "留空则跟随 Agent 默认模型")}
+                      />
+                    </label>
+                  </div>
+                  <div className="form-grid">
+                    <label>
+                      {t("web.schedules.max_turns", "最大轮数")}
+                      <input
+                        value={form.maxTurns}
+                        inputMode="numeric"
+                        onChange={(event) => updateForm({ maxTurns: event.target.value })}
+                        placeholder={t("web.schedules.max_turns_placeholder", "可选")}
+                      />
+                    </label>
+                    <label>
+                      {t("web.schedules.agent_run_mode", "运行方式")}
+                      <Select
+                        value={form.agentRunMode}
+                        onChange={(value) =>
+                          updateForm({
+                            agentRunMode: value as AgentRunMode,
+                            contextConversationId: value === "conversation" ? form.contextConversationId : "",
+                          })
+                        }
+                        options={[
+                          { value: "independent", label: t("web.schedules.agent_run_mode_independent", "独立运行") },
+                          { value: "conversation", label: t("web.schedules.agent_run_mode_conversation", "参考某个会话") },
+                        ]}
+                      />
+                    </label>
+                  </div>
+                  {form.agentRunMode === "conversation" ? (
+                    <label>
+                      {t("web.schedules.context_conversation", "运行参考会话")}
+                      <Select
+                        value={form.contextConversationId}
+                        onChange={(value) => updateForm({ contextConversationId: value })}
+                        options={agentContextConversationOptions}
+                      />
+                    </label>
+                  ) : null}
+                  <label>
+                    {t("web.schedules.agent_prompt", "任务内容")}
+                    <textarea
+                      value={form.agentPrompt}
+                      onChange={(event) => updateForm({ agentPrompt: event.target.value })}
+                      rows={6}
+                      placeholder={t("web.schedules.agent_prompt_placeholder", "例如：整理今天的待办并输出一条晨会提醒")}
+                    />
+                  </label>
+                </div>
+              )}
+            </section>
+
+            <section className="schedules-form-section">
+              <div className="schedules-subtitle">{t("web.schedules.delivery", "投递到会话")}</div>
               <label>
-                {t("web.schedules.delivery_content", "投递内容")}
+                {t("web.schedules.delivery", "投递到会话")}
                 <Select
-                  value={form.contentMode}
-                  onChange={(value) => updateForm({ contentMode: value as ScheduleFormState["contentMode"] })}
-                  options={[
-                    { value: "full", label: t("web.schedules.delivery_content_full", "完整结果") },
-                    { value: "summary", label: t("web.schedules.delivery_content_summary", "摘要") },
-                    { value: "conclusion", label: t("web.schedules.delivery_content_conclusion", "最终结论") },
-                  ]}
+                  value={form.deliveryConversationId}
+                  onChange={(value) => {
+                    updateForm({ deliveryConversationId: value, deliveryLaneId: "" });
+                    if (value) {
+                      void ensureConversationLanes(value);
+                    }
+                  }}
+                  options={deliveryConversationOptions}
                 />
               </label>
-            </div>
-          ) : null}
+              {form.deliveryConversationId ? (
+                <div className="form-grid">
+                  <label>
+                    {t("web.schedules.delivery_lane", "投递到 lane")}
+                    <Select
+                      value={form.deliveryLaneId}
+                      onChange={(value) => updateForm({ deliveryLaneId: value })}
+                      options={deliveryLaneOptions}
+                    />
+                  </label>
+                  <label>
+                    {t("web.schedules.delivery_content", "投递内容")}
+                    <Select
+                      value={form.contentMode}
+                      onChange={(value) => updateForm({ contentMode: value as ScheduleFormState["contentMode"] })}
+                      options={[
+                        { value: "full", label: t("web.schedules.delivery_content_full", "完整结果") },
+                        { value: "summary", label: t("web.schedules.delivery_content_summary", "摘要") },
+                        { value: "conclusion", label: t("web.schedules.delivery_content_conclusion", "最终结论") },
+                      ]}
+                    />
+                  </label>
+                </div>
+              ) : null}
+            </section>
 
-          <div className="form-grid">
-            <label>
-              {t("web.schedules.retry_attempts", "失败重试次数")}
-              <input
-                value={form.retryAttempts}
-                inputMode="numeric"
-                onChange={(event) => updateForm({ retryAttempts: event.target.value })}
-              />
-            </label>
-            <label>
-              {t("web.schedules.retry_backoff", "重试间隔秒数")}
-              <input
-                value={form.retryBackoffSeconds}
-                inputMode="numeric"
-                onChange={(event) => updateForm({ retryBackoffSeconds: event.target.value })}
-              />
-            </label>
-          </div>
+            <section className="schedules-form-section">
+              <div className="schedules-subtitle">{t("web.schedules.retry", "重试")}</div>
+              <div className="form-grid">
+                <label>
+                  {t("web.schedules.retry_attempts", "失败重试次数")}
+                  <input
+                    value={form.retryAttempts}
+                    inputMode="numeric"
+                    onChange={(event) => updateForm({ retryAttempts: event.target.value })}
+                  />
+                </label>
+                <label>
+                  {t("web.schedules.retry_backoff", "重试间隔秒数")}
+                  <input
+                    value={form.retryBackoffSeconds}
+                    inputMode="numeric"
+                    onChange={(event) => updateForm({ retryBackoffSeconds: event.target.value })}
+                  />
+                </label>
+              </div>
+            </section>
 
-          <div className="button-row">
-            <button type="submit" disabled={busy}>
-              {editingId
-                ? t("web.schedules.save", "保存修改")
-                : t("web.schedules.create", "创建定时器")}
-            </button>
-            {editingId ? (
-              <button type="button" className="secondary" disabled={busy} onClick={() => resetForm()}>
-                {t("web.schedules.cancel_edit", "取消编辑")}
+            <div className="button-row">
+              <button type="submit" disabled={busy}>
+                {editingId ? t("web.schedules.save", "保存修改") : t("web.schedules.create", "创建定时器")}
               </button>
-            ) : null}
-            <button type="button" className="secondary" onClick={() => void hydrate()}>
-              {t("web.action.refresh", "刷新")}
-            </button>
-          </div>
-        </form>
-      </section>
+              {editingId ? (
+                <button type="button" className="secondary" disabled={busy} onClick={() => resetForm()}>
+                  {t("web.schedules.cancel_edit", "取消编辑")}
+                </button>
+              ) : null}
+            </div>
+          </form>
+        </section>
 
-      <section className="work-panel">
-        <div className="panel-title">{t("web.schedules.list", "定时器列表")}</div>
-        <div className="stack">
+        <section className="work-panel schedules-list-panel">
+          <div className="schedules-section__header">
+            <div className="page-heading">
+              <span>{t("web.schedules.list", "定时器列表")}</span>
+              <h1>{t("web.schedules.catalog_title", "计划目录")}</h1>
+              <p>{t("web.schedules.catalog_description", "这里统一查看执行方式、触发器、投递目标和最近运行状态。")}</p>
+            </div>
+            <span className="schedules-catalog-count">{`${schedules.length} ${t("web.schedules.catalog_count", "项")}`}</span>
+          </div>
+          <div className="stack schedules-list">
           {schedules.length === 0 ? (
-            <div className="empty-card">{t("web.schedules.empty", "还没有定时器。")}</div>
+            <div className="empty-card schedules-empty-state">
+              <strong>{t("web.schedules.empty_title", "还没有计划")}</strong>
+              <p>{t("web.schedules.empty", "还没有定时器。")}</p>
+            </div>
           ) : (
             schedules.map((schedule) => {
               const contextConversationId =
@@ -789,18 +845,23 @@ export function Schedules() {
               const deliveryConversationId = schedule.delivery?.conversation_id;
               const deliveryLaneId = schedule.delivery?.lane_id;
               return (
-                <article key={schedule.id} className="resource-card">
-                  <header>
-                    <strong>{scheduleTitle(schedule)}</strong>
+                <article key={schedule.id} className={`resource-card schedules-card ${editingId === schedule.id ? "schedules-card--active" : ""}`}>
+                  <header className="schedules-card__header">
+                    <div className="stack schedules-card__title">
+                      <strong>{scheduleTitle(schedule)}</strong>
+                      <small>{schedule.id}</small>
+                    </div>
                     <span className={`badge ${schedule.enabled ? "badge--success" : "badge--muted"}`}>
-                      {schedule.enabled
-                        ? t("web.common.enabled", "启用")
-                        : t("web.common.disabled", "停用")}
+                      {schedule.enabled ? t("web.common.enabled", "启用") : t("web.common.disabled", "停用")}
                     </span>
                   </header>
-                  <p>{schedule.id}</p>
                   {schedule.description ? <p className="helper-text">{schedule.description}</p> : null}
-                  <div className="kv-list">
+                  <div className="schedules-inline-meta">
+                    <span>{describeTrigger(schedule.trigger)}</span>
+                    <span>{describeExecutor(schedule.executor)}</span>
+                    <span>{`${t("web.schedules.next_run", "下次触发")} ${formatScheduleTime(schedule.next_run_at)}`}</span>
+                  </div>
+                  <div className="kv-list schedules-kv-list">
                     <span>{t("web.schedules.executor", "执行方式")}</span>
                     <strong>
                       {schedule.executor.kind === "command"
@@ -868,14 +929,14 @@ export function Schedules() {
                   </div>
 
                   {schedule.history?.length ? (
-                    <div className="stack">
-                      <div className="panel-title">{t("web.schedules.history", "最近运行")}</div>
+                    <div className="stack schedules-history-list">
+                      <div className="schedules-subtitle">{t("web.schedules.history", "最近运行")}</div>
                       {schedule.history.map((run) => (
-                        <details key={run.id} className="resource-card resource-card--subtle">
+                        <details key={run.id} className="resource-card resource-card--subtle schedules-history-card">
                           <summary>
                             <strong>{formatScheduleTime(run.finished_at)}</strong>
                           </summary>
-                          <div className="kv-list">
+                          <div className="kv-list schedules-kv-list">
                             <span>{t("web.common.status", "状态")}</span>
                             <strong>
                               <span className={`badge ${statusBadgeClass(run.status)}`}>{run.status}</span>
@@ -895,7 +956,7 @@ export function Schedules() {
                           ) : null}
                           <label>
                             {t("web.schedules.run_output", "运行输出")}
-                            <textarea readOnly rows={12} value={formatJson(run.output)} />
+                            <textarea className="schedules-output" readOnly rows={12} value={formatJson(run.output)} />
                           </label>
                         </details>
                       ))}
@@ -951,8 +1012,9 @@ export function Schedules() {
               );
             })
           )}
-        </div>
-      </section>
+          </div>
+        </section>
+      </div>
     </div>
   );
 }

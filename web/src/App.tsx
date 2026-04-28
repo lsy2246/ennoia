@@ -195,21 +195,12 @@ function ExtensionPanelDeck() {
 
 function ResourceViewPanel(props: IDockviewPanelProps<ResourcePanelParams>) {
   const descriptor = props.params.descriptor;
-  const openView = useWorkbenchStore((state) => state.openView);
 
   switch (descriptor.kind) {
     case "agent":
       return (
         <div className="resource-panel">
-          <AgentEditorView
-            agentId={descriptor.entityId}
-            onOpenApiChannel={(channelId) =>
-              openView({
-                kind: "api-channel",
-                entityId: channelId,
-                title: channelId,
-              })}
-          />
+          <AgentEditorView agentId={descriptor.entityId} />
         </div>
       );
     case "api-channel":
