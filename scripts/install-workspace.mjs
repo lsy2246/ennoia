@@ -145,6 +145,7 @@ if (!existsSync(webDir)) {
   process.exit(1);
 }
 
+runStep("安装 workspace 依赖", "bun", ["install", "--ignore-scripts"]);
 runStep("执行 web typecheck", "bun", ["run", "--cwd", "web", "typecheck"]);
 
 if (commandExists("cargo")) {
