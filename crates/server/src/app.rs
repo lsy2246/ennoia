@@ -7,8 +7,9 @@ use std::time::Instant;
 use ennoia_assets::builtins;
 use ennoia_extension_host::{ExtensionRuntime, ExtensionRuntimeConfig};
 use ennoia_kernel::{
-    apply_server_log_env_overrides, AgentConfig, AppConfig, PlatformOverview, ProviderConfig,
-    ServerConfig, SkillConfig, SkillRegistryEntry, SkillRegistryFile, SpaceSpec, UiConfig,
+    apply_server_log_env_overrides, AgentConfig, AgentDocument, AgentPermissionPolicy,
+    PlatformOverview, ProviderConfig, ServerConfig, SkillConfig, SkillRegistryEntry,
+    SkillRegistryFile, SpaceSpec, UiConfig,
 };
 use ennoia_observability::{self, next_span_id, ObservabilityGuard, TraceContext};
 use ennoia_paths::{default_home_dir, RuntimePaths};
@@ -34,7 +35,6 @@ const EXTENSION_REFRESH_SUMMARY: &str = "polled runtime refresh";
 
 #[derive(Clone)]
 pub struct AppState {
-    pub app_config: AppConfig,
     pub server_config: ServerConfig,
     pub ui_config: UiConfig,
     pub overview: PlatformOverview,
@@ -54,7 +54,6 @@ pub struct AppState {
 
 pub fn default_app_state() -> AppState {
     let bootstrap_paths = RuntimePaths::new(default_home_dir());
-    let app_config = normalize_app_config(&bootstrap_paths, AppConfig::default());
     let runtime_paths = Arc::new(bootstrap_paths.clone());
     runtime_paths.ensure_layout().expect("runtime layout");
     let extensions =
@@ -65,7 +64,6 @@ pub fn default_app_state() -> AppState {
         Arc::new(AgentPermissionStore::new(&runtime_paths).expect("agent permissions"));
 
     AppState {
-        app_config,
         server_config: ServerConfig::default(),
         ui_config: UiConfig::default(),
         overview: PlatformOverview::default(),
@@ -88,10 +86,6 @@ pub async fn bootstrap_app_state(home_dir: impl AsRef<Path>) -> Result<AppState,
     let bootstrap_paths = RuntimePaths::new(home_dir.as_ref().to_path_buf());
     bootstrap_paths.ensure_layout()?;
 
-    let app_config = normalize_app_config(
-        &bootstrap_paths,
-        read_toml_or_default(bootstrap_paths.app_config_file())?,
-    );
     let runtime_paths = Arc::new(bootstrap_paths);
     runtime_paths.ensure_layout()?;
     let mut server_config: ServerConfig = read_toml_or_default(runtime_paths.server_config_file())?;
@@ -114,7 +108,6 @@ pub async fn bootstrap_app_state(home_dir: impl AsRef<Path>) -> Result<AppState,
     let agent_permissions = Arc::new(AgentPermissionStore::new(&runtime_paths)?);
 
     Ok(AppState {
-        app_config,
         server_config,
         ui_config,
         overview: PlatformOverview::default(),
@@ -446,11 +439,80 @@ where
 }
 
 pub fn load_agent_configs(paths: &RuntimePaths) -> Result<Vec<AgentConfig>, AppError> {
-    let mut agents = load_configs_from_dir::<AgentConfig>(paths.agents_config_dir())?;
+    let mut agents = load_agent_documents(paths)?
+        .into_iter()
+        .map(|document| document.profile)
+        .collect::<Vec<_>>();
     for agent in &mut agents {
         normalize_agent_config(paths, agent);
     }
+    agents.sort_by(|left, right| left.id.cmp(&right.id));
     Ok(agents)
+}
+
+pub fn load_agent_document(
+    paths: &RuntimePaths,
+    agent_id: &str,
+) -> Result<Option<AgentDocument>, AppError> {
+    migrate_legacy_agent_layout(paths)?;
+    let path = paths.agent_config_file(agent_id);
+    if !path.exists() {
+        return Ok(None);
+    }
+    let contents = fs::read_to_string(path)?;
+    Ok(Some(toml::from_str(&contents)?))
+}
+
+pub fn write_agent_config(paths: &RuntimePaths, payload: &AgentConfig) -> Result<(), AppError> {
+    let permission_policy = load_agent_document(paths, &payload.id)?
+        .map(|document| document.permission_policy)
+        .unwrap_or_else(|| AgentPermissionPolicy::builtin_worker(&payload.id));
+    write_agent_document(
+        paths,
+        &AgentDocument {
+            profile: payload.clone(),
+            permission_policy,
+        },
+    )
+}
+
+pub fn delete_agent_config(paths: &RuntimePaths, agent_id: &str) -> Result<bool, AppError> {
+    migrate_legacy_agent_layout(paths)?;
+    let path = paths.agent_config_file(agent_id);
+    if !path.exists() {
+        return Ok(false);
+    }
+    fs::remove_file(&path)?;
+    let agent_dir = paths.agent_dir(agent_id);
+    if agent_dir.exists() && fs::read_dir(&agent_dir)?.next().is_none() {
+        fs::remove_dir(agent_dir)?;
+    }
+    Ok(true)
+}
+
+pub fn load_agent_permission_policy(
+    paths: &RuntimePaths,
+    agent_id: &str,
+) -> Result<AgentPermissionPolicy, AppError> {
+    Ok(load_agent_document(paths, agent_id)?
+        .map(|document| document.permission_policy)
+        .unwrap_or_else(|| AgentPermissionPolicy::builtin_worker(agent_id)))
+}
+
+pub fn write_agent_permission_policy(
+    paths: &RuntimePaths,
+    agent_id: &str,
+    policy: &AgentPermissionPolicy,
+) -> Result<(), AppError> {
+    let Some(mut document) = load_agent_document(paths, agent_id)? else {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("agent '{agent_id}' not found"),
+        )
+        .into());
+    };
+    document.permission_policy = policy.clone();
+    write_agent_document(paths, &document)
 }
 
 pub fn load_skill_configs(paths: &RuntimePaths) -> Result<Vec<SkillConfig>, AppError> {
@@ -532,6 +594,178 @@ where
     Ok(items)
 }
 
+fn load_agent_documents(paths: &RuntimePaths) -> Result<Vec<AgentDocument>, AppError> {
+    migrate_legacy_agent_layout(paths)?;
+    if !paths.agents_dir().exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut items = Vec::new();
+    for entry in fs::read_dir(paths.agents_dir())? {
+        let entry = entry?;
+        if !entry.file_type()?.is_dir() {
+            continue;
+        }
+        let path = entry.path().join("agent.toml");
+        if !path.exists() {
+            continue;
+        }
+        let contents = fs::read_to_string(path)?;
+        let item: AgentDocument = toml::from_str(&contents)?;
+        items.push(item);
+    }
+    items.sort_by(|left, right| left.profile.id.cmp(&right.profile.id));
+    Ok(items)
+}
+
+fn write_agent_document(paths: &RuntimePaths, document: &AgentDocument) -> Result<(), AppError> {
+    let agent_dir = paths.agent_dir(&document.profile.id);
+    fs::create_dir_all(&agent_dir)?;
+    fs::write(
+        paths.agent_config_file(&document.profile.id),
+        toml::to_string_pretty(document)?,
+    )?;
+    Ok(())
+}
+
+fn migrate_legacy_agent_layout(paths: &RuntimePaths) -> Result<(), AppError> {
+    let legacy_agents_dir = paths.config_dir().join("agents");
+    let legacy_policies_dir = paths.config_dir().join("agent-policies");
+    if !legacy_agents_dir.exists() && !legacy_policies_dir.exists() {
+        return Ok(());
+    }
+
+    if legacy_agents_dir.exists() {
+        for entry in fs::read_dir(&legacy_agents_dir)? {
+            let entry = entry?;
+            if !entry.file_type()?.is_file() {
+                continue;
+            }
+            let contents = fs::read_to_string(entry.path())?;
+            let agent = toml::from_str::<AgentConfig>(&contents)?;
+            let legacy_policy_file = legacy_policies_dir.join(format!("{}.toml", agent.id));
+            let permission_policy = if legacy_policy_file.exists() {
+                toml::from_str::<AgentPermissionPolicy>(&fs::read_to_string(&legacy_policy_file)?)?
+            } else {
+                AgentPermissionPolicy::builtin_worker(&agent.id)
+            };
+            write_agent_document(
+                paths,
+                &AgentDocument {
+                    profile: agent,
+                    permission_policy,
+                },
+            )?;
+            fs::remove_file(entry.path())?;
+            if legacy_policy_file.exists() {
+                fs::remove_file(legacy_policy_file)?;
+            }
+        }
+    }
+
+    remove_dir_if_empty(&legacy_agents_dir)?;
+    remove_dir_if_empty(&legacy_policies_dir)?;
+    Ok(())
+}
+
+fn remove_dir_if_empty(path: &Path) -> Result<(), AppError> {
+    if path.exists() && fs::read_dir(path)?.next().is_none() {
+        fs::remove_dir(path)?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    fn sample_agent(id: &str) -> AgentConfig {
+        AgentConfig {
+            id: id.to_string(),
+            display_name: format!("{id}-display"),
+            description: "desc".to_string(),
+            system_prompt: "prompt".to_string(),
+            provider_id: "provider".to_string(),
+            model_id: "model".to_string(),
+            generation_options: Default::default(),
+            skills: vec!["skill-a".to_string()],
+            enabled: true,
+            kind: "agent".to_string(),
+            default_model: "model".to_string(),
+            skills_dir: String::new(),
+            working_dir: String::new(),
+            artifacts_dir: String::new(),
+        }
+    }
+
+    #[test]
+    fn load_agent_configs_migrates_legacy_layout_into_agent_directory() {
+        let temp = tempdir().expect("temp dir");
+        let paths = RuntimePaths::new(temp.path());
+        let legacy_agents_dir = paths.config_dir().join("agents");
+        let legacy_policies_dir = paths.config_dir().join("agent-policies");
+        fs::create_dir_all(&legacy_agents_dir).expect("legacy agents dir");
+        fs::create_dir_all(&legacy_policies_dir).expect("legacy policies dir");
+
+        let agent = sample_agent("writer");
+        fs::write(
+            legacy_agents_dir.join("writer.toml"),
+            toml::to_string_pretty(&agent).expect("serialize agent"),
+        )
+        .expect("write legacy agent");
+        fs::write(
+            legacy_policies_dir.join("writer.toml"),
+            toml::to_string_pretty(&AgentPermissionPolicy {
+                mode: "default_allow".to_string(),
+                rules: Vec::new(),
+            })
+            .expect("serialize policy"),
+        )
+        .expect("write legacy policy");
+
+        let agents = load_agent_configs(&paths).expect("load migrated agents");
+        assert_eq!(agents.len(), 1);
+        assert_eq!(agents[0].id, "writer");
+
+        let document = load_agent_document(&paths, "writer")
+            .expect("load agent document")
+            .expect("agent document exists");
+        assert_eq!(document.permission_policy.mode, "default_allow");
+        assert!(paths.agent_config_file("writer").exists());
+        assert!(!legacy_agents_dir.join("writer.toml").exists());
+        assert!(!legacy_policies_dir.join("writer.toml").exists());
+    }
+
+    #[test]
+    fn write_agent_config_preserves_existing_permission_policy() {
+        let temp = tempdir().expect("temp dir");
+        let paths = RuntimePaths::new(temp.path());
+        let agent = sample_agent("planner");
+        write_agent_document(
+            &paths,
+            &AgentDocument {
+                profile: agent.clone(),
+                permission_policy: AgentPermissionPolicy {
+                    mode: "default_allow".to_string(),
+                    rules: Vec::new(),
+                },
+            },
+        )
+        .expect("seed agent document");
+
+        let mut updated = agent.clone();
+        updated.display_name = "Planner Prime".to_string();
+        write_agent_config(&paths, &updated).expect("write updated agent");
+
+        let document = load_agent_document(&paths, "planner")
+            .expect("load updated document")
+            .expect("document exists");
+        assert_eq!(document.profile.display_name, "Planner Prime");
+        assert_eq!(document.permission_policy.mode, "default_allow");
+    }
+}
+
 fn default_spaces() -> Vec<SpaceSpec> {
     vec![SpaceSpec {
         id: DEFAULT_SPACE_ID.to_string(),
@@ -573,11 +807,6 @@ fn extension_runtime_config(paths: &RuntimePaths) -> ExtensionRuntimeConfig {
         logs_dir: paths.extensions_logs_dir(),
         home_dir: paths.home().to_path_buf(),
     }
-}
-
-pub fn normalize_app_config(paths: &RuntimePaths, config: AppConfig) -> AppConfig {
-    let _ = paths;
-    config
 }
 
 fn builtin_skill_configs() -> Vec<SkillConfig> {

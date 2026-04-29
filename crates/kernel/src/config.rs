@@ -2,36 +2,18 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::permission::AgentPermissionPolicy;
 use crate::server_settings::{
     default_local_dev_origins, BodyLimitConfig, BootstrapState, CorsConfig, LoggingConfig,
     RateLimitConfig, TimeoutConfig,
 };
 use crate::ui::LocalizedText;
 
-/// AppConfig stores startup-wide settings loaded from `config/ennoia.toml`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct AppConfig {
-    pub app_name: String,
-    pub mode: String,
-    pub default_mention_mode: String,
-}
-
-impl Default for AppConfig {
-    fn default() -> Self {
-        Self {
-            app_name: "ennoia".to_string(),
-            mode: "development".to_string(),
-            default_mention_mode: "configured".to_string(),
-        }
-    }
-}
-
 /// ServerConfig stores network and runtime settings loaded from `config/server.toml`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ServerConfig {
     pub host: String,
     pub port: u16,
-    pub enable_ws: bool,
     #[serde(default)]
     pub rate_limit: RateLimitConfig,
     #[serde(default)]
@@ -51,7 +33,6 @@ impl Default for ServerConfig {
         Self {
             host: "127.0.0.1".to_string(),
             port: 3710,
-            enable_ws: true,
             rate_limit: RateLimitConfig::default(),
             cors: CorsConfig {
                 origins: default_local_dev_origins(),
@@ -86,8 +67,6 @@ pub struct UiConfig {
     pub default_locale: String,
     pub fallback_locale: String,
     pub available_locales: Vec<String>,
-    pub dock_persistence: bool,
-    pub default_page: String,
     pub show_command_palette: bool,
 }
 
@@ -99,8 +78,6 @@ impl Default for UiConfig {
             default_locale: "zh-CN".to_string(),
             fallback_locale: "en-US".to_string(),
             available_locales: vec!["zh-CN".to_string(), "en-US".to_string()],
-            dock_persistence: true,
-            default_page: "inbox".to_string(),
             show_command_palette: true,
         }
     }
@@ -119,8 +96,6 @@ default_theme = "system"
 default_locale = "zh-CN"
 fallback_locale = "en-US"
 available_locales = ["zh-CN", "en-US"]
-dock_persistence = true
-default_page = "inbox"
 show_command_palette = true
 "#,
         )
@@ -139,8 +114,6 @@ default_theme = "system"
 default_locale = "zh-CN"
 fallback_locale = "en-US"
 available_locales = ["zh-CN", "en-US"]
-dock_persistence = true
-default_page = "inbox"
 show_command_palette = true
 "#,
         )
@@ -150,7 +123,7 @@ show_command_palette = true
     }
 }
 
-/// AgentConfig represents one file under `config/agents/*.toml`.
+/// AgentConfig represents the editable Agent profile fields exposed through the API.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AgentConfig {
     pub id: String,
@@ -179,6 +152,15 @@ pub struct AgentConfig {
     pub working_dir: String,
     #[serde(default)]
     pub artifacts_dir: String,
+}
+
+/// AgentDocument stores one complete Agent package under `agents/<id>/agent.toml`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AgentDocument {
+    #[serde(flatten)]
+    pub profile: AgentConfig,
+    #[serde(default)]
+    pub permission_policy: AgentPermissionPolicy,
 }
 
 /// SkillConfig represents one skill descriptor under a registered skill package.
@@ -265,8 +247,6 @@ pub struct ProviderConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProviderModelDiscoveryConfig {
-    #[serde(default = "default_model_discovery_mode")]
-    pub mode: String,
     #[serde(default = "default_enabled")]
     pub manual_allowed: bool,
 }
@@ -274,7 +254,6 @@ pub struct ProviderModelDiscoveryConfig {
 impl Default for ProviderModelDiscoveryConfig {
     fn default() -> Self {
         Self {
-            mode: default_model_discovery_mode(),
             manual_allowed: true,
         }
     }
@@ -290,10 +269,6 @@ fn default_skill_source() -> String {
 
 fn default_registry_source() -> String {
     "builtin".to_string()
-}
-
-fn default_model_discovery_mode() -> String {
-    "manual".to_string()
 }
 
 fn default_enabled() -> bool {

@@ -153,32 +153,11 @@ pub(super) async fn runtime_preferences_put(
     Ok(Json(saved))
 }
 
-pub(super) async fn runtime_app_config(State(state): State<AppState>) -> Json<AppConfig> {
-    Json(
-        read_app_config_from_disk(&state)
-            .map(|config| normalize_app_config(&state.runtime_paths, config))
-            .unwrap_or_else(|| state.app_config.clone()),
-    )
-}
-
 pub(super) async fn runtime_server_config(State(state): State<AppState>) -> Json<ServerConfig> {
     let mut config =
         read_server_config_from_disk(&state).unwrap_or_else(|| state.server_config.clone());
     apply_server_log_env_overrides(&mut config.logging);
     Json(config)
-}
-
-pub(super) async fn runtime_app_config_put(
-    State(state): State<AppState>,
-    Extension(request): Extension<RequestContext>,
-    Json(payload): Json<AppConfig>,
-) -> ApiResult<AppConfig> {
-    let normalized = normalize_app_config(&state.runtime_paths, payload);
-    let contents = toml::to_string_pretty(&normalized)
-        .map_err(|error| scoped(ApiError::bad_request(error.to_string()), &request))?;
-    fs::write(state.runtime_paths.app_config_file(), contents)
-        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?;
-    Ok(Json(normalized))
 }
 
 pub(super) async fn runtime_server_config_put(
@@ -189,11 +168,6 @@ pub(super) async fn runtime_server_config_put(
     persist_server_config(&state, &payload)
         .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?;
     Ok(Json(payload))
-}
-
-pub(super) fn read_app_config_from_disk(state: &AppState) -> Option<AppConfig> {
-    let contents = fs::read_to_string(state.runtime_paths.app_config_file()).ok()?;
-    toml::from_str(&contents).ok()
 }
 
 fn read_server_config_from_disk(state: &AppState) -> Option<ServerConfig> {

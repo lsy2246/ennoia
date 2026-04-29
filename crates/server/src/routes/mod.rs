@@ -25,9 +25,9 @@ use ennoia_extension_host::{
     ResolvedExtensionSnapshot,
 };
 use ennoia_kernel::{
-    AgentConfig, AppConfig, BootstrapState, ExtensionDiagnostic, ExtensionRuntimeEvent,
-    HookEventEnvelope, LocalizedText, ProviderConfig, RuntimeProfile, ServerConfig, SkillConfig,
-    UiConfig, UiPreference, UiPreferenceRecord,
+    AgentConfig, BootstrapState, ExtensionDiagnostic, ExtensionRuntimeEvent, HookEventEnvelope,
+    LocalizedText, ProviderConfig, RuntimeProfile, ServerConfig, SkillConfig, UiConfig,
+    UiPreference, UiPreferenceRecord,
 };
 use ennoia_observability::RequestContext;
 use serde::{Deserialize, Serialize};
@@ -36,7 +36,7 @@ use uuid::Uuid;
 
 use crate::app::{
     delete_config_from_dir, delete_skill_package, load_agent_configs, load_provider_configs,
-    load_skill_configs, normalize_app_config, upsert_skill_package, write_config_to_dir, AppState,
+    load_skill_configs, upsert_skill_package, write_config_to_dir, AppState,
 };
 use crate::middleware::{
     body_limit_middleware, cors_middleware, logging_middleware, rate_limit_middleware,
@@ -88,10 +88,6 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/api/runtime/preferences",
             get(runtime_preferences).put(runtime_preferences_put),
-        )
-        .route(
-            "/api/runtime/app-config",
-            get(runtime_app_config).put(runtime_app_config_put),
         )
         .route(
             "/api/runtime/server-config",

@@ -25,7 +25,6 @@ try {
   initRuntime(runtimeDir);
   configureRuntimePort(runtimeDir, port);
 
-  assertExists(join(runtimeDir, "config", "ennoia.toml"), "app config");
   assertExists(join(runtimeDir, "config", "server.toml"), "server config");
   assertExists(join(runtimeDir, "config", "extensions.toml"), "extensions registry");
   assertExists(join(runtimeDir, "config", "skills.toml"), "skills registry");

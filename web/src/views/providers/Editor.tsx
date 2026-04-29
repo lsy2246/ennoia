@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 
 import {
   createProvider,
@@ -22,7 +22,6 @@ const EMPTY_CHANNEL: ProviderConfig = {
   default_model: "",
   available_models: [],
   model_discovery: {
-    mode: "manual",
     manual_allowed: true,
   },
   enabled: true,
@@ -79,10 +78,13 @@ export function ApiChannelEditorView({ channelId, panelId }: { channelId: string
     () => runtime?.registry.providers ?? [],
     [runtime?.registry.providers],
   );
-
-  useEffect(() => {
-    void hydrate();
-  }, [channelId, runtime?.registry.providers]);
+  const selectedContribution = useMemo(
+    () =>
+      providerContributions.find(
+        (item) => resolveProviderImplementationKind(item) === form.kind,
+      ) ?? null,
+    [form.kind, providerContributions],
+  );
 
   useEffect(() => {
     if (!workbenchApi || !panelId) {
@@ -95,7 +97,7 @@ export function ApiChannelEditorView({ channelId, panelId }: { channelId: string
     updateViewDescriptor(panelId, { title: nextTitle });
   }, [channelId, form.display_name, form.id, isNew, panelId, t, updateViewDescriptor, workbenchApi]);
 
-  function applyModelState(models: string[], preferredDefault?: string) {
+  const applyModelState = useCallback((models: string[], preferredDefault?: string) => {
     const normalizedModels = normalizeModels(models);
     const entries = normalizedModels.map((item) => createModelEntry(item));
     const defaultModel =
@@ -107,7 +109,7 @@ export function ApiChannelEditorView({ channelId, panelId }: { channelId: string
     setModelEntries(entries);
     setDefaultModelKey(defaultEntry?.key ?? null);
     return { models: normalizedModels, defaultModel };
-  }
+  }, []);
 
   function syncFormModels(entries: ModelEntry[], nextDefaultKey: string | null) {
     const normalizedModels = normalizeModels(entries.map((entry) => entry.value));
@@ -125,7 +127,33 @@ export function ApiChannelEditorView({ channelId, panelId }: { channelId: string
     }));
   }
 
-  async function hydrate() {
+  const applyInterfaceDefaults = useCallback(
+    (kind: string, options?: { resetIdentity?: boolean }) => {
+      const contribution = providerContributions.find(
+        (item) => resolveProviderImplementationKind(item) === kind,
+      );
+      const recommendedModel = contribution?.provider.recommended_model ?? "";
+      const nextModels = recommendedModel ? [recommendedModel] : [];
+      const modelDiscovery = {
+        manual_allowed: contribution?.provider.model_discovery
+          ? contribution.provider.manual_model
+          : true,
+      };
+      const normalized = applyModelState(nextModels, recommendedModel);
+
+      setForm((current) => ({
+        ...(options?.resetIdentity ? EMPTY_CHANNEL : current),
+        kind,
+        default_model: normalized.defaultModel || current.default_model,
+        available_models:
+          normalized.models.length > 0 ? normalized.models : current.available_models,
+        model_discovery: modelDiscovery,
+      }));
+    },
+    [applyModelState, providerContributions],
+  );
+
+  const hydrate = useCallback(async () => {
     setError(null);
     try {
       const next = await listProviders();
@@ -151,13 +179,18 @@ export function ApiChannelEditorView({ channelId, panelId }: { channelId: string
     } catch (err) {
       setError(String(err));
     }
-  }
+  }, [applyInterfaceDefaults, applyModelState, channelId, interfaceTypes, isNew]);
+
+  useEffect(() => {
+    void hydrate();
+  }, [hydrate]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy(true);
     setError(null);
 
+    try {
       const payload = {
         ...form,
         available_models: normalizeModels(modelEntries.map((entry) => entry.value)),
@@ -165,16 +198,18 @@ export function ApiChannelEditorView({ channelId, panelId }: { channelId: string
       payload.kind = payload.kind.trim();
       payload.default_model =
         payload.available_models.find(
-          (model) => modelEntries.find((entry) => entry.key === defaultModelKey)?.value.trim() === model,
+          (model) =>
+            modelEntries.find((entry) => entry.key === defaultModelKey)?.value.trim() === model,
         ) ??
         payload.available_models[0] ??
         "";
 
       if (!payload.kind) {
-        throw new Error(t("web.channels.interface_type_required", "请先选择一个可用的接口类型。"));
+        throw new Error(
+          t("web.channels.interface_type_required", "请先选择一个可用的接口类型。"),
+        );
       }
 
-    try {
       const saved = isNew
         ? await createProvider(payload)
         : await updateProvider(channelId, payload);
@@ -224,26 +259,6 @@ export function ApiChannelEditorView({ channelId, panelId }: { channelId: string
     } finally {
       setBusy(false);
     }
-  }
-
-  function applyInterfaceDefaults(kind: string, options?: { resetIdentity?: boolean }) {
-    const contribution = providerContributions.find(
-      (item) => resolveProviderImplementationKind(item) === kind,
-    );
-    const recommendedModel = contribution?.provider.recommended_model ?? "";
-    const nextModels = recommendedModel ? [recommendedModel] : [];
-    const modelDiscovery = contribution?.provider.model_discovery
-      ? { mode: "extension", manual_allowed: contribution.provider.manual_model }
-      : { mode: "manual", manual_allowed: true };
-    const normalized = applyModelState(nextModels, recommendedModel);
-
-    setForm((current) => ({
-      ...(options?.resetIdentity ? EMPTY_CHANNEL : current),
-      kind,
-      default_model: normalized.defaultModel || current.default_model,
-      available_models: normalized.models.length > 0 ? normalized.models : current.available_models,
-      model_discovery: modelDiscovery,
-    }));
   }
 
   async function handleDelete() {
@@ -419,7 +434,7 @@ export function ApiChannelEditorView({ channelId, panelId }: { channelId: string
             readOnly
           />
           <p className="helper-text">
-            {form.model_discovery.mode === "extension"
+            {selectedContribution?.provider.model_discovery
               ? t("web.channels.model_discovery_extension", "当前接口实现会提供模型建议；保存时仍以这里的默认模型为准。")
               : t("web.channels.model_discovery_manual", "当前接口没有模型发现能力，请手动输入默认模型。")}
           </p>

@@ -1,12 +1,9 @@
 import { useEffect, useState, type FormEvent } from "react";
 
 import {
-  fetchAppConfig,
   fetchServerConfig,
-  saveAppConfig,
   saveRuntimeProfile,
   saveServerConfig,
-  type AppConfig,
   type ServerConfig,
 } from "@ennoia/api-client";
 import { buildTimeZoneOptionGroups } from "@/lib/timeZones";
@@ -203,7 +200,6 @@ export function Settings() {
   const hydrateRuntime = useRuntimeStore((state) => state.hydrate);
   const { t } = useUiHelpers();
   const [config, setConfig] = useState<ServerConfig | null>(null);
-  const [appConfig, setAppConfig] = useState<AppConfig | null>(null);
   const [profileName, setProfileName] = useState(profile?.display_name ?? "Operator");
   const [timeZone, setTimeZone] = useState(profile?.time_zone ?? "Asia/Shanghai");
   const [corsOrigins, setCorsOrigins] = useState<StringEntry[]>([]);
@@ -225,12 +221,8 @@ export function Settings() {
   }, [profile]);
 
   async function hydrate() {
-    const [snapshot, nextAppConfig] = await Promise.all([
-      fetchServerConfig(),
-      fetchAppConfig(),
-    ]);
+    const snapshot = await fetchServerConfig();
     setConfig(snapshot);
-    setAppConfig(nextAppConfig);
     setCorsOrigins(toStringEntries(snapshot.cors.origins));
     setTimeoutOverrides(toMapEntries(snapshot.timeout.per_path_ms));
     setBodyLimitOverrides(toMapEntries(snapshot.body_limit.per_path_max));
@@ -254,34 +246,31 @@ export function Settings() {
   }
 
   async function saveRuntimeConfig() {
-    if (!config || !appConfig) {
+    if (!config) {
       return;
     }
     setError(null);
     setMessage(null);
     try {
-      await Promise.all([
-        saveAppConfig(appConfig),
-        saveServerConfig({
-          ...config,
-          cors: {
-            ...config.cors,
-            origins: collectStringEntries(corsOrigins),
-          },
-          timeout: {
-            ...config.timeout,
-            per_path_ms: collectMapEntries(timeoutOverrides),
-          },
-          logging: {
-            ...config.logging,
-            redact_headers: collectStringEntries(redactHeaders),
-          },
-          body_limit: {
-            ...config.body_limit,
-            per_path_max: collectMapEntries(bodyLimitOverrides),
-          },
-        }),
-      ]);
+      await saveServerConfig({
+        ...config,
+        cors: {
+          ...config.cors,
+          origins: collectStringEntries(corsOrigins),
+        },
+        timeout: {
+          ...config.timeout,
+          per_path_ms: collectMapEntries(timeoutOverrides),
+        },
+        logging: {
+          ...config.logging,
+          redact_headers: collectStringEntries(redactHeaders),
+        },
+        body_limit: {
+          ...config.body_limit,
+          per_path_max: collectMapEntries(bodyLimitOverrides),
+        },
+      });
       await hydrate();
       setMessage(t("web.settings.runtime_saved", "运行时配置已保存。"));
     } catch (err) {
@@ -311,7 +300,7 @@ export function Settings() {
             <button
               type="button"
               onClick={() => void saveRuntimeConfig()}
-              disabled={!config || !appConfig}
+              disabled={!config}
             >
               {t("web.settings.save_system", "保存系统设置")}
             </button>
@@ -362,7 +351,7 @@ export function Settings() {
           </div>
         </form>
 
-        {config && appConfig ? (
+        {config ? (
           <>
             <article
               id="settings-service"
@@ -371,7 +360,7 @@ export function Settings() {
                   <div className="settings-section-card__header">
                     <div className="panel-title">{t("web.settings.system_service_title", "服务基础")}</div>
                     <p className="helper-text">
-                      {t("web.settings.system_service_help", "维护服务入口、默认提及策略和基础运行行为。")}
+                      {t("web.settings.system_service_help", "维护服务入口和基础运行行为。")}
                     </p>
                   </div>
                   <div className="form-grid settings-form-grid">
@@ -388,18 +377,6 @@ export function Settings() {
                         value={config.port}
                         onChange={(event) =>
                           setConfig({ ...config, port: Number(event.target.value) })
-                        }
-                      />
-                    </label>
-                    <label className="settings-field settings-field--wide">
-                      {t("web.settings.default_mentions", "默认提及策略")}
-                      <input
-                        value={appConfig.default_mention_mode}
-                        onChange={(event) =>
-                          setAppConfig({
-                            ...appConfig,
-                            default_mention_mode: event.target.value,
-                          })
                         }
                       />
                     </label>

@@ -6,8 +6,8 @@ use std::path::PathBuf;
 
 use chrono::{Duration, Utc};
 use ennoia_kernel::{
-    AgentPermissionPolicy, AgentPermissionRule, PermissionApprovalRecord, PermissionDecision,
-    PermissionEventRecord, PermissionRequest,
+    AgentDocument, AgentPermissionPolicy, AgentPermissionRule, PermissionApprovalRecord,
+    PermissionDecision, PermissionEventRecord, PermissionRequest,
 };
 use ennoia_observability::RequestContext;
 use ennoia_paths::RuntimePaths;
@@ -39,7 +39,6 @@ impl AgentPermissionStore {
         if let Some(parent) = paths.permissions_db().parent() {
             fs::create_dir_all(parent)?;
         }
-        fs::create_dir_all(paths.agent_policies_dir())?;
         let store = Self {
             db_path: paths.permissions_db(),
             runtime_paths: paths.clone(),
@@ -49,12 +48,13 @@ impl AgentPermissionStore {
     }
 
     pub fn load_policy(&self, agent_id: &str) -> std::io::Result<AgentPermissionPolicy> {
-        let path = self.runtime_paths.agent_policy_file(agent_id);
+        let path = self.runtime_paths.agent_config_file(agent_id);
         if !path.exists() {
             return Ok(AgentPermissionPolicy::builtin_worker(agent_id));
         }
         let contents = fs::read_to_string(path)?;
-        toml::from_str(&contents).map_err(std::io::Error::other)
+        let document = toml::from_str::<AgentDocument>(&contents).map_err(std::io::Error::other)?;
+        Ok(document.permission_policy)
     }
 
     pub fn save_policy(
@@ -62,12 +62,19 @@ impl AgentPermissionStore {
         agent_id: &str,
         policy: &AgentPermissionPolicy,
     ) -> std::io::Result<()> {
-        if let Some(parent) = self.runtime_paths.agent_policy_file(agent_id).parent() {
-            fs::create_dir_all(parent)?;
+        let path = self.runtime_paths.agent_config_file(agent_id);
+        if !path.exists() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("agent '{agent_id}' not found"),
+            ));
         }
+        let mut document = toml::from_str::<AgentDocument>(&fs::read_to_string(&path)?)
+            .map_err(std::io::Error::other)?;
+        document.permission_policy = policy.clone();
         fs::write(
-            self.runtime_paths.agent_policy_file(agent_id),
-            toml::to_string_pretty(policy).map_err(std::io::Error::other)?,
+            path,
+            toml::to_string_pretty(&document).map_err(std::io::Error::other)?,
         )
     }
 

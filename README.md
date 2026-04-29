@@ -14,7 +14,7 @@
 - 记忆：以内置 `memory` 扩展形式提供记忆、上下文、审查和图谱能力；会话事件先进入宿主事件总线，再异步投递给 `memory`。
 - 编排：以内置 `workflow` 扩展承载 run、task、artifact；定时器里的 Agent 执行通过编排接口落地。
 - 日志：聚合前端日志和扩展运行事件。
-- 设置：通过表单直接编辑 `app/server` 文件配置、`config/profile.toml` 和 `config/preferences/*.toml`。
+- 设置：通过表单直接编辑 `config/server.toml`、`config/profile.toml` 和 `config/preferences/*.toml`。
 
 ## 技术栈
 
@@ -50,7 +50,7 @@
 - 系统定时计划写入 `~/.ennoia/data/system/schedules.json`，到期后由宿主运行命令或触发 Agent，并可把完整结果、摘要或最终结论投递到会话 / lane。
 - 系统事件总线写入 `~/.ennoia/data/system/sqlite/events.db`，用于持久化会话等系统事件及其 Hook 投递状态。
 - 系统观测数据写入 `~/.ennoia/data/system/sqlite/observability.db`，统一承载 logs、traces 和 span links。
-- Agent 权限策略写入 `~/.ennoia/config/agent-policies/{agent_id}.toml`，权限事件与审批写入 `~/.ennoia/data/system/sqlite/permissions.db`。
+- Agent 基础配置与权限策略统一写入 `~/.ennoia/agents/{agent_id}/agent.toml`，权限事件与审批写入 `~/.ennoia/data/system/sqlite/permissions.db`。
 - 核心日志写入 `~/.ennoia/logs/`。
 - 扩展私有数据写入 `~/.ennoia/data/extensions/{extension_id}/`。
 - 核心不提供主业务 SQLite，不内建语义记忆、编排、任务或产物索引表。
@@ -81,6 +81,13 @@ cargo run -p ennoia-cli -- init
 
 - Web：`http://127.0.0.1:5173`
 - API：`http://127.0.0.1:3710`
+
+Docker Compose 运行时：
+
+- `api` 容器内固定使用 `ENNOIA_HOME=/data/ennoia`
+- 宿主机挂载目录优先读取宿主环境变量 `ENNOIA_HOME`
+- 若宿主机未设置 `ENNOIA_HOME`，则回退到当前用户主目录下的 `~/.ennoia/`（Windows 对应 `%USERPROFILE%/.ennoia`）
+- 因此 Docker 模式下不会再落到 Docker 命名卷；用户可以直接在宿主机查看和编辑运行目录
 
 ## 验证命令
 

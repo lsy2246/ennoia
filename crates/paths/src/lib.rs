@@ -39,10 +39,6 @@ impl RuntimePaths {
         self.home.join("config")
     }
 
-    pub fn agents_config_dir(&self) -> PathBuf {
-        self.config_dir().join("agents")
-    }
-
     pub fn extensions_registry_file(&self) -> PathBuf {
         self.config_dir().join("extensions.toml")
     }
@@ -53,18 +49,6 @@ impl RuntimePaths {
 
     pub fn providers_config_dir(&self) -> PathBuf {
         self.config_dir().join("providers")
-    }
-
-    pub fn agent_policies_dir(&self) -> PathBuf {
-        self.config_dir().join("agent-policies")
-    }
-
-    pub fn agent_policy_file(&self, agent_id: &str) -> PathBuf {
-        self.agent_policies_dir().join(format!("{agent_id}.toml"))
-    }
-
-    pub fn app_config_file(&self) -> PathBuf {
-        self.config_dir().join("ennoia.toml")
     }
 
     pub fn server_config_file(&self) -> PathBuf {
@@ -188,6 +172,10 @@ impl RuntimePaths {
         self.agents_dir().join(agent_id)
     }
 
+    pub fn agent_config_file(&self, agent_id: &str) -> PathBuf {
+        self.agent_dir(agent_id).join("agent.toml")
+    }
+
     pub fn agent_skills_dir(&self, agent_id: &str) -> PathBuf {
         self.agent_dir(agent_id).join("skills")
     }
@@ -258,9 +246,7 @@ impl RuntimePaths {
 
     pub fn ensure_layout(&self) -> io::Result<()> {
         for dir in [
-            self.agents_config_dir(),
             self.providers_config_dir(),
-            self.agent_policies_dir(),
             self.preferences_dir(),
             self.space_preferences_dir(),
             self.extensions_dir(),

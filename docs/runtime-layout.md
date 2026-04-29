@@ -18,19 +18,22 @@
 ```text
 <ENNOIA_HOME>/
 ├─ config/
-│  ├─ ennoia.toml              # 应用级系统配置
 │  ├─ server.toml              # HTTP、中间件、系统内置组件配置
-│  ├─ ui.toml                  # Web 标题、语言、主题、Dockview 偏好
+│  ├─ ui.toml                  # Web 标题、语言、主题与本地化默认值
 │  ├─ profile.toml             # 实例资料（显示名、locale、时区、默认空间）
 │  ├─ interfaces.toml          # 细粒度系统动作到扩展 Worker 方法的显式绑定
 │  ├─ preferences/
 │  │  ├─ instance.toml         # 实例级 UI 偏好
 │  │  └─ spaces/               # 空间级 UI 偏好
-│  ├─ agents/                  # Agent 结构化配置文件
 │  ├─ providers/               # API 上游渠道实例配置
 │  ├─ skills.toml              # 技能注册表
 │  └─ extensions.toml          # 扩展注册表
-├─ agents/                     # Agent 私有运行资料根目录，具体 Agent 目录懒创建
+├─ agents/
+│  └─ <agent_id>/
+│     ├─ agent.toml            # Agent 基础配置 + 权限策略
+│     ├─ work/                 # Agent 工作目录
+│     ├─ artifacts/            # Agent 产物目录
+│     └─ skills/               # Agent 私有技能目录
 ├─ extensions/                 # 扩展安装内容根目录
 ├─ skills/                     # 技能安装内容根目录
 ├─ data/
@@ -49,7 +52,6 @@
 
 ## 配置职责
 
-- `config/ennoia.toml`：应用级公共配置。
 - `config/server.toml`：HTTP、中间件、日志级别、开发模式控制台日志镜像和 bootstrap 状态等系统配置。
 - `config/interfaces.toml`：接口绑定配置。
   - `bindings.<interface_key>.extension_id`
@@ -70,7 +72,7 @@
 
 ## 目录职责
 
-- `agents/`：Agent 私有工作目录、技能目录和产物目录。
+- `agents/`：Agent 的统一目录根；每个 Agent 的基础配置、权限策略、工作目录、技能目录和产物目录都收敛在自己的子目录里。
 - `extensions/`：扩展真实内容目录。
 - `skills/`：技能真实内容目录。
 - `logs/`：文本日志与开发日志输出目录，不等同于系统日志数据库。

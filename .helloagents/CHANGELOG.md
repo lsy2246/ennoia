@@ -8,6 +8,15 @@
   - 决策: docker-api-build-fix#D001(在 Docker 构建阶段补齐缺失输入并收口 Web 依赖解析到 workspace 本地目录)
 
 ### 快速修改
+- **[agent-storage]**: 将 Agent 基础配置与权限策略统一收敛到 `agents/<agent_id>/agent.toml`，移除 `config/agents` 与 `config/agent-policies` 的分离存储，并在启动时把旧布局一次性迁移到新目录结构 — by Codex
+  - 类型: 快速修改（无方案包）
+  - 文件: crates/kernel/src/config.rs:154-183, crates/paths/src/lib.rs:18-261, crates/server/src/app.rs:449-614, crates/server/src/agent_permissions/sqlite/mod.rs:28-79, crates/server/src/routes/resources.rs:1-61, README.md:53, docs/runtime-layout.md:19-87, docs/data-model.md:129-221, docs/architecture.md:141-149, docs/api-surface.md:280
+- **[agent-editor]**: 修复新建 Agent 页每次输入或切换选项都会触发重新 hydrate，导致表单值立刻回退到默认内容的问题；现在只在目标 Agent 或运行时 provider 注册表真正变化时才重新拉取 — by Codex
+  - 类型: 快速修改（无方案包）
+  - 文件: web/src/views/agents/Editor.tsx:57-118
+- **[docker-home-bind]**: 把 Docker Compose 的 API 运行目录从命名卷切换为宿主机 bind mount，优先绑定宿主环境变量 `ENNOIA_HOME`，未设置时回退到用户主目录下的 `~/.ennoia`，方便直接查看和编辑用户配置目录 — by Codex
+  - 类型: 快速修改（无方案包）
+  - 文件: docker-compose.yml:1-18, README.md:83-88
 - **[docker-runtime]**: 将 API 运行时基础镜像从 `debian:bookworm-slim` 切换为 `debian:trixie-slim`，修复 `GLIBC_2.39 not found` 导致的容器启动失败 — by lsy
   - 类型: 快速修改（无方案包）
   - 文件: Dockerfile:18-19

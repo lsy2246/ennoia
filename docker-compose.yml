@@ -9,7 +9,9 @@ services:
     ports:
       - "3710:3710"
     volumes:
-      - ennoia-data:/data/ennoia
+      - type: bind
+        source: ${ENNOIA_HOME:-${USERPROFILE}/.ennoia}
+        target: /data/ennoia
     environment:
       ENNOIA_HOME: /data/ennoia
 
@@ -24,6 +26,3 @@ services:
       - "5173:80"
     depends_on:
       - api
-
-volumes:
-  ennoia-data:

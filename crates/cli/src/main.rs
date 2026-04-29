@@ -111,7 +111,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
 fn print_summary() {
     let state = default_app_state();
-    println!("{} {}", state.overview.app_name, state.app_config.mode);
+    println!("{}", state.overview.app_name);
     println!("modules: {}", state.overview.modules.join(", "));
     println!(
         "server: {}:{}",
@@ -137,11 +137,7 @@ fn print_default_config() -> Result<(), Box<dyn std::error::Error + Send + Sync>
     let mut state = default_app_state();
     apply_server_log_env_overrides(&mut state.server_config.logging);
     println!(
-        "[config/ennoia.toml]\n{}",
-        toml::to_string_pretty(&state.app_config)?
-    );
-    println!(
-        "\n[config/server.toml]\n{}",
+        "[config/server.toml]\n{}",
         toml::to_string_pretty(&state.server_config)?
     );
     println!(
@@ -1123,7 +1119,6 @@ fn auto_attach_dev_extensions(paths: &RuntimePaths) -> io::Result<()> {
 fn init_home_template(paths: &RuntimePaths) -> io::Result<()> {
     paths.ensure_layout()?;
 
-    write_if_missing(&paths.app_config_file(), &render_app_config(paths))?;
     write_if_missing(&paths.server_config_file(), templates::server_config())?;
     write_if_missing(&paths.ui_config_file(), templates::ui_config())?;
     migrate_ui_config(&paths.ui_config_file())?;
@@ -1131,11 +1126,6 @@ fn init_home_template(paths: &RuntimePaths) -> io::Result<()> {
     materialize_builtin_packages(paths)?;
     sync_builtin_provider_presets(paths)?;
     Ok(())
-}
-
-fn render_app_config(paths: &RuntimePaths) -> String {
-    let _ = paths;
-    templates::app_config().to_string()
 }
 
 fn sync_builtin_registries(paths: &RuntimePaths) -> io::Result<()> {
@@ -1331,6 +1321,7 @@ fn ensure_binary_asset_permissions(path: &Path, logical_path: &str) -> io::Resul
     Ok(())
 }
 
+#[cfg(any(test, unix))]
 fn should_mark_binary_asset_executable(logical_path: &str) -> bool {
     matches!(
         logical_path.split('/').collect::<Vec<_>>().as_slice(),

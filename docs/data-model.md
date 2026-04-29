@@ -139,7 +139,7 @@
 - `skills`
 - `enabled`
 
-`kind`、`default_model`、`skills_dir`、`working_dir`、`artifacts_dir` 作为运行时派生/内部字段存在，前端产品模型以显式字段为主。`working_dir` / `artifacts_dir` 表示 Agent 自己的运行目录，不等同于用户项目工作区；默认分别按 `agents/<agent_id>/work` 与 `agents/<agent_id>/artifacts` 自动派生。
+`AgentConfig` 与 `AgentPermissionPolicy` 统一持久化在 `agents/<agent_id>/agent.toml`。`kind`、`default_model`、`skills_dir`、`working_dir`、`artifacts_dir` 作为运行时派生/内部字段存在，前端产品模型以显式字段为主。`working_dir` / `artifacts_dir` 表示 Agent 自己的运行目录，不等同于用户项目工作区；默认分别按 `agents/<agent_id>/work` 与 `agents/<agent_id>/artifacts` 自动派生。
 
 ## Agent 权限域
 
@@ -202,9 +202,9 @@
 
 ## API 上游渠道域
 
-`ProviderConfig` 字段：`id`、`display_name`、`kind`、`description`、`base_url`、`api_key_env`、`default_model`、`available_models`、`model_discovery`、`enabled`。
+`ProviderConfig` 字段：`id`、`display_name`、`kind`、`description`、`base_url`、`api_key_env`、`default_model`、`available_models`、`model_discovery.manual_allowed`、`enabled`。
 
-`kind` 表示接口类型，也是系统解析实现扩展的唯一键；当前内置 OpenAI 渠道统一使用 `openai`。`default_model` 是用户确认后的稳定配置；扩展可以通过 `model_discovery` 和 provider contribution 提供模型建议，用户仍可手动输入模型。
+`kind` 表示接口类型，也是系统解析实现扩展的唯一键；当前内置 OpenAI 渠道统一使用 `openai`。`default_model` 是用户确认后的稳定配置；扩展可以通过 provider contribution 提供模型建议，`model_discovery.manual_allowed` 只表达该渠道是否允许手动维护模型列表与默认模型。
 
 ## Extension 域
 
@@ -214,7 +214,7 @@
 
 - 核心系统配置：`~/.ennoia/config/*.toml`。
 - 接口绑定：`~/.ennoia/config/interfaces.toml`。
-- Agent 权限策略：`~/.ennoia/config/agent-policies/{agent_id}.toml`。
+- Agent 基础配置与权限策略：`~/.ennoia/agents/{agent_id}/agent.toml`。
 - 定时计划：`~/.ennoia/data/system/schedules.json`。
 - Agent 权限事件与审批：`~/.ennoia/data/system/sqlite/permissions.db`。
 - 核心前端日志：`~/.ennoia/logs/frontend.jsonl`。

@@ -43,8 +43,6 @@ export type UiConfig = {
   default_locale: string;
   fallback_locale: string;
   available_locales: string[];
-  dock_persistence: boolean;
-  default_page: string;
   show_command_palette: boolean;
 };
 
@@ -98,16 +96,9 @@ export type RuntimeProfile = {
   updated_at: string;
 };
 
-export type AppConfig = {
-  app_name: string;
-  mode: string;
-  default_mention_mode: string;
-};
-
 export type ServerConfig = {
   host: string;
   port: number;
-  enable_ws: boolean;
   rate_limit: {
     enabled: boolean;
     per_ip_rpm: number;
@@ -189,7 +180,6 @@ export type ProviderConfig = {
   default_model: string;
   available_models: string[];
   model_discovery: {
-    mode: string;
     manual_allowed: boolean;
   };
   enabled: boolean;

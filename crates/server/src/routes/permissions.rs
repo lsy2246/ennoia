@@ -53,7 +53,14 @@ pub(super) async fn agent_policy_put(
     state
         .agent_permissions
         .save_policy(&agent_id, &payload)
-        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?;
+        .map_err(|error| {
+            let api_error = if error.kind() == std::io::ErrorKind::NotFound {
+                ApiError::not_found(error.to_string())
+            } else {
+                ApiError::internal(error.to_string())
+            };
+            scoped(api_error, &request)
+        })?;
     Ok(Json(payload))
 }
 

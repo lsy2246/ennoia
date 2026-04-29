@@ -55,6 +55,10 @@ export function AgentEditorView({
   agentId: string;
 }) {
   const { formatDateTime, resolveText, runtime, t } = useUiHelpers();
+  const providerContributions = useMemo(
+    () => runtime?.registry.providers ?? [],
+    [runtime?.registry.providers],
+  );
   const [agents, setAgents] = useState<AgentProfile[]>([]);
   const [skills, setSkills] = useState<SkillConfig[]>([]);
   const [providers, setProviders] = useState<ProviderConfig[]>([]);
@@ -72,8 +76,8 @@ export function AgentEditorView({
     [form.provider_id, providers],
   );
   const selectedProviderContribution = useMemo(
-    () => findProviderContribution(runtime?.registry.providers ?? [], selectedProvider),
-    [runtime?.registry.providers, selectedProvider],
+    () => findProviderContribution(providerContributions, selectedProvider),
+    [providerContributions, selectedProvider],
   );
   const generationOptions = selectedProviderContribution?.provider.generation_options ?? [];
 
@@ -106,7 +110,7 @@ export function AgentEditorView({
           provider_id: nextProviders[0]?.id ?? "",
           model_id: nextProviders[0]?.default_model ?? "",
           generation_options: defaultGenerationOptions(
-            findProviderContribution(runtime?.registry.providers ?? [], nextProviders[0] ?? null),
+            findProviderContribution(providerContributions, nextProviders[0] ?? null),
           ),
         });
         setPolicyForm(EMPTY_POLICY);
@@ -117,7 +121,7 @@ export function AgentEditorView({
 
       const current = nextAgents.find((item) => item.id === agentId);
       if (!current) {
-        setError(t("web.agents.not_found", "未找到对应 Agent。"));
+        setError("未找到对应 Agent。");
         return;
       }
 
@@ -130,7 +134,7 @@ export function AgentEditorView({
     } catch (err) {
       setError(String(err));
     }
-  }, [agentId, hydratePermissions, isNew, runtime?.registry.providers, t]);
+  }, [agentId, hydratePermissions, isNew, providerContributions]);
 
   useEffect(() => {
     void hydrate();
@@ -241,7 +245,7 @@ export function AgentEditorView({
                       value={form.provider_id}
                       onChange={(value) => {
                         const provider = providers.find((item) => item.id === value);
-                        const contribution = findProviderContribution(runtime?.registry.providers ?? [], provider ?? null);
+                        const contribution = findProviderContribution(providerContributions, provider ?? null);
                         setForm({
                           ...form,
                           provider_id: value,

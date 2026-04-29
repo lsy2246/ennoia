@@ -1,4 +1,5 @@
 use super::*;
+use crate::app::{delete_agent_config, write_agent_config};
 
 pub(super) async fn agents(State(state): State<AppState>) -> Json<Vec<AgentConfig>> {
     Json(load_agent_configs(&state.runtime_paths).unwrap_or_default())
@@ -21,12 +22,8 @@ pub(super) async fn agent_create(
     State(state): State<AppState>,
     Json(payload): Json<AgentConfig>,
 ) -> Result<Json<AgentConfig>, ApiError> {
-    write_config_to_dir(
-        state.runtime_paths.agents_config_dir(),
-        &payload.id,
-        &payload,
-    )
-    .map_err(|error| ApiError::internal(error.to_string()))?;
+    write_agent_config(&state.runtime_paths, &payload)
+        .map_err(|error| ApiError::internal(error.to_string()))?;
     let agents = load_agent_configs(&state.runtime_paths)
         .map_err(|error| ApiError::internal(error.to_string()))?;
     agents
@@ -42,7 +39,7 @@ pub(super) async fn agent_update(
     Json(mut payload): Json<AgentConfig>,
 ) -> Result<Json<AgentConfig>, ApiError> {
     payload.id = agent_id.clone();
-    write_config_to_dir(state.runtime_paths.agents_config_dir(), &agent_id, &payload)
+    write_agent_config(&state.runtime_paths, &payload)
         .map_err(|error| ApiError::internal(error.to_string()))?;
     let agents = load_agent_configs(&state.runtime_paths)
         .map_err(|error| ApiError::internal(error.to_string()))?;
@@ -57,7 +54,7 @@ pub(super) async fn agent_delete(
     State(state): State<AppState>,
     Path(agent_id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
-    let deleted = delete_config_from_dir(state.runtime_paths.agents_config_dir(), &agent_id)
+    let deleted = delete_agent_config(&state.runtime_paths, &agent_id)
         .map_err(|error| ApiError::internal(error.to_string()))?;
     if deleted {
         Ok(StatusCode::NO_CONTENT)

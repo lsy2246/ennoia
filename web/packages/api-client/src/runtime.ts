@@ -1,6 +1,5 @@
 ﻿import { fetchJson } from "./core";
 import type {
-  AppConfig,
   BootstrapSetupResponse,
   BootstrapState,
   RuntimeProfile,
@@ -71,17 +70,6 @@ export async function saveInstanceUiPreferences(payload: {
   motion?: string | null;
 }) {
   return fetchJson<UiPreferenceRecord>("/api/runtime/preferences", {
-    method: "PUT",
-    body: JSON.stringify(payload),
-  });
-}
-
-export async function fetchAppConfig() {
-  return fetchJson<AppConfig>("/api/runtime/app-config");
-}
-
-export async function saveAppConfig(payload: AppConfig) {
-  return fetchJson<AppConfig>("/api/runtime/app-config", {
     method: "PUT",
     body: JSON.stringify(payload),
   });

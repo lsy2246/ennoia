@@ -1,10 +1,10 @@
 use std::fs;
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use ennoia_contract::behavior::{BehaviorRunRequest, BehaviorRunResponse};
 use ennoia_kernel::{
-    AgentConfig, ArtifactKind, ArtifactSpec, ContextLayer, HandoffSpec, OwnerRef, RunSpec,
+    AgentConfig, AgentDocument, ArtifactKind, ArtifactSpec, ContextLayer, HandoffSpec, OwnerRef,
+    RunSpec,
 };
 use ennoia_paths::RuntimePaths;
 use sqlx::SqlitePool;
@@ -191,7 +191,10 @@ fn payload_u32_field(value: &serde_json::Value, key: &str) -> Option<u32> {
 fn load_agent_configs(
     paths: &RuntimePaths,
 ) -> Result<Vec<AgentConfig>, Box<dyn std::error::Error + Send + Sync>> {
-    let mut agents = load_configs_from_dir::<AgentConfig>(paths.agents_config_dir())?;
+    let mut agents = load_agent_documents(paths)?
+        .into_iter()
+        .map(|document| document.profile)
+        .collect::<Vec<_>>();
     for agent in &mut agents {
         if agent.model_id.is_empty() && !agent.default_model.is_empty() {
             agent.model_id = agent.default_model.clone();
@@ -219,23 +222,24 @@ fn load_agent_configs(
     Ok(agents)
 }
 
-fn load_configs_from_dir<T>(
-    dir: PathBuf,
-) -> Result<Vec<T>, Box<dyn std::error::Error + Send + Sync>>
-where
-    T: serde::de::DeserializeOwned,
-{
-    if !dir.exists() {
+fn load_agent_documents(
+    paths: &RuntimePaths,
+) -> Result<Vec<AgentDocument>, Box<dyn std::error::Error + Send + Sync>> {
+    if !paths.agents_dir().exists() {
         return Ok(Vec::new());
     }
 
     let mut items = Vec::new();
-    for entry in fs::read_dir(dir)? {
+    for entry in fs::read_dir(paths.agents_dir())? {
         let entry = entry?;
-        if !entry.file_type()?.is_file() {
+        if !entry.file_type()?.is_dir() {
             continue;
         }
-        let contents = fs::read_to_string(entry.path())?;
+        let path = entry.path().join("agent.toml");
+        if !path.exists() {
+            continue;
+        }
+        let contents = fs::read_to_string(path)?;
         items.push(toml::from_str(&contents)?);
     }
     Ok(items)

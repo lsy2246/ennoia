@@ -143,7 +143,7 @@ Web
 - 系统级观测：`~/.ennoia/data/system/sqlite/observability.db`
 - 系统级事件总线：`~/.ennoia/data/system/sqlite/events.db`
 - Agent 权限事件与审批：`~/.ennoia/data/system/sqlite/permissions.db`
-- Agent 权限策略：`~/.ennoia/config/agent-policies/{agent_id}.toml`
+- Agent 基础配置与权限策略：`~/.ennoia/agents/{agent_id}/agent.toml`
 - 系统定时计划：`~/.ennoia/data/system/schedules.json`
 - 扩展私有数据：`~/.ennoia/data/extensions/{extension_id}/`
 - 扩展私有配置：`~/.ennoia/data/extensions/{extension_id}/` 下由扩展自行定义

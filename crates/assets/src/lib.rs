@@ -55,10 +55,6 @@ pub mod templates {
         lookup(TEMPLATE_ASSETS, path)
     }
 
-    pub fn app_config() -> &'static str {
-        get("config/ennoia.toml").expect("app config template")
-    }
-
     pub fn server_config() -> &'static str {
         get("config/server.toml").expect("server config template")
     }
