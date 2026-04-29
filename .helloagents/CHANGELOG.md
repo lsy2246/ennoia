@@ -1,5 +1,32 @@
 # 变更日志
 
+## [0.2.1] - 2026-04-29
+
+### 修复
+- **[docker-build]**: 修复 Docker API/Web 镜像构建链路，补齐 workspace 构建输入，并让 Web 构建脚本优先从 `web/node_modules` 解析前端依赖 — by lsy
+  - 方案: [202604291106_docker-api-build-fix](archive/2026-04/202604291106_docker-api-build-fix/)
+  - 决策: docker-api-build-fix#D001(在 Docker 构建阶段补齐缺失输入并收口 Web 依赖解析到 workspace 本地目录)
+
+### 快速修改
+- **[docker-runtime]**: 将 API 运行时基础镜像从 `debian:bookworm-slim` 切换为 `debian:trixie-slim`，修复 `GLIBC_2.39 not found` 导致的容器启动失败 — by lsy
+  - 类型: 快速修改（无方案包）
+  - 文件: Dockerfile:18-19
+- **[cli-runtime]**: 让 `ennoia serve` 跳过开发态的 builtin worker 编译与 dev extension 自动挂载，避免 Docker 运行镜像因缺少 `cargo` 和源码仓库而启动失败 — by lsy
+  - 类型: 快速修改（无方案包）
+  - 文件: crates/cli/src/main.rs:81-84
+- **[docker-web-proxy]**: 为 Web 运行时新增 nginx 同源反代，把 `/api/*` 和扩展事件 SSE 统一代理到 `api:3710`，修复容器内前端请求命中静态 nginx 而返回 404 — by lsy
+  - 类型: 快速修改（无方案包）
+  - 文件: Dockerfile:40, packaging/nginx/default.conf:1
+- **[docker-builtin-workers]**: 在 API 镜像构建阶段先编译并注入 Linux 版 `conversation` / `memory` process worker，避免 Docker 运行时把仓库中的 Windows `.exe` 当成内置扩展 worker 资产，导致扩展详情页降级和接口调用报 `has no worker` — by lsy
+  - 类型: 快速修改（无方案包）
+  - 文件: Dockerfile:13-20
+- **[builtin-worker-perms]**: 为内置扩展 `bin/` 二进制落盘统一补齐 Unix 可执行权限，修复 Docker 中 worker 文件存在但返回 `Permission denied (os error 13)` 的问题 — by lsy
+  - 类型: 快速修改（无方案包）
+  - 文件: crates/cli/src/main.rs:1309-1352
+- **[ui-config]**: 一次性移除 `UiConfig.web_title` 对旧字段 `shell_title` 的兼容别名，只保留 `web_title` 配置键，并在启动时把旧版 `ui.toml` 重写迁移到新字段/新 i18n key — by lsy
+  - 类型: 快速修改（无方案包）
+  - 文件: crates/kernel/src/config.rs:83-140, crates/cli/src/main.rs:1129-1401
+
 ## [0.2.0] - 2026-04-23
 
 ### 重构

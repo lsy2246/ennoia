@@ -19,10 +19,13 @@
 - 共享 API 访问统一收口到 `web/packages/api-client/src/index.ts`
 - API client 已提供 interface binding 与 scheduler 封装：`interfaces.ts`、`schedules.ts`
 - `web` 提供 `bun run --cwd web lint`，基于 ESLint flat config 检查 `src` 与 `packages`
+- `web` 构建脚本与 `scripts/build-extension-ui.mjs` 优先从 `web/node_modules` 解析 `vite`、`@vitejs/plugin-react`、`typescript` 与 `@pandacss/dev`，避免依赖根目录 `node_modules` 的隐式假设
 - 定时器视图位于 `web/src/pages/schedules.tsx`，依赖 `listScheduleActions` / `listSchedules` 等 API client 方法；创建时支持“交给 AI 执行”和“直接运行命令”
 - 工作台支持 `@agent` 消息路由，不再使用“目标”输入框
 - 内置前端 i18n namespace 使用 `web`
 - 扩展 UI 模块加载使用 `/api/extensions/{extension_id}/ui/module`
+- Docker Web 运行时通过 nginx 同源反代 `/api/*` 到 `api:3710`，其中 `/api/extensions/events/stream` 关闭 buffering 以保证 SSE 实时性
+- Docker API 镜像在构建时会先产出 Linux 版内置 process worker，并覆盖 `builtins/extensions/*/bin/` 的运行时入口，避免扩展详情页因宿主平台 `.exe` 资产被误打包而出现 `has no worker`
 
 ## 依赖关系
 

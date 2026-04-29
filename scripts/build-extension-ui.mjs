@@ -1,12 +1,14 @@
 import { existsSync, readdirSync } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-import react from "@vitejs/plugin-react";
-import { build } from "vite";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const webDir = resolve(rootDir, "web");
-const rootNodeModules = resolve(rootDir, "node_modules");
+const webNodeModules = resolve(webDir, "node_modules");
+const webRequire = createRequire(resolve(webDir, "package.json"));
+const { default: react } = await import(pathToFileURL(webRequire.resolve("@vitejs/plugin-react")).href);
+const { build } = await import(pathToFileURL(webRequire.resolve("vite")).href);
 const watch = process.argv.includes("--watch");
 const explicitRoots = process.argv.filter((arg) => !arg.startsWith("--")).slice(2);
 
@@ -52,9 +54,9 @@ function extensionBuildConfig(extensionRoot, entry) {
         "@ennoia/observability": resolve(webDir, "packages/observability/src"),
         "@ennoia/theme-runtime": resolve(webDir, "packages/theme-runtime/src"),
         "@ennoia/ui-sdk": resolve(webDir, "packages/ui-sdk/src"),
-        react: resolve(rootNodeModules, "react"),
-        "react/jsx-runtime": resolve(rootNodeModules, "react/jsx-runtime.js"),
-        "react-dom": resolve(rootNodeModules, "react-dom"),
+        react: resolve(webNodeModules, "react"),
+        "react/jsx-runtime": resolve(webNodeModules, "react/jsx-runtime.js"),
+        "react-dom": resolve(webNodeModules, "react-dom"),
       },
     },
     build: {

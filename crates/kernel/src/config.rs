@@ -106,6 +106,50 @@ impl Default for UiConfig {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::UiConfig;
+
+    #[test]
+    fn ui_config_deserializes_web_title() {
+        let config = toml::from_str::<UiConfig>(
+            r#"
+web_title = { key = "web.title", fallback = "Ennoia" }
+default_theme = "system"
+default_locale = "zh-CN"
+fallback_locale = "en-US"
+available_locales = ["zh-CN", "en-US"]
+dock_persistence = true
+default_page = "inbox"
+show_command_palette = true
+"#,
+        )
+        .expect("web_title should deserialize");
+
+        assert_eq!(config.web_title.key, "web.title");
+        assert_eq!(config.web_title.fallback, "Ennoia");
+    }
+
+    #[test]
+    fn ui_config_rejects_legacy_shell_title() {
+        let error = toml::from_str::<UiConfig>(
+            r#"
+shell_title = { key = "web.title", fallback = "Ennoia" }
+default_theme = "system"
+default_locale = "zh-CN"
+fallback_locale = "en-US"
+available_locales = ["zh-CN", "en-US"]
+dock_persistence = true
+default_page = "inbox"
+show_command_palette = true
+"#,
+        )
+        .expect_err("shell_title should no longer deserialize");
+
+        assert!(error.to_string().contains("missing field `web_title`"));
+    }
+}
+
 /// AgentConfig represents one file under `config/agents/*.toml`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AgentConfig {

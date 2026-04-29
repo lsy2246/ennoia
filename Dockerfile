@@ -10,12 +10,23 @@ RUN apt-get update \
 
 COPY Cargo.toml Cargo.lock ./
 COPY assets ./assets
+COPY builtins ./builtins
 COPY crates ./crates
+
+# Build Linux process workers first so ennoia-assets embeds the correct runtime binaries
+# instead of host-side Windows .exe files from the repository checkout.
+RUN cargo build --release \
+    -p ennoia-conversation-service \
+    -p ennoia-memory \
+    --bin ennoia-conversation-service \
+    --bin ennoia-memory-extension \
+    && cp /app/target/release/ennoia-conversation-service /app/builtins/extensions/conversation/bin/conversation-service \
+    && cp /app/target/release/ennoia-memory-extension /app/builtins/extensions/memory/bin/memory-service
 
 RUN cargo build --release --bin ennoia
 
 # -------- api runtime --------
-FROM debian:bookworm-slim AS api
+FROM debian:trixie-slim AS api
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates \
@@ -41,14 +52,17 @@ FROM oven/bun:1 AS web-build
 WORKDIR /app
 
 COPY .npmrc package.json bun.lock ./
+COPY builtins ./builtins
+COPY scripts ./scripts
 COPY web ./web
 
-RUN bun install --frozen-lockfile
+RUN bun install --frozen-lockfile --ignore-scripts
 RUN bun run --cwd web build
 
 # -------- web runtime --------
 FROM nginx:alpine AS web
 
+COPY packaging/nginx/default.conf /etc/nginx/conf.d/default.conf
 COPY --from=web-build /app/web/dist /usr/share/nginx/html
 
 EXPOSE 80

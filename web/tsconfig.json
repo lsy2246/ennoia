@@ -12,7 +12,7 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "types": ["vite/client", "react", "react-dom"],
-    "typeRoots": ["../node_modules/@types", "./node_modules/@types"],
+    "typeRoots": ["./node_modules/@types", "../node_modules/@types"],
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"],
@@ -22,9 +22,9 @@
       "@ennoia/observability": ["./packages/observability/src/index.ts"],
       "@ennoia/theme-runtime": ["./packages/theme-runtime/src/index.ts"],
       "@ennoia/ui-sdk": ["./packages/ui-sdk/src/index.ts"],
-      "react": ["../node_modules/@types/react"],
-      "react/jsx-runtime": ["../node_modules/@types/react/jsx-runtime"],
-      "react-dom": ["../node_modules/@types/react-dom"]
+      "react": ["./node_modules/@types/react", "../node_modules/@types/react"],
+      "react/jsx-runtime": ["./node_modules/@types/react/jsx-runtime", "../node_modules/@types/react/jsx-runtime"],
+      "react-dom": ["./node_modules/@types/react-dom", "../node_modules/@types/react-dom"]
     },
     "resolveJsonModule": true,
     "isolatedModules": true,

@@ -94,11 +94,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             run_dev_supervisor(paths, server_config).await?;
         }
         Some("start") | Some("serve") => {
-            let repo_root = env::current_dir()?;
             let paths = RuntimePaths::resolve(args.get(2).map(String::as_str));
             init_home_template(&paths)?;
-            ensure_builtin_process_workers(&repo_root)?;
-            auto_attach_dev_extensions(&paths)?;
             run_server(paths.home()).await?;
         }
         Some("ext") => {
@@ -1129,6 +1126,7 @@ fn init_home_template(paths: &RuntimePaths) -> io::Result<()> {
     write_if_missing(&paths.app_config_file(), &render_app_config(paths))?;
     write_if_missing(&paths.server_config_file(), templates::server_config())?;
     write_if_missing(&paths.ui_config_file(), templates::ui_config())?;
+    migrate_ui_config(&paths.ui_config_file())?;
     sync_builtin_registries(paths)?;
     materialize_builtin_packages(paths)?;
     sync_builtin_provider_presets(paths)?;
@@ -1313,7 +1311,56 @@ fn write_binary_asset(root: &Path, logical_path: &str, contents: &[u8]) -> io::R
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    fs::write(path, contents)
+    fs::write(&path, contents)?;
+    ensure_binary_asset_permissions(&path, logical_path)
+}
+
+fn ensure_binary_asset_permissions(path: &Path, logical_path: &str) -> io::Result<()> {
+    #[cfg(unix)]
+    if should_mark_binary_asset_executable(logical_path) {
+        use std::os::unix::fs::PermissionsExt;
+
+        let mut permissions = fs::metadata(path)?.permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(path, permissions)?;
+    }
+
+    #[cfg(not(unix))]
+    let _ = (path, logical_path);
+
+    Ok(())
+}
+
+fn should_mark_binary_asset_executable(logical_path: &str) -> bool {
+    matches!(
+        logical_path.split('/').collect::<Vec<_>>().as_slice(),
+        ["extensions", _, "bin", ..]
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_mark_binary_asset_executable;
+
+    #[test]
+    fn marks_builtin_process_worker_paths_as_executable() {
+        assert!(should_mark_binary_asset_executable(
+            "extensions/conversation/bin/conversation-service"
+        ));
+        assert!(should_mark_binary_asset_executable(
+            "extensions/memory/bin/memory-service.exe"
+        ));
+    }
+
+    #[test]
+    fn ignores_non_worker_asset_paths() {
+        assert!(!should_mark_binary_asset_executable(
+            "extensions/workflow/worker/workflow.wasm"
+        ));
+        assert!(!should_mark_binary_asset_executable(
+            "skills/example/skill.toml"
+        ));
+    }
 }
 
 fn read_extension_registry(paths: &RuntimePaths) -> io::Result<ExtensionRegistryFile> {
@@ -1379,6 +1426,22 @@ fn sort_skill_registry_entries(entries: &mut [SkillRegistryEntry]) {
 fn write_if_missing(path: &Path, contents: &str) -> io::Result<()> {
     if !path.exists() {
         fs::write(path, contents)?;
+    }
+
+    Ok(())
+}
+
+fn migrate_ui_config(path: &Path) -> io::Result<()> {
+    if !path.exists() {
+        return Ok(());
+    }
+
+    let contents = fs::read_to_string(path)?;
+    let migrated = contents
+        .replace("shell_title", "web_title")
+        .replace("shell.title", "web.title");
+    if migrated != contents {
+        fs::write(path, migrated)?;
     }
 
     Ok(())
