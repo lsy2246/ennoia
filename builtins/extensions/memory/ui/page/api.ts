@@ -39,7 +39,6 @@ export type WorkspaceSummary = {
   active_memory_count: number;
   episode_count: number;
   graph_nodes_count: number;
-  session_state_count: number;
 };
 
 export async function listMemoryRecords() {

@@ -26,29 +26,6 @@ CREATE INDEX IF NOT EXISTS idx_episodes_run
 CREATE INDEX IF NOT EXISTS idx_episodes_conversation
   ON episodes(conversation_id, ingested_at);
 
-CREATE TABLE IF NOT EXISTS session_states (
-  id TEXT PRIMARY KEY,
-  owner_kind TEXT NOT NULL,
-  owner_id TEXT NOT NULL,
-  conversation_id TEXT,
-  lane_id TEXT,
-  session_key TEXT NOT NULL,
-  scope TEXT,
-  reset_policy TEXT,
-  prune_policy TEXT,
-  rotation_policy TEXT,
-  checkpoint_id TEXT,
-  continuity_state_json TEXT NOT NULL DEFAULT '{}',
-  pending_writes_json TEXT NOT NULL DEFAULT '[]',
-  last_active_at TEXT,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  UNIQUE(owner_kind, owner_id, session_key)
-);
-
-CREATE INDEX IF NOT EXISTS idx_session_states_owner_key
-  ON session_states(owner_kind, owner_id, session_key);
-
 CREATE TABLE IF NOT EXISTS memories (
   id TEXT PRIMARY KEY,
   owner_kind TEXT NOT NULL,

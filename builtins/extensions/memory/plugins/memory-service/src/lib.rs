@@ -8,10 +8,7 @@ use std::error::Error;
 use std::io::{self, BufRead, BufReader, Write};
 
 use crate::model as memory_model;
-use ennoia_kernel::{
-    ContextFrame, ContextLayer, ExtensionRpcResponse, HookDispatchResponse, HookEventEnvelope,
-    OwnerKind, OwnerRef,
-};
+use ennoia_kernel::{ExtensionRpcResponse, OwnerKind, OwnerRef};
 use ennoia_paths::RuntimePaths;
 use schema::initialize_memory_schema;
 use serde::Deserialize;
@@ -123,7 +120,6 @@ struct MemoryWorkspaceSummary {
     active_memory_count: usize,
     episode_count: i64,
     graph_nodes_count: i64,
-    session_state_count: i64,
 }
 
 struct MemoryServiceState {
@@ -245,17 +241,6 @@ async fn handle_invocation(
             },
             Err(error) => error,
         },
-        "hooks/conversation/created"
-        | "hooks/conversation/message/created"
-        | "hooks/conversation/deleted" => {
-            match parse_json::<HookEventEnvelope>(invocation.params) {
-                Ok(event) => match ingest_hook_event(state, path, event).await {
-                    Ok(result) => ExtensionRpcResponse::success(serde_json::json!(result)),
-                    Err(error) => error,
-                },
-                Err(error) => error,
-            }
-        }
         _ => ExtensionRpcResponse::failure(
             "method_not_found",
             format!("memory worker method '{path}' not found"),
@@ -285,17 +270,11 @@ async fn workspace_summary(
         .fetch_one(state.store.pool())
         .await
         .map_err(sql_error("memory_workspace_failed"))?;
-    let session_state_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM session_states")
-        .fetch_one(state.store.pool())
-        .await
-        .map_err(sql_error("memory_workspace_failed"))?;
-
     Ok(MemoryWorkspaceSummary {
         pending_review_count: pending_review_count.max(0) as usize,
         active_memory_count: active_memory_count.max(0) as usize,
         episode_count,
         graph_nodes_count,
-        session_state_count,
     })
 }
 
@@ -402,152 +381,6 @@ async fn assemble_context(
         .map_err(memory_error("memory_context_assemble_failed"))
 }
 
-async fn ingest_hook_event(
-    state: &MemoryServiceState,
-    path: &str,
-    event: HookEventEnvelope,
-) -> Result<HookDispatchResponse, ExtensionRpcResponse> {
-    match path {
-        "hooks/conversation/created" => {
-            let owner = hook_owner(&event);
-            let title = event
-                .payload
-                .get("conversation")
-                .and_then(|item| item.get("title"))
-                .and_then(JsonValue::as_str)
-                .unwrap_or("新会话")
-                .to_string();
-            state
-                .store
-                .record_episode(memory_model::EpisodeRequest {
-                    owner: owner.clone(),
-                    namespace: event_namespace(&event),
-                    conversation_id: event
-                        .resource
-                        .conversation_id
-                        .clone()
-                        .or_else(|| Some(event.resource.id.clone())),
-                    run_id: None,
-                    episode_kind: memory_model::EpisodeKind::Decision,
-                    role: Some("system".to_string()),
-                    content: format!("会话已创建：{title}"),
-                    content_type: Some("text/plain".to_string()),
-                    source_uri: None,
-                    entities: collect_entities(&event, &title),
-                    tags: vec!["conversation".to_string(), "created".to_string()],
-                    importance: Some(0.3),
-                    occurred_at: Some(event.occurred_at.clone()),
-                })
-                .await
-                .map_err(memory_error("memory_hook_ingest_failed"))?;
-            Ok(HookDispatchResponse {
-                handled: true,
-                result: Some(serde_json::json!({ "ingested": true })),
-                message: Some("conversation created ingested".to_string()),
-            })
-        }
-        "hooks/conversation/message/created" => {
-            let owner = hook_owner(&event);
-            let body = event
-                .payload
-                .get("message")
-                .and_then(|item| item.get("body"))
-                .and_then(JsonValue::as_str)
-                .unwrap_or_default()
-                .trim()
-                .to_string();
-            if body.is_empty() {
-                return Ok(HookDispatchResponse {
-                    handled: false,
-                    result: None,
-                    message: Some("message body empty; skipped".to_string()),
-                });
-            }
-            let sender = event
-                .payload
-                .get("message")
-                .and_then(|item| item.get("sender"))
-                .and_then(JsonValue::as_str)
-                .unwrap_or("operator")
-                .to_string();
-            let role = event
-                .payload
-                .get("message")
-                .and_then(|item| item.get("role"))
-                .and_then(JsonValue::as_str)
-                .unwrap_or("operator")
-                .to_string();
-            let conversation_id = event.resource.conversation_id.clone().or_else(|| {
-                event
-                    .payload
-                    .get("conversation")
-                    .and_then(|item| item.get("id"))
-                    .and_then(JsonValue::as_str)
-                    .map(str::to_string)
-            });
-
-            state
-                .store
-                .record_episode(memory_model::EpisodeRequest {
-                    owner: owner.clone(),
-                    namespace: event_namespace(&event),
-                    conversation_id: conversation_id.clone(),
-                    run_id: None,
-                    episode_kind: memory_model::EpisodeKind::Message,
-                    role: Some(role.clone()),
-                    content: body.clone(),
-                    content_type: Some("text/plain".to_string()),
-                    source_uri: None,
-                    entities: collect_entities(&event, &body),
-                    tags: vec![
-                        "conversation".to_string(),
-                        "message".to_string(),
-                        sender.clone(),
-                    ],
-                    importance: Some(0.4),
-                    occurred_at: Some(event.occurred_at.clone()),
-                })
-                .await
-                .map_err(memory_error("memory_hook_ingest_failed"))?;
-
-            if let Some(conversation_id) = conversation_id {
-                state
-                    .store
-                    .upsert_frame(ContextFrame {
-                        id: format!("frame-recent-{conversation_id}"),
-                        owner,
-                        namespace: format!("conversation/{conversation_id}/recent"),
-                        layer: ContextLayer::Core,
-                        frame_kind: "recent_message".to_string(),
-                        content: format!("{sender}: {body}"),
-                        source_memory_ids: Vec::new(),
-                        budget_chars: Some(1024),
-                        ttl_seconds: Some(21_600),
-                        created_at: String::new(),
-                        updated_at: String::new(),
-                    })
-                    .await
-                    .map_err(memory_error("memory_hook_frame_failed"))?;
-            }
-
-            Ok(HookDispatchResponse {
-                handled: true,
-                result: Some(serde_json::json!({ "ingested": true })),
-                message: Some("conversation message ingested".to_string()),
-            })
-        }
-        "hooks/conversation/deleted" => Ok(HookDispatchResponse {
-            handled: true,
-            result: Some(serde_json::json!({ "deleted": true })),
-            message: Some("conversation delete acknowledged".to_string()),
-        }),
-        _ => Err(ExtensionRpcResponse::failure(
-            "hook_not_supported",
-            format!("unsupported hook path '{path}'"),
-        )),
-    }
-}
-
 fn parse_json<T>(value: JsonValue) -> Result<T, ExtensionRpcResponse>
 where
     T: for<'de> Deserialize<'de>,
@@ -592,40 +425,4 @@ fn review_action_from(value: &str) -> memory_model::ReviewActionKind {
         "retire" => memory_model::ReviewActionKind::Retire,
         _ => memory_model::ReviewActionKind::Approve,
     }
-}
-
-fn hook_owner(event: &HookEventEnvelope) -> OwnerRef {
-    event
-        .owner
-        .clone()
-        .unwrap_or_else(|| OwnerRef::global("global"))
-}
-
-fn event_namespace(event: &HookEventEnvelope) -> String {
-    event
-        .resource
-        .conversation_id
-        .clone()
-        .map(|conversation_id| format!("conversation/{conversation_id}"))
-        .unwrap_or_else(|| format!("events/{}", event.event.replace('.', "/")))
-}
-
-fn collect_entities(event: &HookEventEnvelope, fallback: &str) -> Vec<String> {
-    let mut entities = event
-        .payload
-        .get("conversation")
-        .and_then(|item| item.get("participants"))
-        .and_then(JsonValue::as_array)
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(JsonValue::as_str)
-                .map(str::to_string)
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    if entities.is_empty() && !fallback.trim().is_empty() {
-        entities.push(fallback.to_string());
-    }
-    entities
 }

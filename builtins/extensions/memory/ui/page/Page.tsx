@@ -158,7 +158,7 @@ export default function MemoryExtensionPage({ helpers }: MemoryExtensionPageProp
           <article className="memory-lane">
             <span>Episodes</span>
             <strong>{workspace?.episode_count ?? 0}</strong>
-            <small>记忆引擎接收的原始事件</small>
+            <small>记忆系统保留的结构化事件</small>
           </article>
         </div>
         <div className="stack">
@@ -256,16 +256,8 @@ export default function MemoryExtensionPage({ helpers }: MemoryExtensionPageProp
             <article className="mini-card">
               <div className="panel-title">边界</div>
               <p>
-                系统会话页负责原始会话和消息；记忆扩展只消费这些原始记录，生成 truth、recent context、review
-                receipts 和 graph sidecar。
+                系统会话页负责原生会话事实；记忆扩展只负责记忆检索、审查、上下文装配和图谱侧车，不再镜像保存整段会话消息。
               </p>
-            </article>
-            <article className="mini-card">
-              <div className="panel-title">Session State</div>
-              <div className="kv-list">
-                <span>活跃状态</span>
-                <strong>{workspace?.session_state_count ?? 0}</strong>
-              </div>
             </article>
           </div>
         ) : null}
