@@ -40,7 +40,7 @@ Skill descriptor 包含：
 - `keywords`
 - `entry`
 
-主声明模型统一只有一层：`resource_types`、`capabilities`、`surfaces`、`locales`、`themes`、`commands`、`subscriptions`。页面、面板、Provider、Behavior、Memory、Hook、Interface 和 Schedule Action 都是宿主运行时根据声明派生的视图。
+主声明模型统一只有一层：`resource_types`、`capabilities`、`surfaces`、`locales`、`themes`、`commands`、`subscriptions`。页面、面板、Provider、Behavior、Memory、Action、Hook 和 Schedule Action 都是宿主运行时根据声明派生的视图。
 
 `ui` 是可选界面入口；`worker` 是可选执行单元，可为 Wasm，也可为进程型 stdio RPC。宿主按声明装配能力，不要求扩展同时包含 UI 和 Worker。
 
@@ -55,12 +55,12 @@ Extension 默认不进入会话目录。只有显式声明了 `conversation.inje
 3. 开发模式下 CLI 把仓库内 `builtins/extensions/*` 追加为开发来源。
 4. Extension Host 扫描 `config/extensions.toml` 中启用且未移除的扩展来源。
 5. Extension Host 解析 `ui`、`worker`、权限和贡献清单，生成 runtime snapshot。
-6. Server 暴露 runtime snapshot、事件、诊断、日志、资源贡献接口、接口绑定 API、scheduler API 和 Worker RPC。
+6. Server 暴露 runtime snapshot、事件、诊断、日志、资源贡献接口、动作规则视图、scheduler API 和 Worker RPC。
 7. Web 工作台通过 runtime snapshot 动态挂载扩展贡献。
 
-## Interface 与 Schedule Action
+## Action 与 Schedule Action
 
-`capabilities[].metadata.interface` 用于把系统稳定 `/api/...` 动作绑定到扩展 Worker 方法。典型 key 包括 `conversation.list`、`conversation.create`、`message.append_user`、`run.create`、`task.list_by_run`。
+`capabilities[].metadata.action` 用于把扩展能力挂到系统稳定动作键上。典型 key 包括 `conversation.list`、`conversation.create`、`message.append`、`run.create`、`task.list`。
 
 `capabilities[].metadata.schedule_action` 用于声明可被系统 scheduler 调用的动作。Scheduler 只保存计划和触发到期动作，不解释业务语义；业务参数通过 `params` 原样传入 Worker。
 
@@ -70,7 +70,7 @@ id = "run.create"
 contract = "run.create"
 kind = "action"
 entry = "workflow/runs/create"
-metadata = { interface = { key = "run.create" } }
+metadata = { action = { key = "run.create", phase = "execute", priority = 100, result_mode = "last" } }
 
 [[capabilities]]
 id = "workflow.run"
@@ -113,7 +113,7 @@ metadata = { schedule_action = { id = "workflow.run" } }
       "span_id": "xxxxxxxxxxxxxxxx",
       "parent_span_id": "xxxxxxxxxxxxxxxx",
       "sampled": true,
-      "source": "interface_rpc",
+      "source": "action_rpc",
       "traceparent": "00-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx-xxxxxxxxxxxxxxxx-01"
     }
   }
@@ -139,7 +139,7 @@ metadata = { schedule_action = { id = "workflow.run" } }
 ## 沙箱与权限
 
 - 默认不注入 WASI，也不允许任意 host import；声明了 import 的模块会被拒绝实例化。
-- RPC 方法必须匹配 manifest 中 Provider、Behavior、Memory、Hook、Interface 或 Schedule Action 贡献声明的 `entry` / `handler` / `method` 前缀；没有声明贡献的纯 Worker 扩展允许调用任意安全方法名。
+- RPC 方法必须匹配 manifest 中 Provider、Behavior、Memory、Hook、Action 或 Schedule Action 贡献声明的 `entry` / `handler` / `method` 前缀；没有声明贡献的纯 Worker 扩展允许调用任意安全方法名。
 - `runtime.memory_limit_mb` 映射为 Wasm store 内存上限。
 - `runtime.timeout_ms` 映射为 Wasm fuel 预算，防止无限循环长期占用 Host。
 - `permissions` 当前作为能力声明和后续 host capability bridge 的唯一来源；在 host capability bridge 接入前，Worker 没有文件、网络、环境变量或数据库的宿主访问能力。
@@ -150,11 +150,9 @@ metadata = { schedule_action = { id = "workflow.run" } }
 - `GET /api/extensions/runtime`
 - `GET /api/extensions/events`
 - `GET /api/extensions/events/stream`
-- `GET /api/extensions/interfaces`
+- `GET /api/extensions/actions`
 - `GET /api/extensions/schedule-actions`
-- `GET /api/interfaces`
-- `GET /api/interfaces/bindings`
-- `PUT /api/interfaces/bindings`
+- `GET /api/actions`
 - `GET /api/schedule-actions`
 - `GET /api/schedules`
 - `POST /api/schedules`

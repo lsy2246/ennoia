@@ -677,7 +677,7 @@ fn method_prefixes(extension: &ResolvedExtensionSnapshot) -> Vec<String> {
             .iter()
             .filter_map(|item| item.handler.clone()),
     );
-    prefixes.extend(extension.interfaces.iter().map(|item| item.method.clone()));
+    prefixes.extend(extension.actions.iter().map(|item| item.method.clone()));
     prefixes.extend(
         extension
             .schedule_actions
@@ -839,7 +839,7 @@ mod tests {
                 entry: Some(method_prefix.to_string()),
             }],
             hooks: Vec::new(),
-            interfaces: Vec::new(),
+            actions: Vec::new(),
             schedule_actions: Vec::new(),
             subscriptions: Vec::new(),
             diagnostics: Vec::new(),

@@ -63,10 +63,6 @@ impl RuntimePaths {
         self.config_dir().join("profile.toml")
     }
 
-    pub fn interfaces_config_file(&self) -> PathBuf {
-        self.config_dir().join("interfaces.toml")
-    }
-
     pub fn preferences_dir(&self) -> PathBuf {
         self.config_dir().join("preferences")
     }

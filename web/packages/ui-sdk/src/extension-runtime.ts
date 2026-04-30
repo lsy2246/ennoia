@@ -240,10 +240,16 @@ export type ExtensionMemoryContribution = RegisteredContributionBase & {
   };
 };
 
-export type ExtensionInterfaceContribution = RegisteredContributionBase & {
-  interface: {
-    key: string;
+export type ExtensionActionContribution = RegisteredContributionBase & {
+  action: {
+    action: string;
+    capability_id: string;
     method: string;
+    phase: "before" | "execute" | "after_success" | "after_error";
+    priority: number;
+    enabled: boolean;
+    result_mode: "void" | "first" | "last" | "collect" | "merge";
+    when: unknown;
     schema?: string | null;
   };
 };
@@ -331,7 +337,7 @@ export type ExtensionRuntimeExtension = {
   behaviors: ExtensionBehaviorContribution["behavior"][];
   memories: ExtensionMemoryContribution["memory"][];
   hooks: ExtensionHookContribution["hook"][];
-  interfaces: ExtensionInterfaceContribution["interface"][];
+  actions: ExtensionActionContribution["action"][];
   schedule_actions: ExtensionScheduleActionContribution["schedule_action"][];
   subscriptions: ExtensionSubscription[];
   diagnostics: ExtensionDiagnostic[];
@@ -354,7 +360,7 @@ export type ExtensionRuntimeSnapshot = {
   behaviors: ExtensionBehaviorContribution[];
   memories: ExtensionMemoryContribution[];
   hooks: ExtensionHookContribution[];
-  interfaces: ExtensionInterfaceContribution[];
+  actions: ExtensionActionContribution[];
   schedule_actions: ExtensionScheduleActionContribution[];
 };
 

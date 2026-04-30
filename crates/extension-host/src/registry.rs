@@ -6,16 +6,17 @@ use std::sync::{Arc, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use ennoia_kernel::{
-    BehaviorContribution, CapabilityContribution, CommandContribution, ExtensionCapabilities,
-    ExtensionConversationSpec, ExtensionDiagnostic, ExtensionHealth, ExtensionKind,
-    ExtensionManifest, ExtensionPermissionSpec, ExtensionRegistryEntry, ExtensionRegistryFile,
-    ExtensionRpcRequest, ExtensionRpcResponse, ExtensionRuntimeEvent, ExtensionRuntimeSpec,
-    ExtensionSourceMode, ExtensionUiSpec, HookContribution, InterfaceContribution,
+    ActionRule, BehaviorContribution, CapabilityContribution, CommandContribution,
+    ExtensionCapabilities, ExtensionConversationSpec, ExtensionDiagnostic, ExtensionHealth,
+    ExtensionKind, ExtensionManifest, ExtensionPermissionSpec, ExtensionRegistryEntry,
+    ExtensionRegistryFile, ExtensionRpcRequest, ExtensionRpcResponse, ExtensionRuntimeEvent,
+    ExtensionRuntimeSpec, ExtensionSourceMode, ExtensionUiSpec, HookContribution,
     LocaleContribution, MemoryContribution, PageContribution, PanelContribution,
     ProviderContribution, ResolvedUiEntry, ResolvedWorkerEntry, ResourceTypeContribution,
     ScheduleActionContribution, SubscriptionContribution, SurfaceContribution, ThemeContribution,
 };
 use serde::Serialize;
+use serde_json::Value as JsonValue;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ResolvedExtensionSnapshot {
@@ -47,7 +48,7 @@ pub struct ResolvedExtensionSnapshot {
     pub behaviors: Vec<BehaviorContribution>,
     pub memories: Vec<MemoryContribution>,
     pub hooks: Vec<HookContribution>,
-    pub interfaces: Vec<InterfaceContribution>,
+    pub actions: Vec<ActionRule>,
     pub schedule_actions: Vec<ScheduleActionContribution>,
     pub subscriptions: Vec<SubscriptionContribution>,
     pub diagnostics: Vec<ExtensionDiagnostic>,
@@ -170,13 +171,13 @@ pub struct RegisteredHookContribution {
     pub hook: HookContribution,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct RegisteredInterfaceContribution {
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct RegisteredActionRuleContribution {
     pub extension_id: String,
     pub extension_kind: ExtensionKind,
     pub source_mode: ExtensionSourceMode,
     pub install_dir: String,
-    pub interface: InterfaceContribution,
+    pub action: ActionRule,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -206,7 +207,7 @@ pub struct ExtensionRuntimeSnapshot {
     pub behaviors: Vec<RegisteredBehaviorContribution>,
     pub memories: Vec<RegisteredMemoryContribution>,
     pub hooks: Vec<RegisteredHookContribution>,
-    pub interfaces: Vec<RegisteredInterfaceContribution>,
+    pub actions: Vec<RegisteredActionRuleContribution>,
     pub schedule_actions: Vec<RegisteredScheduleActionContribution>,
 }
 
@@ -635,16 +636,16 @@ impl ResolvedExtensionSnapshot {
             .collect()
     }
 
-    fn interface_rows(&self) -> Vec<RegisteredInterfaceContribution> {
-        self.interfaces
+    fn action_rows(&self) -> Vec<RegisteredActionRuleContribution> {
+        self.actions
             .iter()
             .cloned()
-            .map(|interface| RegisteredInterfaceContribution {
+            .map(|action| RegisteredActionRuleContribution {
                 extension_id: self.id.clone(),
                 extension_kind: self.kind.clone(),
                 source_mode: self.source_mode.clone(),
                 install_dir: self.install_dir.clone(),
-                interface,
+                action,
             })
             .collect()
     }
@@ -694,7 +695,7 @@ fn build_snapshot(
     let mut behaviors = Vec::new();
     let mut memories = Vec::new();
     let mut hooks = Vec::new();
-    let mut interfaces = Vec::new();
+    let mut actions = Vec::new();
     let mut schedule_actions = Vec::new();
 
     for extension in &extensions {
@@ -711,7 +712,7 @@ fn build_snapshot(
         behaviors.extend(extension.behavior_rows());
         memories.extend(extension.memory_rows());
         hooks.extend(extension.hook_rows());
-        interfaces.extend(extension.interface_rows());
+        actions.extend(extension.action_rows());
         schedule_actions.extend(extension.schedule_action_rows());
     }
 
@@ -732,7 +733,7 @@ fn build_snapshot(
         behaviors,
         memories,
         hooks,
-        interfaces,
+        actions,
         schedule_actions,
     })
 }
@@ -789,7 +790,7 @@ fn resolve_manifest(
     let providers = derive_providers(&capability_rows, &manifest.id);
     let behaviors = derive_behaviors(&capability_rows, &manifest.id);
     let memories = derive_memories(&capability_rows, &manifest.id);
-    let interfaces = derive_interfaces(&capability_rows);
+    let actions = derive_actions(&capability_rows);
     let schedule_actions = derive_schedule_actions(&capability_rows);
     let subscriptions = manifest.subscriptions.clone();
     let hooks = derive_hooks(&capability_rows, &subscriptions);
@@ -866,7 +867,7 @@ fn resolve_manifest(
         behaviors,
         memories,
         hooks,
-        interfaces,
+        actions,
         schedule_actions,
         subscriptions,
         diagnostics,
@@ -973,17 +974,36 @@ fn derive_memories(
         .collect()
 }
 
-fn derive_interfaces(capabilities: &[CapabilityContribution]) -> Vec<InterfaceContribution> {
+fn derive_actions(capabilities: &[CapabilityContribution]) -> Vec<ActionRule> {
     capabilities
         .iter()
         .filter_map(|capability| {
-            let interface = capability.metadata.get("interface")?;
-            let key = json_string(interface, "key").unwrap_or_else(|| capability.contract.clone());
+            let action = capability.metadata.get("action")?;
+            let action_key =
+                json_string(action, "key").unwrap_or_else(|| capability.contract.clone());
             let method = capability.entry.clone()?;
-            Some(InterfaceContribution {
-                key,
+            Some(ActionRule {
+                action: action_key,
+                capability_id: capability.id.clone(),
                 method,
-                schema: json_string(interface, "schema"),
+                phase: serde_json::from_value(
+                    action
+                        .get("phase")
+                        .cloned()
+                        .unwrap_or_else(|| serde_json::json!("execute")),
+                )
+                .unwrap_or_default(),
+                priority: json_i32(action, "priority").unwrap_or(100),
+                enabled: json_bool_default(action, "enabled", true),
+                result_mode: serde_json::from_value(
+                    action
+                        .get("result_mode")
+                        .cloned()
+                        .unwrap_or_else(|| serde_json::json!("last")),
+                )
+                .unwrap_or_default(),
+                when: action.get("when").cloned().unwrap_or(JsonValue::Null),
+                schema: json_string(action, "schema"),
             })
         })
         .collect()
@@ -1040,6 +1060,13 @@ fn json_bool_default(value: &serde_json::Value, key: &str, default_value: bool) 
         .get(key)
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(default_value)
+}
+
+fn json_i32(value: &serde_json::Value, key: &str) -> Option<i32> {
+    value
+        .get(key)?
+        .as_i64()
+        .and_then(|item| i32::try_from(item).ok())
 }
 
 fn json_string_array(value: &serde_json::Value, key: &str) -> Vec<String> {
@@ -1247,7 +1274,7 @@ fn failed_extension_snapshot(
         behaviors: Vec::new(),
         memories: Vec::new(),
         hooks: Vec::new(),
-        interfaces: Vec::new(),
+        actions: Vec::new(),
         schedule_actions: Vec::new(),
         subscriptions: Vec::new(),
         diagnostics: vec![diagnostic(
@@ -1324,6 +1351,8 @@ fn equivalent_snapshots(
         && current.behaviors == next.behaviors
         && current.memories == next.memories
         && current.hooks == next.hooks
+        && current.actions == next.actions
+        && current.schedule_actions == next.schedule_actions
 }
 
 fn normalize_extensions(
@@ -1357,7 +1386,7 @@ fn empty_snapshot() -> ExtensionRuntimeSnapshot {
         behaviors: Vec::new(),
         memories: Vec::new(),
         hooks: Vec::new(),
-        interfaces: Vec::new(),
+        actions: Vec::new(),
         schedule_actions: Vec::new(),
     }
 }

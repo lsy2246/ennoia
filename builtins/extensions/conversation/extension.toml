@@ -1,6 +1,6 @@
 id = "conversation"
 name = "Conversation"
-description = "提供会话、消息与 lane 的系统级读写接口。"
+description = "提供原生会话事实（conversation / message / lane / branch / checkpoint）的统一接口实现。"
 docs = "docs/overview.md"
 kind = "extension"
 
@@ -23,88 +23,88 @@ id = "conversation.list"
 contract = "conversation.list"
 kind = "query"
 entry = "conversation/conversations/list"
-metadata = { interface = { key = "conversation.list" }, permission = { action = "conversation.read", target_kind = "conversation", risk_level = "low", default_decision = "allow", scope_kind = "none" } }
+metadata = { action = { key = "conversation.list" }, permission = { action = "conversation.read", target_kind = "conversation", risk_level = "low", default_decision = "allow", scope_kind = "none" } }
 
 [[capabilities]]
 id = "conversation.create"
 contract = "conversation.create"
 kind = "action"
 entry = "conversation/conversations/create"
-metadata = { interface = { key = "conversation.create" }, permission = { action = "conversation.write", target_kind = "conversation", risk_level = "medium", default_decision = "allow", scope_kind = "none" } }
+metadata = { action = { key = "conversation.create" }, permission = { action = "conversation.write", target_kind = "conversation", risk_level = "medium", default_decision = "allow", scope_kind = "none" } }
 
 [[capabilities]]
 id = "conversation.get"
 contract = "conversation.get"
 kind = "query"
 entry = "conversation/conversations/get"
-metadata = { interface = { key = "conversation.get" }, permission = { action = "conversation.read", target_kind = "conversation", risk_level = "low", default_decision = "allow", scope_kind = "conversation" } }
+metadata = { action = { key = "conversation.get" }, permission = { action = "conversation.read", target_kind = "conversation", risk_level = "low", default_decision = "allow", scope_kind = "conversation" } }
 
 [[capabilities]]
 id = "conversation.delete"
 contract = "conversation.delete"
 kind = "action"
 entry = "conversation/conversations/delete"
-metadata = { interface = { key = "conversation.delete" }, permission = { action = "conversation.write", target_kind = "conversation", risk_level = "high", default_decision = "ask", scope_kind = "conversation" } }
+metadata = { action = { key = "conversation.delete" }, permission = { action = "conversation.write", target_kind = "conversation", risk_level = "high", default_decision = "ask", scope_kind = "conversation" } }
 
 [[capabilities]]
-id = "lane.list_by_conversation"
-contract = "lane.list_by_conversation"
+id = "lane.list"
+contract = "lane.list"
 kind = "query"
 entry = "conversation/lanes/list-by-conversation"
-metadata = { interface = { key = "lane.list_by_conversation" }, permission = { action = "conversation.read", target_kind = "conversation", risk_level = "low", default_decision = "allow", scope_kind = "conversation" } }
+metadata = { action = { key = "lane.list" }, permission = { action = "conversation.read", target_kind = "conversation", risk_level = "low", default_decision = "allow", scope_kind = "conversation" } }
 
 [[capabilities]]
 id = "message.list"
 contract = "message.list"
 kind = "query"
 entry = "conversation/messages/list"
-metadata = { interface = { key = "message.list" }, permission = { action = "conversation.read", target_kind = "conversation", risk_level = "low", default_decision = "allow", scope_kind = "conversation" } }
+metadata = { action = { key = "message.list" }, permission = { action = "conversation.read", target_kind = "conversation", risk_level = "low", default_decision = "allow", scope_kind = "conversation" } }
 
 [[capabilities]]
-id = "branch.list_by_conversation"
-contract = "branch.list_by_conversation"
+id = "branch.list"
+contract = "branch.list"
 kind = "query"
 entry = "conversation/branches/list-by-conversation"
-metadata = { interface = { key = "branch.list_by_conversation" }, permission = { action = "conversation.read", target_kind = "conversation", risk_level = "low", default_decision = "allow", scope_kind = "conversation" } }
+metadata = { action = { key = "branch.list" }, permission = { action = "conversation.read", target_kind = "conversation", risk_level = "low", default_decision = "allow", scope_kind = "conversation" } }
 
 [[capabilities]]
 id = "branch.create"
 contract = "branch.create"
 kind = "action"
 entry = "conversation/branches/create"
-metadata = { interface = { key = "branch.create" }, permission = { action = "conversation.branch.create", target_kind = "branch", risk_level = "medium", default_decision = "allow", scope_kind = "conversation" } }
+metadata = { action = { key = "branch.create" }, permission = { action = "conversation.branch.create", target_kind = "branch", risk_level = "medium", default_decision = "allow", scope_kind = "conversation" } }
 
 [[capabilities]]
 id = "branch.switch"
 contract = "branch.switch"
 kind = "action"
 entry = "conversation/branches/switch"
-metadata = { interface = { key = "branch.switch" }, permission = { action = "conversation.branch.switch", target_kind = "branch", risk_level = "medium", default_decision = "allow", scope_kind = "conversation" } }
+metadata = { action = { key = "branch.switch" }, permission = { action = "conversation.branch.switch", target_kind = "branch", risk_level = "medium", default_decision = "allow", scope_kind = "conversation" } }
 
 [[capabilities]]
-id = "checkpoint.list_by_conversation"
-contract = "checkpoint.list_by_conversation"
+id = "checkpoint.list"
+contract = "checkpoint.list"
 kind = "query"
 entry = "conversation/checkpoints/list-by-conversation"
-metadata = { interface = { key = "checkpoint.list_by_conversation" }, permission = { action = "conversation.read", target_kind = "conversation", risk_level = "low", default_decision = "allow", scope_kind = "conversation" } }
+metadata = { action = { key = "checkpoint.list" }, permission = { action = "conversation.read", target_kind = "conversation", risk_level = "low", default_decision = "allow", scope_kind = "conversation" } }
 
 [[capabilities]]
 id = "checkpoint.create"
 contract = "checkpoint.create"
 kind = "action"
 entry = "conversation/checkpoints/create"
-metadata = { interface = { key = "checkpoint.create" }, permission = { action = "conversation.write", target_kind = "checkpoint", risk_level = "medium", default_decision = "allow", scope_kind = "conversation" } }
+metadata = { action = { key = "checkpoint.create" }, permission = { action = "conversation.write", target_kind = "checkpoint", risk_level = "medium", default_decision = "allow", scope_kind = "conversation" } }
 
 [[capabilities]]
-id = "message.append_user"
-contract = "message.append_user"
+id = "message.append.operator"
+contract = "message.append.operator"
 kind = "action"
 entry = "conversation/messages/append-user"
-metadata = { interface = { key = "message.append_user" }, permission = { action = "conversation.write", target_kind = "conversation", risk_level = "medium", default_decision = "allow", scope_kind = "conversation" } }
+metadata = { action = { key = "message.append", phase = "execute", priority = 300, result_mode = "last", when = { message_role_in = ["operator", "user"] } }, permission = { action = "conversation.write", target_kind = "conversation", risk_level = "medium", default_decision = "allow", scope_kind = "conversation" } }
 
 [[capabilities]]
-id = "message.append_agent"
-contract = "message.append_agent"
+id = "message.append.agent"
+contract = "message.append.agent"
 kind = "action"
 entry = "conversation/messages/append-agent"
-metadata = { interface = { key = "message.append_agent" }, permission = { action = "conversation.write", target_kind = "conversation", risk_level = "medium", default_decision = "allow", scope_kind = "conversation" } }
+metadata = { action = { key = "message.append", phase = "execute", priority = 300, result_mode = "last", when = { message_role_in = ["agent", "assistant", "system", "tool"] } }, permission = { action = "conversation.write", target_kind = "conversation", risk_level = "medium", default_decision = "allow", scope_kind = "conversation" } }

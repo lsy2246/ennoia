@@ -4,8 +4,8 @@ use crate::agent_permissions::{
     ApprovalResolutionPayload, PermissionApprovalsQuery, PermissionEventsQuery,
     PermissionPolicySummary,
 };
+use crate::pipeline::queue_permission_approval_resume;
 
-use super::interfaces::spawn_approved_conversation_agent_reply;
 use super::*;
 
 #[derive(Debug, Deserialize)]
@@ -130,7 +130,7 @@ pub(super) async fn permission_approval_resolve(
             )
         })?;
     if approval.status == "approved" {
-        spawn_approved_conversation_agent_reply(state.clone(), request.clone(), approval.clone());
+        queue_permission_approval_resume(state.clone(), request.clone(), approval.clone());
     }
     Ok(Json(approval))
 }

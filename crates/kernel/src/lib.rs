@@ -17,9 +17,9 @@ pub mod ui;
 // ========== Re-exports ==========
 
 pub use config::{
-    AgentConfig, AgentDocument, ExtensionRegistryEntry, ExtensionRegistryFile,
-    InterfaceBindingConfig, InterfaceBindingsConfig, ProviderConfig, ProviderModelDiscoveryConfig,
-    ServerConfig, SkillConfig, SkillRegistryEntry, SkillRegistryFile, UiConfig,
+    AgentConfig, AgentDocument, ExtensionRegistryEntry, ExtensionRegistryFile, ProviderConfig,
+    ProviderModelDiscoveryConfig, ServerConfig, SkillConfig, SkillRegistryEntry, SkillRegistryFile,
+    UiConfig,
 };
 pub use context::{ContextFrame, ContextLayer, RunContext};
 pub use decision::{Decision, DecisionSnapshot, NextAction};
@@ -31,19 +31,19 @@ pub use domain::{
 };
 pub use ennoia_error_utils::normalize_error_message;
 pub use extension::{
-    BehaviorContribution, CapabilityContribution, CommandContribution, ExtensionAssetsSpec,
-    ExtensionCapabilities, ExtensionConversationSpec, ExtensionDiagnostic, ExtensionHealth,
-    ExtensionKind, ExtensionManifest, ExtensionPermissionSpec, ExtensionRpcError,
-    ExtensionRpcRequest, ExtensionRpcResponse, ExtensionRuntimeEvent, ExtensionRuntimeSpec,
-    ExtensionSourceMode, ExtensionSourceSpec, ExtensionUiSpec, ExtensionWatchSpec,
-    ExtensionWorkerSpec, HookContribution, HookDispatchResponse, HookEventEnvelope,
-    HookResourceRef, InterfaceContribution, LocaleContribution, MemoryContribution,
-    PageContribution, PageNavContribution, PanelContribution, ProviderContribution,
-    ProviderGenerationOption, ResolvedUiEntry, ResolvedWorkerEntry, ResourceTypeContribution,
-    ScheduleActionContribution, SubscriptionContribution, SurfaceContribution, ThemeContribution,
-    HOOK_EVENT_ARTIFACT_CREATED, HOOK_EVENT_CONVERSATION_CREATED,
-    HOOK_EVENT_CONVERSATION_MESSAGE_CREATED, HOOK_EVENT_JOB_DUE, HOOK_EVENT_RUN_REQUESTED,
-    HOOK_EVENT_RUN_STAGE_CHANGED,
+    ActionPhase, ActionResultMode, ActionRule, BehaviorContribution, CapabilityContribution,
+    CommandContribution, ExtensionAssetsSpec, ExtensionCapabilities, ExtensionConversationSpec,
+    ExtensionDiagnostic, ExtensionHealth, ExtensionKind, ExtensionManifest,
+    ExtensionPermissionSpec, ExtensionRpcError, ExtensionRpcRequest, ExtensionRpcResponse,
+    ExtensionRuntimeEvent, ExtensionRuntimeSpec, ExtensionSourceMode, ExtensionSourceSpec,
+    ExtensionUiSpec, ExtensionWatchSpec, ExtensionWorkerSpec, HookContribution,
+    HookDispatchResponse, HookEventEnvelope, HookResourceRef, LocaleContribution,
+    MemoryContribution, PageContribution, PageNavContribution, PanelContribution,
+    ProviderContribution, ProviderGenerationOption, ResolvedUiEntry, ResolvedWorkerEntry,
+    ResourceTypeContribution, ScheduleActionContribution, SubscriptionContribution,
+    SurfaceContribution, ThemeContribution, HOOK_EVENT_ARTIFACT_CREATED,
+    HOOK_EVENT_CONVERSATION_CREATED, HOOK_EVENT_CONVERSATION_MESSAGE_CREATED, HOOK_EVENT_JOB_DUE,
+    HOOK_EVENT_RUN_REQUESTED, HOOK_EVENT_RUN_STAGE_CHANGED,
 };
 pub use gate::{GateRecord, GateSeverity, GateVerdict};
 pub use overview::{core_modules, PlatformOverview};

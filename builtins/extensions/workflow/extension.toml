@@ -1,6 +1,6 @@
 id = "workflow"
 name = "Workflow"
-description = "提供 run、task、artifact 与调度动作的系统编排能力。"
+description = "提供 run、task、artifact 与调度动作的编排实现；是否接入 conversation 或 memory 由系统动作管道与事件链决定。"
 docs = "docs/overview.md"
 kind = "extension"
 
@@ -24,7 +24,7 @@ inject = true
 capabilities = [
   "run.create",
   "run.get",
-  "artifact.list_by_run",
+  "artifact.list",
 ]
 
 [[capabilities]]
@@ -39,35 +39,35 @@ id = "run.create"
 contract = "run.create"
 kind = "action"
 entry = "workflow/runs/create"
-metadata = { interface = { key = "run.create" }, permission = { action = "run.create", target_kind = "run", risk_level = "medium", default_decision = "allow", scope_kind = "conversation" } }
+metadata = { action = { key = "run.create" }, permission = { action = "run.create", target_kind = "run", risk_level = "medium", default_decision = "allow", scope_kind = "conversation" } }
 
 [[capabilities]]
 id = "run.get"
 contract = "run.get"
 kind = "query"
 entry = "workflow/runs/get"
-metadata = { interface = { key = "run.get" }, permission = { action = "run.read", target_kind = "run", risk_level = "low", default_decision = "allow", scope_kind = "run" } }
+metadata = { action = { key = "run.get" }, permission = { action = "run.read", target_kind = "run", risk_level = "low", default_decision = "allow", scope_kind = "run" } }
 
 [[capabilities]]
-id = "run.list_by_conversation"
-contract = "run.list_by_conversation"
+id = "run.list"
+contract = "run.list"
 kind = "query"
 entry = "workflow/runs/list-by-conversation"
-metadata = { interface = { key = "run.list_by_conversation" }, permission = { action = "run.read", target_kind = "run", risk_level = "low", default_decision = "allow", scope_kind = "conversation" } }
+metadata = { action = { key = "run.list" }, permission = { action = "run.read", target_kind = "run", risk_level = "low", default_decision = "allow", scope_kind = "conversation" } }
 
 [[capabilities]]
-id = "task.list_by_run"
-contract = "task.list_by_run"
+id = "task.list"
+contract = "task.list"
 kind = "query"
 entry = "workflow/tasks/list-by-run"
-metadata = { interface = { key = "task.list_by_run" }, permission = { action = "run.read", target_kind = "task", risk_level = "low", default_decision = "allow", scope_kind = "run" } }
+metadata = { action = { key = "task.list" }, permission = { action = "run.read", target_kind = "task", risk_level = "low", default_decision = "allow", scope_kind = "run" } }
 
 [[capabilities]]
-id = "artifact.list_by_run"
-contract = "artifact.list_by_run"
+id = "artifact.list"
+contract = "artifact.list"
 kind = "query"
 entry = "workflow/artifacts/list-by-run"
-metadata = { interface = { key = "artifact.list_by_run" }, permission = { action = "artifact.read", target_kind = "artifact", risk_level = "low", default_decision = "allow", scope_kind = "run" } }
+metadata = { action = { key = "artifact.list" }, permission = { action = "artifact.read", target_kind = "artifact", risk_level = "low", default_decision = "allow", scope_kind = "run" } }
 
 [[capabilities]]
 id = "workflow.run"

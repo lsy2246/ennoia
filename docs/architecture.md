@@ -16,7 +16,8 @@ Web
       -> Observability Store
       -> Event Bus
       -> Agent Permission Store
-      -> Interface Router
+      -> Action Pipeline Runtime
+      -> Action Router
         -> Memory Worker / Workflow Worker / Other Extension Workers
       -> Scheduler
         -> Schedule Action Worker RPC
@@ -28,14 +29,15 @@ Web
 - `Contract`：定义跨边界 DTO；当前保留 `behavior` 与 `memory` 兼容协议响应结构。
 - `Paths`：统一解析运行目录，所有运行时文件位置都通过 `RuntimePaths` 推导。
 - `Extension Host`：负责扩展扫描、attach / detach、reload / restart、诊断、Worker 解析和 Worker RPC 分发；Worker 可以是 Wasm，也可以是进程型 stdio RPC。
-- `Server`：负责 HTTP API、配置读写、接口绑定、定时调度、Worker RPC 路由、Observability、事件总线和系统内置组件装配。
+- `Server`：负责 HTTP API、定时调度、Worker RPC 路由、Observability、事件总线和系统内置组件装配。
+- `Pipeline Runtime`：负责稳定 action 的规则收集、阶段执行和结果收敛。它不拥有 conversation、memory、workflow 的主数据。
 
 ## Agent 权限裁决
 
 - Agent 权限属于系统核心，不做成扩展，也不交给 Wasm / Process Worker 自行裁决。
 - 扩展只通过 `capabilities[].metadata.permission` 声明动作、目标类型、风险等级和作用域；最终允许、拒绝、审批都由宿主 `AgentPermissionStore` 决定。
 - 当前宿主会在两类入口做权限判断：
-  - Interface Router：当内部 Agent 以 `permission_actor` 身份调用 `conversation.*`、`memory.*`、`run.*` 等稳定接口时。
+  - Action Router：当内部 Agent 以 `permission_actor` 身份调用 `conversation.*`、`memory.*`、`run.*` 等稳定动作时。
   - Provider 调用：Agent 真正发起 `provider.generate` 上游请求前。
 - 裁决结果固定为 `allow`、`deny`、`ask`。`ask` 会生成待审批记录，审批通过后可落成单次 grant、当前会话 grant、当前 run grant 或永久 policy。
 - 系统默认只管 Agent 身份，不拦截操作者直接发起的 HTTP 调用。
@@ -43,23 +45,23 @@ Web
 ## 细粒度接口层
 
 - 系统用稳定 `/api/...` 表达产品动作，例如会话列表、创建会话、写消息、创建运行、读取任务。
-- 每个产品动作映射为一个接口键，例如 `conversation.list`、`message.append_user`、`run.create`、`task.list_by_run`。
-- 扩展通过 manifest 的 `capabilities[].metadata.interface` 声明接口实现，实际执行统一进入扩展 Worker RPC。
-- `config/interfaces.toml` 只保存必要的显式绑定；没有显式绑定且只有一个实现时自动绑定，有多个实现时返回冲突。
+- 每个产品动作映射为一个接口键，例如 `conversation.list`、`message.append`、`run.create`、`task.list`。
+- 扩展通过 manifest 的 `capabilities[].metadata.action` 声明动作规则，规则携带 `key`、`phase`、`priority`、`result_mode` 和可选 `when`。
+- 同一个动作键可以同时挂多条规则；宿主按阶段和优先级执行，并按 `result_mode` 收敛返回值。
 - 当前系统接口管理入口包括：
-  - `GET /api/extensions/interfaces`
-  - `GET /api/interfaces`
-  - `GET /api/interfaces/bindings`
-  - `PUT /api/interfaces/bindings`
+  - `GET /api/extensions/actions`
+  - `GET /api/actions`
 
-## 会话与记忆边界
+## 会话、记忆与组合层边界
 
 - 核心不再内置 `journal` 文件记录层。
 - `/api/conversations`、`/api/conversations/{id}/messages` 等稳定入口通过接口层路由，不直接绑定某个 memory 大能力。
 - 内置 `conversation` 扩展当前声明会话、分支、检查点、线路和消息接口；内置 `memory` 扩展只负责记忆、上下文、审查和图谱侧车。
+- 动作管道是系统级中立执行层，用来承接 `message.append -> run.create`、`run.create -> message.append`、`run.create -> memory.ingest` 这类默认链路。
 - `memory` 的系统入口固定为 `/api/memory/*`，底层通过 `memory.*` 接口键解析到扩展 Worker。
-- `conversation` 不直接调用 `memory`；它只把稳定事件交给宿主事件总线。
-- `memory` 不直接读取 `conversation.db`；它只消费宿主持久化的系统事件。
+- `conversation` 不直接调用 `memory` 或 `workflow`；它只维护会话事实并发出事实事件。
+- `memory` 不直接读取 `conversation.db`，也不再镜像保存整段会话消息或 shadow session state。
+- `workflow` 不假设自己一定挂在 conversation 上；会话事实是否进入 workflow，由系统动作管道与事件链决定，而不是由 builtin 互相依赖。
 - Conversation、Message、Memory Graph、Review 等业务数据组织属于扩展私有责任，不属于 Observability。
 
 ## 运行与定时边界
@@ -92,7 +94,7 @@ Web
 - Trace 模型固定使用 `trace_id`、`span_id`、`parent_span_id`、`request_id`、`sampled` 和 `source`。
 - 当前先追踪跨边界 span，不追踪每条 SQL：
   - HTTP 入口
-  - Interface Router -> Worker RPC
+  - Action Router -> Worker RPC
   - Behavior Router -> Worker RPC
   - `/api/extensions/{extension_id}/rpc/{method}`
   - Event Bus publish
@@ -108,18 +110,18 @@ Web
 ## Hook 边界
 
 - Hook 保留为扩展订阅系统事件的方式，但事件先进入宿主持久化事件总线，不做同步强耦合调用。
-- 接口层完成会话创建、消息追加等动作后，把 `conversation.created`、`conversation.message.created` 等事件写入 `events.db`。
+- 动作管道在完成会话创建、消息追加等动作后，把 `conversation.created`、`conversation.message.created` 等事件写入 `events.db`。
 - 事件总线异步把事件投递给已注册 Hook；扩展临时离线不会阻塞会话写入。
-- 系统不把会话、记忆或编排重新耦合回 Hook。
+- 系统不要求 memory / workflow 必须通过 Hook 互相耦合；内置跨域组合统一走动作管道与事件链。
 
 ## 扩展能力模型
 
 - 扩展 manifest 只保留当前协议，不再声明独立协议版本号。
 - 扩展负责系统能力，可选声明 `ui` 和 `worker`，主声明模型统一为：`resource_types`、`capabilities`、`surfaces`、`locales`、`themes`、`commands`、`subscriptions`。
-- `pages`、`panels`、`providers`、`behaviors`、`memories`、`hooks`、`interfaces`、`schedule_actions` 都是运行时派生视图，不再是 manifest 顶层主声明。
+- `pages`、`panels`、`providers`、`behaviors`、`memories`、`actions`、`hooks`、`schedule_actions` 都是运行时派生视图，不再是 manifest 顶层主声明。
 - UI 工作台读取扩展快照时，同时获得通用声明和派生视图。
 - `workflow` 和 `memory` 都只是内置扩展实现；系统依赖接口键和动作 ID，不反向依赖具体扩展。
-- 扩展不自行开放端口；Provider、Behavior、Memory、Hook、Interface 和 Schedule Action 的执行统一走宿主 Worker RPC，Worker 通过 Wasm ABI 或进程 stdio 协议接入。
+- 扩展不自行开放端口；Provider、Behavior、Memory、Hook、Action 和 Schedule Action 的执行统一走宿主 Worker RPC，Worker 通过 Wasm ABI 或进程 stdio 协议接入。
 - 扩展 UI、语言、主题和业务配置归扩展自身所有；Web 主壳只按 runtime snapshot 发现并挂载，不在系统前端包中静态注册某个扩展页面或文案。
 - 扩展 UI 通过独立 ESM bundle 动态加载；主壳只导入 `/api/extensions/{extension_id}/ui/module` 暴露的模块包装器，再按 mount id 调用扩展自己的 `mount/unmount`。
 - 扩展主题通过 `ennoia.theme` 与主壳对接；主壳只消费稳定语义 token 和 dockview token，不把内部 class 结构暴露给扩展。
@@ -139,7 +141,6 @@ Web
 ## 存储划分
 
 - 系统级配置：`~/.ennoia/config/*.toml`
-- 接口绑定：`~/.ennoia/config/interfaces.toml`
 - 系统级观测：`~/.ennoia/data/system/sqlite/observability.db`
 - 系统级事件总线：`~/.ennoia/data/system/sqlite/events.db`
 - Agent 权限事件与审批：`~/.ennoia/data/system/sqlite/permissions.db`

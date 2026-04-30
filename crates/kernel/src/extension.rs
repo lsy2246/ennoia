@@ -212,9 +212,51 @@ pub struct MemoryContribution {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct InterfaceContribution {
-    pub key: String,
+#[serde(rename_all = "snake_case")]
+pub enum ActionPhase {
+    Before,
+    Execute,
+    AfterSuccess,
+    AfterError,
+}
+
+impl Default for ActionPhase {
+    fn default() -> Self {
+        Self::Execute
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ActionResultMode {
+    Void,
+    First,
+    Last,
+    Collect,
+    Merge,
+}
+
+impl Default for ActionResultMode {
+    fn default() -> Self {
+        Self::Last
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ActionRule {
+    pub action: String,
+    pub capability_id: String,
     pub method: String,
+    #[serde(default)]
+    pub phase: ActionPhase,
+    #[serde(default)]
+    pub priority: i32,
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub result_mode: ActionResultMode,
+    #[serde(default)]
+    pub when: JsonValue,
     #[serde(default)]
     pub schema: Option<String>,
 }
@@ -245,6 +287,10 @@ pub const HOOK_EVENT_RUN_REQUESTED: &str = "run.requested";
 pub const HOOK_EVENT_RUN_STAGE_CHANGED: &str = "run.stage.changed";
 pub const HOOK_EVENT_ARTIFACT_CREATED: &str = "artifact.created";
 pub const HOOK_EVENT_JOB_DUE: &str = "job.due";
+
+fn default_enabled() -> bool {
+    true
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct HookResourceRef {

@@ -1,10 +1,10 @@
-use super::interfaces::dispatch_interface_json;
+use super::actions::dispatch_action_json;
 use super::*;
 
 #[derive(Debug, Clone, Serialize)]
 pub(super) struct MemoryExtensionRecord {
     extension_id: String,
-    interfaces: Vec<String>,
+    actions: Vec<String>,
     enabled: bool,
     healthy: bool,
 }
@@ -18,18 +18,18 @@ pub(super) async fn extension_memories(
         .extensions
         .into_iter()
         .filter_map(|extension| {
-            let interfaces = extension
-                .interfaces
+            let actions = extension
+                .actions
                 .iter()
-                .filter(|item| item.key.starts_with("memory."))
-                .map(|item| item.key.clone())
+                .filter(|item| item.action.starts_with("memory."))
+                .map(|item| item.action.clone())
                 .collect::<Vec<_>>();
-            if interfaces.is_empty() {
+            if actions.is_empty() {
                 return None;
             }
             Some(MemoryExtensionRecord {
                 extension_id: extension.id,
-                interfaces,
+                actions,
                 enabled: !matches!(extension.health, ennoia_kernel::ExtensionHealth::Stopped),
                 healthy: matches!(extension.health, ennoia_kernel::ExtensionHealth::Ready),
             })
@@ -43,14 +43,14 @@ pub(super) async fn memory_workspace(
     State(state): State<AppState>,
     Extension(request): Extension<RequestContext>,
 ) -> ApiResult<JsonValue> {
-    dispatch_interface_json(&state, &request, "memory.workspace", JsonValue::Null).await
+    dispatch_action_json(&state, &request, "memory.workspace.get", JsonValue::Null).await
 }
 
 pub(super) async fn memory_list(
     State(state): State<AppState>,
     Extension(request): Extension<RequestContext>,
 ) -> ApiResult<JsonValue> {
-    dispatch_interface_json(&state, &request, "memory.list", JsonValue::Null).await
+    dispatch_action_json(&state, &request, "memory.entry.list", JsonValue::Null).await
 }
 
 pub(super) async fn memory_episodes_list(
@@ -58,10 +58,10 @@ pub(super) async fn memory_episodes_list(
     Extension(request): Extension<RequestContext>,
     Query(query): Query<std::collections::HashMap<String, String>>,
 ) -> ApiResult<JsonValue> {
-    dispatch_interface_json(
+    dispatch_action_json(
         &state,
         &request,
-        "memory.episodes_list",
+        "memory.episode.list",
         serde_json::to_value(query).unwrap_or(JsonValue::Null),
     )
     .await
@@ -72,7 +72,7 @@ pub(super) async fn memory_remember(
     Extension(request): Extension<RequestContext>,
     Json(payload): Json<JsonValue>,
 ) -> ApiResult<JsonValue> {
-    dispatch_interface_json(&state, &request, "memory.remember", payload).await
+    dispatch_action_json(&state, &request, "memory.ingest", payload).await
 }
 
 pub(super) async fn memory_recall(
@@ -80,7 +80,7 @@ pub(super) async fn memory_recall(
     Extension(request): Extension<RequestContext>,
     Json(payload): Json<JsonValue>,
 ) -> ApiResult<JsonValue> {
-    dispatch_interface_json(&state, &request, "memory.recall", payload).await
+    dispatch_action_json(&state, &request, "memory.query", payload).await
 }
 
 pub(super) async fn memory_review(
@@ -88,7 +88,7 @@ pub(super) async fn memory_review(
     Extension(request): Extension<RequestContext>,
     Json(payload): Json<JsonValue>,
 ) -> ApiResult<JsonValue> {
-    dispatch_interface_json(&state, &request, "memory.review", payload).await
+    dispatch_action_json(&state, &request, "memory.review", payload).await
 }
 
 pub(super) async fn memory_assemble_context(
@@ -96,5 +96,5 @@ pub(super) async fn memory_assemble_context(
     Extension(request): Extension<RequestContext>,
     Json(payload): Json<JsonValue>,
 ) -> ApiResult<JsonValue> {
-    dispatch_interface_json(&state, &request, "memory.assemble_context", payload).await
+    dispatch_action_json(&state, &request, "memory.build_context", payload).await
 }

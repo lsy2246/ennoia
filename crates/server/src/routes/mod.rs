@@ -16,13 +16,13 @@ use axum::{
 use chrono::Utc;
 use ennoia_contract::ApiError;
 use ennoia_extension_host::{
-    read_registry_file, ExtensionRuntimeSnapshot, RegisteredBehaviorContribution,
-    RegisteredCapabilityContribution, RegisteredCommandContribution, RegisteredHookContribution,
-    RegisteredInterfaceContribution, RegisteredLocaleContribution, RegisteredMemoryContribution,
-    RegisteredPageContribution, RegisteredPanelContribution, RegisteredProviderContribution,
-    RegisteredResourceTypeContribution, RegisteredScheduleActionContribution,
-    RegisteredSubscriptionContribution, RegisteredSurfaceContribution, RegisteredThemeContribution,
-    ResolvedExtensionSnapshot,
+    read_registry_file, ExtensionRuntimeSnapshot, RegisteredActionRuleContribution,
+    RegisteredBehaviorContribution, RegisteredCapabilityContribution,
+    RegisteredCommandContribution, RegisteredHookContribution, RegisteredLocaleContribution,
+    RegisteredMemoryContribution, RegisteredPageContribution, RegisteredPanelContribution,
+    RegisteredProviderContribution, RegisteredResourceTypeContribution,
+    RegisteredScheduleActionContribution, RegisteredSubscriptionContribution,
+    RegisteredSurfaceContribution, RegisteredThemeContribution, ResolvedExtensionSnapshot,
 };
 use ennoia_kernel::{
     AgentConfig, BootstrapState, ExtensionDiagnostic, ExtensionRuntimeEvent, HookEventEnvelope,
@@ -43,9 +43,9 @@ use crate::middleware::{
     request_context_middleware, timeout_middleware,
 };
 
+pub(crate) mod actions;
 mod behavior;
 mod extensions;
-mod interfaces;
 mod logs;
 mod memory;
 mod observability;
@@ -54,9 +54,9 @@ mod resources;
 mod runtime;
 mod schedules;
 
+use actions::*;
 use behavior::*;
 use extensions::*;
-use interfaces::*;
 use logs::*;
 use memory::*;
 use observability::*;
@@ -69,7 +69,7 @@ pub(crate) use schedules::run_due_schedules_once;
 
 type ApiResult<T> = Result<Json<T>, ApiError>;
 
-fn scoped(error: ApiError, request: &RequestContext) -> ApiError {
+pub(crate) fn scoped(error: ApiError, request: &RequestContext) -> ApiError {
     error
         .with_request_id(&request.request_id)
         .with_trace_id(&request.trace_id)
@@ -122,16 +122,12 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/extensions/behaviors", get(extension_behaviors))
         .route("/api/extensions/memories", get(extension_memories))
         .route("/api/extensions/hooks", get(extension_hooks))
-        .route("/api/extensions/interfaces", get(extension_interfaces))
+        .route("/api/extensions/actions", get(extension_actions))
         .route(
             "/api/extensions/schedule-actions",
             get(extension_schedule_actions),
         )
-        .route("/api/interfaces", get(interfaces_status))
-        .route(
-            "/api/interfaces/bindings",
-            get(interface_bindings).put(interface_bindings_put),
-        )
+        .route("/api/actions", get(actions_status))
         .route("/api/extensions/attach", post(extension_attach))
         .route("/api/extensions/{extension_id}", get(extension_detail))
         .route(
@@ -328,7 +324,7 @@ struct UiRuntimeRegistryResponse {
     providers: Vec<RegisteredProviderContribution>,
     behaviors: Vec<RegisteredBehaviorContribution>,
     memories: Vec<RegisteredMemoryContribution>,
-    interfaces: Vec<RegisteredInterfaceContribution>,
+    actions: Vec<RegisteredActionRuleContribution>,
     schedule_actions: Vec<RegisteredScheduleActionContribution>,
 }
 
@@ -532,7 +528,7 @@ async fn ui_runtime(State(state): State<AppState>) -> Json<UiRuntimeResponse> {
         + snapshot.providers.len()
         + snapshot.behaviors.len()
         + snapshot.memories.len()
-        + snapshot.interfaces.len()
+        + snapshot.actions.len()
         + snapshot.schedule_actions.len()) as u64;
     let preference_version = ui_preference_version_from_disk(&state);
 
@@ -550,7 +546,7 @@ async fn ui_runtime(State(state): State<AppState>) -> Json<UiRuntimeResponse> {
             providers: snapshot.providers,
             behaviors: snapshot.behaviors,
             memories: snapshot.memories,
-            interfaces: snapshot.interfaces,
+            actions: snapshot.actions,
             schedule_actions: snapshot.schedule_actions,
         },
         instance_preference,

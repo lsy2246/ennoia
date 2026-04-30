@@ -4,22 +4,22 @@
 
 ## 产品结构
 
-- 工作台：核心只提供宿主、配置、路径、日志和 Worker RPC；业务能力由扩展提供。
+- 工作台：核心只提供宿主、配置、路径、日志、权限、事件总线、动作管道与 Worker RPC；业务能力由扩展提供。
 - Agents：维护协作者档案、上游渠道、模型、技能和启用状态。
 - Agent 权限：系统级权限策略、审批和事件记录统一由宿主裁决，扩展只声明能力风险，不直接放权。
 - 技能：Agent 可引用的工具与用法定义，只保留最小目录元信息与文档入口，和扩展严格分离。
 - API 上游渠道：Agent 绑定的具体模型访问实例。
 - 扩展：系统插件包，manifest 统一声明 `resource_types`、`capabilities`、`surfaces`、`locales`、`themes`、`commands`、`subscriptions`；如需进入会话目录，再额外声明 `conversation` 规则。宿主把扩展/技能目录整理成结构化 `context` 交给 provider 渲染，不再把它们直接硬拼进自然语言 prompt，也不自动注入文档正文。
-- 会话：系统保留稳定 `/api/conversations` 入口，实际读写由 `conversation.*`、`message.*`、`lane.*` 等接口绑定到内置 `conversation` 扩展。
-- 记忆：以内置 `memory` 扩展形式提供记忆、上下文、审查和图谱能力；会话事件先进入宿主事件总线，再异步投递给 `memory`。
-- 编排：以内置 `workflow` 扩展承载 run、task、artifact；定时器里的 Agent 执行通过编排接口落地。
+- 会话：系统保留稳定 `/api/conversations` 入口，实际读写由 `conversation.*`、`message.*`、`lane.*` 等动作规则路由到内置 `conversation` 扩展。
+- 记忆：以内置 `memory` 扩展形式提供记忆、上下文、审查和图谱能力；不再镜像保存原始会话消息。
+- 编排：以内置 `workflow` 扩展承载 run、task、artifact；会话事实进入编排、编排结果回写会话与记忆，由系统动作管道与事件链承接。
 - 日志：聚合前端日志和扩展运行事件。
 - 设置：通过表单直接编辑 `config/server.toml`、`config/profile.toml` 和 `config/preferences/*.toml`。
 
 ## 技术栈
 
 - 后端：Rust、Tokio、Axum、Serde、TOML
-- 存储：系统配置走 TOML 文件；接口绑定走 `config/interfaces.toml`；定时计划走 `data/system/schedules.json`；扩展按需使用自己的私有存储。
+- 存储：系统配置走 TOML 文件；定时计划走 `data/system/schedules.json`；扩展按需使用自己的私有存储。
 - 前端：React、Vite、TanStack Router、Zustand
 - 包管理：`bun`
 - 发布目标：一个 npm 包 + `~/.ennoia` 运行目录
@@ -32,7 +32,7 @@
 - `crates/cli`：初始化、开发与启动入口
 - `web`：Ennoia Web 工作台
 - `web/packages/api-client`：前端统一 API 访问层
-- `builtins/extensions/conversation`：内置会话扩展，声明会话、线路与消息接口
+- `builtins/extensions/conversation`：内置会话扩展，声明原生会话事实接口
 - `builtins/extensions/memory`：内置记忆扩展，声明记忆、上下文、审查与图谱接口
 - `builtins/extensions/workflow`：内置编排扩展，声明 run/task/artifact 接口
 
@@ -46,7 +46,7 @@
 ## 存储边界
 
 - 核心系统配置只走 `~/.ennoia/config/*.toml`。
-- 系统接口绑定写入 `~/.ennoia/config/interfaces.toml`；未显式绑定且只有一个实现时自动选中。
+- 系统动作规则来自扩展 manifest；宿主在运行时收集规则、排序并执行。
 - 系统定时计划写入 `~/.ennoia/data/system/schedules.json`，到期后由宿主运行命令或触发 Agent，并可把完整结果、摘要或最终结论投递到会话 / lane。
 - 系统事件总线写入 `~/.ennoia/data/system/sqlite/events.db`，用于持久化会话等系统事件及其 Hook 投递状态。
 - 系统观测数据写入 `~/.ennoia/data/system/sqlite/observability.db`，统一承载 logs、traces 和 span links。

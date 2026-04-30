@@ -174,6 +174,8 @@ function localizeSourceKind(sourceKind: string, t: (key: string, fallback: strin
       return t("web.observability.source.route", "路由");
     case "permission":
       return t("web.observability.source.permission", "权限");
+    case "action":
+      return t("web.observability.source.action", "动作");
     case "interface":
       return t("web.observability.source.interface", "接口");
     case "hook":

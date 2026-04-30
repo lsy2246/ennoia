@@ -46,19 +46,6 @@ impl Default for ServerConfig {
     }
 }
 
-/// InterfaceBindingsConfig stores fine-grained system action bindings.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct InterfaceBindingsConfig {
-    #[serde(default)]
-    pub bindings: BTreeMap<String, InterfaceBindingConfig>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct InterfaceBindingConfig {
-    pub extension_id: String,
-    pub method: String,
-}
-
 /// UiConfig stores Web workbench settings loaded from `config/ui.toml`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct UiConfig {

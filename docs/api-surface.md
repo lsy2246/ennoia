@@ -57,7 +57,7 @@
 - `GET /api/extensions/behaviors`
 - `GET /api/extensions/memories`
 - `GET /api/extensions/hooks`
-- `GET /api/extensions/interfaces`
+- `GET /api/extensions/actions`
 - `GET /api/extensions/schedule-actions`
 - `GET /api/extensions/{extension_id}`
 - `GET /api/extensions/{extension_id}/diagnostics`
@@ -71,13 +71,11 @@
 - `POST /api/extensions/attach`
 - `DELETE /api/extensions/attach/{extension_id}`
 
-## Interface Binding
+## Action Runtime
 
-- `GET /api/interfaces`
-- `GET /api/interfaces/bindings`
-- `PUT /api/interfaces/bindings`
+- `GET /api/actions`
 
-接口绑定用于把系统稳定动作键绑定到扩展 Worker RPC 方法。没有显式绑定且只有一个实现时自动使用该实现；多个实现时要求用户或前端写入绑定。
+动作运行时返回系统动作键下挂载的规则列表。每条规则包含扩展、能力、阶段、优先级、结果收敛方式和条件。
 
 ## Conversation
 
@@ -100,15 +98,14 @@ Conversation API 是稳定产品入口，实际由以下接口键解析到扩展
 - `conversation.create`
 - `conversation.get`
 - `conversation.delete`
-- `lane.list_by_conversation`
-- `branch.list_by_conversation`
+- `lane.list`
+- `branch.list`
 - `branch.create`
 - `branch.switch`
-- `checkpoint.list_by_conversation`
+- `checkpoint.list`
 - `checkpoint.create`
 - `message.list`
-- `message.append_user`
-- `message.append_agent`
+- `message.append`
 
 ## Memory
 
@@ -122,15 +119,15 @@ Conversation API 是稳定产品入口，实际由以下接口键解析到扩展
 
 Memory API 是稳定产品入口，实际由以下接口键解析到扩展 Worker：
 
-- `memory.workspace`
-- `memory.list`
-- `memory.episodes_list`
-- `memory.remember`
-- `memory.recall`
+- `memory.workspace.get`
+- `memory.entry.list`
+- `memory.episode.list`
+- `memory.ingest`
+- `memory.query`
 - `memory.review`
-- `memory.assemble_context`
+- `memory.build_context`
 
-会话事件先由宿主写入系统事件总线，再异步投递给 `memory` 扩展；Memory 扩展只维护自己的私有数据库，不再暴露兼容代理式 `memory/active/*` 路径。
+Memory 扩展只维护自己的私有数据库，不再暴露兼容代理式 `memory/active/*` 路径，也不再镜像保存原始 conversation message 流。
 
 ### Conversation 约定
 
@@ -150,9 +147,11 @@ Memory API 是稳定产品入口，实际由以下接口键解析到扩展 Worke
 
 - `run.create`
 - `run.get`
-- `run.list_by_conversation`
-- `task.list_by_run`
-- `artifact.list_by_run`
+- `run.list`
+- `task.list`
+- `artifact.list`
+
+这些稳定入口是否和会话自动联动，不由 workflow builtin 自己决定，而由系统动作管道与事件链承接。
 
 ## Schedule
 

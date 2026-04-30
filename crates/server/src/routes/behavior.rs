@@ -139,7 +139,7 @@ pub(super) fn resolve_active_behavior(
         }
         _ => Err(scoped(
             ApiError::conflict(
-                "multiple behavior implementations found; use interface bindings or explicit extension endpoints",
+                "multiple behavior implementations found; enable a single behavior implementation or use explicit extension endpoints",
             ),
             request,
         )),

@@ -5,6 +5,7 @@ pub mod app;
 pub mod event_bus;
 pub mod middleware;
 pub mod observability;
+pub mod pipeline;
 pub mod routes;
 
 pub use app::{bootstrap_app_state, default_app_state, run_server, AppState};

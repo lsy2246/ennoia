@@ -588,7 +588,7 @@ export function Extensions() {
                       </div>
                       <span className="badge badge--muted extensions-summary-card__count">{capabilityCount}</span>
                     </div>
-                    <p>{t("web.extensions.capabilities_help", "manifest 的 capabilities 是系统能力入口；Provider、Interface、Memory 等视图都从这里派生。")}</p>
+                    <p>{t("web.extensions.capabilities_help", "manifest 的 capabilities 是系统能力入口；Provider、Action、Memory 等视图都从这里派生。")}</p>
                   </article>
                   <article className="extensions-summary-card">
                     <div className="extensions-summary-card__header">

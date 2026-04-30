@@ -85,7 +85,7 @@ Manifest 主声明只有一层：
 - `metadata.provider` -> Provider
 - `metadata.behavior` -> Behavior
 - `metadata.memory` -> Memory
-- `metadata.interface` -> Interface
+- `metadata.action` -> Action
 - `metadata.schedule_action` -> Schedule Action
 - `subscriptions[] + capability.entry` -> Hook
 
@@ -125,7 +125,7 @@ capability = "acme.conversation_message"
 - `result`：可选结构化结果，供调用方继续返回或落库。
 - `message`：可选诊断说明。
 
-Interface 实现通过 capability metadata 声明：
+Action 规则通过 capability metadata 声明：
 
 ```toml
 [[capabilities]]
@@ -133,14 +133,14 @@ id = "conversation.list"
 contract = "conversation.list"
 kind = "query"
 entry = "conversation/conversations/list"
-metadata = { interface = { key = "conversation.list" }, permission = { action = "conversation.read", target_kind = "conversation", risk_level = "low", default_decision = "allow", scope_kind = "none" } }
+metadata = { action = { key = "conversation.list", phase = "execute", priority = 100, result_mode = "last" }, permission = { action = "conversation.read", target_kind = "conversation", risk_level = "low", default_decision = "allow", scope_kind = "none" } }
 
 [[capabilities]]
-id = "message.append_user"
-contract = "message.append_user"
+id = "message.append.operator"
+contract = "message.append.operator"
 kind = "action"
 entry = "conversation/messages/append-user"
-metadata = { interface = { key = "message.append_user" }, permission = { action = "conversation.write", target_kind = "conversation", risk_level = "medium", default_decision = "allow", scope_kind = "conversation" } }
+metadata = { action = { key = "message.append", phase = "execute", priority = 300, result_mode = "last", when = { message_role_in = ["operator", "user"] } }, permission = { action = "conversation.write", target_kind = "conversation", risk_level = "medium", default_decision = "allow", scope_kind = "conversation" } }
 ```
 
 `metadata.permission` 是 Agent 权限系统的能力声明，不是最终授权结果。推荐字段：
@@ -151,7 +151,7 @@ metadata = { interface = { key = "message.append_user" }, permission = { action 
 - `default_decision`：建议默认裁决，用于表达扩展设计意图；真正是否放行仍由宿主 policy / grant 决定。
 - `scope_kind`：作用域粒度，例如 `none`、`conversation`、`run`。
 
-扩展不直接判断 Agent 是否有权执行某项能力。扩展只声明 `permission` 元数据，宿主在 Interface Router 和 Provider 调用前统一完成裁决、审批和事件落库。
+扩展不直接判断 Agent 是否有权执行某项能力。扩展只声明 `permission` 元数据，宿主在 Action Router 和 Provider 调用前统一完成裁决、审批和事件落库。
 
 Schedule Action 也通过 capability metadata 声明：
 
@@ -164,7 +164,7 @@ entry = "workflow/schedules/run"
 metadata = { schedule_action = { id = "workflow.run" } }
 ```
 
-Provider、Behavior、Memory、Hook、Interface 和 Schedule Action 都只声明能力入口；实际执行统一通过宿主 Worker RPC 分发或宿主事件总线投递，不允许扩展自行开放端口。
+Provider、Behavior、Memory、Hook、Action 和 Schedule Action 都只声明能力入口；实际执行统一通过宿主 Worker RPC 分发或宿主事件总线投递，不允许扩展自行开放端口。
 扩展自己的配置、UI 文案、主题、页面实现和业务运行态都属于扩展边界，不得放入 Web 主壳的系统模块、核心配置模型或 `config/` 根目录。
 
 ## 推荐目录
@@ -204,7 +204,7 @@ Skill 目录独立：
 4. CLI 把仓库内 `builtins/extensions/*` 追加为开发来源，供开发模式覆盖安装目录。
 5. Extension Host 扫描扩展，解析 `ui`、`worker` 和贡献能力，不启动扩展私有进程。
 6. Server 暴露 runtime snapshot、事件流、诊断、日志、资源贡献接口、接口绑定 API、scheduler API，以及 `/api/extensions/{extension_id}/rpc/{method}` Worker RPC 入口。
-7. Core 只维护稳定接口、绑定、计划与 Hook 派发；扩展内部按 Worker ABI 和 capability 组织自己的业务逻辑。
+7. Core 只维护稳定动作、绑定、计划与 Hook 派发；扩展内部按 Worker ABI 和 capability 组织自己的业务逻辑。
 8. Web 工作台根据 runtime snapshot 动态导入扩展 UI 模块，并按 mount id 挂载页面、面板、主题、语言和命令。
 
 ## UI Module ABI
@@ -262,7 +262,7 @@ export default ui;
       "span_id": "xxxxxxxxxxxxxxxx",
       "parent_span_id": "xxxxxxxxxxxxxxxx",
       "sampled": true,
-      "source": "interface_rpc",
+      "source": "action_rpc",
       "traceparent": "00-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx-xxxxxxxxxxxxxxxx-01"
     }
   }
@@ -283,7 +283,7 @@ export default ui;
 ## 沙箱与权限
 
 - Host 默认不注入 WASI，也不允许任意 import。
-- RPC 方法必须匹配 manifest 中 Provider、Behavior、Memory、Hook、Interface 或 Schedule Action 贡献声明的 `entry` / `handler` / `method` 前缀；纯 Worker 扩展没有贡献前缀时允许调用安全方法名。
+- RPC 方法必须匹配 manifest 中 Provider、Behavior、Memory、Hook、Action 或 Schedule Action 贡献声明的 `entry` / `handler` / `method` 前缀；纯 Worker 扩展没有贡献前缀时允许调用安全方法名。
 - `runtime.memory_limit_mb` 控制 Wasm store 内存上限。
 - `runtime.timeout_ms` 控制 Wasm fuel 预算，防止无限循环长期占用 Host。
 - `permissions` 是后续 host capability bridge 的唯一声明来源；在 bridge 接入前，Worker 没有文件、网络、环境变量或数据库的宿主访问能力。

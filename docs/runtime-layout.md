@@ -21,7 +21,6 @@
 │  ├─ server.toml              # HTTP、中间件、系统内置组件配置
 │  ├─ ui.toml                  # Web 标题、语言、主题与本地化默认值
 │  ├─ profile.toml             # 实例资料（显示名、locale、时区、默认空间）
-│  ├─ interfaces.toml          # 细粒度系统动作到扩展 Worker 方法的显式绑定
 │  ├─ preferences/
 │  │  ├─ instance.toml         # 实例级 UI 偏好
 │  │  └─ spaces/               # 空间级 UI 偏好
@@ -53,9 +52,6 @@
 ## 配置职责
 
 - `config/server.toml`：HTTP、中间件、日志级别、开发模式控制台日志镜像和 bootstrap 状态等系统配置。
-- `config/interfaces.toml`：接口绑定配置。
-  - `bindings.<interface_key>.extension_id`
-  - `bindings.<interface_key>.method`
 - `config/extensions.toml`：扩展注册表，记录来源、启用状态、路径和移除意图。
 - `config/skills.toml`：技能注册表，记录来源、启用状态、路径和移除意图。
 
@@ -92,4 +88,4 @@
 
 `cargo run -p ennoia-cli -- init` 会自动创建运行目录、基础配置、扩展与技能注册表、日志目录，并同步未卸载的内置扩展与技能。初始化不会预先写入会话数据、记忆数据、定时计划或运行数据。
 
-系统配置始终走 TOML；接口绑定走 `config/interfaces.toml`；系统 Observability 与系统事件总线都走独立 SQLite；定时计划走 `data/system/schedules.json`；会话、记忆和运行等业务数据始终由扩展实现维护。
+系统配置始终走 TOML；系统 Observability 与系统事件总线都走独立 SQLite；定时计划走 `data/system/schedules.json`；会话、记忆和运行等业务数据始终由扩展实现维护。

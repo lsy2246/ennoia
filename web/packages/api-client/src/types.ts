@@ -2,7 +2,7 @@ import type {
   ExtensionBehaviorContribution,
   ExtensionCapabilityContribution,
   ExtensionDiagnostic,
-  ExtensionInterfaceContribution,
+  ExtensionActionContribution,
   ExtensionLocaleContribution,
   ExtensionMemoryContribution,
   ExtensionPageContribution,
@@ -60,7 +60,7 @@ export type UiRuntime = {
     providers: ExtensionProviderContribution[];
     behaviors: ExtensionBehaviorContribution[];
     memories: ExtensionMemoryContribution[];
-    interfaces: ExtensionInterfaceContribution[];
+    actions: ExtensionActionContribution[];
     schedule_actions: ExtensionScheduleActionContribution[];
   };
   instance_preference?: UiPreferenceRecord | null;
@@ -488,7 +488,7 @@ export type ExtensionDetail = {
     event: string;
     handler?: string | null;
   }[];
-  interfaces: ExtensionInterfaceContribution["interface"][];
+  actions: ExtensionActionContribution["action"][];
   schedule_actions: ExtensionScheduleActionContribution["schedule_action"][];
   subscriptions: ExtensionSubscriptionContribution["subscription"][];
   diagnostics: ExtensionDiagnostic[];
@@ -590,27 +590,23 @@ export type ObservationTraceQuery = {
   limit?: number;
 };
 
-export type InterfaceImplementation = {
+export type ActionImplementation = {
   extension_id: string;
+  capability_id: string;
   method: string;
+  phase: string;
+  priority: number;
+  enabled: boolean;
+  result_mode: string;
+  when: unknown;
   schema?: string | null;
   extension_status: string;
 };
 
-export type InterfaceStatus = {
-  key: string;
-  implementations: InterfaceImplementation[];
-  active?: InterfaceImplementation | null;
-  status: string;
-};
-
-export type InterfaceBinding = {
-  extension_id: string;
-  method: string;
-};
-
-export type InterfaceBindings = {
-  bindings: Record<string, InterfaceBinding>;
+export type ActionStatus = {
+  action: string;
+  rules: ActionImplementation[];
+  execute_rule_count: number;
 };
 
 export type ScheduleTrigger =

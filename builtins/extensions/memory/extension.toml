@@ -29,10 +29,10 @@ events = ["publish", "subscribe"]
 [conversation]
 inject = true
 capabilities = [
-  "memory.remember",
-  "memory.recall",
+  "memory.ingest",
+  "memory.query",
   "memory.review",
-  "memory.assemble_context",
+  "memory.build_context",
 ]
 
 [assets]
@@ -58,80 +58,50 @@ namespace = "ext.memory"
 entry = "ui/locales/en-US.json"
 
 [[capabilities]]
-id = "memory.workspace"
-contract = "memory.workspace"
+id = "memory.workspace.get"
+contract = "memory.workspace.get"
 kind = "query"
 entry = "memory/workspace"
-metadata = { interface = { key = "memory.workspace" }, memory = { id = "memory", interfaces = ["workspace"] }, permission = { action = "memory.read", target_kind = "memory", risk_level = "low", default_decision = "allow", scope_kind = "none" } }
+metadata = { action = { key = "memory.workspace.get" }, memory = { id = "memory", interfaces = ["workspace"] }, permission = { action = "memory.read", target_kind = "memory", risk_level = "low", default_decision = "allow", scope_kind = "none" } }
 
 [[capabilities]]
-id = "memory.list"
-contract = "memory.list"
+id = "memory.entry.list"
+contract = "memory.entry.list"
 kind = "query"
 entry = "memory/memories/list"
-metadata = { interface = { key = "memory.list" }, memory = { id = "memory", interfaces = ["list"] }, permission = { action = "memory.read", target_kind = "memory", risk_level = "low", default_decision = "allow", scope_kind = "none" } }
+metadata = { action = { key = "memory.entry.list" }, memory = { id = "memory", interfaces = ["list"] }, permission = { action = "memory.read", target_kind = "memory", risk_level = "low", default_decision = "allow", scope_kind = "none" } }
 
 [[capabilities]]
-id = "memory.episodes_list"
-contract = "memory.episodes_list"
+id = "memory.episode.list"
+contract = "memory.episode.list"
 kind = "query"
 entry = "memory/episodes/list"
-metadata = { interface = { key = "memory.episodes_list" }, memory = { id = "memory", interfaces = ["episodes_list"] }, permission = { action = "memory.read", target_kind = "memory", risk_level = "low", default_decision = "allow", scope_kind = "none" } }
+metadata = { action = { key = "memory.episode.list" }, memory = { id = "memory", interfaces = ["episodes_list"] }, permission = { action = "memory.read", target_kind = "memory", risk_level = "low", default_decision = "allow", scope_kind = "none" } }
 
 [[capabilities]]
-id = "memory.remember"
-contract = "memory.remember"
+id = "memory.ingest"
+contract = "memory.ingest"
 kind = "action"
 entry = "memory/memories/remember"
-metadata = { interface = { key = "memory.remember" }, memory = { id = "memory", interfaces = ["remember"] }, permission = { action = "memory.write", target_kind = "memory", risk_level = "medium", default_decision = "allow", scope_kind = "conversation" } }
+metadata = { action = { key = "memory.ingest" }, memory = { id = "memory", interfaces = ["remember"] }, permission = { action = "memory.write", target_kind = "memory", risk_level = "medium", default_decision = "allow", scope_kind = "conversation" } }
 
 [[capabilities]]
-id = "memory.recall"
-contract = "memory.recall"
+id = "memory.query"
+contract = "memory.query"
 kind = "query"
 entry = "memory/memories/recall"
-metadata = { interface = { key = "memory.recall" }, memory = { id = "memory", interfaces = ["recall"] }, permission = { action = "memory.read", target_kind = "memory", risk_level = "low", default_decision = "allow", scope_kind = "conversation" } }
+metadata = { action = { key = "memory.query" }, memory = { id = "memory", interfaces = ["recall"] }, permission = { action = "memory.read", target_kind = "memory", risk_level = "low", default_decision = "allow", scope_kind = "conversation" } }
 
 [[capabilities]]
 id = "memory.review"
 contract = "memory.review"
 kind = "action"
 entry = "memory/memories/review"
-metadata = { interface = { key = "memory.review" }, memory = { id = "memory", interfaces = ["review"] }, permission = { action = "memory.review", target_kind = "memory", risk_level = "medium", default_decision = "allow", scope_kind = "conversation" } }
+metadata = { action = { key = "memory.review" }, memory = { id = "memory", interfaces = ["review"] }, permission = { action = "memory.review", target_kind = "memory", risk_level = "medium", default_decision = "allow", scope_kind = "conversation" } }
 
 [[capabilities]]
-id = "memory.assemble_context"
-contract = "memory.assemble_context"
+id = "memory.build_context"
+contract = "memory.build_context"
 kind = "query"
 entry = "memory/context/assemble"
-metadata = { interface = { key = "memory.assemble_context" }, memory = { id = "memory", interfaces = ["assemble_context"] }, permission = { action = "memory.read", target_kind = "memory", risk_level = "low", default_decision = "allow", scope_kind = "conversation" } }
-
-[[capabilities]]
-id = "memory.handle_conversation_created"
-contract = "event.memory.conversation_created"
-kind = "effect"
-entry = "hooks/conversation/created"
-
-[[capabilities]]
-id = "memory.handle_conversation_message_created"
-contract = "event.memory.conversation_message_created"
-kind = "effect"
-entry = "hooks/conversation/message/created"
-
-[[capabilities]]
-id = "memory.handle_conversation_deleted"
-contract = "event.memory.conversation_deleted"
-kind = "effect"
-entry = "hooks/conversation/deleted"
-
-[[subscriptions]]
-event = "conversation.created"
-capability = "memory.handle_conversation_created"
-
-[[subscriptions]]
-event = "conversation.message.created"
-capability = "memory.handle_conversation_message_created"
-
-[[subscriptions]]
-event = "conversation.deleted"
-capability = "memory.handle_conversation_deleted"
+metadata = { action = { key = "memory.build_context" }, memory = { id = "memory", interfaces = ["assemble_context"] }, permission = { action = "memory.read", target_kind = "memory", risk_level = "low", default_decision = "allow", scope_kind = "conversation" } }

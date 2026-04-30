@@ -7,28 +7,51 @@
 - `SkillConfig`
 - `ProviderConfig`
 - `ExtensionRuntimeState`
-- `InterfaceBindingsConfig`
+- `ActionRule`
 - `ScheduleRecord`
 - `SystemLog`
 
-核心模型表达系统配置、扩展运行态、接口绑定、scheduler 计划和宿主协议。Conversation、Message、Memory、Run、Task、Artifact 等业务数据由对应扩展在私有边界内管理。
+核心模型表达系统配置、扩展运行态、动作规则、scheduler 计划和宿主协议。Conversation、Message、Memory、Run、Task、Artifact 等业务数据由对应扩展在私有边界内管理。
 
-## Interface Binding 域
+## ServerConfig 域
 
-`InterfaceBindingsConfig` 字段：
+`ServerConfig` 当前包含：
 
-- `bindings`
-
-`InterfaceBindingConfig` 字段：
-
-- `extension_id`
-- `method`
+- `host`
+- `port`
+- `rate_limit`
+- `cors`
+- `timeout`
+- `logging`
+- `body_limit`
+- `bootstrap`
 
 约定：
 
-- key 是系统动作键，例如 `conversation.list`、`message.append_user`、`run.create`。
-- value 指向扩展 ID 和该扩展 Worker 的 RPC method。
-- 没有显式绑定且只有一个实现时自动绑定；多个实现时由用户或 UI 写入配置。
+- 动作管道是系统内部实现边界，不暴露为运行时配置。
+- conversation、memory、workflow 各自仍是自己的原生数据边界；系统只在动作管道与事件链里把事实拼接成业务流程。
+
+## Action Rule 域
+
+`ActionRule` 字段：
+
+- `action`
+- `capability_id`
+- `method`
+- `phase`
+- `priority`
+- `enabled`
+- `result_mode`
+- `when`
+- `schema`
+
+约定：
+
+- `action` 是系统动作键，例如 `conversation.list`、`message.append`、`run.create`。
+- `capability_id` 是扩展自己的能力标识。
+- `method` 指向扩展 Worker 的 RPC entry。
+- `phase` 支持 `before`、`execute`、`after_success`、`after_error`。
+- 宿主把同一动作键下的规则收集为一组，按阶段和优先级执行。
 
 ## Schedule 域
 
@@ -213,10 +236,10 @@
 ## 存储快照
 
 - 核心系统配置：`~/.ennoia/config/*.toml`。
-- 接口绑定：`~/.ennoia/config/interfaces.toml`。
 - Agent 基础配置与权限策略：`~/.ennoia/agents/{agent_id}/agent.toml`。
 - 定时计划：`~/.ennoia/data/system/schedules.json`。
 - Agent 权限事件与审批：`~/.ennoia/data/system/sqlite/permissions.db`。
 - 核心前端日志：`~/.ennoia/logs/frontend.jsonl`。
 - 扩展私有数据：`~/.ennoia/data/extensions/{extension_id}/`。
 - 核心不维护主业务数据库快照。
+- `memory` 不再维护原始会话消息镜像或 session shadow state。

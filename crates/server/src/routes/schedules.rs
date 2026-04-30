@@ -610,7 +610,7 @@ async fn run_agent_schedule_executor(
         serde_json::json!([])
     };
 
-    let response = dispatch_interface_value(
+    let response = dispatch_action_value(
         state,
         request,
         "run.create",
@@ -659,10 +659,10 @@ async fn deliver_schedule_result(
         .as_deref()
         .ok_or_else(|| "delivery conversation is required".to_string())?;
     let body = render_delivery_message(schedule, primary_output, delivery.content_mode);
-    dispatch_interface_value(
+    dispatch_action_value(
         state,
         request,
-        "message.append_agent",
+        "message.append",
         serde_json::json!({
             "conversation_id": conversation_id,
             "message": {
@@ -918,9 +918,9 @@ fn ensure_schedule_executor(
                 return Err(scoped(ApiError::not_found("agent not found"), request));
             }
 
-            resolve_interface_binding(state, "run.create", request)?;
+            ensure_action_execute_available(state, "run.create", request)?;
             if agent.context.conversation_id.is_some() {
-                resolve_interface_binding(state, "conversation.get", request)?;
+                ensure_action_execute_available(state, "conversation.get", request)?;
             }
         }
     }
@@ -939,7 +939,7 @@ async fn resolve_agent_context(
         });
     };
 
-    let _ = dispatch_interface_value(
+    let _ = dispatch_action_value(
         state,
         request,
         "conversation.get",
@@ -971,8 +971,8 @@ fn ensure_schedule_delivery(
         .filter(|item| !item.trim().is_empty())
         .is_some()
     {
-        resolve_interface_binding(state, "message.append_agent", request)?;
-        resolve_interface_binding(state, "conversation.get", request)?;
+        ensure_action_execute_available(state, "message.append", request)?;
+        ensure_action_execute_available(state, "conversation.get", request)?;
     }
     if delivery
         .target
@@ -981,7 +981,7 @@ fn ensure_schedule_delivery(
         .filter(|item| !item.trim().is_empty())
         .is_some()
     {
-        resolve_interface_binding(state, "lane.list_by_conversation", request)?;
+        ensure_action_execute_available(state, "lane.list", request)?;
     }
     Ok(())
 }
@@ -998,7 +998,7 @@ async fn resolve_conversation_target(
         });
     };
 
-    let _ = dispatch_interface_value(
+    let _ = dispatch_action_value(
         state,
         request,
         "conversation.get",
@@ -1008,10 +1008,10 @@ async fn resolve_conversation_target(
 
     let lane_id = target.lane_id.clone();
     if let Some(lane_id) = lane_id.clone() {
-        let lanes = dispatch_interface_value(
+        let lanes = dispatch_action_value(
             state,
             request,
-            "lane.list_by_conversation",
+            "lane.list",
             serde_json::json!({ "conversation_id": conversation_id }),
         )
         .await?;
