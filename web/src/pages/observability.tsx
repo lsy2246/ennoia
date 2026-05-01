@@ -14,6 +14,7 @@ import {
   type ObservationSpanRecord,
 } from "@ennoia/api-client";
 import { MultiSelect, type MultiSelectOption } from "@/components/MultiSelect";
+import { StatusNotice } from "@/components/StatusNotice";
 import { useUiHelpers } from "@/stores/ui";
 
 type UnifiedFilters = {
@@ -635,6 +636,7 @@ export function Observability() {
 
   return (
     <div className="observability-layout">
+      <StatusNotice message={error} tone="error" onDismiss={() => setError(null)} />
       <section className="work-panel observability-header-card">
         <div className="observability-toolbar">
           <div className="page-heading">
@@ -646,9 +648,6 @@ export function Observability() {
             {busy ? t("web.common.loading", "加载中…") : t("web.action.refresh", "刷新")}
           </button>
         </div>
-
-        {error ? <div className="error">{error}</div> : null}
-
         <div className="observability-summary-grid">
           <article className="metric-card observability-metric-card">
             <span>{t("web.observability.metrics.issue_logs", "异常日志")}</span>

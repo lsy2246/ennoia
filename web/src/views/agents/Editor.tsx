@@ -29,6 +29,7 @@ import {
 } from "@ennoia/api-client";
 import type { ExtensionProviderContribution } from "@ennoia/ui-sdk";
 import { Select } from "@/components/Select";
+import { StatusNotice } from "@/components/StatusNotice";
 import { formatRelativePath } from "@/lib/pathDisplay";
 import { useUiHelpers } from "@/stores/ui";
 
@@ -203,6 +204,7 @@ export function AgentEditorView({
 
   return (
     <form className="resource-editor resource-editor--agent" onSubmit={handleSubmit}>
+      <StatusNotice message={error} tone="error" onDismiss={() => setError(null)} />
       <div className="resource-editor__header agent-editor__header">
         <div className="page-heading agent-editor__hero-copy">
           <span className="resource-editor__eyebrow">{t("web.agents.eyebrow", "Agent Registry")}</span>
@@ -217,8 +219,6 @@ export function AgentEditorView({
           {form.model_id ? <span className="badge badge--muted">{form.model_id}</span> : null}
         </div>
       </div>
-
-      {error ? <div className="error">{error}</div> : null}
 
       <div className="resource-editor__scroll">
         <div className="agent-editor__canvas">

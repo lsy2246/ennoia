@@ -57,6 +57,7 @@ type LocalWorkbenchPreferences = {
 
 const LOCAL_WORKBENCH_PREFERENCES_KEY = "ennoia.web.workbench.v2";
 const WORKBENCH_EMPTY_PRIMARY_IDS = ["conversations", "agents", "skills", "settings"] as const;
+const MOBILE_WORKBENCH_BREAKPOINT_PX = 900;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -111,7 +112,7 @@ function writeWorkbenchPreferences(preferences: LocalWorkbenchPreferences) {
 
 function useIsMobileViewport() {
   const [isMobile, setIsMobile] = useState(() =>
-    typeof window !== "undefined" ? window.innerWidth <= 1100 : false,
+    typeof window !== "undefined" ? window.innerWidth <= MOBILE_WORKBENCH_BREAKPOINT_PX : false,
   );
 
   useEffect(() => {
@@ -119,7 +120,7 @@ function useIsMobileViewport() {
       return;
     }
 
-    const media = window.matchMedia("(max-width: 1100px)");
+    const media = window.matchMedia(`(max-width: ${MOBILE_WORKBENCH_BREAKPOINT_PX}px)`);
     const sync = () => setIsMobile(media.matches);
     sync();
     if (typeof media.addEventListener === "function") {

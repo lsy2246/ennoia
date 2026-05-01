@@ -6,6 +6,7 @@ import {
   type AgentProfile,
   type ProviderConfig,
 } from "@ennoia/api-client";
+import { StatusNotice } from "@/components/StatusNotice";
 import { formatRelativePath } from "@/lib/pathDisplay";
 import { useUiHelpers } from "@/stores/ui";
 import { useWorkbenchStore } from "@/stores/workbench";
@@ -38,13 +39,13 @@ export function Agents() {
 
   return (
     <div className="resource-layout resource-layout--single">
+      <StatusNotice message={error} tone="error" onDismiss={() => setError(null)} />
       <section className="work-panel">
         <div className="page-heading">
           <span>{t("web.agents.eyebrow", "Agent Registry")}</span>
           <h1>{t("web.agents.title", "Agent 是可配置的协作者档案。")}</h1>
           <p>{t("web.agents.description", "从这里查看 Agent 清单，并把任意 Agent 作为独立工作视图打开。")}</p>
         </div>
-        {error ? <div className="error">{error}</div> : null}
         <div className="button-row">
           <button
             type="button"

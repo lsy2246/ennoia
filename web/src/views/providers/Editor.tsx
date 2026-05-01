@@ -9,6 +9,7 @@ import {
   type ProviderConfig,
   type ProviderModelDescriptor,
 } from "@ennoia/api-client";
+import { StatusNotice } from "@/components/StatusNotice";
 import { useProvidersStore } from "@/stores/providers";
 import { useUiHelpers } from "@/stores/ui";
 import { useWorkbenchStore } from "@/stores/workbench";
@@ -394,6 +395,7 @@ export function ApiChannelEditorView({ channelId, panelId }: { channelId: string
 
   return (
     <form className="resource-editor" onSubmit={handleSubmit}>
+      <StatusNotice message={error} tone="error" onDismiss={() => setError(null)} />
       <div className="resource-editor__header">
         <div>
           <span className="resource-editor__eyebrow">
@@ -408,7 +410,6 @@ export function ApiChannelEditorView({ channelId, panelId }: { channelId: string
           </p>
         </div>
       </div>
-      {error ? <div className="error">{error}</div> : null}
       <div className="form-grid">
         <label>
           ID

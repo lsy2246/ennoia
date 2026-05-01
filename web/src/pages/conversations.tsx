@@ -8,6 +8,7 @@ import {
   type AgentProfile,
   type ChatThread,
 } from "@ennoia/api-client";
+import { StatusNotice } from "@/components/StatusNotice";
 import { useConversationsStore } from "@/stores/conversations";
 import { useUiHelpers } from "@/stores/ui";
 import { useWorkbenchStore } from "@/stores/workbench";
@@ -121,6 +122,7 @@ export function Conversations() {
 
   return (
     <div className="conversations-page">
+      <StatusNotice message={error} tone="error" onDismiss={() => setError(null)} />
       <section className="work-panel conversations-toolbar">
         <div className="conversations-toolbar__row">
           <div className="page-heading">
@@ -134,7 +136,6 @@ export function Conversations() {
             </button>
           </div>
         </div>
-        {error ? <div className="error">{error}</div> : null}
         <div className="conversations-overview-grid">
           <article className="metric-card conversations-metric-card">
             <span>{t("web.conversations.summary_total", "会话总数")}</span>
@@ -167,7 +168,7 @@ export function Conversations() {
               <h1>{t("web.conversations.create_title", "发起新会话")}</h1>
               <p>{t("web.conversations.create_description", "先选 Agent，再决定是直接协作还是多人群聊。")}</p>
             </div>
-            <span className="badge badge--muted">{`${selectedAgentIds.length} ${t("web.conversations.summary_selected", "已选")}`}</span>
+            <span className="conversations-selection-pill">{`${selectedAgentIds.length} ${t("web.conversations.summary_selected", "已选")}`}</span>
           </div>
 
           <form className="conversations-create-form" onSubmit={handleCreate}>
@@ -195,10 +196,10 @@ export function Conversations() {
 
             <div className="conversations-selected-meta">
               {selectedAgents.length === 0 ? (
-                <span className="badge badge--muted">{t("web.conversations.none_selected", "还没有选中 Agent")}</span>
+                <span className="conversations-selection-empty">{t("web.conversations.none_selected", "还没有选中 Agent")}</span>
               ) : (
                 selectedAgents.map((agent) => (
-                  <span key={agent.id} className="badge badge--muted">{agent.display_name}</span>
+                  <span key={agent.id} className="conversations-selection-pill">{agent.display_name}</span>
                 ))
               )}
             </div>

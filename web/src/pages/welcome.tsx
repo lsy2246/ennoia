@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 
 import { bootstrapSetup } from "@ennoia/api-client";
 import { applyTheme, readUiBootstrapCache, writeUiBootstrapCache } from "@ennoia/theme-runtime";
+import { StatusNotice } from "@/components/StatusNotice";
 import { buildTimeZoneOptionGroups, getBrowserTimeZone } from "@/lib/timeZones";
 import { normalizeLocaleSelection } from "@/lib/uiCapabilities";
 import {
@@ -94,6 +95,7 @@ export function Welcome() {
 
   return (
     <div className="page page--centered onboarding-page">
+      <StatusNotice message={error} tone="error" onDismiss={() => setError(null)} />
       <section className="onboarding-hero">
         <span className="onboarding-hero__eyebrow">
           {t("settings.bootstrap.hero_eyebrow", "首次启动引导")}
@@ -150,8 +152,6 @@ export function Welcome() {
             </label>
           </div>
         </div>
-
-        {error ? <div className="setup-card__error">{error}</div> : null}
 
         <div className="onboarding-actions">
           <button type="submit" disabled={busy}>

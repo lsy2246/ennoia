@@ -20,6 +20,7 @@ import {
   type ScheduleTrigger,
 } from "@ennoia/api-client";
 import { Select } from "@/components/Select";
+import { StatusNotice } from "@/components/StatusNotice";
 import { useUiHelpers } from "@/stores/ui";
 
 type TriggerKind = ScheduleTrigger["kind"];
@@ -502,6 +503,8 @@ export function Schedules() {
 
   return (
     <div className="schedules-page">
+      <StatusNotice message={error} tone="error" onDismiss={() => setError(null)} />
+      <StatusNotice message={message} tone="success" onDismiss={() => setMessage(null)} />
       <section className="work-panel schedules-toolbar">
         <div className="schedules-toolbar__row">
           <div className="page-heading">
@@ -515,8 +518,6 @@ export function Schedules() {
             </button>
           </div>
         </div>
-        {error ? <div className="error">{error}</div> : null}
-        {message ? <div className="success">{message}</div> : null}
         <div className="schedules-overview-grid">
           <article className="metric-card schedules-metric-card">
             <span>{t("web.schedules.summary_total", "计划总数")}</span>

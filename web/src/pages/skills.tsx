@@ -7,6 +7,7 @@ import {
   type AgentProfile,
   type SkillConfig,
 } from "@ennoia/api-client";
+import { StatusNotice } from "@/components/StatusNotice";
 import { formatRelativePath } from "@/lib/pathDisplay";
 import { useUiHelpers } from "@/stores/ui";
 
@@ -69,6 +70,7 @@ export function Skills() {
 
   return (
     <div className="skills-page">
+      <StatusNotice message={error} tone="error" onDismiss={() => setError(null)} />
       <section className="work-panel skills-toolbar">
         <div className="skills-toolbar__row">
           <div className="page-heading">
@@ -82,7 +84,6 @@ export function Skills() {
             </button>
           </div>
         </div>
-        {error ? <div className="error">{error}</div> : null}
         <div className="skills-overview-grid">
           <article className="metric-card skills-metric-card">
             <span>{t("web.skills.summary_total", "技能总数")}</span>

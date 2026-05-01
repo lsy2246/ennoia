@@ -8,6 +8,7 @@ import {
 } from "@ennoia/api-client";
 import { useUiHelpers } from "@/stores/ui";
 import { Select } from "@/components/Select";
+import { StatusNotice } from "@/components/StatusNotice";
 
 type UnifiedLogItem = {
   id: string;
@@ -96,13 +97,13 @@ export function Logs() {
 
   return (
     <div className="logs-layout">
+      <StatusNotice message={error} tone="error" onDismiss={() => setError(null)} />
       <section className="work-panel">
         <div className="page-heading">
           <span>{t("web.logs.eyebrow", "统一日志")}</span>
           <h1>{t("web.logs.title", "前端、后端、扩展事件和运行摘要在同一条流里。")}</h1>
           <p>{t("web.logs.description", "这里就是统一观测台。按来源、等级、类型和关键词筛选，不再拆独立 Observatory。")}</p>
         </div>
-        {error ? <div className="error">{error}</div> : null}
         <div className="filter-bar">
           <input value={q} onChange={(event) => setQ(event.target.value)} placeholder={t("web.logs.search_placeholder", "搜索标题、摘要、详情或来源")} />
           <Select

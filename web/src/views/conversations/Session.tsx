@@ -20,6 +20,7 @@ import {
   type PermissionApprovalRecord,
   type SkillConfig,
 } from "@ennoia/api-client";
+import { StatusNotice } from "@/components/StatusNotice";
 import { useConversationsStore } from "@/stores/conversations";
 import { useSessionCommandsStore } from "@/stores/sessionCommands";
 import { useUiHelpers } from "@/stores/ui";
@@ -1530,7 +1531,7 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
 
   return (
     <div className="session-view session-view--chat">
-      {error ? <div className="error">{error}</div> : null}
+      <StatusNotice message={error} tone="error" onDismiss={() => setError(null)} />
       {detail?.conversation ? (
         <>
           <header className="conversation-header conversation-header--chat">

@@ -6,6 +6,7 @@ import {
   saveServerConfig,
   type ServerConfig,
 } from "@ennoia/api-client";
+import { StatusNotice } from "@/components/StatusNotice";
 import { buildTimeZoneOptionGroups } from "@/lib/timeZones";
 import { resolveDefaultDisplayName, resolveDefaultTimeZone } from "@/lib/uiDefaults";
 import { Select } from "@/components/Select";
@@ -285,6 +286,8 @@ export function Settings() {
 
   return (
     <div className="settings-page">
+      <StatusNotice message={error} tone="error" onDismiss={() => setError(null)} />
+      <StatusNotice message={message} tone="success" onDismiss={() => setMessage(null)} />
       <section className="work-panel settings-toolbar">
         <div className="settings-toolbar__row">
           <div className="settings-toolbar__copy">
@@ -308,9 +311,6 @@ export function Settings() {
           </div>
         </div>
       </section>
-
-      {error ? <div className="error">{error}</div> : null}
-      {message ? <div className="success">{message}</div> : null}
 
       <div className="settings-modular-grid">
         <form

@@ -4,6 +4,7 @@ import {
   listProviders,
   type ProviderConfig,
 } from "@ennoia/api-client";
+import { StatusNotice } from "@/components/StatusNotice";
 import { useProvidersStore } from "@/stores/providers";
 import { useUiHelpers } from "@/stores/ui";
 import { useWorkbenchStore } from "@/stores/workbench";
@@ -32,6 +33,7 @@ export function Providers({ embedded = false }: { embedded?: boolean }) {
     <div
       className={`resource-layout resource-layout--single ${embedded ? "providers-shell providers-shell--embedded" : ""}`}
     >
+      <StatusNotice message={error} tone="error" onDismiss={() => setError(null)} />
       <section className={embedded ? "providers-panel providers-panel--embedded" : "work-panel"}>
         {embedded ? (
           <div className="providers-embedded-header">
@@ -51,7 +53,6 @@ export function Providers({ embedded = false }: { embedded?: boolean }) {
             <p>{t("web.channels.description", "接口类型只在创建渠道时选择；日常使用和绑定都围绕渠道实例展开。")}</p>
           </div>
         )}
-        {error ? <div className="error">{error}</div> : null}
         <div className={`button-row ${embedded ? "button-row--wrap" : ""}`}>
           <button
             type="button"

@@ -10,6 +10,7 @@ import {
   type ExtensionDetail,
   type ExtensionRuntimeState,
 } from "@ennoia/api-client";
+import { StatusNotice } from "@/components/StatusNotice";
 import { formatRelativePath } from "@/lib/pathDisplay";
 import { useUiHelpers } from "@/stores/ui";
 import { useWorkbenchStore } from "@/stores/workbench";
@@ -342,6 +343,7 @@ export function Extensions() {
 
   return (
     <div className="extensions-page">
+      <StatusNotice message={error} tone="error" onDismiss={() => setError(null)} />
       <section className="work-panel extensions-toolbar">
         <div className="extensions-toolbar__row">
           <div className="page-heading">
@@ -355,8 +357,6 @@ export function Extensions() {
             </button>
           </div>
         </div>
-
-        {error ? <div className="error">{error}</div> : null}
 
         <div className="extensions-overview-grid">
           <article className="metric-card extensions-metric-card">
