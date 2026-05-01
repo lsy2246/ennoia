@@ -7,6 +7,7 @@ import {
   type ServerConfig,
 } from "@ennoia/api-client";
 import { buildTimeZoneOptionGroups } from "@/lib/timeZones";
+import { resolveDefaultDisplayName, resolveDefaultTimeZone } from "@/lib/uiDefaults";
 import { Select } from "@/components/Select";
 import { Providers } from "@/pages/providers";
 import { useRuntimeStore } from "@/stores/runtime";
@@ -198,10 +199,12 @@ function NumberMapEditor({
 export function Settings() {
   const profile = useRuntimeStore((state) => state.profile);
   const hydrateRuntime = useRuntimeStore((state) => state.hydrate);
-  const { t } = useUiHelpers();
+  const { runtime, t } = useUiHelpers();
+  const defaultProfileName = resolveDefaultDisplayName(runtime);
+  const defaultTimeZone = resolveDefaultTimeZone(runtime);
   const [config, setConfig] = useState<ServerConfig | null>(null);
-  const [profileName, setProfileName] = useState(profile?.display_name ?? "Operator");
-  const [timeZone, setTimeZone] = useState(profile?.time_zone ?? "Asia/Shanghai");
+  const [profileName, setProfileName] = useState(profile?.display_name ?? defaultProfileName);
+  const [timeZone, setTimeZone] = useState(profile?.time_zone ?? defaultTimeZone);
   const [corsOrigins, setCorsOrigins] = useState<StringEntry[]>([]);
   const [timeoutOverrides, setTimeoutOverrides] = useState<NumberMapEntry[]>([]);
   const [bodyLimitOverrides, setBodyLimitOverrides] = useState<NumberMapEntry[]>([]);
@@ -214,11 +217,9 @@ export function Settings() {
   }, []);
 
   useEffect(() => {
-    if (profile) {
-      setProfileName(profile.display_name);
-      setTimeZone(profile.time_zone);
-    }
-  }, [profile]);
+    setProfileName(profile?.display_name ?? defaultProfileName);
+    setTimeZone(profile?.time_zone ?? defaultTimeZone);
+  }, [defaultProfileName, defaultTimeZone, profile]);
 
   async function hydrate() {
     const snapshot = await fetchServerConfig();
@@ -377,6 +378,30 @@ export function Settings() {
                         value={config.port}
                         onChange={(event) =>
                           setConfig({ ...config, port: Number(event.target.value) })
+                        }
+                      />
+                    </label>
+                    <label>
+                      {t("web.settings.web_dev_host", "前端开发主机")}
+                      <input
+                        value={config.web_dev.host}
+                        onChange={(event) =>
+                          setConfig({
+                            ...config,
+                            web_dev: { ...config.web_dev, host: event.target.value },
+                          })
+                        }
+                      />
+                    </label>
+                    <label>
+                      {t("web.settings.web_dev_port", "前端开发端口")}
+                      <input
+                        value={config.web_dev.port}
+                        onChange={(event) =>
+                          setConfig({
+                            ...config,
+                            web_dev: { ...config.web_dev, port: Number(event.target.value) },
+                          })
                         }
                       />
                     </label>

@@ -4,11 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node ./node_modules/vite/bin/vite.js",
-    "panda:codegen": "node ./node_modules/@pandacss/dev/bin.js codegen --clean",
-    "build": "node ../scripts/build-extension-ui.mjs && bun run panda:codegen && node ./node_modules/vite/bin/vite.js build",
-    "lint": "bun run panda:codegen && bunx eslint src packages",
-    "typecheck": "bun run panda:codegen && node ./node_modules/typescript/bin/tsc --noEmit",
+    "dev": "node ../scripts/run-web-bin.mjs vite bin/vite.js",
+    "panda:codegen": "node ../scripts/panda-codegen.mjs",
+    "build": "node ../scripts/build-extension-ui.mjs && bun run panda:codegen && node ../scripts/run-web-bin.mjs vite bin/vite.js build",
+    "lint": "bun run panda:codegen && node ../scripts/run-web-bin.mjs eslint bin/eslint.js src packages",
+    "typecheck": "bun run panda:codegen && node ../scripts/run-web-bin.mjs typescript bin/tsc --noEmit",
     "test:smoke": "bun run build",
     "prepare": "bun run panda:codegen"
   },

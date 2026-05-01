@@ -39,19 +39,56 @@ pub struct CorsConfig {
     pub max_age_seconds: u32,
 }
 
-pub fn default_local_dev_origins() -> Vec<String> {
-    vec![
-        "http://localhost:5173".to_string(),
-        "http://127.0.0.1:5173".to_string(),
-        "http://[::1]:5173".to_string(),
-    ]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WebDevConfig {
+    pub host: String,
+    pub port: u16,
+}
+
+impl Default for WebDevConfig {
+    fn default() -> Self {
+        Self {
+            host: "127.0.0.1".to_string(),
+            port: 5173,
+        }
+    }
+}
+
+pub fn default_local_dev_origins(host: &str, port: u16) -> Vec<String> {
+    let mut origins = vec![
+        format!("http://localhost:{port}"),
+        format!("http://127.0.0.1:{port}"),
+        format!("http://[::1]:{port}"),
+    ];
+    let normalized_host = host.trim();
+    if !normalized_host.is_empty()
+        && normalized_host != "localhost"
+        && normalized_host != "127.0.0.1"
+        && normalized_host != "::1"
+        && normalized_host != "[::1]"
+        && normalized_host != "0.0.0.0"
+        && normalized_host != "::"
+        && normalized_host != "[::]"
+    {
+        let formatted_host = if normalized_host.contains(':')
+            && !normalized_host.starts_with('[')
+            && !normalized_host.ends_with(']')
+        {
+            format!("[{normalized_host}]")
+        } else {
+            normalized_host.to_string()
+        };
+        origins.push(format!("http://{formatted_host}:{port}"));
+    }
+    origins
 }
 
 impl Default for CorsConfig {
     fn default() -> Self {
+        let web_dev = WebDevConfig::default();
         Self {
             enabled: true,
-            origins: default_local_dev_origins(),
+            origins: default_local_dev_origins(&web_dev.host, web_dev.port),
             methods: vec![
                 "GET".to_string(),
                 "HEAD".to_string(),

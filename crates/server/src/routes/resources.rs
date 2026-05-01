@@ -1,5 +1,8 @@
 use super::*;
 use crate::app::{delete_agent_config, write_agent_config};
+use crate::pipeline::{
+    invoke_provider_method, provider_runtime_request_config, resolve_provider_entry_path,
+};
 
 pub(super) async fn agents(State(state): State<AppState>) -> Json<Vec<AgentConfig>> {
     Json(load_agent_configs(&state.runtime_paths).unwrap_or_default())
@@ -153,10 +156,22 @@ pub(super) async fn provider_models(
         .find(|item| item.id == provider_id)
         .ok_or_else(|| ApiError::not_found(format!("provider '{provider_id}' not found")))?;
 
-    let contribution = resolve_provider_contribution(&state, &provider.kind)?;
+    provider_models_response(&state, &provider).map(Json)
+}
 
+pub(super) async fn provider_discover_models(
+    State(state): State<AppState>,
+    Json(payload): Json<ProviderConfig>,
+) -> Result<Json<ProviderModelsResponse>, ApiError> {
+    provider_models_response(&state, &payload).map(Json)
+}
+
+fn provider_models_response(
+    state: &AppState,
+    provider: &ProviderConfig,
+) -> Result<ProviderModelsResponse, ApiError> {
+    let contribution = resolve_provider_contribution(&state, &provider.kind)?;
     let mut models = provider.available_models.clone();
-    let mut recommended_model = None;
     let mut source = if models.is_empty() {
         "manual".to_string()
     } else {
@@ -168,34 +183,38 @@ pub(super) async fn provider_models(
     if let Some(contribution) = contribution {
         manual_allowed = contribution.provider.manual_model;
         generation_options = contribution.provider.generation_options.clone();
-        if recommended_model.is_none() {
-            recommended_model = contribution.provider.recommended_model.clone();
-        }
-        if models.is_empty() {
-            if let Some(model) = contribution.provider.recommended_model {
-                models.push(model.clone());
-                recommended_model = Some(model);
+        if contribution.provider.model_discovery
+            && contribution
+                .provider
+                .interfaces
+                .iter()
+                .any(|name| name == "models")
+        {
+            let entry = resolve_provider_entry_path(&contribution)
+                .map_err(|error| ApiError::internal(error.to_string()))?;
+            let request_payload = serde_json::json!({
+                "method": "list_models",
+                "params": {
+                    "provider": provider_runtime_request_config(&provider),
+                }
+            });
+            let response = invoke_provider_method(&entry, &request_payload, &provider)
+                .map_err(ApiError::internal)?;
+            let extension_models = parse_provider_models_from_response(&response)?;
+            if !extension_models.is_empty() {
+                models = extension_models;
+                source = "extension".to_string();
             }
-            source = if contribution.provider.model_discovery {
-                "extension".to_string()
-            } else {
-                "extension-recommendation".to_string()
-            };
         }
     }
 
-    if recommended_model.is_none() && !provider.default_model.is_empty() {
-        recommended_model = Some(provider.default_model.clone());
-    }
-
-    Ok(Json(ProviderModelsResponse {
-        provider_id: provider.id,
+    Ok(ProviderModelsResponse {
+        provider_id: provider.id.clone(),
         source,
         models,
-        recommended_model,
         manual_allowed,
         generation_options,
-    }))
+    })
 }
 
 pub(super) async fn provider_create(
@@ -266,6 +285,26 @@ fn validate_provider_payload(state: &AppState, payload: &ProviderConfig) -> Resu
             "启用上游渠道前必须配置默认模型；无法发现模型时使用手动输入。",
         ));
     }
+    let mut seen = HashSet::new();
+    for model in &payload.available_models {
+        let model_id = model.id.trim();
+        if model_id.is_empty() {
+            return Err(ApiError::bad_request("模型列表里不能有空模型 ID。"));
+        }
+        if !seen.insert(model_id.to_string()) {
+            return Err(ApiError::bad_request(format!(
+                "模型列表里存在重复模型 ID: '{model_id}'。"
+            )));
+        }
+    }
+    if !payload.default_model.trim().is_empty()
+        && !payload
+            .available_models
+            .iter()
+            .any(|model| model.id.trim() == payload.default_model.trim())
+    {
+        return Err(ApiError::bad_request("默认模型必须存在于模型列表里。"));
+    }
     Ok(())
 }
 
@@ -291,4 +330,30 @@ fn resolve_provider_contribution(
             "接口类型 '{normalized}' 对应多个实现扩展，当前不允许创建渠道。"
         ))),
     }
+}
+
+fn parse_provider_models_from_response(
+    response: &JsonValue,
+) -> Result<Vec<ennoia_kernel::ProviderModelDescriptor>, ApiError> {
+    let Some(items) = response
+        .get("result")
+        .and_then(|item| item.get("models"))
+        .and_then(JsonValue::as_array)
+    else {
+        return Ok(Vec::new());
+    };
+
+    items.iter().map(parse_provider_model_descriptor).collect()
+}
+
+fn parse_provider_model_descriptor(
+    value: &JsonValue,
+) -> Result<ennoia_kernel::ProviderModelDescriptor, ApiError> {
+    serde_json::from_value::<ennoia_kernel::ProviderModelDescriptor>(value.clone()).map_err(
+        |error| {
+            ApiError::internal(format!(
+                "provider returned invalid model descriptor: {error}"
+            ))
+        },
+    )
 }

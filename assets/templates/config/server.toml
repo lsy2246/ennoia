@@ -1,6 +1,10 @@
 host = "127.0.0.1"
 port = 3710
 
+[web_dev]
+host = "127.0.0.1"
+port = 5173
+
 [cors]
 enabled = true
 origins = [

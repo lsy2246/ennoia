@@ -202,7 +202,6 @@ export type ExtensionProviderContribution = RegisteredContributionBase & {
     extension_id?: string | null;
     interfaces: string[];
     model_discovery: boolean;
-    recommended_model?: string | null;
     manual_model: boolean;
     generation_options: {
       id: string;

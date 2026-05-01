@@ -43,6 +43,8 @@ export type UiConfig = {
   default_locale: string;
   fallback_locale: string;
   available_locales: string[];
+  default_display_name: string;
+  default_time_zone: string;
   show_command_palette: boolean;
 };
 
@@ -99,6 +101,10 @@ export type RuntimeProfile = {
 export type ServerConfig = {
   host: string;
   port: number;
+  web_dev: {
+    host: string;
+    port: number;
+  };
   rate_limit: {
     enabled: boolean;
     per_ip_rpm: number;
@@ -170,6 +176,12 @@ export type SkillConfig = {
   enabled: boolean;
 };
 
+export type ProviderModelDescriptor = {
+  id: string;
+  max_context_tokens?: number | null;
+  max_input_tokens?: number | null;
+};
+
 export type ProviderConfig = {
   id: string;
   display_name: string;
@@ -178,7 +190,7 @@ export type ProviderConfig = {
   base_url: string;
   api_key_env: string;
   default_model: string;
-  available_models: string[];
+  available_models: ProviderModelDescriptor[];
   model_discovery: {
     manual_allowed: boolean;
   };
@@ -188,8 +200,7 @@ export type ProviderConfig = {
 export type ProviderModelsResponse = {
   provider_id: string;
   source: string;
-  models: string[];
-  recommended_model?: string | null;
+  models: ProviderModelDescriptor[];
   manual_allowed: boolean;
   generation_options: ExtensionProviderContribution["provider"]["generation_options"];
 };
@@ -383,6 +394,11 @@ export type ChatThreadDetail = {
   outputs: RunOutput[];
 };
 
+export type ConversationStreamSnapshot = {
+  detail: ChatThreadDetail;
+  approvals: PermissionApprovalRecord[];
+};
+
 export type ChatSendResponse = {
   conversation: ChatThread;
   lane: ChatLane;
@@ -567,6 +583,12 @@ export type ObservationTraceDetail = {
   trace_id: string;
   spans: ObservationSpanRecord[];
   links: ObservationSpanLinkRecord[];
+};
+
+export type LogStreamDelta = {
+  overview: ObservationOverview;
+  logs: ObservationLogEntry[];
+  traces: ObservationSpanRecord[];
 };
 
 export type ObservationLogQuery = {

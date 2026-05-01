@@ -2,6 +2,11 @@ import type { UiRuntime } from "@ennoia/api-client";
 import { getExtensionThemeStylesheetUrl } from "@ennoia/api-client";
 import { BUILTIN_THEMES, type ThemeDefinition } from "@ennoia/theme-runtime";
 import type { LocalizedText } from "@ennoia/ui-sdk";
+import {
+  FRONTEND_UI_DEFAULTS,
+  resolveAvailableLocales,
+  resolveDefaultTheme,
+} from "@/lib/uiDefaults";
 
 export type ThemeOption = {
   id: string;
@@ -11,10 +16,8 @@ export type ThemeOption = {
   source: ThemeDefinition["source"];
 };
 
-const FALLBACK_LOCALES = ["zh-CN", "en-US"];
-
 export function listSupportedLocales(runtime: UiRuntime | null | undefined) {
-  return dedupe(runtime?.ui_config.available_locales ?? FALLBACK_LOCALES);
+  return dedupe(resolveAvailableLocales(runtime));
 }
 
 export function normalizeLocaleSelection(
@@ -22,7 +25,8 @@ export function normalizeLocaleSelection(
   supportedLocales: string[],
   fallbackLocale: string,
 ) {
-  const options = supportedLocales.length > 0 ? supportedLocales : FALLBACK_LOCALES;
+  const options =
+    supportedLocales.length > 0 ? supportedLocales : FRONTEND_UI_DEFAULTS.availableLocales;
   if (!candidate) {
     return options.includes(fallbackLocale) ? fallbackLocale : options[0];
   }
@@ -70,8 +74,10 @@ export function normalizeThemeSelection(themeId: string | null | undefined, runt
   if (themeId && themes.some((item) => item.id === themeId)) {
     return themeId;
   }
-  const fallback = runtime?.ui_config.default_theme ?? "system";
-  return themes.some((item) => item.id === fallback) ? fallback : "system";
+  const fallback = resolveDefaultTheme(runtime);
+  return themes.some((item) => item.id === fallback)
+    ? fallback
+    : FRONTEND_UI_DEFAULTS.defaultTheme;
 }
 
 export function buildThemeOptions(

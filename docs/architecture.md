@@ -26,6 +26,7 @@ Web
 ## 核心边界
 
 - `Kernel`：定义系统级配置、扩展 manifest、共享运行时模型和能力声明结构。
+- `config/server.toml`：系统级唯一宿主配置入口，统一承载 API 绑定地址、前端开发地址和宿主中间件配置；CLI 与 Web dev 只消费这份配置，不再各自维护地址常量。
 - `Contract`：定义跨边界 DTO；当前保留 `behavior` 与 `memory` 兼容协议响应结构。
 - `Paths`：统一解析运行目录，所有运行时文件位置都通过 `RuntimePaths` 推导。
 - `Extension Host`：负责扩展扫描、attach / detach、reload / restart、诊断、Worker 解析和 Worker RPC 分发；Worker 可以是 Wasm，也可以是进程型 stdio RPC。
@@ -58,6 +59,7 @@ Web
 - `/api/conversations`、`/api/conversations/{id}/messages` 等稳定入口通过接口层路由，不直接绑定某个 memory 大能力。
 - 内置 `conversation` 扩展当前声明会话、分支、检查点、线路和消息接口；内置 `memory` 扩展只负责记忆、上下文、审查和图谱侧车。
 - 动作管道是系统级中立执行层，用来承接 `message.append -> run.create`、`run.create -> message.append`、`run.create -> memory.ingest` 这类默认链路。
+- 会话展示层以 `/api/conversations/{id}/stream` 持续接收完整会话快照和审批状态；首屏拉取只负责建初始状态，不再靠前端定时轮询刷新会话消息。
 - `memory` 的系统入口固定为 `/api/memory/*`，底层通过 `memory.*` 接口键解析到扩展 Worker。
 - `conversation` 不直接调用 `memory` 或 `workflow`；它只维护会话事实并发出事实事件。
 - `memory` 不直接读取 `conversation.db`，也不再镜像保存整段会话消息或 shadow session state。
@@ -100,12 +102,13 @@ Web
   - Event Bus publish
   - Event Bus hook delivery
 - Worker RPC `context` 会收到 `trace` 字段，扩展可以把它继续透传给自己的内部子流程。
-- 当前系统 observability 查询接口包括：
-  - `GET /api/observability/overview`
-  - `GET /api/observability/logs`
-  - `GET /api/observability/logs/{log_id}`
-  - `GET /api/observability/traces`
-  - `GET /api/observability/traces/{trace_id}`
+- 当前系统日志中心接口包括：
+  - `GET /api/logs/overview`
+  - `GET /api/logs/entries`
+  - `GET /api/logs/entries/stream`
+  - `GET /api/logs/entries/{log_id}`
+  - `GET /api/logs/traces`
+  - `GET /api/logs/traces/{trace_id}`
 
 ## Hook 边界
 

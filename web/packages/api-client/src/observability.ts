@@ -1,5 +1,6 @@
-import { fetchJson, toQueryString } from "./core";
+import { apiUrl, fetchJson, toQueryString } from "./core";
 import type {
+  LogStreamDelta,
   ObservationLogEntry,
   ObservationLogQuery,
   ObservationOverview,
@@ -8,15 +9,15 @@ import type {
   ObservationSpanRecord,
 } from "./types";
 
-const OBSERVABILITY_API = "/api/observability";
+const LOGS_API = "/api/logs";
 
 export async function getObservabilityOverview() {
-  return fetchJson<ObservationOverview>(`${OBSERVABILITY_API}/overview`);
+  return fetchJson<ObservationOverview>(`${LOGS_API}/overview`);
 }
 
 export async function listObservabilityLogs(query: ObservationLogQuery = {}) {
   return fetchJson<ObservationLogEntry[]>(
-    `${OBSERVABILITY_API}/logs${toQueryString({
+    `${LOGS_API}/entries${toQueryString({
       event: query.event,
       level: query.level,
       component: query.component,
@@ -31,12 +32,12 @@ export async function listObservabilityLogs(query: ObservationLogQuery = {}) {
 }
 
 export async function getObservabilityLogDetail(logId: string) {
-  return fetchJson<ObservationLogEntry>(`${OBSERVABILITY_API}/logs/${encodeURIComponent(logId)}`);
+  return fetchJson<ObservationLogEntry>(`${LOGS_API}/entries/${encodeURIComponent(logId)}`);
 }
 
 export async function listObservabilityTraces(query: ObservationTraceQuery = {}) {
   return fetchJson<ObservationSpanRecord[]>(
-    `${OBSERVABILITY_API}/traces${toQueryString({
+    `${LOGS_API}/traces${toQueryString({
       request_id: query.request_id,
       component: query.component,
       kind: query.kind,
@@ -48,5 +49,13 @@ export async function listObservabilityTraces(query: ObservationTraceQuery = {})
 }
 
 export async function getObservabilityTraceDetail(traceId: string) {
-  return fetchJson<ObservationTraceDetail>(`${OBSERVABILITY_API}/traces/${encodeURIComponent(traceId)}`);
+  return fetchJson<ObservationTraceDetail>(`${LOGS_API}/traces/${encodeURIComponent(traceId)}`);
+}
+
+export function createObservabilityStream() {
+  return new EventSource(apiUrl(`${LOGS_API}/entries/stream`));
+}
+
+export function parseObservabilityStreamPayload(value: string) {
+  return JSON.parse(value) as LogStreamDelta;
 }

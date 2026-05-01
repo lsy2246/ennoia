@@ -3,4 +3,6 @@ default_theme = "system"
 default_locale = "zh-CN"
 fallback_locale = "en-US"
 available_locales = ["zh-CN", "en-US"]
+default_display_name = "Operator"
+default_time_zone = "Asia/Shanghai"
 show_command_palette = true

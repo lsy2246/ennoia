@@ -2,10 +2,11 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::extension::ProviderModelDescriptor;
 use crate::permission::AgentPermissionPolicy;
 use crate::server_settings::{
     default_local_dev_origins, BodyLimitConfig, BootstrapState, CorsConfig, LoggingConfig,
-    RateLimitConfig, TimeoutConfig,
+    RateLimitConfig, TimeoutConfig, WebDevConfig,
 };
 use crate::ui::LocalizedText;
 
@@ -14,6 +15,8 @@ use crate::ui::LocalizedText;
 pub struct ServerConfig {
     pub host: String,
     pub port: u16,
+    #[serde(default)]
+    pub web_dev: WebDevConfig,
     #[serde(default)]
     pub rate_limit: RateLimitConfig,
     #[serde(default)]
@@ -30,12 +33,14 @@ pub struct ServerConfig {
 
 impl Default for ServerConfig {
     fn default() -> Self {
+        let web_dev = WebDevConfig::default();
         Self {
             host: "127.0.0.1".to_string(),
             port: 3710,
+            web_dev: web_dev.clone(),
             rate_limit: RateLimitConfig::default(),
             cors: CorsConfig {
-                origins: default_local_dev_origins(),
+                origins: default_local_dev_origins(&web_dev.host, web_dev.port),
                 ..CorsConfig::default()
             },
             timeout: TimeoutConfig::default(),
@@ -46,6 +51,49 @@ impl Default for ServerConfig {
     }
 }
 
+impl ServerConfig {
+    pub fn normalize(mut self) -> Self {
+        self.sync_web_dev_origins();
+        self
+    }
+
+    pub fn sync_web_dev_origins(&mut self) {
+        let dev_origins = default_local_dev_origins(&self.web_dev.host, self.web_dev.port);
+        let custom_origins = self
+            .cors
+            .origins
+            .iter()
+            .filter(|origin| {
+                !origin.trim().is_empty() && !is_managed_web_dev_origin(origin, &self.web_dev.host)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        self.cors.origins = dev_origins;
+        self.cors.origins.extend(custom_origins);
+    }
+}
+
+fn is_managed_web_dev_origin(origin: &str, web_dev_host: &str) -> bool {
+    let normalized_origin = origin.trim();
+    let Some(remainder) = normalized_origin.strip_prefix("http://") else {
+        return false;
+    };
+    let authority = remainder.split('/').next().unwrap_or_default();
+    let host = if let Some(stripped) = authority.strip_prefix('[') {
+        stripped.split(']').next().unwrap_or_default()
+    } else {
+        authority
+            .rsplit_once(':')
+            .map(|(host, _)| host)
+            .unwrap_or(authority)
+    };
+    let normalized_host = host.trim_matches(&['[', ']'][..]);
+    let configured_host = web_dev_host.trim_matches(&['[', ']'][..]);
+
+    matches!(normalized_host, "localhost" | "127.0.0.1" | "::1")
+        || normalized_host == configured_host
+}
+
 /// UiConfig stores Web workbench settings loaded from `config/ui.toml`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct UiConfig {
@@ -54,6 +102,10 @@ pub struct UiConfig {
     pub default_locale: String,
     pub fallback_locale: String,
     pub available_locales: Vec<String>,
+    #[serde(default = "default_ui_display_name")]
+    pub default_display_name: String,
+    #[serde(default = "default_ui_time_zone")]
+    pub default_time_zone: String,
     pub show_command_palette: bool,
 }
 
@@ -65,6 +117,8 @@ impl Default for UiConfig {
             default_locale: "zh-CN".to_string(),
             fallback_locale: "en-US".to_string(),
             available_locales: vec!["zh-CN".to_string(), "en-US".to_string()],
+            default_display_name: default_ui_display_name(),
+            default_time_zone: default_ui_time_zone(),
             show_command_palette: true,
         }
     }
@@ -72,7 +126,7 @@ impl Default for UiConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::UiConfig;
+    use super::{ServerConfig, UiConfig};
 
     #[test]
     fn ui_config_deserializes_web_title() {
@@ -83,6 +137,8 @@ default_theme = "system"
 default_locale = "zh-CN"
 fallback_locale = "en-US"
 available_locales = ["zh-CN", "en-US"]
+default_display_name = "Operator"
+default_time_zone = "Asia/Shanghai"
 show_command_palette = true
 "#,
         )
@@ -101,12 +157,38 @@ default_theme = "system"
 default_locale = "zh-CN"
 fallback_locale = "en-US"
 available_locales = ["zh-CN", "en-US"]
+default_display_name = "Operator"
+default_time_zone = "Asia/Shanghai"
 show_command_palette = true
 "#,
         )
         .expect_err("shell_title should no longer deserialize");
 
         assert!(error.to_string().contains("missing field `web_title`"));
+    }
+
+    #[test]
+    fn server_config_syncs_web_dev_origins_and_preserves_custom_items() {
+        let mut config = ServerConfig::default();
+        config.web_dev.host = "192.168.1.20".to_string();
+        config.web_dev.port = 4173;
+        config.cors.origins = vec![
+            "http://localhost:5173".to_string(),
+            "https://example.com".to_string(),
+        ];
+
+        config.sync_web_dev_origins();
+
+        assert_eq!(
+            config.cors.origins,
+            vec![
+                "http://localhost:4173".to_string(),
+                "http://127.0.0.1:4173".to_string(),
+                "http://[::1]:4173".to_string(),
+                "http://192.168.1.20:4173".to_string(),
+                "https://example.com".to_string(),
+            ]
+        );
     }
 }
 
@@ -225,7 +307,7 @@ pub struct ProviderConfig {
     #[serde(default)]
     pub default_model: String,
     #[serde(default)]
-    pub available_models: Vec<String>,
+    pub available_models: Vec<ProviderModelDescriptor>,
     #[serde(default)]
     pub model_discovery: ProviderModelDiscoveryConfig,
     #[serde(default = "default_enabled")]
@@ -258,6 +340,71 @@ fn default_registry_source() -> String {
     "builtin".to_string()
 }
 
+fn default_ui_display_name() -> String {
+    "Operator".to_string()
+}
+
+fn default_ui_time_zone() -> String {
+    "Asia/Shanghai".to_string()
+}
+
 fn default_enabled() -> bool {
     true
+}
+
+#[cfg(test)]
+mod provider_config_tests {
+    use super::ProviderConfig;
+
+    #[test]
+    fn provider_config_deserializes_model_descriptors() {
+        let config = toml::from_str::<ProviderConfig>(
+            r#"
+id = "openai"
+display_name = "OpenAI"
+kind = "openai"
+base_url = "https://api.openai.com/v1"
+api_key_env = "OPENAI_API_KEY"
+default_model = "gpt-5.4"
+available_models = [
+  { id = "gpt-5.4", max_context_tokens = 128000, max_input_tokens = 32000 }
+]
+enabled = true
+
+[model_discovery]
+manual_allowed = true
+"#,
+        )
+        .expect("provider config should deserialize");
+
+        assert_eq!(config.available_models.len(), 1);
+        assert_eq!(config.available_models[0].id, "gpt-5.4");
+        assert_eq!(config.available_models[0].max_context_tokens, Some(128000));
+        assert_eq!(config.available_models[0].max_input_tokens, Some(32000));
+    }
+
+    #[test]
+    fn provider_config_deserializes_legacy_string_model_list() {
+        let config = toml::from_str::<ProviderConfig>(
+            r#"
+id = "openai"
+display_name = "OpenAI"
+kind = "openai"
+base_url = "https://api.openai.com/v1"
+api_key_env = "OPENAI_API_KEY"
+default_model = "gpt-5.4"
+available_models = ["gpt-5.4"]
+enabled = true
+
+[model_discovery]
+manual_allowed = true
+"#,
+        )
+        .expect("legacy string model list should deserialize");
+
+        assert_eq!(config.available_models.len(), 1);
+        assert_eq!(config.available_models[0].id, "gpt-5.4");
+        assert_eq!(config.available_models[0].max_context_tokens, None);
+        assert_eq!(config.available_models[0].max_input_tokens, None);
+    }
 }

@@ -1,12 +1,11 @@
 import { existsSync, readdirSync } from "node:fs";
-import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { buildWebModuleAliases, createWebPackageRequire } from "./web-build-shared.mjs";
 
 const rootDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const webDir = resolve(rootDir, "web");
-const webNodeModules = resolve(webDir, "node_modules");
-const webRequire = createRequire(resolve(webDir, "package.json"));
+const webRequire = createWebPackageRequire(webDir);
 const { default: react } = await import(pathToFileURL(webRequire.resolve("@vitejs/plugin-react")).href);
 const { build } = await import(pathToFileURL(webRequire.resolve("vite")).href);
 const watch = process.argv.includes("--watch");
@@ -47,17 +46,7 @@ function extensionBuildConfig(extensionRoot, entry) {
     publicDir: false,
     plugins: [react()],
     resolve: {
-      alias: {
-        "@ennoia/api-client": resolve(webDir, "packages/api-client/src"),
-        "@ennoia/contract": resolve(webDir, "packages/contract/src"),
-        "@ennoia/i18n": resolve(webDir, "packages/i18n/src"),
-        "@ennoia/observability": resolve(webDir, "packages/observability/src"),
-        "@ennoia/theme-runtime": resolve(webDir, "packages/theme-runtime/src"),
-        "@ennoia/ui-sdk": resolve(webDir, "packages/ui-sdk/src"),
-        react: resolve(webNodeModules, "react"),
-        "react/jsx-runtime": resolve(webNodeModules, "react/jsx-runtime.js"),
-        "react-dom": resolve(webNodeModules, "react-dom"),
-      },
+      alias: buildWebModuleAliases(webDir),
     },
     build: {
       target: "es2022",

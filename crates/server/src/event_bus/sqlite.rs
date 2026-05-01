@@ -281,6 +281,23 @@ impl EventBusStore {
             .map_err(std::io::Error::other)
     }
 
+    pub fn latest_conversation_seq(&self, conversation_id: &str) -> std::io::Result<i64> {
+        let connection = self.open()?;
+        connection
+            .query_row(
+                "SELECT seq
+                 FROM hook_events
+                 WHERE conversation_id = ?1
+                 ORDER BY seq DESC
+                 LIMIT 1",
+                params![conversation_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()
+            .map(|value| value.unwrap_or(0))
+            .map_err(std::io::Error::other)
+    }
+
     fn open(&self) -> std::io::Result<Connection> {
         let connection = Connection::open(&self.db_path).map_err(std::io::Error::other)?;
         connection

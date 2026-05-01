@@ -4,10 +4,12 @@ import {
   ApiError,
   createChatBranch,
   createChatCheckpoint,
+  createConversationStream,
   getChat,
   listAgents,
   listConversationPermissionApprovals,
   listSkills,
+  parseConversationStreamPayload,
   resolvePermissionApproval,
   sendChatMessage,
   switchChatBranch,
@@ -83,7 +85,6 @@ const EMPTY_PICKER_STATE: ComposerPickerState = {
 const OUTBOX_STORAGE_PREFIX = "ennoia.conversation.outbox.v1";
 const PENDING_REPLY_STORAGE_PREFIX = "ennoia.conversation.pending-replies.v1";
 const RECOVER_SENDING_AFTER_MS = 1500;
-const MESSAGE_POLL_INTERVAL_MS = 2500;
 
 function uniqueStrings(values: string[]) {
   return [...new Set(values.map((item) => item.trim()).filter(Boolean))];
@@ -603,7 +604,6 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
   const closeView = useWorkbenchStore((state) => state.closeView);
   const registerSessionCommands = useSessionCommandsStore((state) => state.register);
   const unregisterSessionCommands = useSessionCommandsStore((state) => state.unregister);
-  const conversationRevision = useConversationsStore((state) => state.revision);
   const deletedSessionMark = useConversationsStore((state) => state.deletedSessionMarks[sessionId]);
   const notifyChanged = useConversationsStore((state) => state.notifyChanged);
   const [agents, setAgents] = useState<AgentProfile[]>([]);
@@ -619,6 +619,11 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
   const editorRef = useRef<HTMLDivElement | null>(null);
   const isMountedRef = useRef(true);
   const inFlightDraftIdRef = useRef<string | null>(null);
+  const conversationUpdatedAtRef = useRef<string | null>(null);
+  const streamDisconnectedMessage = t(
+    "web.conversations.stream_disconnected",
+    "会话流连接中断，正在等待自动重连。",
+  );
 
   const activeAgents = useMemo(() => {
     const ids = new Set(detail?.conversation?.participants?.filter((item) => item !== "operator") ?? []);
@@ -655,6 +660,7 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
       }
       setDetail(nextDetail);
       setApprovals(nextApprovals);
+      conversationUpdatedAtRef.current = nextDetail.conversation.updated_at;
     } catch (err) {
       if (err instanceof ApiError && err.status === 404 && panelId) {
         closeView(panelId);
@@ -683,6 +689,7 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
       setSkills(nextSkills);
       setDetail(nextDetail);
       setApprovals(nextApprovals);
+      conversationUpdatedAtRef.current = nextDetail.conversation.updated_at;
     } catch (err) {
       if (err instanceof ApiError && err.status === 404 && panelId) {
         closeView(panelId);
@@ -696,7 +703,7 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
 
   useEffect(() => {
     void hydrate();
-  }, [conversationRevision, hydrate]);
+  }, [hydrate]);
 
   useEffect(() => {
     if (deletedSessionMark && panelId) {
@@ -716,6 +723,7 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
     setPendingReplies(loadPersistedPendingReplies(sessionId));
     setApprovals([]);
     setComposerMode({ kind: "normal" });
+    conversationUpdatedAtRef.current = null;
   }, [sessionId]);
 
   useEffect(() => {
@@ -736,14 +744,73 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
   }, [approvals, detail?.messages]);
 
   useEffect(() => {
-    if (!conversation) {
+    if (typeof EventSource === "undefined") {
       return;
     }
-    const timer = window.setInterval(() => {
-      void refreshThread();
-    }, MESSAGE_POLL_INTERVAL_MS);
-    return () => window.clearInterval(timer);
-  }, [conversation, refreshThread]);
+
+    const stream = createConversationStream(sessionId);
+    const handleSnapshot = (event: Event) => {
+      if (!(event instanceof MessageEvent) || typeof event.data !== "string") {
+        return;
+      }
+      try {
+        const snapshot = parseConversationStreamPayload(event.data);
+        const nextUpdatedAt = snapshot.detail.conversation.updated_at ?? null;
+        const shouldNotifyChanged = Boolean(
+          nextUpdatedAt
+          && conversationUpdatedAtRef.current
+          && nextUpdatedAt !== conversationUpdatedAtRef.current,
+        );
+        conversationUpdatedAtRef.current = nextUpdatedAt;
+        if (!isMountedRef.current) {
+          return;
+        }
+        setDetail(snapshot.detail);
+        setApprovals(snapshot.approvals);
+        if (shouldNotifyChanged) {
+          notifyChanged();
+        }
+      } catch (err) {
+        if (isMountedRef.current) {
+          setError(String(err));
+        }
+      }
+    };
+    const handleStreamError = (event: Event) => {
+      if (!(event instanceof MessageEvent) || typeof event.data !== "string") {
+        return;
+      }
+      try {
+        const payload = JSON.parse(event.data) as { message?: string };
+        if (isMountedRef.current) {
+          setError(payload.message?.trim() || streamDisconnectedMessage);
+        }
+      } catch {
+        if (isMountedRef.current) {
+          setError(streamDisconnectedMessage);
+        }
+      }
+    };
+
+    stream.addEventListener("conversation.snapshot", handleSnapshot);
+    stream.addEventListener("conversation.error", handleStreamError);
+    stream.onopen = () => {
+      if (isMountedRef.current) {
+        setError((current) => current === streamDisconnectedMessage ? null : current);
+      }
+    };
+    stream.onerror = () => {
+      if (isMountedRef.current) {
+        setError(streamDisconnectedMessage);
+      }
+    };
+
+    return () => {
+      stream.removeEventListener("conversation.snapshot", handleSnapshot);
+      stream.removeEventListener("conversation.error", handleStreamError);
+      stream.close();
+    };
+  }, [notifyChanged, sessionId, streamDisconnectedMessage]);
 
   const syncComposerState = useCallback(() => {
     const snapshot = readComposerSnapshot(editorRef.current);
@@ -1133,6 +1200,7 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
         ]);
         const switchedBranch = response.conversation.active_branch_id !== conversation.active_branch_id;
         if (switchedBranch) {
+          conversationUpdatedAtRef.current = response.conversation.updated_at;
           setDetail((current) => current ? {
             ...current,
             conversation: response.conversation,
@@ -1141,6 +1209,7 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
           await refreshThread();
           return;
         }
+        conversationUpdatedAtRef.current = response.conversation.updated_at;
         setDetail((current) => {
           if (!current) {
             return current;
@@ -1164,7 +1233,6 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
           };
         });
         notifyChanged();
-        void refreshThread();
       } catch (err) {
         if (isMountedRef.current) {
           setLocalDrafts((current) =>
@@ -1292,6 +1360,7 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
       if (!isMountedRef.current) {
         return;
       }
+      conversationUpdatedAtRef.current = nextDetail.conversation.updated_at;
       setDetail(nextDetail);
       setComposerMode({ kind: "normal" });
     } catch (err) {

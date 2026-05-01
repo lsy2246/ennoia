@@ -1,4 +1,4 @@
-import { fetchJson } from "./core";
+import { apiUrl, fetchJson } from "./core";
 import type {
   ChatBranch,
   ChatCheckpoint,
@@ -7,6 +7,8 @@ import type {
   ChatSendResponse,
   ChatThread,
   ChatThreadDetail,
+  ConversationStreamSnapshot,
+  PermissionApprovalRecord,
 } from "./types";
 
 const CONVERSATIONS_API = "/api/conversations";
@@ -164,4 +166,36 @@ export async function createChatCheckpoint(
     method: "POST",
     body: JSON.stringify(payload),
   });
+}
+
+export function createConversationStream(chatId: string) {
+  return new EventSource(
+    apiUrl(`${CONVERSATIONS_API}/${encodeURIComponent(chatId)}/stream`),
+  );
+}
+
+export function parseConversationStreamPayload(value: string): ConversationStreamSnapshot {
+  const parsed = JSON.parse(value) as {
+    detail?: unknown;
+    approvals?: unknown;
+  };
+  const detailValue = parsed.detail;
+  const normalized = normalizeChatDetailPayload(detailValue);
+  const detailRecord = isRecord(detailValue) ? detailValue : null;
+
+  return {
+    detail: {
+      conversation: normalized.conversation,
+      lanes: normalized.lanes ?? [],
+      branches: normalized.branches ?? [],
+      checkpoints: normalized.checkpoints ?? [],
+      messages: normalized.messages ?? [],
+      runs: Array.isArray(detailRecord?.runs) ? detailRecord.runs as ChatThreadDetail["runs"] : [],
+      tasks: Array.isArray(detailRecord?.tasks) ? detailRecord.tasks as ChatThreadDetail["tasks"] : [],
+      outputs: Array.isArray(detailRecord?.outputs) ? detailRecord.outputs as ChatThreadDetail["outputs"] : [],
+    },
+    approvals: Array.isArray(parsed.approvals)
+      ? parsed.approvals as PermissionApprovalRecord[]
+      : [],
+  };
 }

@@ -1,13 +1,11 @@
 const DEFAULT_BASE_URL = "https://api.openai.com/v1";
 const DEFAULT_MODEL = "gpt-5.4";
+const MODEL_BUDGETS = new Map();
 
 export const provider = {
   id: "openai",
   kind: "openai",
   interfaces: ["generate", "tools", "models"],
-  recommendedModels: {
-    openai: DEFAULT_MODEL,
-  },
   generationOptions: [
     {
       id: "reasoning_effort",
@@ -26,15 +24,14 @@ export async function listModels(context = {}) {
   const data = await response.json();
   const models = Array.isArray(data.data)
     ? data.data
-        .map((item) => item?.id)
-        .filter((item) => typeof item === "string")
-        .sort()
+        .map((item) => normalizeModelDescriptor(item?.id))
+        .filter(Boolean)
+        .sort((left, right) => left.id.localeCompare(right.id))
     : [];
 
   return {
     provider_id: config.id,
     models,
-    recommended_model: config.default_model || DEFAULT_MODEL,
   };
 }
 
@@ -136,6 +133,22 @@ function normalizeProviderConfig(config) {
   };
 }
 
+function normalizeModelDescriptor(value) {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const id = value.trim();
+  if (!id) {
+    return null;
+  }
+  const budgets = MODEL_BUDGETS.get(id) ?? null;
+  return {
+    id,
+    max_context_tokens: budgets?.max_context_tokens ?? null,
+    max_input_tokens: budgets?.max_input_tokens ?? null,
+  };
+}
+
 async function openaiFetch(config, path, init) {
   const response = await fetch(`${config.base_url}${path}`, {
     ...init,
@@ -149,6 +162,18 @@ async function openaiFetch(config, path, init) {
   if (!response.ok) {
     const body = await response.text();
     const summary = summarizeOpenAiErrorBody(body);
+    if (path === "/models" && response.status === 405) {
+      throw new Error(
+        [
+          `当前上游不支持 OpenAI 扩展使用的模型发现接口: GET ${config.base_url}${path}`,
+          "这通常说明它不是标准 OpenAI 模型列表接口。",
+          "请手动维护模型列表，或者为这个上游提供它自己的模型发现扩展。",
+          summary ? `上游返回: ${summary}` : null,
+        ]
+          .filter(Boolean)
+          .join(" "),
+      );
+    }
     throw new Error(
       summary
         ? `OpenAI request failed: ${response.status} ${summary}`

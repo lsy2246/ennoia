@@ -56,6 +56,7 @@ pub struct ObservationLogQuery {
     pub request_id: Option<String>,
     pub trace_id: Option<String>,
     pub before_seq: Option<i64>,
+    pub after_seq: Option<i64>,
     pub limit: usize,
 }
 
@@ -104,6 +105,7 @@ pub struct ObservationSpanQuery {
     pub kind: Option<String>,
     pub source_kind: Option<String>,
     pub source_id: Option<String>,
+    pub after_seq: Option<i64>,
     pub limit: usize,
 }
 
@@ -467,8 +469,12 @@ fn build_logs_query(query: &ObservationLogQuery) -> SelectQuery {
     if let Some(before_seq) = query.before_seq {
         builder.push_filter(LogsSchema::SEQ, FilterOperator::Lt, before_seq.into());
     }
+    if let Some(after_seq) = query.after_seq {
+        builder.push_filter(LogsSchema::SEQ, FilterOperator::Gt, after_seq.into());
+    }
+    let descending = query.after_seq.is_none();
     builder
-        .order_by(LogsSchema::SEQ, true)
+        .order_by(LogsSchema::SEQ, descending)
         .limit(query.limit.max(1) as i64)
 }
 
@@ -512,7 +518,11 @@ fn build_spans_query(query: &ObservationSpanQuery) -> SelectQuery {
             source_id.clone().into(),
         );
     }
-    let descending = query.trace_id.is_none() && query.request_id.is_none();
+    if let Some(after_seq) = query.after_seq {
+        builder.push_filter(SpansSchema::SEQ, FilterOperator::Gt, after_seq.into());
+    }
+    let descending =
+        query.after_seq.is_none() && query.trace_id.is_none() && query.request_id.is_none();
     builder
         .order_by(SpansSchema::SEQ, descending)
         .limit(query.limit.max(1) as i64)

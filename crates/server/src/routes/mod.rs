@@ -186,6 +186,10 @@ pub fn build_router(state: AppState) -> Router {
             get(conversation_detail).delete(conversation_delete),
         )
         .route(
+            "/api/conversations/{conversation_id}/stream",
+            get(conversation_stream),
+        )
+        .route(
             "/api/conversations/{conversation_id}/messages",
             get(conversation_messages).post(conversation_messages_create),
         )
@@ -229,6 +233,10 @@ pub fn build_router(state: AppState) -> Router {
         )
         .route("/api/providers", get(providers).post(provider_create))
         .route(
+            "/api/providers/discover-models",
+            post(provider_discover_models),
+        )
+        .route(
             "/api/providers/{provider_id}",
             get(provider_detail)
                 .put(provider_update)
@@ -248,15 +256,14 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/schedules/{schedule_id}/resume", post(schedule_resume))
         .route("/api/spaces", get(spaces))
         .route("/api/logs", get(logs_list))
-        .route("/api/observability/overview", get(observability_overview))
-        .route("/api/observability/logs", get(observability_logs))
+        .route("/api/logs/frontend", post(frontend_log_create))
+        .route("/api/logs/overview", get(observability_overview))
+        .route("/api/logs/entries", get(observability_logs))
+        .route("/api/logs/entries/stream", get(observability_stream))
+        .route("/api/logs/entries/{log_id}", get(observability_log_detail))
+        .route("/api/logs/traces", get(observability_traces))
         .route(
-            "/api/observability/logs/{log_id}",
-            get(observability_log_detail),
-        )
-        .route("/api/observability/traces", get(observability_traces))
-        .route(
-            "/api/observability/traces/{trace_id}",
+            "/api/logs/traces/{trace_id}",
             get(observability_trace_detail),
         )
         .route(
@@ -269,7 +276,6 @@ pub fn build_router(state: AppState) -> Router {
             "/api/permissions/approvals/{approval_id}/resolve",
             post(permission_approval_resolve),
         )
-        .route("/api/logs/frontend", post(frontend_log_create))
         .merge(bootstrap)
         .merge(runtime)
         .layer(axum_middleware::from_fn_with_state(
@@ -481,8 +487,7 @@ struct ExtensionAttachPayload {
 struct ProviderModelsResponse {
     provider_id: String,
     source: String,
-    models: Vec<String>,
-    recommended_model: Option<String>,
+    models: Vec<ennoia_kernel::ProviderModelDescriptor>,
     manual_allowed: bool,
     generation_options: Vec<ennoia_kernel::ProviderGenerationOption>,
 }

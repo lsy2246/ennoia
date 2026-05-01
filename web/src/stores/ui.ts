@@ -15,6 +15,10 @@ import {
   normalizeThemeSelection,
 } from "@/lib/uiCapabilities";
 import {
+  FRONTEND_UI_DEFAULTS,
+  resolveDefaultLocale,
+} from "@/lib/uiDefaults";
+import {
   builtinI18nRegistry,
   formatDate,
   formatDateTime,
@@ -62,7 +66,7 @@ function pickEffectiveLocale(runtime: UiRuntime | null, cachedLocale?: string) {
   return normalizeLocaleSelection(
     cachedLocale ?? runtime?.instance_preference?.preference.locale,
     supportedLocales,
-    runtime?.ui_config.default_locale ?? "zh-CN",
+    resolveDefaultLocale(runtime),
   );
 }
 
@@ -96,8 +100,8 @@ export const useUiStore = create<UiState>((set, get) => ({
   status: "idle",
   runtime: null,
   messagesVersion: builtinI18nRegistry.getRevision(),
-  locale: readUiBootstrapCache().locale ?? "zh-CN",
-  themeId: readUiBootstrapCache().theme_id ?? "system",
+  locale: readUiBootstrapCache().locale ?? FRONTEND_UI_DEFAULTS.defaultLocale,
+  themeId: readUiBootstrapCache().theme_id ?? FRONTEND_UI_DEFAULTS.defaultTheme,
   timeZone: readUiBootstrapCache().time_zone,
   dateStyle: readUiBootstrapCache().date_style,
   error: null,

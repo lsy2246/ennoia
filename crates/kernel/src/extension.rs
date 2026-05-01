@@ -1,5 +1,5 @@
 use ennoia_error_utils::normalize_error_message;
-use serde::{Deserialize, Serialize};
+use serde::{de::Deserializer, Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
 use crate::ui::{LocalizedText, ThemeAppearance};
@@ -80,6 +80,52 @@ pub struct ProviderGenerationOption {
     pub default_value: Option<String>,
     #[serde(default)]
     pub allowed_values: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
+pub struct ProviderModelDescriptor {
+    pub id: String,
+    #[serde(default)]
+    pub max_context_tokens: Option<u32>,
+    #[serde(default)]
+    pub max_input_tokens: Option<u32>,
+}
+
+impl<'de> Deserialize<'de> for ProviderModelDescriptor {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum ProviderModelDescriptorInput {
+            Id(String),
+            Object {
+                id: String,
+                #[serde(default)]
+                max_context_tokens: Option<u32>,
+                #[serde(default)]
+                max_input_tokens: Option<u32>,
+            },
+        }
+
+        match ProviderModelDescriptorInput::deserialize(deserializer)? {
+            ProviderModelDescriptorInput::Id(id) => Ok(Self {
+                id,
+                max_context_tokens: None,
+                max_input_tokens: None,
+            }),
+            ProviderModelDescriptorInput::Object {
+                id,
+                max_context_tokens,
+                max_input_tokens,
+            } => Ok(Self {
+                id,
+                max_context_tokens,
+                max_input_tokens,
+            }),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -171,8 +217,6 @@ pub struct ProviderContribution {
     pub interfaces: Vec<String>,
     #[serde(default)]
     pub model_discovery: bool,
-    #[serde(default)]
-    pub recommended_model: Option<String>,
     #[serde(default = "default_manual_model")]
     pub manual_model: bool,
     #[serde(default)]

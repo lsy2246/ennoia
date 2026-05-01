@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 
 import {
+  createObservabilityStream,
   ApiError,
   getObservabilityOverview,
+  parseObservabilityStreamPayload,
   getObservabilityTraceDetail,
   listObservabilityLogs,
   listObservabilityTraces,
@@ -50,6 +52,7 @@ type DiagnosticFeedItem = {
   summary: string;
   component: string;
   sourceKind: string;
+  sourceId?: string | null;
   requestId?: string | null;
   traceId?: string | null;
   durationMs?: number;
@@ -73,6 +76,7 @@ const INITIAL_FILTERS: UnifiedFilters = {
 };
 
 const SLOW_TRACE_THRESHOLD_MS = 1200;
+const OBSERVABILITY_ROUTE_PREFIX = "/api/logs";
 
 function stringifyJson(value: unknown) {
   try {
@@ -192,6 +196,44 @@ function collectOptionValues(values: Array<string | null | undefined>) {
     .sort((left, right) => left.localeCompare(right));
 }
 
+function isObservabilitySelfRequest(path?: string | null) {
+  return typeof path === "string" && path.startsWith(OBSERVABILITY_ROUTE_PREFIX);
+}
+
+function isObservabilityNoiseLog(item: ObservationLogEntry) {
+  return isObservabilitySelfRequest(item.source_id);
+}
+
+function isObservabilityNoiseTrace(item: ObservationSpanRecord) {
+  return isObservabilitySelfRequest(item.source_id);
+}
+
+function mergeObservationLogs(
+  current: ObservationLogEntry[],
+  incoming: ObservationLogEntry[],
+) {
+  const records = new Map(current.map((item) => [item.id, item]));
+  for (const item of incoming) {
+    records.set(item.id, item);
+  }
+  return [...records.values()]
+    .sort((left, right) => right.seq - left.seq)
+    .slice(0, 160);
+}
+
+function mergeObservationSpans(
+  current: ObservationSpanRecord[],
+  incoming: ObservationSpanRecord[],
+) {
+  const records = new Map(current.map((item) => [item.id, item]));
+  for (const item of incoming) {
+    records.set(item.id, item);
+  }
+  return [...records.values()]
+    .sort((left, right) => right.seq - left.seq)
+    .slice(0, 200);
+}
+
 function buildTraceSummaries(spans: ObservationSpanRecord[]): TraceSummary[] {
   const grouped = new Map<string, ObservationSpanRecord[]>();
   for (const span of spans) {
@@ -252,6 +294,7 @@ function buildDiagnosticFeed(logs: ObservationLogEntry[], traces: TraceSummary[]
       summary: item.message,
       component: item.component,
       sourceKind: item.source_kind,
+      sourceId: item.source_id,
       requestId: item.request_id,
       traceId: item.trace_id,
       badgeValue: item.level,
@@ -279,6 +322,7 @@ function buildDiagnosticFeed(logs: ObservationLogEntry[], traces: TraceSummary[]
       summary: `${item.spanCount} spans · ${item.durationMs} ms · ${item.traceId}`,
       component: item.component,
       sourceKind: item.sourceKind,
+      sourceId: item.sourceId,
       requestId: item.requestId,
       traceId: item.traceId,
       durationMs: item.durationMs,
@@ -303,6 +347,7 @@ export function Observability() {
   const [busy, setBusy] = useState(false);
   const [loadingTraceDetail, setLoadingTraceDetail] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const streamDisconnectedMessage = t("web.logs.stream_disconnected", "日志流连接中断，正在等待自动重连。");
 
   const traceSummaries = useMemo(() => buildTraceSummaries(traceSpans), [traceSpans]);
   const feed = useMemo(() => buildDiagnosticFeed(logs, traceSummaries), [logs, traceSummaries]);
@@ -491,11 +536,13 @@ export function Observability() {
         listObservabilityLogs({ limit: 160 }),
         listObservabilityTraces({ limit: 200 }),
       ]);
-      const nextTraceSummaries = buildTraceSummaries(nextTraces);
-      const nextFeed = buildDiagnosticFeed(nextLogs, nextTraceSummaries);
+      const visibleLogs = nextLogs.filter((item) => !isObservabilityNoiseLog(item));
+      const visibleTraces = nextTraces.filter((item) => !isObservabilityNoiseTrace(item));
+      const nextTraceSummaries = buildTraceSummaries(visibleTraces);
+      const nextFeed = buildDiagnosticFeed(visibleLogs, nextTraceSummaries);
       setOverview(nextOverview);
-      setLogs(nextLogs);
-      setTraceSpans(nextTraces);
+      setLogs(visibleLogs);
+      setTraceSpans(visibleTraces);
       setSelectedItemKey((current) => nextFeed.some((item) => item.key === current) ? current : nextFeed[0]?.key ?? null);
     } catch (err) {
       setError(String(err));
@@ -507,6 +554,45 @@ export function Observability() {
   useEffect(() => {
     void refresh();
   }, []);
+
+  useEffect(() => {
+    const stream = createObservabilityStream();
+    stream.addEventListener("logs.delta", (event) => {
+      if (!(event instanceof MessageEvent) || typeof event.data !== "string") {
+        return;
+      }
+      try {
+        const payload = parseObservabilityStreamPayload(event.data);
+        const visibleLogs = payload.logs.filter((item) => !isObservabilityNoiseLog(item));
+        const visibleTraces = payload.traces.filter((item) => !isObservabilityNoiseTrace(item));
+        setOverview(payload.overview);
+        if (visibleLogs.length > 0) {
+          setLogs((current) => mergeObservationLogs(current, visibleLogs));
+        }
+        if (visibleTraces.length > 0) {
+          setTraceSpans((current) => mergeObservationSpans(current, visibleTraces));
+        }
+      } catch (err) {
+        setError(String(err));
+      }
+    });
+    stream.addEventListener("logs.error", (event) => {
+      if (event instanceof MessageEvent && typeof event.data === "string" && event.data.trim()) {
+        setError(event.data);
+      }
+    });
+    stream.onerror = () => {
+      setError(streamDisconnectedMessage);
+    };
+    stream.onopen = () => {
+      setError((current) =>
+        current === streamDisconnectedMessage
+          ? null
+          : current,
+      );
+    };
+    return () => stream.close();
+  }, [streamDisconnectedMessage]);
 
   useEffect(() => {
     setSelectedItemKey((current) =>

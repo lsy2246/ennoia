@@ -21,8 +21,6 @@ use ennoia_server::{bootstrap_app_state, default_app_state, run_server};
 use notify::{Config as NotifyConfig, RecommendedWatcher, RecursiveMode, Watcher};
 
 const WEB_DIR: &str = "web";
-const WEB_DEV_HOST: &str = "127.0.0.1";
-const WEB_DEV_PORT: u16 = 5173;
 static DEV_CONSOLE_OUTPUT_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -88,9 +86,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             auto_attach_dev_extensions(&paths)?;
             let mut server_config: ServerConfig =
                 read_toml_or_default(&paths.server_config_file())?;
+            server_config = server_config.normalize();
             apply_server_log_env_overrides(&mut server_config.logging);
-            ensure_port_available(server_config.port, "API")?;
-            ensure_port_available(WEB_DEV_PORT, "Web")?;
+            ensure_port_available(&server_config.host, server_config.port, "API")?;
+            ensure_port_available(
+                &server_config.web_dev.host,
+                server_config.web_dev.port,
+                "Web",
+            )?;
             run_dev_supervisor(paths, server_config).await?;
         }
         Some("start") | Some("serve") => {
@@ -227,6 +230,8 @@ async fn extension_command(
 const HOST_RELOAD_DEBOUNCE: Duration = Duration::from_millis(800);
 const WATCH_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const API_READY_TIMEOUT: Duration = Duration::from_secs(15);
+const DEV_CHILD_STARTUP_GRACE: Duration = Duration::from_millis(1500);
+const DEV_CHILD_LOG_TAIL_LINES: usize = 20;
 
 async fn run_dev_supervisor(
     paths: RuntimePaths,
@@ -251,7 +256,10 @@ async fn run_dev_supervisor(
     let _watcher = start_host_watcher(&repo_root, watch_tx)?;
 
     println!("Ennoia dev runtime starting at {}", paths.home().display());
-    println!("Web: http://{WEB_DEV_HOST}:{WEB_DEV_PORT}");
+    println!(
+        "Web: http://{}:{}",
+        server_config.web_dev.host, server_config.web_dev.port
+    );
     println!("API: http://{}:{}", server_config.host, server_config.port);
     println!(
         "Host hot reload: watching crates/, assets/, builtins/extensions/, Cargo.toml and Cargo.lock."
@@ -278,6 +286,7 @@ async fn run_dev_supervisor(
                 break;
             }
             _ = ticker.tick() => {
+                dev_processes.ensure_children_alive()?;
                 let mut saw_change = false;
                 while watch_rx.try_recv().is_ok() {
                     saw_change = true;
@@ -526,6 +535,7 @@ struct DevProcessGroup {
 
 struct DevChild {
     label: String,
+    log_path: PathBuf,
     child: Child,
 }
 
@@ -546,8 +556,16 @@ impl DevProcessGroup {
 
         let log_path = paths.server_logs_dir().join("web-dev.log");
         let mut command = shell_command(
-            &format!("bun run dev --host {WEB_DEV_HOST} --port {WEB_DEV_PORT} --strictPort"),
+            &format!(
+                "bun run dev --host {} --port {} --strictPort",
+                server_config.web_dev.host, server_config.web_dev.port
+            ),
             &web_dir,
+        );
+        command.env("ENNOIA_WEB_DEV_HOST", &server_config.web_dev.host);
+        command.env(
+            "ENNOIA_WEB_DEV_PORT",
+            server_config.web_dev.port.to_string(),
         );
         command.env(
             "VITE_ENNOIA_API_URL",
@@ -602,10 +620,21 @@ impl DevProcessGroup {
             .spawn()?;
         attach_child_log_pumps(label, &mut child, log_path, &self.console_config)?;
         println!("started {label}; log={}", log_path.display());
+        ensure_dev_child_stable_start(label, &mut child, log_path, DEV_CHILD_STARTUP_GRACE)?;
         self.children.push(DevChild {
             label: label.to_string(),
+            log_path: log_path.to_path_buf(),
             child,
         });
+        Ok(())
+    }
+
+    fn ensure_children_alive(&mut self) -> io::Result<()> {
+        for child in &mut self.children {
+            if let Some(status) = child.child.try_wait()? {
+                return Err(dev_child_exit_error(&child.label, &child.log_path, status));
+            }
+        }
         Ok(())
     }
 }
@@ -665,6 +694,57 @@ fn attach_child_log_pumps(
         );
     }
     Ok(())
+}
+
+fn ensure_dev_child_stable_start(
+    label: &str,
+    child: &mut Child,
+    log_path: &Path,
+    grace_period: Duration,
+) -> io::Result<()> {
+    thread::sleep(grace_period);
+    if let Some(status) = child.try_wait()? {
+        thread::sleep(Duration::from_millis(120));
+        return Err(dev_child_exit_error(label, log_path, status));
+    }
+    Ok(())
+}
+
+fn dev_child_exit_error(label: &str, log_path: &Path, status: ExitStatus) -> io::Error {
+    let exit_summary = match status.code() {
+        Some(code) => format!("exit code {code}"),
+        None => "terminated by signal".to_string(),
+    };
+    let log_tail = tail_log_file(log_path, DEV_CHILD_LOG_TAIL_LINES);
+    let detail = if log_tail.is_empty() {
+        "日志尾部为空。".to_string()
+    } else {
+        format!("最近日志：\n{}", log_tail.join("\n"))
+    };
+    io::Error::other(format!(
+        "开发子进程 '{label}' 已退出（{exit_summary}）。\n日志文件：{}\n{detail}",
+        log_path.display()
+    ))
+}
+
+fn tail_log_file(path: &Path, max_lines: usize) -> Vec<String> {
+    if max_lines == 0 {
+        return Vec::new();
+    }
+    let Ok(contents) = fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    let mut lines = contents
+        .lines()
+        .map(str::trim_end)
+        .filter(|line| !line.is_empty())
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
+    if lines.len() > max_lines {
+        let drain = lines.len() - max_lines;
+        lines.drain(0..drain);
+    }
+    lines
 }
 
 fn spawn_log_pump<R>(
@@ -929,14 +1009,14 @@ fn unique_suffix() -> String {
     millis.to_string()
 }
 
-fn ensure_port_available(port: u16, label: &str) -> io::Result<()> {
-    TcpListener::bind(("127.0.0.1", port))
+fn ensure_port_available(host: &str, port: u16, label: &str) -> io::Result<()> {
+    TcpListener::bind((host, port))
         .map(|listener| drop(listener))
         .map_err(|_| {
             io::Error::new(
                 io::ErrorKind::AddrInUse,
                 format!(
-                    "{label} port {port} is already in use; stop the existing process and retry"
+                    "{label} address {host}:{port} is already in use; stop the existing process and retry"
                 ),
             )
         })
@@ -1331,7 +1411,9 @@ fn should_mark_binary_asset_executable(logical_path: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::should_mark_binary_asset_executable;
+    use std::fs;
+
+    use super::{should_mark_binary_asset_executable, tail_log_file, unique_suffix};
 
     #[test]
     fn marks_builtin_process_worker_paths_as_executable() {
@@ -1351,6 +1433,17 @@ mod tests {
         assert!(!should_mark_binary_asset_executable(
             "skills/example/skill.toml"
         ));
+    }
+
+    #[test]
+    fn tail_log_file_returns_last_non_empty_lines() {
+        let path = std::env::temp_dir().join(format!("ennoia-log-tail-{}.log", unique_suffix()));
+        fs::write(&path, "line-1\n\nline-2\nline-3\nline-4\n").expect("write log file");
+
+        let lines = tail_log_file(&path, 2);
+
+        assert_eq!(lines, vec!["line-3".to_string(), "line-4".to_string()]);
+        let _ = fs::remove_file(path);
     }
 }
 

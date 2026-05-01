@@ -5,6 +5,7 @@ pub enum FilterOperator {
     Eq,
     EqIgnoreCase,
     Lt,
+    Gt,
 }
 
 #[derive(Debug, Clone)]
@@ -86,6 +87,7 @@ impl SelectQuery {
                         sql.push_str(&format!("lower({}) = lower(?)", filter.column));
                     }
                     FilterOperator::Lt => sql.push_str(&format!("{} < ?", filter.column)),
+                    FilterOperator::Gt => sql.push_str(&format!("{} > ?", filter.column)),
                 }
                 params.push(filter.value);
             }

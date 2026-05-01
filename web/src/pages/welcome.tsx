@@ -5,6 +5,11 @@ import { bootstrapSetup } from "@ennoia/api-client";
 import { applyTheme, readUiBootstrapCache, writeUiBootstrapCache } from "@ennoia/theme-runtime";
 import { buildTimeZoneOptionGroups, getBrowserTimeZone } from "@/lib/timeZones";
 import { normalizeLocaleSelection } from "@/lib/uiCapabilities";
+import {
+  resolveDefaultDisplayName,
+  resolveDefaultLocale,
+  resolveDefaultTheme,
+} from "@/lib/uiDefaults";
 import { Select } from "@/components/Select";
 import { useRuntimeStore } from "@/stores/runtime";
 import { useUiHelpers, useUiStore } from "@/stores/ui";
@@ -15,19 +20,22 @@ export function Welcome() {
   const hydrateRuntime = useRuntimeStore((state) => state.hydrate);
   const hydrateUi = useUiStore((state) => state.hydrate);
   const previewLocale = useUiStore((state) => state.previewLocale);
-  const { availableLocales, availableThemes, t } = useUiHelpers();
+  const { availableLocales, availableThemes, runtime, t } = useUiHelpers();
+  const defaultDisplayName = resolveDefaultDisplayName(runtime);
+  const defaultLocale = resolveDefaultLocale(runtime);
+  const defaultTheme = resolveDefaultTheme(runtime);
 
-  const [displayName, setDisplayName] = useState(t("settings.profile.default_name", "Operator"));
+  const [displayName, setDisplayName] = useState(defaultDisplayName);
   const timeZoneGroups = useMemo(() => buildTimeZoneOptionGroups(t, false), [t]);
   const [locale, setLocale] = useState(
     normalizeLocaleSelection(
-      typeof navigator !== "undefined" ? navigator.language : "zh-CN",
+      typeof navigator !== "undefined" ? navigator.language : defaultLocale,
       availableLocales,
-      "zh-CN",
+      defaultLocale,
     ),
   );
   const [timeZone, setTimeZone] = useState(getBrowserTimeZone);
-  const [themeId, setThemeId] = useState("system");
+  const [themeId, setThemeId] = useState(defaultTheme);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -38,8 +46,16 @@ export function Welcome() {
   }, [bootstrap, navigate]);
 
   useEffect(() => {
-    setLocale((current) => normalizeLocaleSelection(current, availableLocales, "zh-CN"));
-  }, [availableLocales]);
+    setLocale((current) => normalizeLocaleSelection(current, availableLocales, defaultLocale));
+  }, [availableLocales, defaultLocale]);
+
+  useEffect(() => {
+    setDisplayName((current) => current || defaultDisplayName);
+  }, [defaultDisplayName]);
+
+  useEffect(() => {
+    setThemeId((current) => current || defaultTheme);
+  }, [defaultTheme]);
 
   function previewTheme(nextThemeId: string) {
     setThemeId(nextThemeId);

@@ -1258,13 +1258,14 @@ fn build_workflow_memory_sources(
     sources
 }
 
-fn provider_runtime_request_config(provider: &ProviderConfig) -> JsonValue {
+pub(crate) fn provider_runtime_request_config(provider: &ProviderConfig) -> JsonValue {
     serde_json::json!({
         "id": provider.id,
         "kind": provider.kind,
         "base_url": provider.base_url,
         "api_key_env": provider.api_key_env,
         "default_model": provider.default_model,
+        "available_models": provider.available_models,
     })
 }
 
@@ -1382,7 +1383,7 @@ fn resolve_provider_contribution_for_generate(
     }
 }
 
-fn resolve_provider_entry_path(
+pub(crate) fn resolve_provider_entry_path(
     contribution: &RegisteredProviderContribution,
 ) -> std::io::Result<PathBuf> {
     let entry = contribution
@@ -1672,7 +1673,7 @@ fn permission_actor_context(
     })
 }
 
-fn invoke_provider_method(
+pub(crate) fn invoke_provider_method(
     entry: &PathBuf,
     payload: &JsonValue,
     provider: &ProviderConfig,

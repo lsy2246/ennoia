@@ -43,11 +43,11 @@ pub(super) async fn bootstrap_setup(
         id: "runtime".to_string(),
         display_name: payload
             .display_name
-            .unwrap_or_else(|| "Operator".to_string()),
+            .unwrap_or_else(|| state.ui_config.default_display_name.clone()),
         locale,
         time_zone: payload
             .time_zone
-            .unwrap_or_else(|| "Asia/Shanghai".to_string()),
+            .unwrap_or_else(|| state.ui_config.default_time_zone.clone()),
         default_space_id: payload
             .default_space_id
             .or_else(|| state.spaces.first().map(|space| space.id.clone())),
@@ -110,14 +110,14 @@ pub(super) async fn runtime_profile_put(
         display_name: payload
             .display_name
             .or_else(|| current.as_ref().map(|profile| profile.display_name.clone()))
-            .unwrap_or_else(|| "Operator".to_string()),
+            .unwrap_or_else(|| state.ui_config.default_display_name.clone()),
         locale: requested_locale
             .or_else(|| current.as_ref().map(|profile| profile.locale.clone()))
             .unwrap_or_else(|| state.ui_config.default_locale.clone()),
         time_zone: payload
             .time_zone
             .or_else(|| current.as_ref().map(|profile| profile.time_zone.clone()))
-            .unwrap_or_else(|| "Asia/Shanghai".to_string()),
+            .unwrap_or_else(|| state.ui_config.default_time_zone.clone()),
         default_space_id: payload.default_space_id.or_else(|| {
             current
                 .as_ref()
@@ -156,6 +156,7 @@ pub(super) async fn runtime_preferences_put(
 pub(super) async fn runtime_server_config(State(state): State<AppState>) -> Json<ServerConfig> {
     let mut config =
         read_server_config_from_disk(&state).unwrap_or_else(|| state.server_config.clone());
+    config = config.normalize();
     apply_server_log_env_overrides(&mut config.logging);
     Json(config)
 }
@@ -165,6 +166,7 @@ pub(super) async fn runtime_server_config_put(
     Extension(request): Extension<RequestContext>,
     Json(payload): Json<ServerConfig>,
 ) -> ApiResult<ServerConfig> {
+    let payload = payload.normalize();
     persist_server_config(&state, &payload)
         .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?;
     Ok(Json(payload))

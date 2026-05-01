@@ -39,9 +39,9 @@ pub use extension::{
     ExtensionUiSpec, ExtensionWatchSpec, ExtensionWorkerSpec, HookContribution,
     HookDispatchResponse, HookEventEnvelope, HookResourceRef, LocaleContribution,
     MemoryContribution, PageContribution, PageNavContribution, PanelContribution,
-    ProviderContribution, ProviderGenerationOption, ResolvedUiEntry, ResolvedWorkerEntry,
-    ResourceTypeContribution, ScheduleActionContribution, SubscriptionContribution,
-    SurfaceContribution, ThemeContribution, HOOK_EVENT_ARTIFACT_CREATED,
+    ProviderContribution, ProviderGenerationOption, ProviderModelDescriptor, ResolvedUiEntry,
+    ResolvedWorkerEntry, ResourceTypeContribution, ScheduleActionContribution,
+    SubscriptionContribution, SurfaceContribution, ThemeContribution, HOOK_EVENT_ARTIFACT_CREATED,
     HOOK_EVENT_CONVERSATION_CREATED, HOOK_EVENT_CONVERSATION_MESSAGE_CREATED, HOOK_EVENT_JOB_DUE,
     HOOK_EVENT_RUN_REQUESTED, HOOK_EVENT_RUN_STAGE_CHANGED,
 };
@@ -57,7 +57,7 @@ pub use policy::{
 };
 pub use server_settings::{
     apply_server_log_env_overrides, default_local_dev_origins, BodyLimitConfig, BootstrapState,
-    CorsConfig, DevConsoleLogConfig, LoggingConfig, RateLimitConfig, TimeoutConfig,
+    CorsConfig, DevConsoleLogConfig, LoggingConfig, RateLimitConfig, TimeoutConfig, WebDevConfig,
 };
 pub use signals::{EvidenceSignals, ExecutionSignals, IntentSignals, Signals};
 pub use stage::{RunStage, RunStageEvent, StageTransition};

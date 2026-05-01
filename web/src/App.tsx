@@ -139,7 +139,7 @@ const BUILTIN_NAV = [
   { id: "skills", href: "/skills", icon: "S", labelKey: "web.nav.skills", fallback: "技能", hintKey: "web.nav.skills_hint", hint: "发现并分配技能给 Agent" },
   { id: "schedules", href: "/schedules", icon: "T", labelKey: "web.nav.schedules", fallback: "定时器", hintKey: "web.nav.schedules_hint", hint: "管理定时触发的命令、Agent 与会话投递" },
   { id: "extensions", href: "/extensions", icon: "E", labelKey: "web.nav.extensions", fallback: "扩展", hintKey: "web.nav.extensions_hint", hint: "系统插件与贡献能力" },
-  { id: "observability", href: "/observability", icon: "L", labelKey: "web.nav.observability", fallback: "观测", hintKey: "web.nav.observability_hint", hint: "统一日志与 trace 观测台" },
+  { id: "observability", href: "/observability", icon: "L", labelKey: "web.nav.observability", fallback: "日志", hintKey: "web.nav.observability_hint", hint: "统一日志与链路排查入口" },
   { id: "settings", href: "/settings", icon: "⚙", labelKey: "web.nav.settings", fallback: "设置", hintKey: "web.nav.settings_hint", hint: "运行时配置表单" },
 ] as const;
 

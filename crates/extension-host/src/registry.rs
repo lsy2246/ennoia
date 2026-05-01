@@ -925,7 +925,6 @@ fn derive_providers(
                 ),
                 interfaces: json_string_array(provider, "interfaces"),
                 model_discovery: json_bool(provider, "model_discovery"),
-                recommended_model: json_string(provider, "recommended_model"),
                 manual_model: json_bool_default(provider, "manual_model", true),
                 generation_options: provider_generation_options(provider),
             })

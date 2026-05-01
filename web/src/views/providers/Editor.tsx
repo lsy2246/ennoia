@@ -3,10 +3,11 @@ import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react
 import {
   createProvider,
   deleteProvider,
-  getProviderModels,
+  discoverProviderModels,
   listProviders,
   updateProvider,
   type ProviderConfig,
+  type ProviderModelDescriptor,
 } from "@ennoia/api-client";
 import { useProvidersStore } from "@/stores/providers";
 import { useUiHelpers } from "@/stores/ui";
@@ -29,18 +30,68 @@ const EMPTY_CHANNEL: ProviderConfig = {
 
 type ModelEntry = {
   key: string;
-  value: string;
+  id: string;
+  maxContextTokens: string;
+  maxInputTokens: string;
 };
 
 let modelSequence = 0;
 
-function createModelEntry(value = ""): ModelEntry {
-  modelSequence += 1;
-  return { key: `model-${modelSequence}`, value };
+function stringifyTokenValue(value?: number | null) {
+  return typeof value === "number" && Number.isFinite(value) ? String(value) : "";
 }
 
-function normalizeModels(models: string[]) {
-  return Array.from(new Set(models.map((item) => item.trim()).filter(Boolean)));
+function createModelEntry(model?: ProviderModelDescriptor): ModelEntry {
+  modelSequence += 1;
+  return {
+    key: `model-${modelSequence}`,
+    id: model?.id ?? "",
+    maxContextTokens: stringifyTokenValue(model?.max_context_tokens),
+    maxInputTokens: stringifyTokenValue(model?.max_input_tokens),
+  };
+}
+
+function parseTokenValue(value?: string | null) {
+  const normalized = typeof value === "string" ? value.trim() : "";
+  if (!normalized) {
+    return null;
+  }
+  if (!/^\d+$/.test(normalized)) {
+    return null;
+  }
+  const parsed = Number.parseInt(normalized, 10);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    return null;
+  }
+  return parsed;
+}
+
+function normalizeModelDescriptors(models: Array<ProviderModelDescriptor | string | null | undefined>) {
+  const seen = new Set<string>();
+  const normalized: ProviderModelDescriptor[] = [];
+  for (const model of models) {
+    const id = (typeof model === "string" ? model : model?.id ?? "").trim();
+    if (!id || seen.has(id)) {
+      continue;
+    }
+    seen.add(id);
+    normalized.push({
+      id,
+      max_context_tokens: typeof model === "string" ? null : model?.max_context_tokens ?? null,
+      max_input_tokens: typeof model === "string" ? null : model?.max_input_tokens ?? null,
+    });
+  }
+  return normalized;
+}
+
+function serializeModelEntries(entries: ModelEntry[]) {
+  return normalizeModelDescriptors(
+    entries.map((entry) => ({
+      id: entry.id,
+      max_context_tokens: parseTokenValue(entry.maxContextTokens),
+      max_input_tokens: parseTokenValue(entry.maxInputTokens),
+    })),
+  );
 }
 
 function resolveProviderImplementationKind(
@@ -91,20 +142,21 @@ export function ApiChannelEditorView({ channelId, panelId }: { channelId: string
       return;
     }
 
-    const nextTitle = form.display_name.trim() || form.id.trim() || (isNew ? t("web.channels.new", "新建渠道") : channelId);
+    const nextTitle =
+      (form.display_name ?? "").trim() || (form.id ?? "").trim() || (isNew ? t("web.channels.new", "新建渠道") : channelId);
     const panel = workbenchApi.getPanel?.(panelId);
     panel?.api?.setTitle?.(nextTitle);
     updateViewDescriptor(panelId, { title: nextTitle });
   }, [channelId, form.display_name, form.id, isNew, panelId, t, updateViewDescriptor, workbenchApi]);
 
-  const applyModelState = useCallback((models: string[], preferredDefault?: string) => {
-    const normalizedModels = normalizeModels(models);
+  const applyModelState = useCallback((models: ProviderModelDescriptor[], preferredDefault?: string) => {
+    const normalizedModels = normalizeModelDescriptors(models);
     const entries = normalizedModels.map((item) => createModelEntry(item));
     const defaultModel =
-      preferredDefault && normalizedModels.includes(preferredDefault)
+      preferredDefault && normalizedModels.some((item) => item.id === preferredDefault)
         ? preferredDefault
-        : normalizedModels[0] ?? "";
-    const defaultEntry = entries.find((entry) => entry.value === defaultModel) ?? entries[0] ?? null;
+        : normalizedModels[0]?.id ?? "";
+    const defaultEntry = entries.find((entry) => entry.id === defaultModel) ?? entries[0] ?? null;
 
     setModelEntries(entries);
     setDefaultModelKey(defaultEntry?.key ?? null);
@@ -112,13 +164,13 @@ export function ApiChannelEditorView({ channelId, panelId }: { channelId: string
   }, []);
 
   function syncFormModels(entries: ModelEntry[], nextDefaultKey: string | null) {
-    const normalizedModels = normalizeModels(entries.map((entry) => entry.value));
+    const normalizedModels = serializeModelEntries(entries);
     const defaultEntry = entries.find((entry) => entry.key === nextDefaultKey);
-    const preferredDefault = defaultEntry?.value.trim() ?? "";
+    const preferredDefault = (defaultEntry?.id ?? "").trim();
     const defaultModel =
-      preferredDefault && normalizedModels.includes(preferredDefault)
+      preferredDefault && normalizedModels.some((item) => item.id === preferredDefault)
         ? preferredDefault
-        : normalizedModels[0] ?? "";
+        : normalizedModels[0]?.id ?? "";
 
     setForm((current) => ({
       ...current,
@@ -132,25 +184,23 @@ export function ApiChannelEditorView({ channelId, panelId }: { channelId: string
       const contribution = providerContributions.find(
         (item) => resolveProviderImplementationKind(item) === kind,
       );
-      const recommendedModel = contribution?.provider.recommended_model ?? "";
-      const nextModels = recommendedModel ? [recommendedModel] : [];
       const modelDiscovery = {
         manual_allowed: contribution?.provider.model_discovery
           ? contribution.provider.manual_model
           : true,
       };
-      const normalized = applyModelState(nextModels, recommendedModel);
 
       setForm((current) => ({
         ...(options?.resetIdentity ? EMPTY_CHANNEL : current),
         kind,
-        default_model: normalized.defaultModel || current.default_model,
-        available_models:
-          normalized.models.length > 0 ? normalized.models : current.available_models,
         model_discovery: modelDiscovery,
       }));
+      if (options?.resetIdentity) {
+        setModelEntries([]);
+        setDefaultModelKey(null);
+      }
     },
-    [applyModelState, providerContributions],
+    [providerContributions],
   );
 
   const hydrate = useCallback(async () => {
@@ -166,10 +216,7 @@ export function ApiChannelEditorView({ channelId, panelId }: { channelId: string
 
       const current = next.find((item) => item.id === channelId);
       if (current) {
-        const normalized = applyModelState(
-          [...current.available_models, current.default_model],
-          current.default_model,
-        );
+        const normalized = applyModelState(current.available_models, current.default_model);
         setForm({
           ...current,
           available_models: normalized.models,
@@ -193,15 +240,15 @@ export function ApiChannelEditorView({ channelId, panelId }: { channelId: string
     try {
       const payload = {
         ...form,
-        available_models: normalizeModels(modelEntries.map((entry) => entry.value)),
+        available_models: serializeModelEntries(modelEntries),
       };
-      payload.kind = payload.kind.trim();
+      payload.kind = (payload.kind ?? "").trim();
       payload.default_model =
         payload.available_models.find(
           (model) =>
-            modelEntries.find((entry) => entry.key === defaultModelKey)?.value.trim() === model,
-        ) ??
-        payload.available_models[0] ??
+            ((modelEntries.find((entry) => entry.key === defaultModelKey)?.id ?? "").trim() === model.id),
+        )?.id ??
+        payload.available_models[0]?.id ??
         "";
 
       if (!payload.kind) {
@@ -240,10 +287,7 @@ export function ApiChannelEditorView({ channelId, panelId }: { channelId: string
         });
       }
 
-      const normalized = applyModelState(
-        [...saved.available_models, saved.default_model],
-        saved.default_model,
-      );
+      const normalized = applyModelState(saved.available_models, saved.default_model);
       setForm({
         ...saved,
         available_models: normalized.models,
@@ -285,23 +329,16 @@ export function ApiChannelEditorView({ channelId, panelId }: { channelId: string
     }
   }
 
-  async function handleLoadModels() {
-    if (isNew || !form.id) {
-      return;
-    }
-
+  async function handleDiscoverModels() {
     setModelsBusy(true);
     setError(null);
     try {
-      const response = await getProviderModels(form.id);
-      const nextDefault = response.recommended_model ?? form.default_model;
-      const nextModels =
-        response.models.length > 0
-          ? response.models
-          : nextDefault
-            ? [nextDefault]
-            : form.available_models;
-      const normalized = applyModelState(nextModels, nextDefault);
+      const response = await discoverProviderModels({
+        ...form,
+        available_models: serializeModelEntries(modelEntries),
+      });
+      const nextModels = response.models.length > 0 ? response.models : form.available_models;
+      const normalized = applyModelState(nextModels, form.default_model);
       setForm((current) => ({
         ...current,
         available_models: normalized.models,
@@ -315,7 +352,19 @@ export function ApiChannelEditorView({ channelId, panelId }: { channelId: string
   }
 
   function handleModelChange(key: string, value: string) {
-    const nextEntries = modelEntries.map((entry) => (entry.key === key ? { ...entry, value } : entry));
+    const nextEntries = modelEntries.map((entry) => (entry.key === key ? { ...entry, id: value } : entry));
+    setModelEntries(nextEntries);
+    syncFormModels(nextEntries, defaultModelKey);
+  }
+
+  function handleModelBudgetChange(
+    key: string,
+    field: "maxContextTokens" | "maxInputTokens",
+    value: string,
+  ) {
+    const nextEntries = modelEntries.map((entry) =>
+      entry.key === key ? { ...entry, [field]: value } : entry,
+    );
     setModelEntries(nextEntries);
     syncFormModels(nextEntries, defaultModelKey);
   }
@@ -435,8 +484,8 @@ export function ApiChannelEditorView({ channelId, panelId }: { channelId: string
           />
           <p className="helper-text">
             {selectedContribution?.provider.model_discovery
-              ? t("web.channels.model_discovery_extension", "当前接口实现会提供模型建议；保存时仍以这里的默认模型为准。")
-              : t("web.channels.model_discovery_manual", "当前接口没有模型发现能力，请手动输入默认模型。")}
+              ? t("web.channels.model_discovery_extension", "当前接口实现可以返回模型列表；保存时仍以这里的默认模型为准。")
+              : t("web.channels.model_discovery_manual", "当前接口没有模型发现能力，请手动维护模型列表和默认模型。")}
           </p>
         </label>
         <div className="stack">
@@ -446,18 +495,18 @@ export function ApiChannelEditorView({ channelId, panelId }: { channelId: string
               <p className="helper-text">
                 {t(
                   "web.channels.models_help",
-                  "每行一个模型，从列表中选一个作为默认模型；保存前会自动去重并清理空项。",
+                  "每行一个模型，直接维护模型名、总上下文大小和最大输入上限；保存前会自动去重并清理空项。",
                 )}
               </p>
             </div>
-            {!isNew ? (
+            {selectedContribution?.provider.model_discovery ? (
               <button
                 type="button"
                 className="secondary"
-                disabled={modelsBusy || busy}
-                onClick={() => void handleLoadModels()}
+                disabled={modelsBusy || busy || !(form.kind ?? "").trim()}
+                onClick={() => void handleDiscoverModels()}
               >
-                {t("web.channels.refresh_models", "刷新建议模型")}
+                {t("web.channels.refresh_models", "一键获取上游模型")}
               </button>
             ) : null}
           </div>
@@ -466,9 +515,27 @@ export function ApiChannelEditorView({ channelId, panelId }: { channelId: string
               modelEntries.map((entry) => (
                 <div key={entry.key} className="model-row">
                   <input
-                    value={entry.value}
+                    value={entry.id}
                     placeholder={t("web.channels.model_placeholder", "模型 ID，例如 gpt-5.4")}
                     onChange={(event) => handleModelChange(entry.key, event.target.value)}
+                  />
+                  <input
+                    type="number"
+                    min="1"
+                    value={entry.maxContextTokens}
+                    placeholder={t("web.channels.model_context_placeholder", "总上下文大小")}
+                    onChange={(event) =>
+                      handleModelBudgetChange(entry.key, "maxContextTokens", event.target.value)
+                    }
+                  />
+                  <input
+                    type="number"
+                    min="1"
+                    value={entry.maxInputTokens}
+                    placeholder={t("web.channels.model_input_placeholder", "最大输入上限")}
+                    onChange={(event) =>
+                      handleModelBudgetChange(entry.key, "maxInputTokens", event.target.value)
+                    }
                   />
                   <button
                     type="button"
@@ -490,7 +557,7 @@ export function ApiChannelEditorView({ channelId, panelId }: { channelId: string
               ))
             ) : (
               <div className="empty-card">
-                {t("web.channels.models_empty", "还没有模型。先新增一项，或在已保存渠道上刷新建议模型。")}
+                {t("web.channels.models_empty", "还没有模型。先新增一项，或直接一键获取上游模型。")}
               </div>
             )}
             <button type="button" className="secondary" onClick={handleModelAdd}>

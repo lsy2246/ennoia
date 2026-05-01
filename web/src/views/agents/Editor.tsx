@@ -266,7 +266,7 @@ export function AgentEditorView({
                     />
                     <datalist id={`agent-models-${agentId}`}>
                       {(selectedProvider?.available_models ?? []).map((model) => (
-                        <option key={model} value={model} />
+                        <option key={model.id} value={model.id} />
                       ))}
                     </datalist>
                   </label>

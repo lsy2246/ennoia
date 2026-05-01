@@ -75,3 +75,10 @@ export async function getProviderModels(providerId: string) {
   return fetchJson<ProviderModelsResponse>(`/api/providers/${providerId}/models`);
 }
 
+export async function discoverProviderModels(payload: ProviderConfig) {
+  return fetchJson<ProviderModelsResponse>("/api/providers/discover-models", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+

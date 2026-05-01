@@ -19,7 +19,7 @@
 <ENNOIA_HOME>/
 ├─ config/
 │  ├─ server.toml              # HTTP、中间件、系统内置组件配置
-│  ├─ ui.toml                  # Web 标题、语言、主题与本地化默认值
+│  ├─ ui.toml                  # Web 标题、语言、主题、默认操作者名与本地化默认值
 │  ├─ profile.toml             # 实例资料（显示名、locale、时区、默认空间）
 │  ├─ preferences/
 │  │  ├─ instance.toml         # 实例级 UI 偏好
@@ -51,7 +51,8 @@
 
 ## 配置职责
 
-- `config/server.toml`：HTTP、中间件、日志级别、开发模式控制台日志镜像和 bootstrap 状态等系统配置。
+- `config/server.toml`：HTTP、中间件、前端开发地址、日志级别、开发模式控制台日志镜像和 bootstrap 状态等系统配置。
+- `config/ui.toml`：Web 标题、语言主题、默认操作者名、默认时区和本地化默认值。
 - `config/extensions.toml`：扩展注册表，记录来源、启用状态、路径和移除意图。
 - `config/skills.toml`：技能注册表，记录来源、启用状态、路径和移除意图。
 

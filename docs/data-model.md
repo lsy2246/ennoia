@@ -227,7 +227,7 @@
 
 `ProviderConfig` 字段：`id`、`display_name`、`kind`、`description`、`base_url`、`api_key_env`、`default_model`、`available_models`、`model_discovery.manual_allowed`、`enabled`。
 
-`kind` 表示接口类型，也是系统解析实现扩展的唯一键；当前内置 OpenAI 渠道统一使用 `openai`。`default_model` 是用户确认后的稳定配置；扩展可以通过 provider contribution 提供模型建议，`model_discovery.manual_allowed` 只表达该渠道是否允许手动维护模型列表与默认模型。
+`kind` 表示接口类型，也是系统解析实现扩展的唯一键；当前内置 OpenAI 渠道统一使用 `openai`。`default_model` 是用户确认后的稳定配置；`available_models` 直接保存模型对象列表，每项只定义三项：`id`、`max_context_tokens`、`max_input_tokens`。其中后两项分别表示模型总上下文上限和最大输入上限；未知时允许为空。系统提供一个统一的“获取上游模型”入口，但只负责按 `kind` 把当前渠道配置转发给对应扩展；具体如何请求上游、如何解析响应，都由扩展自己的 `list_models` 实现决定。`model_discovery.manual_allowed` 只表达该渠道是否允许手动维护模型列表与默认模型。
 
 ## Extension 域
 
