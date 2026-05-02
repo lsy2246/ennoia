@@ -8,19 +8,21 @@ import {
 } from "@ennoia/api-client";
 import { StatusNotice } from "@/components/StatusNotice";
 import { formatRelativePath } from "@/lib/pathDisplay";
+import { useAgentsStore } from "@/stores/agents";
 import { useUiHelpers } from "@/stores/ui";
 import { useWorkbenchStore } from "@/stores/workbench";
 
 export function Agents() {
   const { t } = useUiHelpers();
   const openView = useWorkbenchStore((state) => state.openView);
+  const agentsRevision = useAgentsStore((state) => state.revision);
   const [agents, setAgents] = useState<AgentProfile[]>([]);
   const [modelEndpoints, setModelEndpoints] = useState<ModelEndpointConfig[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     void refresh();
-  }, []);
+  }, [agentsRevision]);
 
   async function refresh() {
     setError(null);

@@ -31,6 +31,7 @@ import type { ExtensionProviderContribution } from "@ennoia/ui-sdk";
 import { Select } from "@/components/Select";
 import { StatusNotice } from "@/components/StatusNotice";
 import { formatRelativePath } from "@/lib/pathDisplay";
+import { useAgentsStore } from "@/stores/agents";
 import { useModelEndpointsStore } from "@/stores/modelEndpoints";
 import { useUiHelpers } from "@/stores/ui";
 
@@ -61,6 +62,7 @@ export function AgentEditorView({
     () => runtime?.registry.providers ?? [],
     [runtime?.registry.providers],
   );
+  const notifyAgentsChanged = useAgentsStore((state) => state.notifyChanged);
   const modelEndpointsRevision = useModelEndpointsStore((state) => state.revision);
   const [agents, setAgents] = useState<AgentProfile[]>([]);
   const [skills, setSkills] = useState<SkillConfig[]>([]);
@@ -179,6 +181,7 @@ export function AgentEditorView({
       } else {
         await updateAgent(agentId, payload);
       }
+      notifyAgentsChanged();
       await hydrate();
     } catch (err) {
       setError(String(err));
@@ -195,6 +198,7 @@ export function AgentEditorView({
     setError(null);
     try {
       await deleteAgent(form.id);
+      notifyAgentsChanged();
       setForm(EMPTY_AGENT);
       await hydrate();
     } catch (err) {

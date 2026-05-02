@@ -619,6 +619,7 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
   const [composerSnapshot, setComposerSnapshot] = useState<ComposerSnapshot>({ body: "", addressedAgents: [], segments: [] });
   const [composerMode, setComposerMode] = useState<ComposerModeState>({ kind: "normal" });
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
   const editorRef = useRef<HTMLDivElement | null>(null);
   const isMountedRef = useRef(true);
   const inFlightDraftIdRef = useRef<string | null>(null);
@@ -1309,10 +1310,11 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
     }
     try {
       await navigator.clipboard.writeText(body);
+      setSuccess(t("web.conversations.copy_success", "已复制到剪贴板。"));
     } catch (err) {
       setError(String(err));
     }
-  }, []);
+  }, [t]);
 
   const startBranchFromMessage = useCallback((messageId: string) => {
     const source = findMessageById(detail?.messages ?? [], messageId);
@@ -1533,6 +1535,7 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
   return (
     <div className="session-view session-view--chat">
       <StatusNotice message={error} tone="error" onDismiss={() => setError(null)} />
+      <StatusNotice message={success} tone="success" onDismiss={() => setSuccess(null)} />
       {detail?.conversation ? (
         <>
           <header className="conversation-header conversation-header--chat">
@@ -1609,14 +1612,15 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
             ) : null}
           </div>
 
-          <ConversationExtensionCards conversationId={sessionId} />
+          {detail.messages.length > 0 ? (
+            <ConversationExtensionCards conversationId={sessionId} />
+          ) : null}
 
           <div ref={scrollRef} className="message-stream message-stream--chat">
             <ChatStream
               entries={streamEntries}
               agents={activeAgents}
               skills={skills}
-              emptyMessage={t("web.conversations.empty_messages", "还没有消息。在输入框用 @agent_id 指定某个 Agent。")}
               formatDateTime={formatDateTime}
               t={t}
               onCopy={copyMessageBody}

@@ -7,7 +7,6 @@ export function ChatStream({
   entries,
   agents,
   skills,
-  emptyMessage,
   formatDateTime,
   t,
   onCopy,
@@ -20,7 +19,6 @@ export function ChatStream({
   entries: ChatEntryViewModel[];
   agents: AgentProfile[];
   skills: SkillConfig[];
-  emptyMessage: string;
   formatDateTime: (value: string) => string;
   t: (key: string, fallback: string) => string;
   onCopy: (entryId: string, body: string) => void;
@@ -34,7 +32,7 @@ export function ChatStream({
   ) => void;
 }) {
   if (entries.length === 0) {
-    return <div className="empty-card conversation-empty-card">{emptyMessage}</div>;
+    return null;
   }
 
   return entries.map((entry) => (

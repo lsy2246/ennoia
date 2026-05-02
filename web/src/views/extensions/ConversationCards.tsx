@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { apiUrl } from "@ennoia/api-client";
 import type { ExtensionSurfaceContribution } from "@ennoia/ui-sdk";
 
@@ -22,15 +22,11 @@ function ConversationExtensionCardMount({
   const themeId = useUiStore((state) => state.themeId);
   const { formatDate, formatDateTime, formatTime, locale, t } = helpers;
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const [mountStatus, setMountStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
-  const [mountError, setMountError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     let cleanup: (() => void | Promise<void>) | undefined;
     const container = containerRef.current;
-    setMountStatus("idle");
-    setMountError(null);
     if (!container) {
       return () => {
         cancelled = true;
@@ -38,14 +34,12 @@ function ConversationExtensionCardMount({
     }
 
     container.replaceChildren();
-    setMountStatus("loading");
     void loadExtensionConversationCardMount(surface, generation)
       .then(async (mount) => {
         if (cancelled) {
           return;
         }
         if (!mount) {
-          setMountStatus("idle");
           return;
         }
         const handle = await mount(container, {
@@ -66,15 +60,9 @@ function ConversationExtensionCardMount({
         });
         if (!cancelled) {
           cleanup = handle?.unmount;
-          setMountStatus("ready");
         }
       })
-      .catch((error) => {
-        if (!cancelled) {
-          setMountStatus("error");
-          setMountError(String(error));
-        }
-      });
+      .catch(() => {});
 
     return () => {
       cancelled = true;
@@ -89,11 +77,6 @@ function ConversationExtensionCardMount({
         className="session-extension-card"
         data-extension-conversation-card={surface.surface.mount}
       />
-      {mountStatus === "error" ? (
-        <div className="session-extension-card session-extension-card--error">
-          {mountError}
-        </div>
-      ) : null}
     </>
   );
 }

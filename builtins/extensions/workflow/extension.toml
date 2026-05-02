@@ -81,6 +81,14 @@ entry = "behavior"
 metadata = { behavior = { id = "default", extension_id = "workflow", interfaces = ["runs", "tasks", "artifacts", "handoffs", "status"] } }
 
 [[capabilities]]
+id = "workflow.workspace"
+contract = "workflow.workspace"
+kind = "query"
+entry = "workspace"
+title = { key = "ext.workflow.workspace", fallback = "工作流总览" }
+metadata = { action = { key = "workflow.workspace" }, permission = { action = "run.read", target_kind = "run", risk_level = "low", default_decision = "allow", scope_kind = "none" } }
+
+[[capabilities]]
 id = "run.create"
 contract = "run.create"
 kind = "action"

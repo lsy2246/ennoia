@@ -57,6 +57,7 @@ struct AgentProviderContext {
     conversation: AgentConversationContext,
     extensions: Vec<AgentExtensionContext>,
     skills: Vec<AgentSkillContext>,
+    tools: Vec<AgentToolContext>,
 }
 
 #[derive(Debug, Serialize)]
@@ -117,6 +118,17 @@ struct AgentSkillContext {
     #[serde(skip_serializing_if = "Option::is_none")]
     docs: Option<String>,
     keywords: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct AgentToolContext {
+    extension_id: String,
+    extension_name: String,
+    capability_id: String,
+    label: String,
+    summary: String,
+    kind: String,
+    contract: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1483,6 +1495,10 @@ fn build_agent_runtime_prompt(state: &AppState, agent: &AgentConfig, run_id: &st
         "系统会额外提供一份结构化 JSON 上下文，里面包含当前运行时、会话、已注入扩展目录和已启用技能目录。按字段理解并使用，不要向用户原样复述 JSON，也不要主动枚举内部路径、目录清单或所有可用能力，除非用户明确要求。"
             .to_string(),
     );
+    sections.push(
+        "如果用户明确询问你有哪些工具、能力或可以做什么，优先依据上下文里的 tools 字段回答，使用 label 和 summary 做自然语言说明；不要把参数 schema、原始 JSON 对象或 `[object Object]` 直接输出给用户。"
+            .to_string(),
+    );
     sections.join("\n\n")
 }
 
@@ -1523,6 +1539,7 @@ fn build_agent_provider_context(
         },
         extensions: build_agent_extension_contexts(state),
         skills: build_agent_skill_contexts(state, agent),
+        tools: build_agent_tool_contexts(state),
     }
 }
 
@@ -1617,6 +1634,95 @@ fn build_agent_skill_contexts(state: &AppState, agent: &AgentConfig) -> Vec<Agen
             keywords: skill.keywords.clone(),
         })
         .collect()
+}
+
+fn build_agent_tool_contexts(state: &AppState) -> Vec<AgentToolContext> {
+    let mut tools = state
+        .extensions
+        .snapshot()
+        .extensions
+        .into_iter()
+        .filter(|extension| extension.conversation.inject)
+        .flat_map(|extension| {
+            let extension_name = extension.name.clone();
+            let extension_id = extension.id.clone();
+            extension
+                .capability_rows
+                .iter()
+                .filter(|capability| {
+                    extension.conversation.capabilities.is_empty()
+                        || extension
+                            .conversation
+                            .capabilities
+                            .iter()
+                            .any(|id| id == &capability.id)
+                })
+                .map(move |capability| AgentToolContext {
+                    extension_id: extension_id.clone(),
+                    extension_name: extension_name.clone(),
+                    capability_id: capability.id.clone(),
+                    label: humanize_agent_tool_label(
+                        &capability.id,
+                        capability.title.as_ref().map(|item| item.fallback.as_str()),
+                        &capability.contract,
+                    ),
+                    summary: humanize_agent_tool_summary(
+                        &capability.id,
+                        &capability.kind,
+                        &capability.contract,
+                    ),
+                    kind: capability.kind.clone(),
+                    contract: capability.contract.clone(),
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    tools.sort_by(|left, right| {
+        left.extension_name
+            .cmp(&right.extension_name)
+            .then(left.label.cmp(&right.label))
+            .then(left.capability_id.cmp(&right.capability_id))
+    });
+    tools
+}
+
+fn humanize_agent_tool_label(id: &str, title: Option<&str>, contract: &str) -> String {
+    match id {
+        "memory.ingest" => "记忆写入".to_string(),
+        "memory.query" => "记忆查询".to_string(),
+        "memory.review" => "记忆审查".to_string(),
+        "memory.build_context" => "上下文组装".to_string(),
+        "run.create" => "运行创建".to_string(),
+        "run.get" => "运行详情".to_string(),
+        "run.list" => "运行列表".to_string(),
+        "task.list" => "任务列表".to_string(),
+        "artifact.list" => "产物列表".to_string(),
+        _ => title
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or(contract)
+            .to_string(),
+    }
+}
+
+fn humanize_agent_tool_summary(id: &str, kind: &str, contract: &str) -> String {
+    match id {
+        "memory.ingest" => "把当前会话里值得保留的信息写入记忆库。".to_string(),
+        "memory.query" => "按主题、关键词或上下文从记忆库里检索已有信息。".to_string(),
+        "memory.review" => "回顾、审查和整理已有记忆记录。".to_string(),
+        "memory.build_context" => "从记忆库里提取相关片段，为当前任务补充上下文。".to_string(),
+        "run.create" => "为当前问题创建一条 workflow 执行流程。".to_string(),
+        "run.get" => "查看某条 workflow run 的当前状态和详情。".to_string(),
+        "run.list" => "按当前会话列出相关的 workflow runs。".to_string(),
+        "task.list" => "查看某条 workflow run 拆分出的任务清单。".to_string(),
+        "artifact.list" => "查看某条 workflow run 产出的文件和结果。".to_string(),
+        _ => match kind {
+            "action" => format!("可执行动作，合同标识为 {contract}。"),
+            "query" => format!("查询能力，合同标识为 {contract}。"),
+            "effect" => format!("运行时能力入口，合同标识为 {contract}。"),
+            _ => format!("能力入口，合同标识为 {contract}。"),
+        },
+    }
 }
 
 fn resolve_catalog_path(base: &str, value: &str) -> String {

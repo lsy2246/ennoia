@@ -11,7 +11,39 @@ import { useRuntimeStore } from "@/stores/runtime";
 import { useUiHelpers, useUiStore } from "@/stores/ui";
 import "./styles.css";
 
+type BrowserProcessShim = {
+  env: Record<string, string>;
+  argv: string[];
+  browser: true;
+  platform: "browser";
+  cwd: () => string;
+  emit: () => false;
+};
+
+function installProcessShim() {
+  const globalScope = globalThis as typeof globalThis & { process?: Partial<BrowserProcessShim> };
+  if (globalScope.process && typeof globalScope.process === "object") {
+    globalScope.process.env ??= {};
+    globalScope.process.argv ??= [];
+    globalScope.process.browser ??= true;
+    globalScope.process.platform ??= "browser";
+    globalScope.process.cwd ??= () => "/";
+    globalScope.process.emit ??= () => false;
+    return;
+  }
+
+  globalScope.process = {
+    env: {},
+    argv: [],
+    browser: true,
+    platform: "browser",
+    cwd: () => "/",
+    emit: () => false,
+  };
+}
+
 bootstrapTheme();
+installProcessShim();
 (globalThis as { __ENNOIA_API_BASE_URL__?: string }).__ENNOIA_API_BASE_URL__ = getApiBaseUrl();
 
 function reportRuntimeError(title: string, error: unknown) {

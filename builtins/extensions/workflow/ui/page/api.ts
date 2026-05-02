@@ -139,9 +139,9 @@ export async function listWorkflowRuns(params?: {
   q?: string;
   limit?: number;
 }) {
-  return callWorkflowRpc<WorkflowRun[]>("runs-list", params);
+  return callWorkflowRpc<WorkflowRun[]>("workflow/runs/list-by-conversation", params);
 }
 
 export async function getWorkflowRunDetail(runId: string) {
-  return callWorkflowRpc<WorkflowRunDetail>("run-detail", { run_id: runId });
+  return callWorkflowRpc<WorkflowRunDetail>("workflow/runs/get", { run_id: runId });
 }
