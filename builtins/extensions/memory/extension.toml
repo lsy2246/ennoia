@@ -47,6 +47,42 @@ mount = "memory.page"
 icon = "memory"
 nav = { default_pinned = true, order = 30 }
 
+[[surfaces]]
+id = "memory.about"
+kind = "page"
+title = { key = "ext.memory.about.page", fallback = "关于记忆" }
+route = "/memory/about"
+mount = "memory.about"
+
+[[entrypoints]]
+id = "memory.workspace"
+label = { key = "ext.memory.entry.workspace", fallback = "记忆工作台" }
+description = { key = "ext.memory.entry.workspace_description", fallback = "进入记忆检索、上下文装配和审查界面。" }
+kind = "page"
+page_id = "memory.page"
+icon = "memory"
+order = 10
+prominent = true
+
+[[settings]]
+key = "default_owner_kind"
+label = { key = "ext.memory.setting.default_owner_kind", fallback = "默认 owner kind" }
+description = { key = "ext.memory.setting.default_owner_kind_description", fallback = "决定记忆工作台首次检索时使用的 owner kind。" }
+type = "select"
+default_value = "global"
+options = [
+  { label = { key = "ext.memory.setting.option.global", fallback = "全局" }, value = "global" },
+  { label = { key = "ext.memory.setting.option.agent", fallback = "Agent" }, value = "agent" },
+  { label = { key = "ext.memory.setting.option.space", fallback = "空间" }, value = "space" }
+]
+
+[[settings]]
+key = "default_recall_limit"
+label = { key = "ext.memory.setting.default_recall_limit", fallback = "默认召回数量" }
+description = { key = "ext.memory.setting.default_recall_limit_description", fallback = "决定记忆工作台默认回忆时采用的数量上限。" }
+type = "number"
+default_value = 8
+
 [[locales]]
 locale = "zh-CN"
 namespace = "ext.memory"

@@ -62,6 +62,7 @@
 - `data/system/sqlite/events.db`：系统事件总线，记录会话创建、消息追加等稳定系统事件，以及它们到各扩展 Hook 的投递状态。
 - `data/system/schedules.json`：scheduler 计划列表，记录 trigger、executor、delivery、retry、启用状态、最近执行结果和最近运行历史；executor 可以是命令或 Agent。
 - `data/extensions/{extension_id}/`：扩展私有运行数据根目录。
+  - `settings.toml`：可选；由宿主为声明了 `settings[]` 的扩展保存扩展级配置。
   - 扩展私有配置、数据库、缓存和业务运行态都应保留在自己的扩展目录内，不再上浮到 `config/` 根目录。
   - `conversation` 扩展在自己的目录中维护会话、线路和消息数据。
   - `memory` 扩展在自己的目录中维护完整记忆系统数据。

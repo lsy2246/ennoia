@@ -120,9 +120,11 @@ Web
 ## 扩展能力模型
 
 - 扩展 manifest 只保留当前协议，不再声明独立协议版本号。
-- 扩展负责系统能力，可选声明 `ui` 和 `worker`，主声明模型统一为：`resource_types`、`capabilities`、`surfaces`、`locales`、`themes`、`commands`、`subscriptions`。
+- 扩展负责系统能力，可选声明 `ui` 和 `worker`，主声明模型统一为：`resource_types`、`capabilities`、`surfaces`、`entrypoints`、`settings`、`locales`、`themes`、`commands`、`subscriptions`。
 - `pages`、`panels`、`providers`、`behaviors`、`memories`、`actions`、`hooks`、`schedule_actions` 都是运行时派生视图，不再是 manifest 顶层主声明。
 - UI 工作台读取扩展快照时，同时获得通用声明和派生视图。
+- `entrypoints` 只表达“用户从哪里进入这个扩展”；入口名称、说明和优先级由扩展自身定义，主壳只负责展示与打开。
+- `settings` 表达扩展级配置字段；主壳按声明渲染表单，实际值保存在扩展私有数据目录，不上浮为系统级配置模型。
 - `workflow` 和 `memory` 都只是内置扩展实现；系统依赖接口键和动作 ID，不反向依赖具体扩展。
 - 扩展不自行开放端口；Provider、Behavior、Memory、Hook、Action 和 Schedule Action 的执行统一走宿主 Worker RPC，Worker 通过 Wasm ABI 或进程 stdio 协议接入。
 - 扩展 UI、语言、主题和业务配置归扩展自身所有；Web 主壳只按 runtime snapshot 发现并挂载，不在系统前端包中静态注册某个扩展页面或文案。

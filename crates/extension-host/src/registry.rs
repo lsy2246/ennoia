@@ -7,13 +7,14 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use ennoia_kernel::{
     ActionRule, BehaviorContribution, CapabilityContribution, CommandContribution,
-    ExtensionCapabilities, ExtensionConversationSpec, ExtensionDiagnostic, ExtensionHealth,
-    ExtensionKind, ExtensionManifest, ExtensionPermissionSpec, ExtensionRegistryEntry,
-    ExtensionRegistryFile, ExtensionRpcRequest, ExtensionRpcResponse, ExtensionRuntimeEvent,
-    ExtensionRuntimeSpec, ExtensionSourceMode, ExtensionUiSpec, HookContribution,
-    LocaleContribution, MemoryContribution, PageContribution, PanelContribution,
-    ProviderContribution, ResolvedUiEntry, ResolvedWorkerEntry, ResourceTypeContribution,
-    ScheduleActionContribution, SubscriptionContribution, SurfaceContribution, ThemeContribution,
+    ExtensionCapabilities, ExtensionConversationSpec, ExtensionDiagnostic, ExtensionEntrypointKind,
+    ExtensionEntrypointSpec, ExtensionHealth, ExtensionKind, ExtensionManifest,
+    ExtensionPermissionSpec, ExtensionRegistryEntry, ExtensionRegistryFile, ExtensionRpcRequest,
+    ExtensionRpcResponse, ExtensionRuntimeEvent, ExtensionRuntimeSpec, ExtensionSettingFieldSpec,
+    ExtensionSourceMode, ExtensionUiSpec, HookContribution, LocaleContribution, MemoryContribution,
+    PageContribution, PanelContribution, ProviderContribution, ResolvedUiEntry,
+    ResolvedWorkerEntry, ResourceTypeContribution, ScheduleActionContribution,
+    SubscriptionContribution, SurfaceContribution, ThemeContribution,
 };
 use serde::Serialize;
 use serde_json::Value as JsonValue;
@@ -44,6 +45,8 @@ pub struct ResolvedExtensionSnapshot {
     pub themes: Vec<ThemeContribution>,
     pub locales: Vec<LocaleContribution>,
     pub commands: Vec<CommandContribution>,
+    pub entrypoints: Vec<ExtensionEntrypointSpec>,
+    pub settings: Vec<ExtensionSettingFieldSpec>,
     pub providers: Vec<ProviderContribution>,
     pub behaviors: Vec<BehaviorContribution>,
     pub memories: Vec<MemoryContribution>,
@@ -787,6 +790,8 @@ fn resolve_manifest(
     let surfaces = manifest.surfaces.clone();
     let pages = derive_pages(&surfaces);
     let panels = derive_panels(&surfaces);
+    let entrypoints = derive_entrypoints(&manifest, &pages, &panels);
+    let settings = manifest.settings.clone();
     let providers = derive_providers(&capability_rows, &manifest.id);
     let behaviors = derive_behaviors(&capability_rows, &manifest.id);
     let memories = derive_memories(&capability_rows, &manifest.id);
@@ -863,6 +868,8 @@ fn resolve_manifest(
         themes: manifest.themes,
         locales: manifest.locales,
         commands: manifest.commands,
+        entrypoints,
+        settings,
         providers,
         behaviors,
         memories,
@@ -905,6 +912,60 @@ fn derive_panels(surfaces: &[SurfaceContribution]) -> Vec<PanelContribution> {
             })
         })
         .collect()
+}
+
+fn derive_entrypoints(
+    manifest: &ExtensionManifest,
+    pages: &[PageContribution],
+    panels: &[PanelContribution],
+) -> Vec<ExtensionEntrypointSpec> {
+    let mut entrypoints = if manifest.entrypoints.is_empty() {
+        let page_entries = pages.iter().map(|page| ExtensionEntrypointSpec {
+            id: page.id.clone(),
+            label: page.title.clone(),
+            description: None,
+            kind: ExtensionEntrypointKind::Page,
+            page_id: Some(page.id.clone()),
+            panel_id: None,
+            icon: page.icon.clone(),
+            order: page.nav.as_ref().and_then(|nav| nav.order),
+            prominent: page
+                .nav
+                .as_ref()
+                .map(|nav| nav.default_pinned)
+                .unwrap_or(false),
+        });
+        let panel_entries = panels.iter().map(|panel| ExtensionEntrypointSpec {
+            id: panel.id.clone(),
+            label: panel.title.clone(),
+            description: None,
+            kind: ExtensionEntrypointKind::Panel,
+            page_id: None,
+            panel_id: Some(panel.id.clone()),
+            icon: panel.icon.clone(),
+            order: None,
+            prominent: false,
+        });
+        page_entries.chain(panel_entries).collect::<Vec<_>>()
+    } else {
+        manifest.entrypoints.clone()
+    };
+
+    entrypoints.sort_by(|left, right| {
+        let prominent = right.prominent.cmp(&left.prominent);
+        if prominent != std::cmp::Ordering::Equal {
+            return prominent;
+        }
+        let order = left
+            .order
+            .unwrap_or(i32::MAX)
+            .cmp(&right.order.unwrap_or(i32::MAX));
+        if order != std::cmp::Ordering::Equal {
+            return order;
+        }
+        left.id.cmp(&right.id)
+    });
+    entrypoints
 }
 
 fn derive_providers(
@@ -1269,6 +1330,8 @@ fn failed_extension_snapshot(
         themes: Vec::new(),
         locales: Vec::new(),
         commands: Vec::new(),
+        entrypoints: Vec::new(),
+        settings: Vec::new(),
         providers: Vec::new(),
         behaviors: Vec::new(),
         memories: Vec::new(),

@@ -1,6 +1,18 @@
 {
   "ext.memory.page": "记忆",
+  "ext.memory.about.page": "关于记忆",
   "ext.memory.eyebrow": "Memory",
   "ext.memory.title": "记忆",
-  "ext.memory.description": "记忆页只负责记忆检索、上下文装配、审查和图谱概览；会话的新建、打开和消息发送由系统会话页承载。"
+  "ext.memory.description": "记忆页只负责记忆检索、上下文装配、审查和图谱概览；会话的新建、打开和消息发送由系统会话页承载。",
+  "ext.memory.entry.workspace": "记忆工作台",
+  "ext.memory.entry.workspace_description": "进入记忆检索、上下文装配和审查界面。",
+  "ext.memory.entry.about": "关于记忆",
+  "ext.memory.entry.about_description": "查看记忆扩展的职责边界、能力范围和使用建议。",
+  "ext.memory.setting.default_owner_kind": "默认 owner kind",
+  "ext.memory.setting.default_owner_kind_description": "决定记忆工作台首次检索时使用的 owner kind。",
+  "ext.memory.setting.default_recall_limit": "默认召回数量",
+  "ext.memory.setting.default_recall_limit_description": "决定记忆工作台默认回忆时采用的数量上限。",
+  "ext.memory.setting.option.global": "全局",
+  "ext.memory.setting.option.agent": "Agent",
+  "ext.memory.setting.option.space": "空间"
 }

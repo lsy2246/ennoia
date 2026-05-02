@@ -325,6 +325,74 @@ pub struct ExtensionConversationSpec {
     pub capabilities: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ExtensionEntrypointKind {
+    Page,
+    Panel,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ExtensionEntrypointSpec {
+    pub id: String,
+    pub label: LocalizedText,
+    #[serde(default)]
+    pub description: Option<LocalizedText>,
+    pub kind: ExtensionEntrypointKind,
+    #[serde(default)]
+    pub page_id: Option<String>,
+    #[serde(default)]
+    pub panel_id: Option<String>,
+    #[serde(default)]
+    pub icon: Option<String>,
+    #[serde(default)]
+    pub order: Option<i32>,
+    #[serde(default)]
+    pub prominent: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ExtensionSettingFieldType {
+    Text,
+    Textarea,
+    Boolean,
+    Select,
+    Number,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ExtensionSettingOptionSpec {
+    pub label: LocalizedText,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum ExtensionSettingValue {
+    String(String),
+    Integer(i64),
+    Boolean(bool),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ExtensionSettingFieldSpec {
+    pub key: String,
+    pub label: LocalizedText,
+    #[serde(default)]
+    pub description: Option<LocalizedText>,
+    #[serde(rename = "type")]
+    pub field_type: ExtensionSettingFieldType,
+    #[serde(default)]
+    pub placeholder: Option<String>,
+    #[serde(default)]
+    pub required: bool,
+    #[serde(default)]
+    pub options: Vec<ExtensionSettingOptionSpec>,
+    #[serde(default)]
+    pub default_value: Option<ExtensionSettingValue>,
+}
+
 pub const HOOK_EVENT_CONVERSATION_CREATED: &str = "conversation.created";
 pub const HOOK_EVENT_CONVERSATION_MESSAGE_CREATED: &str = "conversation.message.created";
 pub const HOOK_EVENT_RUN_REQUESTED: &str = "run.requested";
@@ -563,6 +631,10 @@ pub struct ExtensionManifest {
     pub commands: Vec<CommandContribution>,
     #[serde(default)]
     pub subscriptions: Vec<SubscriptionContribution>,
+    #[serde(default)]
+    pub entrypoints: Vec<ExtensionEntrypointSpec>,
+    #[serde(default)]
+    pub settings: Vec<ExtensionSettingFieldSpec>,
     #[serde(default)]
     pub conversation: ExtensionConversationSpec,
 }

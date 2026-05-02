@@ -34,6 +34,7 @@ import { Schedules } from "@/pages/schedules";
 import { Settings } from "@/pages/settings";
 import { Skills } from "@/pages/skills";
 import { ExtensionPageView } from "@/views/extensions/Page";
+import { ExtensionPanelView } from "@/views/extensions/Panel";
 
 type ResourcePanelParams = {
   panelKind?: "resource";
@@ -244,6 +245,8 @@ function RoutedWorkbenchPanel(props: IDockviewPanelProps<RoutePanelParams>) {
       default:
         return href.startsWith("/extension-pages/")
           ? <ExtensionPageView pageId={decodeURIComponent(href.replace("/extension-pages/", ""))} />
+          : href.startsWith("/extension-panels/")
+            ? <ExtensionPanelView panelId={decodeURIComponent(href.replace("/extension-panels/", ""))} />
           : <div className="empty-card">{props.params.label}</div>;
     }
   })();

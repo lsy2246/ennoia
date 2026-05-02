@@ -10,6 +10,7 @@ import { Skills } from "@/pages/skills";
 import { Welcome } from "@/pages/welcome";
 import { Conversations } from "@/pages/conversations";
 import { ExtensionPageView } from "@/views/extensions/Page";
+import { ExtensionPanelView } from "@/views/extensions/Panel";
 import { useRuntimeStore } from "@/stores/runtime";
 
 function requireInitialized() {
@@ -105,6 +106,12 @@ const extensionPageRoute = createRoute({
   component: ExtensionPageView,
 });
 
+const extensionPanelRoute = createRoute({
+  getParentRoute: () => webRoute,
+  path: "/extension-panels/$panelId",
+  component: ExtensionPanelView,
+});
+
 const extensionsRoute = createRoute({
   getParentRoute: () => webRoute,
   path: "/extensions",
@@ -132,6 +139,7 @@ const routeTree = rootRoute.addChildren([
     skillsRoute,
     schedulesRoute,
     extensionPageRoute,
+    extensionPanelRoute,
     extensionsRoute,
     logsRoute,
     settingsRoute,

@@ -2,7 +2,7 @@
 
 ## 定位
 
-Extension 负责系统能力，Skill 负责工具与用法。Extension 不再表示“前端 + 独立后端服务”，而是由宿主装配的一组能力声明：`ui`、`worker`、`resource_types`、`capabilities`、`surfaces`、`themes`、`locales`、`commands`、`subscriptions`。
+Extension 负责系统能力，Skill 负责工具与用法。Extension 不再表示“前端 + 独立后端服务”，而是由宿主装配的一组能力声明：`ui`、`worker`、`resource_types`、`capabilities`、`surfaces`、`entrypoints`、`settings`、`themes`、`locales`、`commands`、`subscriptions`。
 
 ## 源码放置
 
@@ -28,6 +28,8 @@ Extension 负责系统能力，Skill 负责工具与用法。Extension 不再表
 - `resource_types`
 - `capabilities`
 - `surfaces`
+- `entrypoints`
+- `settings`
 - `locales`
 - `themes`
 - `commands`
@@ -77,6 +79,8 @@ Manifest 主声明只有一层：
 - `resource_types[]`：声明扩展理解或产出的资源模型。
 - `capabilities[]`：声明系统能力入口。
 - `surfaces[]`：声明 page、panel 等 UI 挂载点。
+- `entrypoints[]`：声明扩展页里优先展示的“可进入入口”，名称、说明和排序都由扩展自己定义。
+- `settings[]`：声明扩展级配置字段，由宿主渲染表单并保存。
 - `locales[]`、`themes[]`、`commands[]`：声明静态 UI 资源。
 - `subscriptions[]`：声明事件订阅关系。
 
@@ -89,7 +93,46 @@ Manifest 主声明只有一层：
 - `metadata.schedule_action` -> Schedule Action
 - `subscriptions[] + capability.entry` -> Hook
 
-`surfaces[]` 里的 `kind = "page"` 是可选 UI 页面贡献。声明页面后，Web 的扩展详情页会提供“打开视图”；只有页面额外声明 `nav.default_pinned = true` 时才默认进入主导航。
+`surfaces[]` 里的 `kind = "page"` 是可选 UI 页面贡献。声明页面后，Web 的扩展详情页会根据 `entrypoints[]` 把这些入口优先展示出来；只有页面额外声明 `nav.default_pinned = true` 时才默认进入主导航。
+
+`entrypoints[]` 用来表达“用户从哪里进入这个扩展”，而不是简单暴露底层 surface。当前支持两种目标：
+
+- `kind = "page"`：进入某个页面，使用 `page_id`
+- `kind = "panel"`：进入某个面板，使用 `panel_id`
+
+推荐字段：
+
+- `id`
+- `label`
+- `description`
+- `kind`
+- `page_id` 或 `panel_id`
+- `icon`
+- `order`
+- `prominent`
+
+如果扩展没有显式声明 `entrypoints[]`，宿主会从 `surfaces[]` 派生默认 page / panel 入口，保证扩展页始终可进入。
+
+`settings[]` 用来声明扩展级配置表单。当前支持字段类型：
+
+- `text`
+- `textarea`
+- `boolean`
+- `select`
+- `number`
+
+推荐字段：
+
+- `key`
+- `label`
+- `description`
+- `type`
+- `placeholder`
+- `required`
+- `options`
+- `default_value`
+
+宿主会把扩展配置保存到 `~/.ennoia/data/extensions/{extension_id}/settings.toml`。这个文件属于扩展私有数据，不进入系统级 `config/` 根目录。
 
 `themes[]` 是可选主题贡献。扩展主题遵循 `ennoia.theme`，通过 `tokens_entry` 提供 CSS 变量文件，详细 token 规范见 [主题协议](theme-contract.md)。
 

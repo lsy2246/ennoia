@@ -3,9 +3,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   getExtension,
   getExtensionLogs,
+  getExtensionSettings,
   listExtensions,
   reloadExtension,
   restartExtension,
+  saveExtensionSettings,
   setExtensionEnabled,
   type ExtensionDetail,
   type ExtensionRuntimeState,
@@ -34,6 +36,13 @@ type ExtensionPanelListItem = {
   title: string;
   mount: string;
   slot: string;
+};
+
+type ExtensionSettingsState = {
+  status: "idle" | "loading" | "ready" | "saving" | "error";
+  extensionId: string | null;
+  values: Record<string, string | number | boolean>;
+  message: string | null;
 };
 
 function statusBadgeClass(status: string) {
@@ -96,6 +105,21 @@ function extensionSortWeight(extension: ExtensionRuntimeState) {
   return 2;
 }
 
+function takePreviewItems<T>(items: T[], limit = 4) {
+  return items.slice(0, limit);
+}
+
+function localizeEntrypointKind(kind: string, t: (key: string, fallback: string) => string) {
+  switch (kind) {
+    case "page":
+      return t("web.extensions.entrypoint_kind.page", "页面");
+    case "panel":
+      return t("web.extensions.entrypoint_kind.panel", "面板");
+    default:
+      return kind;
+  }
+}
+
 export function Extensions() {
   const { formatDateTime, resolveText, runtime, t } = useUiHelpers();
   const workbenchApi = useWorkbenchStore((state) => state.api);
@@ -108,20 +132,47 @@ export function Extensions() {
     extensionId: null,
     content: "",
   });
+  const [settingsState, setSettingsState] = useState<ExtensionSettingsState>({
+    status: "idle",
+    extensionId: null,
+    values: {},
+    message: null,
+  });
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<ExtensionStatusFilter>("all");
   const [busy, setBusy] = useState(false);
-  const [loadingDetail, setLoadingDetail] = useState(false);
   const [actionBusy, setActionBusy] = useState<"enable" | "disable" | "reload" | "restart" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const loadExtensionDetail = useCallback(async (extensionId: string) => {
     const requestId = ++detailRequestRef.current;
-    setLoadingDetail(true);
-    const nextDetail = await getExtension(extensionId).catch(() => null);
+    setSettingsState({
+      status: "loading",
+      extensionId,
+      values: {},
+      message: null,
+    });
+    const [nextDetail, nextSettings] = await Promise.all([
+      getExtension(extensionId).catch(() => null),
+      getExtensionSettings(extensionId).catch(() => null),
+    ]);
     if (requestId === detailRequestRef.current) {
       setDetail(nextDetail);
-      setLoadingDetail(false);
+      setSettingsState(
+        nextSettings
+          ? {
+            status: "ready",
+            extensionId,
+            values: nextSettings.values,
+            message: null,
+          }
+          : {
+            status: "error",
+            extensionId,
+            values: {},
+            message: null,
+          },
+      );
     }
   }, []);
 
@@ -142,8 +193,8 @@ export function Extensions() {
         await loadExtensionDetail(nextSelected.id);
       } else {
         setDetail(null);
-        setLoadingDetail(false);
         setLogsState({ status: "idle", extensionId: null, content: "" });
+        setSettingsState({ status: "idle", extensionId: null, values: {}, message: null });
       }
     } catch (err) {
       setError(String(err));
@@ -205,21 +256,6 @@ export function Extensions() {
     }
   }
 
-  const extensionCountsById = useMemo(() => {
-    const counts = new Map<string, { pageCount: number; panelCount: number }>();
-    for (const page of runtime?.registry.pages ?? []) {
-      const current = counts.get(page.extension_id) ?? { pageCount: 0, panelCount: 0 };
-      current.pageCount += 1;
-      counts.set(page.extension_id, current);
-    }
-    for (const panel of runtime?.registry.panels ?? []) {
-      const current = counts.get(panel.extension_id) ?? { pageCount: 0, panelCount: 0 };
-      current.panelCount += 1;
-      counts.set(panel.extension_id, current);
-    }
-    return counts;
-  }, [runtime?.registry.pages, runtime?.registry.panels]);
-
   const selectedPages = useMemo<ExtensionPageListItem[]>(() => {
     if (!selected) {
       return [];
@@ -263,6 +299,15 @@ export function Extensions() {
       slot: panel.slot,
     }));
   }, [detail, resolveText, runtime?.registry.panels, selected]);
+
+  const selectedPageById = useMemo(
+    () => new Map(selectedPages.map((page) => [page.id, page])),
+    [selectedPages],
+  );
+  const selectedPanelById = useMemo(
+    () => new Map(selectedPanels.map((panel) => [panel.id, panel])),
+    [selectedPanels],
+  );
 
   const filteredExtensions = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
@@ -309,16 +354,13 @@ export function Extensions() {
     () => extensions.filter((extension) => !extension.enabled).length,
     [extensions],
   );
-  const totalPages = runtime?.registry.pages.length ?? 0;
-  const totalPanels = runtime?.registry.panels.length ?? 0;
   const selectedDiagnostics = detail?.diagnostics ?? selected?.diagnostics ?? [];
   const selectedHealth = detail?.health ?? selected?.status ?? t("web.common.unknown", "未知");
-  const selectedPageCount = selectedPages.length;
-  const selectedPanelCount = selectedPanels.length;
-  const capabilityCount = detail?.capability_rows.length ?? 0;
-  const surfaceCount = detail?.surfaces.length ?? 0;
-  const resourceTypeCount = detail?.resource_types.length ?? 0;
-  const subscriptionCount = detail?.subscriptions.length ?? 0;
+  const selectedEntrypoints = detail?.entrypoints ?? [];
+  const selectedSettings = detail?.settings ?? [];
+  const selectedCapabilityRows = detail?.capability_rows ?? [];
+  const selectedResourceTypes = detail?.resource_types ?? [];
+  const selectedCommands = detail?.commands ?? [];
   const logsButtonLabel = selected && logsState.extensionId === selected.id && logsState.status === "ready"
     ? t("web.action.refresh", "刷新")
     : t("web.extensions.view_logs", "查看日志");
@@ -339,6 +381,71 @@ export function Extensions() {
         source: "extension",
       },
     });
+  }
+
+  function openExtensionPanel(panelId: string, label: string) {
+    if (!workbenchApi) {
+      setError(t("web.extensions.open_page_unavailable", "工作台尚未就绪，无法打开扩展视图。"));
+      return;
+    }
+    workbenchApi.addPanel({
+      id: `route:extension-panel:${panelId}:${Date.now().toString(36)}`,
+      title: label,
+      component: "route",
+      params: {
+        routeId: panelId,
+        href: `/extension-panels/${encodeURIComponent(panelId)}`,
+        label,
+        source: "extension",
+      },
+    });
+  }
+
+  function updateSettingValue(key: string, value: string | number | boolean) {
+    setSettingsState((current) => ({
+      ...current,
+      values: {
+        ...current.values,
+        [key]: value,
+      },
+      message: null,
+    }));
+  }
+
+  async function handleSaveSettings() {
+    if (!selected || !detail) {
+      return;
+    }
+    const payload = Object.fromEntries(
+      selectedSettings.flatMap((field) => {
+        const currentValue = settingsState.values[field.key];
+        if (currentValue === undefined) {
+          return [];
+        }
+        return [[field.key, currentValue] as const];
+      }),
+    );
+
+    setSettingsState((current) => ({
+      ...current,
+      status: "saving",
+      message: null,
+    }));
+    try {
+      const saved = await saveExtensionSettings(selected.id, payload);
+      setSettingsState({
+        status: "ready",
+        extensionId: selected.id,
+        values: saved.values,
+        message: t("web.extensions.settings_saved", "扩展配置已保存。"),
+      });
+    } catch (err) {
+      setSettingsState((current) => ({
+        ...current,
+        status: "error",
+        message: String(err),
+      }));
+    }
   }
 
   return (
@@ -378,16 +485,6 @@ export function Extensions() {
             <span>{t("web.extensions.summary_disabled", "停用")}</span>
             <strong>{totalDisabled}</strong>
             <small>{t("web.common.disabled", "停用")}</small>
-          </article>
-          <article className="metric-card extensions-metric-card">
-            <span>{t("web.extensions.summary_pages", "扩展视图")}</span>
-            <strong>{totalPages}</strong>
-            <small>{t("web.extensions.surfaces", "界面挂载")}</small>
-          </article>
-          <article className="metric-card extensions-metric-card">
-            <span>{t("web.extensions.summary_panels", "扩展面板")}</span>
-            <strong>{totalPanels}</strong>
-            <small>{t("web.extensions.ui_contributions", "UI 贡献")}</small>
           </article>
         </div>
       </section>
@@ -437,7 +534,6 @@ export function Extensions() {
               </div>
             ) : (
               filteredExtensions.map((extension) => {
-                const counts = extensionCountsById.get(extension.id) ?? { pageCount: 0, panelCount: 0 };
                 return (
                   <article
                     key={extension.id}
@@ -461,8 +557,7 @@ export function Extensions() {
                         </span>
                       </div>
                       <div className="extensions-inline-meta">
-                        <span>{`${t("web.extensions.summary_pages", "扩展视图")} ${counts.pageCount}`}</span>
-                        <span>{`${t("web.extensions.summary_panels", "扩展面板")} ${counts.panelCount}`}</span>
+                        <span>{localizeExtensionStatus(extension.status, t)}</span>
                         <span>{`${t("web.extensions.diagnostics", "诊断")} ${extension.diagnostics.length}`}</span>
                       </div>
                     </button>
@@ -525,8 +620,192 @@ export function Extensions() {
               <section className="extensions-section">
                 <div className="extensions-section__header">
                   <div className="stack">
-                    <div className="panel-title">{t("web.extensions.runtime_overview", "运行概览")}</div>
-                    {loadingDetail ? <p className="helper-text">{t("web.common.loading", "加载中…")}</p> : null}
+                    <div className="panel-title">{t("web.extensions.entrypoints", "可用入口")}</div>
+                    <p className="helper-text">{t("web.extensions.entrypoints_description", "这里列出扩展自己声明的可进入入口，用户先从这里进入，而不是先阅读底层运行信息。")}</p>
+                  </div>
+                  <span className="badge badge--muted">{selectedEntrypoints.length}</span>
+                </div>
+                {selectedEntrypoints.length === 0 ? (
+                  <div className="empty-card extensions-empty-state">
+                    <strong>{t("web.extensions.entrypoints_empty_title", "当前没有可进入入口")}</strong>
+                    <p>{t("web.extensions.entrypoints_empty", "这个扩展还没有声明入口，或者入口尚未解析出来。")}</p>
+                  </div>
+                ) : (
+                  <div className="extensions-entry-grid">
+                    {selectedEntrypoints.map((entrypoint) => {
+                      const page = entrypoint.page_id ? selectedPageById.get(entrypoint.page_id) : null;
+                      const panel = entrypoint.panel_id ? selectedPanelById.get(entrypoint.panel_id) : null;
+                      const label = resolveText(entrypoint.label);
+                      const description = entrypoint.description
+                        ? resolveText(entrypoint.description)
+                        : page?.title ?? panel?.title ?? t("web.extensions.entrypoint_no_description", "这个入口没有额外说明。");
+                      return (
+                        <article key={entrypoint.id} className={`mini-card extensions-entry-card ${entrypoint.prominent ? "extensions-entry-card--prominent" : ""}`}>
+                          <div className="extensions-entry-card__header">
+                            <div className="stack">
+                              <strong>{label}</strong>
+                              <small>{entrypoint.id}</small>
+                            </div>
+                            <span className="badge badge--muted">{localizeEntrypointKind(entrypoint.kind, t)}</span>
+                          </div>
+                          <p>{description}</p>
+                          <div className="extensions-inline-meta">
+                            {page ? <span>{`${t("web.extensions.mount_point", "挂载点")} ${page.mount}`}</span> : null}
+                            {panel ? <span>{`${t("web.extensions.slot", "槽位")} ${panel.slot}`}</span> : null}
+                          </div>
+                          <div className="button-row extensions-entry-card__footer">
+                            <button
+                              type="button"
+                              className={entrypoint.prominent ? "" : "secondary"}
+                              onClick={() => {
+                                if (entrypoint.kind === "page" && entrypoint.page_id) {
+                                  openExtensionPage(entrypoint.page_id, label);
+                                }
+                                if (entrypoint.kind === "panel" && entrypoint.panel_id) {
+                                  openExtensionPanel(entrypoint.panel_id, label);
+                                }
+                              }}
+                              disabled={
+                                (entrypoint.kind === "page" && !entrypoint.page_id)
+                                || (entrypoint.kind === "panel" && !entrypoint.panel_id)
+                              }
+                            >
+                              {t("web.extensions.enter_entrypoint", "进入")}
+                            </button>
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                )}
+              </section>
+
+              {selectedSettings.length > 0 ? (
+                <section className="extensions-section">
+                  <div className="extensions-section__header">
+                    <div className="stack">
+                      <div className="panel-title">{t("web.extensions.settings", "配置")}</div>
+                      <p className="helper-text">{t("web.extensions.settings_description", "这里显示扩展自己声明的可填写配置字段，适合放扩展级别的默认值和开关。")}</p>
+                    </div>
+                    <button
+                      type="button"
+                      className="secondary"
+                      onClick={() => void handleSaveSettings()}
+                      disabled={settingsState.status === "loading" || settingsState.status === "saving"}
+                    >
+                      {settingsState.status === "saving"
+                        ? t("web.common.loading", "加载中…")
+                        : t("web.extensions.save_settings", "保存配置")}
+                    </button>
+                  </div>
+                  {settingsState.message ? (
+                    <div className={settingsState.status === "error" ? "error" : "helper-text"}>
+                      {settingsState.message}
+                    </div>
+                  ) : null}
+                  <div className="form-grid extensions-settings-grid">
+                    {selectedSettings.map((field) => {
+                      const currentValue = settingsState.values[field.key] ?? field.default_value;
+                      return (
+                        <label
+                          key={field.key}
+                          className={`extensions-setting-field ${field.type === "textarea" ? "extensions-setting-field--wide" : ""}`}
+                        >
+                          <span className="extensions-setting-field__label">{resolveText(field.label)}</span>
+                          {field.description ? (
+                            <small className="extensions-setting-field__help">{resolveText(field.description)}</small>
+                          ) : null}
+                          {field.type === "textarea" ? (
+                            <textarea
+                              rows={4}
+                              value={typeof currentValue === "string" ? currentValue : ""}
+                              placeholder={field.placeholder ?? ""}
+                              onChange={(event) => updateSettingValue(field.key, event.target.value)}
+                            />
+                          ) : null}
+                          {field.type === "text" ? (
+                            <input
+                              value={typeof currentValue === "string" ? currentValue : ""}
+                              placeholder={field.placeholder ?? ""}
+                              onChange={(event) => updateSettingValue(field.key, event.target.value)}
+                            />
+                          ) : null}
+                          {field.type === "number" ? (
+                            <input
+                              type="number"
+                              value={typeof currentValue === "number" ? String(currentValue) : "0"}
+                              onChange={(event) => updateSettingValue(field.key, Number(event.target.value || 0))}
+                            />
+                          ) : null}
+                          {field.type === "select" ? (
+                            <select
+                              value={typeof currentValue === "string" ? currentValue : ""}
+                              onChange={(event) => updateSettingValue(field.key, event.target.value)}
+                            >
+                              {field.options.map((option) => (
+                                <option key={option.value} value={option.value}>
+                                  {resolveText(option.label)}
+                                </option>
+                              ))}
+                            </select>
+                          ) : null}
+                          {field.type === "boolean" ? (
+                            <span className="check-row">
+                              <input
+                                type="checkbox"
+                                checked={Boolean(currentValue)}
+                                onChange={(event) => updateSettingValue(field.key, event.target.checked)}
+                              />
+                              <span>{t("web.extensions.boolean_enabled", "启用")}</span>
+                            </span>
+                          ) : null}
+                        </label>
+                      );
+                    })}
+                  </div>
+                </section>
+              ) : null}
+
+              <section className="extensions-section">
+                <div className="extensions-section__header">
+                  <div className="stack">
+                    <div className="panel-title">{t("web.extensions.diagnostics", "诊断")}</div>
+                    <p className="helper-text">{t("web.extensions.diagnostics_description", "先看诊断摘要，再决定是否重载、重启或查看日志。")}</p>
+                  </div>
+                  <span className={`badge ${selectedDiagnostics.length > 0 ? "badge--warn" : "badge--muted"}`}>
+                    {selectedDiagnostics.length}
+                  </span>
+                </div>
+                {selectedDiagnostics.length === 0 ? (
+                  <div className="empty-card extensions-empty-state">
+                    <strong>{t("web.extensions.diagnostics_empty_title", "当前状态正常")}</strong>
+                    <p>{t("web.extensions.diagnostics_empty", "当前没有诊断。")}</p>
+                  </div>
+                ) : (
+                  <div className="extensions-diagnostic-list">
+                    {selectedDiagnostics.map((diagnostic, index) => (
+                      <article key={`${diagnostic.at}:${diagnostic.summary}:${index}`} className={`mini-card extensions-diagnostic-card extensions-diagnostic-card--${statusBadgeClass(diagnostic.level).replace("badge--", "")}`}>
+                        <header className="extensions-diagnostic-card__header">
+                          <div className="stack extensions-diagnostic-card__title">
+                            <strong>{diagnostic.summary}</strong>
+                            <small>{formatDateTime(diagnostic.at)}</small>
+                          </div>
+                          <span className={`badge ${statusBadgeClass(diagnostic.level)}`}>
+                            {localizeExtensionStatus(diagnostic.level, t)}
+                          </span>
+                        </header>
+                        {diagnostic.detail ? <p className="extensions-diagnostic-card__detail">{diagnostic.detail}</p> : null}
+                      </article>
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              <section className="extensions-section">
+                <div className="extensions-section__header">
+                  <div className="stack">
+                    <div className="panel-title">{t("web.extensions.advanced", "高级信息")}</div>
+                    <p className="helper-text">{t("web.extensions.advanced_description", "把运行参数、挂载清单和协议摘要放到后面，只有在排查或核对时再看。")}</p>
                   </div>
                 </div>
                 <div className="kv-list extensions-kv-list">
@@ -534,7 +813,9 @@ export function Extensions() {
                   <span>{t("web.common.status", "状态")}</span><strong>{localizeExtensionStatus(selected.status, t)}</strong>
                   <span>{t("web.extensions.health", "健康状态")}</span><strong>{localizeExtensionStatus(selectedHealth, t)}</strong>
                   <span>{t("web.extensions.generation", "版本代次")}</span><strong>{detail?.generation ?? t("web.common.none", "无")}</strong>
-                  <span>{t("web.extensions.diagnostics", "诊断")}</span><strong>{selectedDiagnostics.length}</strong>
+                  <span>{t("web.extensions.runtime_startup", "启动策略")}</span><strong>{detail?.runtime.startup ?? t("web.common.none", "无")}</strong>
+                  <span>{t("web.extensions.runtime_timeout", "超时限制")}</span><strong>{detail ? `${detail.runtime.timeout_ms} ms` : t("web.common.none", "无")}</strong>
+                  <span>{t("web.extensions.runtime_memory", "内存上限")}</span><strong>{detail ? `${detail.runtime.memory_limit_mb} MB` : t("web.common.none", "无")}</strong>
                   <span>{t("web.extensions.install_dir", "扩展目录")}</span><strong>{formatRelativePath(selected.install_dir)}</strong>
                   <span>{t("web.extensions.source_root", "来源目录")}</span><strong>{formatRelativePath(selected.source_root)}</strong>
                   <span>{t("web.extensions.docs", "文档入口")}</span><strong>{detail?.docs ? formatRelativePath(detail.docs) : t("web.common.none", "无")}</strong>
@@ -574,225 +855,92 @@ export function Extensions() {
                       <span className="badge badge--muted">{t("web.common.none", "无")}</span>
                     )}
                   </article>
+                  <article className="mini-card extensions-runtime-card extensions-runtime-card--wide">
+                    <div className="extensions-runtime-card__header">
+                      <strong>{t("web.extensions.permissions", "权限边界")}</strong>
+                    </div>
+                    {detail ? (
+                      <div className="kv-list extensions-kv-list extensions-kv-list--compact">
+                        <span>{t("web.extensions.permission_storage", "存储")}</span>
+                        <strong>{detail.permissions.storage ?? t("web.common.none", "无")}</strong>
+                        <span>SQLite</span>
+                        <strong>{detail.permissions.sqlite ? t("web.common.enabled", "启用") : t("web.common.disabled", "停用")}</strong>
+                        <span>{t("web.extensions.permission_network", "网络")}</span>
+                        <strong>{detail.permissions.network.length}</strong>
+                        <span>{t("web.extensions.permission_events", "事件")}</span>
+                        <strong>{detail.permissions.events.length}</strong>
+                        <span>{t("web.extensions.permission_fs", "文件")}</span>
+                        <strong>{detail.permissions.fs.length}</strong>
+                        <span>{t("web.extensions.permission_env", "环境变量")}</span>
+                        <strong>{detail.permissions.env.length}</strong>
+                      </div>
+                    ) : (
+                      <span className="badge badge--muted">{t("web.common.none", "无")}</span>
+                    )}
+                  </article>
                 </div>
-              </section>
-
-              <section className="extensions-section">
-                <div className="panel-title">{t("web.extensions.capability_summary", "能力与挂载")}</div>
                 <div className="extensions-summary-grid">
                   <article className="extensions-summary-card">
                     <div className="extensions-summary-card__header">
                       <div className="extensions-summary-card__title">
                         <span>{t("web.extensions.capabilities", "能力声明")}</span>
-                        <strong>{t("web.extensions.capabilities", "能力声明")}</strong>
+                        <strong>{selectedCapabilityRows.length}</strong>
                       </div>
-                      <span className="badge badge--muted extensions-summary-card__count">{capabilityCount}</span>
                     </div>
-                    <p>{t("web.extensions.capabilities_help", "manifest 的 capabilities 是系统能力入口；Provider、Action、Memory 等视图都从这里派生。")}</p>
-                  </article>
-                  <article className="extensions-summary-card">
-                    <div className="extensions-summary-card__header">
-                      <div className="extensions-summary-card__title">
-                        <span>{t("web.extensions.surfaces", "界面挂载")}</span>
-                        <strong>{t("web.extensions.surfaces", "界面挂载")}</strong>
-                      </div>
-                      <span className="badge badge--muted extensions-summary-card__count">{surfaceCount}</span>
+                    <div className="chip-grid extensions-summary-card__chips">
+                      {takePreviewItems(selectedCapabilityRows).map((capability) => (
+                        <span key={capability.id} className="chip chip--active">
+                          {`${capability.title ? resolveText(capability.title) : capability.contract} · ${capability.kind}`}
+                        </span>
+                      ))}
                     </div>
-                    <p>{t("web.extensions.surfaces_help", "surfaces 统一表达 page、panel 等 UI 挂载点。")}</p>
-                  </article>
-                  <article className="extensions-summary-card">
-                    <div className="extensions-summary-card__header">
-                      <div className="extensions-summary-card__title">
-                        <span>{t("web.extensions.subscriptions", "事件订阅")}</span>
-                        <strong>{t("web.extensions.subscriptions", "事件订阅")}</strong>
-                      </div>
-                      <span className="badge badge--muted extensions-summary-card__count">{subscriptionCount}</span>
-                    </div>
-                    <p>{t("web.extensions.subscriptions_help", "subscriptions 只声明监听关系，实际 Hook 处理入口由 capability.entry 决定。")}</p>
                   </article>
                   <article className="extensions-summary-card">
                     <div className="extensions-summary-card__header">
                       <div className="extensions-summary-card__title">
                         <span>{t("web.extensions.resource_types", "资源类型")}</span>
-                        <strong>{t("web.extensions.resource_types", "资源类型")}</strong>
+                        <strong>{selectedResourceTypes.length}</strong>
                       </div>
-                      <span className="badge badge--muted extensions-summary-card__count">{resourceTypeCount}</span>
                     </div>
-                    <p>{t("web.extensions.resource_types_help", "resource_types 用来声明扩展理解和产出的资源模型。")}</p>
+                    <div className="chip-grid extensions-summary-card__chips">
+                      {takePreviewItems(selectedResourceTypes).map((resourceType) => (
+                        <span key={resourceType.id} className="chip chip--active">
+                          {resourceType.title ? resolveText(resourceType.title) : resourceType.id}
+                        </span>
+                      ))}
+                    </div>
                   </article>
                   <article className="extensions-summary-card">
                     <div className="extensions-summary-card__header">
                       <div className="extensions-summary-card__title">
-                        <span>{t("web.extensions.summary_pages", "扩展视图")}</span>
-                        <strong>{t("web.extensions.summary_pages", "扩展视图")}</strong>
+                        <span>{t("web.extensions.commands", "命令")}</span>
+                        <strong>{selectedCommands.length}</strong>
                       </div>
-                      <span className="badge badge--muted extensions-summary-card__count">{selectedPageCount}</span>
                     </div>
-                    <p>{t("web.extensions.contributes_ui_help", "扩展可贡献页面、面板、主题和语言包。")}</p>
+                    <div className="chip-grid extensions-summary-card__chips">
+                      {takePreviewItems(selectedCommands).map((command) => (
+                        <span key={command.id} className="chip chip--active">
+                          {resolveText(command.title)}
+                        </span>
+                      ))}
+                    </div>
                   </article>
                   <article className="extensions-summary-card">
                     <div className="extensions-summary-card__header">
                       <div className="extensions-summary-card__title">
-                        <span>{t("web.extensions.summary_panels", "扩展面板")}</span>
-                        <strong>{t("web.extensions.summary_panels", "扩展面板")}</strong>
+                        <span>{t("web.extensions.conversation", "会话装配")}</span>
+                        <strong>{detail?.conversation.inject ? t("web.common.yes", "是") : t("web.common.no", "否")}</strong>
                       </div>
-                      <span className="badge badge--muted extensions-summary-card__count">{selectedPanelCount}</span>
                     </div>
-                    <p>{t("web.extensions.contributes_ui", "贡献 UI")}</p>
+                    <div className="chip-grid extensions-summary-card__chips">
+                      {detail?.conversation.capabilities.length ? detail.conversation.capabilities.map((item) => (
+                        <span key={item} className="chip chip--active">{item}</span>
+                      )) : (
+                        <span className="badge badge--muted">{t("web.common.none", "无")}</span>
+                      )}
+                    </div>
                   </article>
                 </div>
-              </section>
-
-              <section className="extensions-section">
-                <div className="extensions-section__header">
-                  <div className="stack">
-                    <div className="panel-title">{t("web.extensions.diagnostics", "诊断")}</div>
-                    <p className="helper-text">{t("web.extensions.diagnostics_description", "先看诊断摘要，再决定是否重载、重启或查看日志。")}</p>
-                  </div>
-                  <span className={`badge ${selectedDiagnostics.length > 0 ? "badge--warn" : "badge--muted"}`}>
-                    {selectedDiagnostics.length}
-                  </span>
-                </div>
-                {selectedDiagnostics.length === 0 ? (
-                  <div className="empty-card extensions-empty-state">
-                    <strong>{t("web.extensions.diagnostics_empty_title", "当前状态正常")}</strong>
-                    <p>{t("web.extensions.diagnostics_empty", "当前没有诊断。")}</p>
-                  </div>
-                ) : (
-                  <div className="extensions-diagnostic-list">
-                    {selectedDiagnostics.map((diagnostic, index) => (
-                      <article key={`${diagnostic.at}:${diagnostic.summary}:${index}`} className={`mini-card extensions-diagnostic-card extensions-diagnostic-card--${statusBadgeClass(diagnostic.level).replace("badge--", "")}`}>
-                        <header className="extensions-diagnostic-card__header">
-                          <div className="stack extensions-diagnostic-card__title">
-                            <strong>{diagnostic.summary}</strong>
-                            <small>{formatDateTime(diagnostic.at)}</small>
-                          </div>
-                          <span className={`badge ${statusBadgeClass(diagnostic.level)}`}>
-                            {localizeExtensionStatus(diagnostic.level, t)}
-                          </span>
-                        </header>
-                        {diagnostic.detail ? <p className="extensions-diagnostic-card__detail">{diagnostic.detail}</p> : null}
-                      </article>
-                    ))}
-                  </div>
-                )}
-              </section>
-
-              <section className="extensions-section">
-                <div className="panel-title">{t("web.extensions.ui_contributions", "UI 贡献")}</div>
-                <div className="extensions-contributions-grid">
-                  <div className="stack extensions-contribution-column">
-                    <div className="extensions-subtitle">{t("web.extensions.pages", "扩展视图")}</div>
-                    {selectedPages.length === 0 ? (
-                      <div className="empty-card extensions-contribution-empty">
-                        <strong>{t("web.extensions.ui_empty_title", "暂无贡献")}</strong>
-                        <p>{t("web.extensions.pages_empty", "这个扩展没有声明视图。")}</p>
-                      </div>
-                    ) : (
-                      selectedPages.map((page) => (
-                        <article key={page.id} className="mini-card extensions-contribution-card">
-                          <div className="extensions-contribution-card__header">
-                            <strong>{page.title}</strong>
-                            <span className="badge badge--muted">{t("web.extensions.page_kind", "页面")}</span>
-                          </div>
-                          <div className="extensions-contribution-card__body">
-                            <span>{t("web.extensions.mount_point", "挂载点")}</span>
-                            <p className="extensions-contribution-card__path">{page.mount}</p>
-                          </div>
-                          <div className="button-row extensions-contribution-card__footer">
-                            <button type="button" className="secondary" onClick={() => openExtensionPage(page.id, page.title)}>
-                              {t("web.extensions.open_page", "打开视图")}
-                            </button>
-                          </div>
-                        </article>
-                      ))
-                    )}
-                  </div>
-                  <div className="stack extensions-contribution-column">
-                    <div className="extensions-subtitle">{t("web.extensions.panels", "扩展面板")}</div>
-                    {selectedPanels.length === 0 ? (
-                      <div className="empty-card extensions-contribution-empty">
-                        <strong>{t("web.extensions.ui_empty_title", "暂无贡献")}</strong>
-                        <p>{t("web.extensions.panels_empty", "这个扩展没有声明面板。")}</p>
-                      </div>
-                    ) : (
-                      selectedPanels.map((panel) => (
-                        <article key={panel.id} className="mini-card extensions-contribution-card">
-                          <div className="extensions-contribution-card__header">
-                            <strong>{panel.title}</strong>
-                            <span className="badge badge--muted">{panel.slot}</span>
-                          </div>
-                          <div className="extensions-contribution-card__body">
-                            <span>{t("web.extensions.mount_point", "挂载点")}</span>
-                            <p className="extensions-contribution-card__path">{panel.mount}</p>
-                          </div>
-                        </article>
-                      ))
-                    )}
-                  </div>
-                </div>
-              </section>
-
-              <section className="extensions-section">
-                <div className="extensions-section__header">
-                  <div className="stack">
-                    <div className="panel-title">{t("web.extensions.conversation", "会话装配")}</div>
-                    <p className="helper-text">{t("web.extensions.conversation_description", "这里决定扩展是否进入会话目录，以及会向会话暴露哪些能力条件。")}</p>
-                  </div>
-                  <span className={`badge ${detail?.conversation.inject ? "badge--success" : "badge--muted"}`}>
-                    {detail?.conversation.inject ? t("web.common.enabled", "启用") : t("web.common.disabled", "停用")}
-                  </span>
-                </div>
-                {detail?.conversation.inject ? (
-                  <div className="extensions-conversation-grid">
-                    <article className="mini-card extensions-conversation-card extensions-conversation-card--status">
-                      <div className="extensions-conversation-card__header">
-                        <strong>{t("web.extensions.conversation_enabled", "进入会话目录")}</strong>
-                        <span className="badge badge--success">{t("web.common.yes", "是")}</span>
-                      </div>
-                      <p>{t("web.extensions.conversation_enabled_help", "这个扩展会出现在会话能力目录里，可被会话按规则引用。")}</p>
-                    </article>
-                    <article className="mini-card extensions-conversation-card">
-                      <div className="extensions-conversation-card__header">
-                        <strong>{t("web.extensions.conversation_material", "会话注入内容")}</strong>
-                      </div>
-                      <p>{t("web.extensions.conversation_material_help", "只复用扩展说明和这里声明的能力目录，不自动注入文档正文。")}</p>
-                    </article>
-                    <article className="mini-card extensions-conversation-card">
-                      <div className="extensions-conversation-card__header">
-                        <strong>{t("web.extensions.conversation_resource_types", "资源类型条件")}</strong>
-                      </div>
-                      {detail.conversation.resource_types.length > 0 ? (
-                        <div className="chip-grid">
-                          {detail.conversation.resource_types.map((item) => (
-                            <span key={item} className="chip chip--active">{item}</span>
-                          ))}
-                        </div>
-                      ) : (
-                        <span className="badge badge--muted">{t("web.common.none", "无")}</span>
-                      )}
-                    </article>
-                    <article className="mini-card extensions-conversation-card">
-                      <div className="extensions-conversation-card__header">
-                        <strong>{t("web.extensions.conversation_capabilities", "能力入口")}</strong>
-                      </div>
-                      {detail.conversation.capabilities.length > 0 ? (
-                        <div className="chip-grid">
-                          {detail.conversation.capabilities.map((item) => (
-                            <span key={item} className="chip chip--active">{item}</span>
-                          ))}
-                        </div>
-                      ) : (
-                        <span className="badge badge--muted">{t("web.common.none", "无")}</span>
-                      )}
-                    </article>
-                  </div>
-                ) : (
-                  <div className="empty-card extensions-empty-state">
-                    <strong>{t("web.extensions.conversation_empty_title", "未接入会话目录")}</strong>
-                    <p>{t("web.extensions.conversation_empty", "这个扩展没有声明进入会话目录的规则。")}</p>
-                  </div>
-                )}
               </section>
 
               <section className="extensions-section">

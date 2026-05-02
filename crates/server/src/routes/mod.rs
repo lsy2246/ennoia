@@ -131,6 +131,10 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/extensions/attach", post(extension_attach))
         .route("/api/extensions/{extension_id}", get(extension_detail))
         .route(
+            "/api/extensions/{extension_id}/settings",
+            get(extension_settings).put(extension_settings_put),
+        )
+        .route(
             "/api/extensions/{extension_id}/diagnostics",
             get(extension_diagnostics),
         )

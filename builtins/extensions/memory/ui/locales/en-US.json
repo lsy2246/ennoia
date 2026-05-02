@@ -1,6 +1,18 @@
 {
   "ext.memory.page": "Memory",
+  "ext.memory.about.page": "About Memory",
   "ext.memory.eyebrow": "Memory",
   "ext.memory.title": "Memory",
-  "ext.memory.description": "The Memory page owns recall, context assembly, review and graph overview; conversation creation, opening and sending messages stay in the system Conversations page."
+  "ext.memory.description": "The Memory page owns recall, context assembly, review and graph overview; conversation creation, opening and sending messages stay in the system Conversations page.",
+  "ext.memory.entry.workspace": "Memory workspace",
+  "ext.memory.entry.workspace_description": "Open the recall, context assembly, and review workspace.",
+  "ext.memory.entry.about": "About Memory",
+  "ext.memory.entry.about_description": "Review the extension boundary, capability scope, and usage notes.",
+  "ext.memory.setting.default_owner_kind": "Default owner kind",
+  "ext.memory.setting.default_owner_kind_description": "Controls the initial owner kind used by the memory workspace.",
+  "ext.memory.setting.default_recall_limit": "Default recall limit",
+  "ext.memory.setting.default_recall_limit_description": "Controls the default recall limit used by the memory workspace.",
+  "ext.memory.setting.option.global": "Global",
+  "ext.memory.setting.option.agent": "Agent",
+  "ext.memory.setting.option.space": "Space"
 }

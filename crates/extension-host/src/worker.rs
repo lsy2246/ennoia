@@ -830,6 +830,8 @@ mod tests {
             themes: Vec::new(),
             locales: Vec::new(),
             commands: Vec::new(),
+            entrypoints: Vec::new(),
+            settings: Vec::new(),
             providers: Vec::new(),
             behaviors: Vec::new(),
             memories: vec![MemoryContribution {

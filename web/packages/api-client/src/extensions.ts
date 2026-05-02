@@ -1,6 +1,11 @@
 ﻿import { apiUrl, fetchJson, toQueryString } from "./core";
 import type { ExtensionDiagnostic } from "@ennoia/ui-sdk";
-import type { ExtensionDetail, ExtensionRuntimeEvent, ExtensionRuntimeState } from "./types";
+import type {
+  ExtensionDetail,
+  ExtensionRuntimeEvent,
+  ExtensionRuntimeState,
+  ExtensionSettingsResponse,
+} from "./types";
 
 export async function listExtensions() {
   return fetchJson<ExtensionRuntimeState[]>("/api/extensions");
@@ -8,6 +13,20 @@ export async function listExtensions() {
 
 export async function getExtension(extensionId: string) {
   return fetchJson<ExtensionDetail>(`/api/extensions/${extensionId}`);
+}
+
+export async function getExtensionSettings(extensionId: string) {
+  return fetchJson<ExtensionSettingsResponse>(`/api/extensions/${extensionId}/settings`);
+}
+
+export async function saveExtensionSettings(
+  extensionId: string,
+  values: Record<string, string | number | boolean>,
+) {
+  return fetchJson<ExtensionSettingsResponse>(`/api/extensions/${extensionId}/settings`, {
+    method: "PUT",
+    body: JSON.stringify({ values }),
+  });
 }
 
 export async function getExtensionDiagnostics(extensionId: string) {

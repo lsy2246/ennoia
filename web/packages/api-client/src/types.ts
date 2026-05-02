@@ -2,6 +2,7 @@ import type {
   ExtensionBehaviorContribution,
   ExtensionCapabilityContribution,
   ExtensionDiagnostic,
+  ExtensionEntrypoint,
   ExtensionActionContribution,
   ExtensionLocaleContribution,
   ExtensionMemoryContribution,
@@ -10,6 +11,7 @@ import type {
   ExtensionProviderContribution,
   ExtensionResourceTypeContribution,
   ExtensionScheduleActionContribution,
+  ExtensionSettingField,
   ExtensionSubscriptionContribution,
   ExtensionSurfaceContribution,
   ExtensionThemeContribution,
@@ -499,6 +501,8 @@ export type ExtensionDetail = {
     action: string;
     shortcut?: string | null;
   }[];
+  entrypoints: ExtensionEntrypoint[];
+  settings: ExtensionSettingField[];
   providers: ExtensionProviderContribution["provider"][];
   behaviors: ExtensionBehaviorContribution["behavior"][];
   memories: ExtensionMemoryContribution["memory"][];
@@ -510,6 +514,11 @@ export type ExtensionDetail = {
   schedule_actions: ExtensionScheduleActionContribution["schedule_action"][];
   subscriptions: ExtensionSubscriptionContribution["subscription"][];
   diagnostics: ExtensionDiagnostic[];
+};
+
+export type ExtensionSettingsResponse = {
+  extension_id: string;
+  values: Record<string, string | number | boolean>;
 };
 
 export type SystemLog = {

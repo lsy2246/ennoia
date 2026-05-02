@@ -61,6 +61,34 @@ export type ExtensionSubscription = {
   match_capability_contracts: string[];
 };
 
+export type ExtensionEntrypoint = {
+  id: string;
+  label: LocalizedText;
+  description?: LocalizedText | null;
+  kind: "page" | "panel";
+  page_id?: string | null;
+  panel_id?: string | null;
+  icon?: string | null;
+  order?: number | null;
+  prominent: boolean;
+};
+
+export type ExtensionSettingValue = string | number | boolean;
+
+export type ExtensionSettingField = {
+  key: string;
+  label: LocalizedText;
+  description?: LocalizedText | null;
+  type: "text" | "textarea" | "boolean" | "select" | "number";
+  placeholder?: string | null;
+  required: boolean;
+  options: Array<{
+    label: LocalizedText;
+    value: string;
+  }>;
+  default_value?: ExtensionSettingValue | null;
+};
+
 export type ExtensionResourceTypeContribution = RegisteredContributionBase & {
   resource_type: ExtensionResourceType;
 };
@@ -332,6 +360,8 @@ export type ExtensionRuntimeExtension = {
   themes: ExtensionThemeContribution["theme"][];
   locales: ExtensionLocaleContribution["locale"][];
   commands: ExtensionCommandContribution["command"][];
+  entrypoints: ExtensionEntrypoint[];
+  settings: ExtensionSettingField[];
   providers: ExtensionProviderContribution["provider"][];
   behaviors: ExtensionBehaviorContribution["behavior"][];
   memories: ExtensionMemoryContribution["memory"][];

@@ -1,5 +1,11 @@
 use super::*;
-use ennoia_kernel::{ExtensionRpcRequest, ExtensionRpcResponse, HookDispatchResponse};
+use ennoia_kernel::{
+    ExtensionRpcRequest, ExtensionRpcResponse, ExtensionSettingFieldType, ExtensionSettingValue,
+    HookDispatchResponse,
+};
+use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
+use std::path::PathBuf;
 use std::time::Instant;
 
 use crate::app::record_trace_span;
@@ -15,6 +21,24 @@ const HOOK_DISPATCH_RETRY_DELAY_MS: u64 = 250;
 pub(crate) struct HookDispatchOutcome {
     pub extension_id: String,
     pub response: HookDispatchResponse,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct ExtensionSettingsFile {
+    #[serde(default)]
+    values: BTreeMap<String, ExtensionSettingValue>,
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct ExtensionSettingsRecord {
+    extension_id: String,
+    values: BTreeMap<String, ExtensionSettingValue>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct ExtensionSettingsPayload {
+    #[serde(default)]
+    values: BTreeMap<String, ExtensionSettingValue>,
 }
 
 pub(super) async fn extensions(
@@ -106,11 +130,183 @@ pub(super) async fn extension_detail(
         })
 }
 
+pub(super) async fn extension_settings(
+    State(state): State<AppState>,
+    Extension(request): Extension<RequestContext>,
+    Path(extension_id): Path<String>,
+) -> ApiResult<ExtensionSettingsRecord> {
+    let extension = state.extensions.get(&extension_id).ok_or_else(|| {
+        scoped(
+            ApiError::not_found(format!("extension '{extension_id}' not found")),
+            &request,
+        )
+    })?;
+    Ok(Json(ExtensionSettingsRecord {
+        extension_id,
+        values: load_effective_extension_settings(&state, &extension),
+    }))
+}
+
+pub(super) async fn extension_settings_put(
+    State(state): State<AppState>,
+    Extension(request): Extension<RequestContext>,
+    Path(extension_id): Path<String>,
+    Json(payload): Json<ExtensionSettingsPayload>,
+) -> ApiResult<ExtensionSettingsRecord> {
+    let extension = state.extensions.get(&extension_id).ok_or_else(|| {
+        scoped(
+            ApiError::not_found(format!("extension '{extension_id}' not found")),
+            &request,
+        )
+    })?;
+    validate_extension_settings_payload(&extension, &payload)
+        .map_err(|error| scoped(ApiError::bad_request(error), &request))?;
+
+    let mut stored = read_extension_settings_file(extension_settings_path(&state, &extension_id))
+        .unwrap_or_default()
+        .values;
+    for (key, value) in payload.values {
+        stored.insert(key, value);
+    }
+    write_extension_settings_file(extension_settings_path(&state, &extension_id), &stored)
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?;
+
+    Ok(Json(ExtensionSettingsRecord {
+        extension_id,
+        values: load_effective_extension_settings(&state, &extension),
+    }))
+}
+
 pub(super) async fn extension_diagnostics(
     State(state): State<AppState>,
     Path(extension_id): Path<String>,
 ) -> Json<Vec<ExtensionDiagnostic>> {
     Json(state.extensions.diagnostics(&extension_id))
+}
+
+fn extension_settings_path(state: &AppState, extension_id: &str) -> PathBuf {
+    state
+        .runtime_paths
+        .extension_state_dir(extension_id)
+        .join("settings.toml")
+}
+
+fn read_extension_settings_file(path: PathBuf) -> Option<ExtensionSettingsFile> {
+    let contents = fs::read_to_string(path).ok()?;
+    toml::from_str(&contents).ok()
+}
+
+fn write_extension_settings_file(
+    path: PathBuf,
+    values: &BTreeMap<String, ExtensionSettingValue>,
+) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let payload = ExtensionSettingsFile {
+        values: values.clone(),
+    };
+    fs::write(
+        path,
+        toml::to_string_pretty(&payload).map_err(std::io::Error::other)?,
+    )
+}
+
+fn default_extension_settings(
+    extension: &ResolvedExtensionSnapshot,
+) -> BTreeMap<String, ExtensionSettingValue> {
+    extension
+        .settings
+        .iter()
+        .filter_map(|item| {
+            item.default_value
+                .clone()
+                .map(|value| (item.key.clone(), value))
+        })
+        .collect()
+}
+
+fn load_effective_extension_settings(
+    state: &AppState,
+    extension: &ResolvedExtensionSnapshot,
+) -> BTreeMap<String, ExtensionSettingValue> {
+    let stored = read_extension_settings_file(extension_settings_path(state, &extension.id))
+        .unwrap_or_default()
+        .values;
+    let mut values = default_extension_settings(extension);
+    for field in &extension.settings {
+        if let Some(value) = stored.get(&field.key).cloned() {
+            values.insert(field.key.clone(), value);
+        }
+    }
+    values
+}
+
+fn validate_extension_settings_payload(
+    extension: &ResolvedExtensionSnapshot,
+    payload: &ExtensionSettingsPayload,
+) -> Result<(), String> {
+    let declared = extension
+        .settings
+        .iter()
+        .map(|item| (item.key.as_str(), item))
+        .collect::<BTreeMap<_, _>>();
+    let declared_keys = declared.keys().copied().collect::<BTreeSet<_>>();
+
+    for key in payload.values.keys() {
+        if !declared_keys.contains(key.as_str()) {
+            return Err(format!(
+                "setting '{key}' is not declared by extension '{}'",
+                extension.id
+            ));
+        }
+    }
+
+    for field in &extension.settings {
+        if field.required
+            && !payload.values.contains_key(&field.key)
+            && field.default_value.is_none()
+        {
+            return Err(format!("required setting '{}' is missing", field.key));
+        }
+    }
+
+    for (key, value) in &payload.values {
+        let Some(field) = declared.get(key.as_str()) else {
+            continue;
+        };
+        match (&field.field_type, value) {
+            (ExtensionSettingFieldType::Boolean, ExtensionSettingValue::Boolean(_)) => {}
+            (ExtensionSettingFieldType::Number, ExtensionSettingValue::Integer(_)) => {}
+            (
+                ExtensionSettingFieldType::Text
+                | ExtensionSettingFieldType::Textarea
+                | ExtensionSettingFieldType::Select,
+                ExtensionSettingValue::String(text),
+            ) => {
+                if field.required && text.trim().is_empty() {
+                    return Err(format!("setting '{}' cannot be empty", field.key));
+                }
+                if matches!(field.field_type, ExtensionSettingFieldType::Select)
+                    && !field.options.is_empty()
+                    && !field.options.iter().any(|option| option.value == *text)
+                {
+                    return Err(format!(
+                        "setting '{}' has unsupported value '{}'",
+                        field.key, text
+                    ));
+                }
+            }
+            _ => {
+                return Err(format!(
+                    "setting '{}' does not match declared type '{:?}'",
+                    field.key, field.field_type
+                ));
+            }
+        }
+    }
+
+    Ok(())
 }
 
 pub(super) async fn extension_ui_module(
