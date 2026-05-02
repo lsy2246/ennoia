@@ -1,8 +1,10 @@
 use super::*;
 use crate::app::{delete_agent_config, write_agent_config};
+use crate::logs_store::{LogEntryWrite, LOGS_COMPONENT_PROXY};
 use crate::pipeline::{
     invoke_provider_method, model_endpoint_runtime_request_config, resolve_provider_entry_path,
 };
+use ennoia_logs::RequestContext;
 
 pub(super) async fn agents(State(state): State<AppState>) -> Json<Vec<AgentConfig>> {
     Json(load_agent_configs(&state.runtime_paths).unwrap_or_default())
@@ -151,6 +153,7 @@ pub(super) async fn model_endpoint_detail(
 
 pub(super) async fn model_endpoint_models(
     State(state): State<AppState>,
+    Extension(request): Extension<RequestContext>,
     Path(model_endpoint_id): Path<String>,
 ) -> Result<Json<ModelEndpointModelsResponse>, ApiError> {
     let model_endpoints = load_model_endpoint_configs(&state.runtime_paths)
@@ -162,19 +165,21 @@ pub(super) async fn model_endpoint_models(
             ApiError::not_found(format!("model endpoint '{model_endpoint_id}' not found"))
         })?;
 
-    model_endpoint_models_response(&state, &model_endpoint).map(Json)
+    model_endpoint_models_response(&state, &model_endpoint, Some(&request)).map(Json)
 }
 
 pub(super) async fn model_endpoint_discover_models(
     State(state): State<AppState>,
+    Extension(request): Extension<RequestContext>,
     Json(payload): Json<ModelEndpointConfig>,
 ) -> Result<Json<ModelEndpointModelsResponse>, ApiError> {
-    model_endpoint_models_response(&state, &payload).map(Json)
+    model_endpoint_models_response(&state, &payload, Some(&request)).map(Json)
 }
 
 fn model_endpoint_models_response(
     state: &AppState,
     model_endpoint: &ModelEndpointConfig,
+    request: Option<&RequestContext>,
 ) -> Result<ModelEndpointModelsResponse, ApiError> {
     let contribution = resolve_provider_contribution(&state, &model_endpoint.kind)?;
     let mut models = model_endpoint.available_models.clone();
@@ -205,7 +210,32 @@ fn model_endpoint_models_response(
                 }
             });
             let response = invoke_provider_method(&entry, &request_payload, &model_endpoint)
-                .map_err(ApiError::internal)?;
+                .map_err(|error| {
+                    let error_message = error.clone();
+                    let trace = request.map(RequestContext::trace_context);
+                    let _ = state.logs.append_log_scoped(
+                        LogEntryWrite {
+                            event: "runtime.model_endpoint.discovery_failed".to_string(),
+                            level: "error".to_string(),
+                            component: LOGS_COMPONENT_PROXY.to_string(),
+                            source_kind: "interface".to_string(),
+                            source_id: Some(model_endpoint.id.clone()),
+                            message: "获取上游模型失败".to_string(),
+                            attributes: serde_json::json!({
+                                "error": error_message,
+                                "operation": "list_models",
+                                "model_endpoint_id": model_endpoint.id,
+                                "display_name": model_endpoint.display_name,
+                                "provider_kind": model_endpoint.kind,
+                                "base_url": model_endpoint.base_url,
+                                "api_key_env": model_endpoint.api_key_env,
+                            }),
+                            created_at: None,
+                        },
+                        trace.as_ref(),
+                    );
+                    ApiError::internal(error)
+                })?;
             let extension_models = parse_provider_models_from_response(&response)?;
             if !extension_models.is_empty() {
                 models = extension_models;

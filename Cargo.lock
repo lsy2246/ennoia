@@ -810,6 +810,7 @@ dependencies = [
  "chrono",
  "ennoia-assets",
  "ennoia-contract",
+ "ennoia-error-utils",
  "ennoia-extension-host",
  "ennoia-kernel",
  "ennoia-logs",

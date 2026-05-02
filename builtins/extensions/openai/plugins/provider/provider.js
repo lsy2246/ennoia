@@ -119,8 +119,13 @@ async function generateByChatCompletionStream(config, fallbackModel, payload) {
 
 function normalizeModelEndpointConfig(config) {
   const baseUrl = trimTrailingSlash(config.base_url || DEFAULT_BASE_URL);
-  const apiKeyEnv = config.api_key_env || "OPENAI_API_KEY";
-  const apiKey = process.env[apiKeyEnv];
+  const directApiKey = typeof config.api_key === "string" ? config.api_key.trim() : "";
+  const rawApiKeyEnv = typeof config.api_key_env === "string" ? config.api_key_env.trim() : "";
+  const apiKeyEnv = isLikelyEnvName(rawApiKeyEnv) ? rawApiKeyEnv : "OPENAI_API_KEY";
+  const inlineApiKeyFromEnvField = !directApiKey && rawApiKeyEnv && !isLikelyEnvName(rawApiKeyEnv)
+    ? rawApiKeyEnv
+    : "";
+  const apiKey = directApiKey || inlineApiKeyFromEnvField || process.env[apiKeyEnv];
   if (!apiKey) {
     throw new Error(`OpenAI API key is missing; set ${apiKeyEnv}`);
   }
@@ -131,6 +136,10 @@ function normalizeModelEndpointConfig(config) {
     api_key: apiKey,
     default_model: config.default_model || DEFAULT_MODEL,
   };
+}
+
+function isLikelyEnvName(value) {
+  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(value);
 }
 
 function normalizeModelDescriptor(value) {

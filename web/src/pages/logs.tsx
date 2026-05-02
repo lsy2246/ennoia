@@ -43,6 +43,7 @@ type TraceSummary = {
   durationMs: number;
   spanCount: number;
   lastSeq: number;
+  detail?: string;
 };
 
 type DiagnosticFeedItem = {
@@ -78,6 +79,20 @@ const INITIAL_FILTERS: UnifiedFilters = {
 
 const SLOW_TRACE_THRESHOLD_MS = 1200;
 const LOGS_ROUTE_PREFIX = "/api/logs";
+const DIAGNOSTIC_DETAIL_KEYS = [
+  "error",
+  "message",
+  "reason",
+  "detail",
+  "details",
+  "cause",
+  "top_reason",
+  "error_message",
+  "stderr",
+  "stdout",
+  "stack",
+  "code",
+];
 
 function stringifyJson(value: unknown) {
   try {
@@ -85,6 +100,141 @@ function stringifyJson(value: unknown) {
   } catch {
     return String(value);
   }
+}
+
+function parseJsonText(value: string) {
+  const trimmed = value.trim();
+  if (!(trimmed.startsWith("{") || trimmed.startsWith("["))) {
+    return null;
+  }
+  try {
+    return JSON.parse(trimmed) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+function collectDiagnosticDetails(value: unknown, limit = 4) {
+  const results: string[] = [];
+  const seen = new Set<string>();
+
+  function push(item: string) {
+    const trimmed = item.trim();
+    if (!trimmed) {
+      return;
+    }
+    const dedupeKey = trimmed.replace(/\s+/g, " ").toLowerCase();
+    if (seen.has(dedupeKey)) {
+      return;
+    }
+    seen.add(dedupeKey);
+    results.push(trimmed);
+  }
+
+  function visit(current: unknown, depth: number) {
+    if (results.length >= limit || current == null || depth > 4) {
+      return;
+    }
+    if (typeof current === "string") {
+      const parsed = parseJsonText(current);
+      if (parsed !== null) {
+        visit(parsed, depth + 1);
+        if (results.length >= limit) {
+          return;
+        }
+      }
+      push(current);
+      return;
+    }
+    if (typeof current === "number" || typeof current === "boolean") {
+      push(String(current));
+      return;
+    }
+    if (Array.isArray(current)) {
+      for (const item of current) {
+        visit(item, depth + 1);
+        if (results.length >= limit) {
+          return;
+        }
+      }
+      return;
+    }
+    if (typeof current !== "object") {
+      return;
+    }
+
+    const record = current as Record<string, unknown>;
+    let matchedPreferredKey = false;
+    for (const key of DIAGNOSTIC_DETAIL_KEYS) {
+      if (!(key in record)) {
+        continue;
+      }
+      matchedPreferredKey = true;
+      visit(record[key], depth + 1);
+      if (results.length >= limit) {
+        return;
+      }
+    }
+
+    if (matchedPreferredKey) {
+      return;
+    }
+
+    for (const [key, item] of Object.entries(record)) {
+      if (typeof item === "string" || typeof item === "number" || typeof item === "boolean") {
+        push(`${key}: ${String(item)}`);
+      } else {
+        visit(item, depth + 1);
+      }
+      if (results.length >= limit) {
+        return;
+      }
+    }
+  }
+
+  visit(value, 0);
+  return results;
+}
+
+function truncateDiagnosticText(value: string, maxLength = 180) {
+  const compact = value.replace(/\s+/g, " ").trim();
+  if (compact.length <= maxLength) {
+    return compact;
+  }
+  return `${compact.slice(0, maxLength - 3)}...`;
+}
+
+function buildLogSummary(item: LogEntry) {
+  const message = item.message.trim();
+  const detail = collectDiagnosticDetails(item.attributes, 1)[0];
+  if (!detail) {
+    return message;
+  }
+  const preview = truncateDiagnosticText(detail);
+  if (!message) {
+    return preview;
+  }
+  const normalizedMessage = message.toLowerCase();
+  const normalizedPreview = preview.toLowerCase();
+  if (normalizedMessage.includes(normalizedPreview) || normalizedPreview.includes(normalizedMessage)) {
+    return message;
+  }
+  return `${message} · ${preview}`;
+}
+
+function buildTraceDetailPreview(records: LogTraceRecord[]) {
+  const prioritized = [
+    ...records.filter((item) => statusBadgeClass(item.status) === "badge--danger"),
+    ...records.filter((item) => statusBadgeClass(item.status) === "badge--warn"),
+    ...records,
+  ];
+  for (const record of prioritized) {
+    const detail = collectDiagnosticDetails(record.attributes, 1)[0];
+    if (detail) {
+      return truncateDiagnosticText(detail, 160);
+    }
+  }
+  return "";
 }
 
 function levelBadgeClass(level: string) {
@@ -274,6 +424,7 @@ function buildTraceSummaries(spans: LogTraceRecord[]): TraceSummary[] {
         durationMs: root.duration_ms,
         spanCount: ordered.length,
         lastSeq: latest.seq,
+        detail: buildTraceDetailPreview(ordered),
       };
     })
     .sort((left, right) => right.lastSeq - left.lastSeq);
@@ -292,7 +443,7 @@ function buildDiagnosticFeed(logs: LogEntry[], traces: TraceSummary[]): Diagnost
       kind: "log",
       timestamp: item.created_at,
       title: item.event,
-      summary: item.message,
+      summary: buildLogSummary(item),
       component: item.component,
       sourceKind: item.source_kind,
       sourceId: item.source_id,
@@ -320,7 +471,9 @@ function buildDiagnosticFeed(logs: LogEntry[], traces: TraceSummary[]): Diagnost
       kind: "trace",
       timestamp: item.endedAt,
       title: item.name,
-      summary: `${item.spanCount} spans · ${item.durationMs} ms · ${item.traceId}`,
+      summary: [`${item.spanCount} spans`, `${item.durationMs} ms`, item.detail || item.traceId]
+        .filter(Boolean)
+        .join(" · "),
       component: item.component,
       sourceKind: item.sourceKind,
       sourceId: item.sourceId,
@@ -468,6 +621,37 @@ export function LogsPage() {
     () => (selectedTraceId ? traceSummaries.find((item) => item.traceId === selectedTraceId) ?? null : null),
     [selectedTraceId, traceSummaries],
   );
+  const selectedLogDiagnostics = useMemo(() => {
+    if (selectedItem?.kind !== "log" || !selectedItem.log) {
+      return [];
+    }
+    return collectDiagnosticDetails(selectedItem.log.attributes).filter((item) => {
+      const message = selectedItem.log?.message.trim().toLowerCase() ?? "";
+      return !message || !message.includes(item.trim().toLowerCase());
+    });
+  }, [selectedItem]);
+  const selectedTraceDiagnostics = useMemo(() => {
+    if (!selectedTrace) {
+      return [];
+    }
+    const prioritized = [
+      ...selectedTrace.spans.filter((item) => statusBadgeClass(item.status) === "badge--danger"),
+      ...selectedTrace.spans.filter((item) => statusBadgeClass(item.status) === "badge--warn"),
+      ...selectedTrace.spans,
+    ];
+    const details: string[] = [];
+    for (const span of prioritized) {
+      for (const detail of collectDiagnosticDetails(span.attributes, 2)) {
+        if (!details.includes(detail)) {
+          details.push(detail);
+        }
+        if (details.length >= 4) {
+          return details;
+        }
+      }
+    }
+    return details;
+  }, [selectedTrace]);
 
   const relatedLogs = useMemo(() => {
     if (!selectedItem) {
@@ -859,6 +1043,15 @@ export function LogsPage() {
                   </section>
                 ) : null}
 
+                {selectedLogDiagnostics.length > 0 ? (
+                  <section className="logs-detail-block">
+                    <div className="logs-detail-block__header">
+                      <strong>{t("web.logs_page.detail.error_reason", "错误原因")}</strong>
+                    </div>
+                    <pre className="logs-json">{selectedLogDiagnostics.join("\n\n")}</pre>
+                  </section>
+                ) : null}
+
                 {selectedItem.kind === "trace" && selectedItem.trace ? (
                   <section className="logs-detail-block">
                     <div className="logs-detail-block__header">
@@ -885,6 +1078,15 @@ export function LogsPage() {
                         <strong>{formatDateTime(selectedTraceSummary.endedAt)}</strong>
                       </div>
                     ) : null}
+                  </section>
+                ) : null}
+
+                {selectedItem.kind === "trace" && selectedTraceDiagnostics.length > 0 ? (
+                  <section className="logs-detail-block">
+                    <div className="logs-detail-block__header">
+                      <strong>{t("web.logs_page.detail.error_reason", "错误原因")}</strong>
+                    </div>
+                    <pre className="logs-json">{selectedTraceDiagnostics.join("\n\n")}</pre>
                   </section>
                 ) : null}
 

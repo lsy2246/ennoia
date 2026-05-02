@@ -190,6 +190,7 @@ export type ModelEndpointConfig = {
   kind: string;
   description: string;
   base_url: string;
+  api_key: string;
   api_key_env: string;
   default_model: string;
   available_models: ProviderModelDescriptor[];

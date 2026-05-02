@@ -4,6 +4,7 @@ use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use ennoia_contract::ApiError;
+use ennoia_error_utils::normalize_error_message;
 use ennoia_extension_host::RegisteredProviderContribution;
 use ennoia_kernel::{
     ActionPhase, ActionResultMode, AgentConfig, ModelEndpointConfig, OwnerKind, OwnerRef,
@@ -1269,6 +1270,7 @@ pub(crate) fn model_endpoint_runtime_request_config(
         "id": model_endpoint.id,
         "kind": model_endpoint.kind,
         "base_url": model_endpoint.base_url,
+        "api_key": model_endpoint.api_key,
         "api_key_env": model_endpoint.api_key_env,
         "default_model": model_endpoint.default_model,
         "available_models": model_endpoint.available_models,
@@ -1722,7 +1724,7 @@ pub(crate) fn invoke_provider_method(
         return Err(if detail.is_empty() {
             format!("provider runner exited with status {}", output.status)
         } else {
-            detail
+            normalize_error_message(detail)
         });
     }
     serde_json::from_slice::<JsonValue>(&output.stdout)
@@ -1732,6 +1734,9 @@ pub(crate) fn invoke_provider_method(
 fn resolve_model_endpoint_env_binding(
     model_endpoint: &ModelEndpointConfig,
 ) -> Option<(String, String)> {
+    if !model_endpoint.api_key.trim().is_empty() {
+        return None;
+    }
     let env_name = model_endpoint.api_key_env.trim();
     if env_name.is_empty() {
         return None;

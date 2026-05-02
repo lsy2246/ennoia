@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 
 type StatusNoticeTone = "error" | "success";
@@ -26,16 +26,39 @@ export function StatusNotice({
   message,
   tone,
   onDismiss,
+  durationMs,
 }: {
   message?: string | null;
   tone: StatusNoticeTone;
   onDismiss?: () => void;
+  durationMs?: number;
 }) {
   const [target, setTarget] = useState<HTMLElement | null>(null);
+  const [isHovering, setIsHovering] = useState(false);
+  const [timerCycle, setTimerCycle] = useState(0);
+  const autoDismissDelay = useMemo(
+    () => durationMs ?? (tone === "error" ? 6000 : 3200),
+    [durationMs, tone],
+  );
 
   useEffect(() => {
     setTarget(ensureStatusNoticeRoot());
   }, []);
+
+  useEffect(() => {
+    setIsHovering(false);
+    setTimerCycle((current) => current + 1);
+  }, [message]);
+
+  useEffect(() => {
+    if (!message || !onDismiss || isHovering || autoDismissDelay <= 0) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      onDismiss();
+    }, autoDismissDelay);
+    return () => window.clearTimeout(timer);
+  }, [autoDismissDelay, isHovering, message, onDismiss]);
 
   if (!message || !target) {
     return null;
@@ -47,7 +70,18 @@ export function StatusNotice({
       role={tone === "error" ? "alert" : "status"}
       aria-live={tone === "error" ? "assertive" : "polite"}
       aria-atomic="true"
+      onMouseEnter={() => setIsHovering(true)}
+      onMouseLeave={() => {
+        setIsHovering(false);
+        setTimerCycle((current) => current + 1);
+      }}
+      style={{ "--status-toast-duration": `${autoDismissDelay}ms` } as CSSProperties}
     >
+      <div
+        key={`${tone}:${message}:${timerCycle}`}
+        className={`status-toast__progress ${isHovering ? "status-toast__progress--paused" : ""}`}
+        aria-hidden="true"
+      />
       <div className="status-toast__copy">{message}</div>
       {onDismiss ? (
         <button

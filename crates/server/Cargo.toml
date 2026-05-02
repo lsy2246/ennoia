@@ -11,6 +11,7 @@ ennoia-extension-host = { path = "../extension-host" }
 ennoia-paths = { path = "../paths" }
 ennoia-logs = { path = "../logs" }
 ennoia-contract = { path = "../contract" }
+ennoia-error-utils = { path = "../error-utils" }
 async-stream = "0.3.6"
 arc-swap = "1.7.1"
 axum = "0.8.9"

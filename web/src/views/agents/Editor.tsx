@@ -31,6 +31,7 @@ import type { ExtensionProviderContribution } from "@ennoia/ui-sdk";
 import { Select } from "@/components/Select";
 import { StatusNotice } from "@/components/StatusNotice";
 import { formatRelativePath } from "@/lib/pathDisplay";
+import { useModelEndpointsStore } from "@/stores/modelEndpoints";
 import { useUiHelpers } from "@/stores/ui";
 
 const EMPTY_AGENT: AgentProfile = {
@@ -60,6 +61,7 @@ export function AgentEditorView({
     () => runtime?.registry.providers ?? [],
     [runtime?.registry.providers],
   );
+  const modelEndpointsRevision = useModelEndpointsStore((state) => state.revision);
   const [agents, setAgents] = useState<AgentProfile[]>([]);
   const [skills, setSkills] = useState<SkillConfig[]>([]);
   const [modelEndpoints, setModelEndpoints] = useState<ModelEndpointConfig[]>([]);
@@ -81,6 +83,15 @@ export function AgentEditorView({
     [providerContributions, selectedProvider],
   );
   const generationOptions = selectedProviderContribution?.provider.generation_options ?? [];
+  const modelOptions = useMemo(
+    () => buildAgentModelOptions(selectedProvider, form.model_id, t),
+    [form.model_id, selectedProvider, t],
+  );
+
+  const refreshModelEndpoints = useCallback(async () => {
+    const nextModelEndpoints = await listModelEndpoints();
+    setModelEndpoints(nextModelEndpoints);
+  }, []);
 
   const hydratePermissions = useCallback(async (targetAgentId: string) => {
     const [policy, approvals, events] = await Promise.all([
@@ -109,7 +120,7 @@ export function AgentEditorView({
         setForm({
           ...EMPTY_AGENT,
           model_endpoint_id: nextModelEndpoints[0]?.id ?? "",
-          model_id: nextModelEndpoints[0]?.default_model ?? "",
+          model_id: resolveAgentModelId(nextModelEndpoints[0] ?? null, ""),
           generation_options: defaultGenerationOptions(
             findProviderContribution(providerContributions, nextModelEndpoints[0] ?? null),
           ),
@@ -140,6 +151,13 @@ export function AgentEditorView({
   useEffect(() => {
     void hydrate();
   }, [hydrate]);
+
+  useEffect(() => {
+    if (modelEndpointsRevision === 0) {
+      return;
+    }
+    void refreshModelEndpoints();
+  }, [modelEndpointsRevision, refreshModelEndpoints]);
 
   function toggleSkill(skillId: string) {
     setForm((current) => ({
@@ -249,7 +267,7 @@ export function AgentEditorView({
                         setForm({
                           ...form,
                           model_endpoint_id: value,
-                          model_id: provider?.default_model ?? form.model_id,
+                          model_id: resolveAgentModelId(provider ?? null, form.model_id),
                           generation_options: defaultGenerationOptions(contribution),
                         });
                       }}
@@ -258,17 +276,26 @@ export function AgentEditorView({
                   </label>
                   <label>
                     {t("web.agents.model", "模型")}
-                    <input
-                      list={`agent-models-${agentId}`}
-                      value={form.model_id}
-                      onChange={(event) => setForm({ ...form, model_id: event.target.value })}
-                      required
-                    />
-                    <datalist id={`agent-models-${agentId}`}>
-                      {(selectedProvider?.available_models ?? []).map((model) => (
-                        <option key={model.id} value={model.id} />
-                      ))}
-                    </datalist>
+                    {modelOptions.length > 0 ? (
+                      <Select
+                        value={form.model_id}
+                        onChange={(value) => setForm({ ...form, model_id: value })}
+                        options={modelOptions}
+                        placeholder={t("web.agents.model_select_placeholder", "请选择已配置模型")}
+                      />
+                    ) : (
+                      <input
+                        value={form.model_id}
+                        onChange={(event) => setForm({ ...form, model_id: event.target.value })}
+                        placeholder={t("web.agents.model_input_placeholder", "当前没有已配置模型，可临时手动输入")}
+                        required
+                      />
+                    )}
+                    <p className="helper-text">
+                      {modelOptions.length > 0
+                        ? t("web.agents.model_help", "这里只显示当前模型接入里已经配置并保存过的模型。")
+                        : t("web.agents.model_empty_help", "当前模型接入还没有已配置模型；先去“模型接入”里添加并保存，或临时手动输入。")}
+                    </p>
                   </label>
                   <label className="check-row agent-editor__check-row">
                     <input
@@ -657,6 +684,37 @@ function findProviderContribution(
 
   const matches = contributions.filter((item) => item.provider.kind === provider.kind);
   return matches.length === 1 ? matches[0] : null;
+}
+
+function resolveAgentModelId(provider: ModelEndpointConfig | null, currentModelId: string) {
+  const normalizedCurrentModelId = currentModelId.trim();
+  const models = provider?.available_models ?? [];
+  if (normalizedCurrentModelId && models.some((model) => model.id === normalizedCurrentModelId)) {
+    return normalizedCurrentModelId;
+  }
+  if (provider?.default_model?.trim()) {
+    return provider.default_model.trim();
+  }
+  return models[0]?.id ?? normalizedCurrentModelId;
+}
+
+function buildAgentModelOptions(
+  provider: ModelEndpointConfig | null,
+  currentModelId: string,
+  t: (key: string, fallback: string, params?: Record<string, string | number>) => string,
+) {
+  const options = (provider?.available_models ?? []).map((model) => ({ value: model.id, label: model.id }));
+  const normalizedCurrentModelId = currentModelId.trim();
+  if (!normalizedCurrentModelId || options.some((option) => option.value === normalizedCurrentModelId)) {
+    return options;
+  }
+  return [
+    {
+      value: normalizedCurrentModelId,
+      label: `${normalizedCurrentModelId} · ${t("web.agents.model_unknown_current", "当前值")}`,
+    },
+    ...options,
+  ];
 }
 
 function defaultGenerationOptions(contribution: ExtensionProviderContribution | null) {

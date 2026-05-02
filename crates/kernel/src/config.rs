@@ -303,6 +303,8 @@ pub struct ModelEndpointConfig {
     #[serde(default)]
     pub base_url: String,
     #[serde(default)]
+    pub api_key: String,
+    #[serde(default)]
     pub api_key_env: String,
     #[serde(default)]
     pub default_model: String,
@@ -364,6 +366,7 @@ id = "openai"
 display_name = "OpenAI"
 kind = "openai"
 base_url = "https://api.openai.com/v1"
+api_key = ""
 api_key_env = "OPENAI_API_KEY"
 default_model = "gpt-5.4"
 available_models = [
@@ -391,6 +394,7 @@ id = "openai"
 display_name = "OpenAI"
 kind = "openai"
 base_url = "https://api.openai.com/v1"
+api_key = ""
 api_key_env = "OPENAI_API_KEY"
 default_model = "gpt-5.4"
 available_models = ["gpt-5.4"]
