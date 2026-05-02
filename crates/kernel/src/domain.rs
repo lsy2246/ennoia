@@ -160,22 +160,9 @@ pub struct ConversationBranchSpec {
     pub status: String,
     pub parent_branch_id: Option<String>,
     pub source_message_id: Option<String>,
-    pub source_checkpoint_id: Option<String>,
     pub inherit_mode: String,
     pub created_at: String,
     pub updated_at: String,
-}
-
-/// ConversationCheckpointSpec marks one reusable point in the conversation timeline.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ConversationCheckpointSpec {
-    pub id: String,
-    pub conversation_id: String,
-    pub branch_id: String,
-    pub message_id: Option<String>,
-    pub kind: String,
-    pub label: String,
-    pub created_at: String,
 }
 
 /// LaneSpec is one work line inside a conversation.

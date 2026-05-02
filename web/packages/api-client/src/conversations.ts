@@ -1,7 +1,6 @@
 import { apiUrl, fetchJson } from "./core";
 import type {
   ConversationBranch,
-  ConversationCheckpoint,
   ConversationLane,
   ConversationMessage,
   ConversationMessageAppendResponse,
@@ -31,7 +30,6 @@ function normalizeConversationDetailPayload(payload: unknown): {
   conversation: ConversationSummary;
   lanes?: ConversationLane[];
   branches?: ConversationBranch[];
-  checkpoints?: ConversationCheckpoint[];
   messages?: ConversationMessage[];
   runs?: ExecutionRun[];
   tasks?: ExecutionStep[];
@@ -49,7 +47,6 @@ function normalizeConversationDetailPayload(payload: unknown): {
     conversation: payload.conversation,
     lanes: Array.isArray(payload.lanes) ? payload.lanes as ConversationLane[] : undefined,
     branches: Array.isArray(payload.branches) ? payload.branches as ConversationBranch[] : undefined,
-    checkpoints: Array.isArray(payload.checkpoints) ? payload.checkpoints as ConversationCheckpoint[] : undefined,
     messages: Array.isArray(payload.messages) ? payload.messages as ConversationMessage[] : undefined,
     runs: Array.isArray(payload.runs) ? payload.runs as ExecutionRun[] : undefined,
     tasks: Array.isArray(payload.tasks) ? payload.tasks as ExecutionStep[] : undefined,
@@ -84,14 +81,12 @@ export async function getConversation(conversationId: string): Promise<Conversat
   const normalized = normalizeConversationDetailPayload(detail);
   const lanes = normalized.lanes ?? await fetchJson<ConversationLane[]>(`${CONVERSATIONS_API}/${conversationId}/lanes`);
   const branches = normalized.branches ?? await fetchJson<ConversationBranch[]>(`${CONVERSATIONS_API}/${conversationId}/branches`);
-  const checkpoints = normalized.checkpoints ?? await fetchJson<ConversationCheckpoint[]>(`${CONVERSATIONS_API}/${conversationId}/checkpoints`);
   const messages = normalized.messages
     ?? await fetchJson<ConversationMessage[]>(`${CONVERSATIONS_API}/${conversationId}/messages`);
   return {
     conversation: normalized.conversation,
     lanes,
     branches,
-    checkpoints,
     messages,
     runs: normalized.runs ?? [],
     tasks: normalized.tasks ?? [],
@@ -110,7 +105,6 @@ export async function appendConversationMessage(
     mentions?: string[];
     fork_from_message_id?: string;
     rewrite_from_message_id?: string;
-    reset_context?: boolean;
     branch_name?: string;
   },
 ) {
@@ -133,9 +127,8 @@ export async function createConversationBranch(
   payload: {
     from_branch_id?: string;
     source_message_id?: string;
-    source_checkpoint_id?: string;
     name?: string;
-    mode?: "fork" | "rewrite" | "reset";
+    mode?: "fork" | "rewrite";
     activate?: boolean;
   },
 ) {
@@ -154,7 +147,6 @@ export async function switchConversationBranch(conversationId: string, branchId:
     conversation: normalized.conversation,
     lanes: normalized.lanes ?? [],
     branches: normalized.branches ?? [],
-    checkpoints: normalized.checkpoints ?? [],
     messages: normalized.messages ?? [],
     runs: normalized.runs ?? [],
     tasks: normalized.tasks ?? [],
@@ -191,27 +183,11 @@ export async function deleteConversationBranch(
     conversation: normalized.conversation,
     lanes: normalized.lanes ?? [],
     branches: normalized.branches ?? [],
-    checkpoints: normalized.checkpoints ?? [],
     messages: normalized.messages ?? [],
     runs: normalized.runs ?? [],
     tasks: normalized.tasks ?? [],
     outputs: normalized.outputs ?? [],
   } satisfies ConversationDetail;
-}
-
-export async function createConversationCheckpoint(
-  conversationId: string,
-  payload: {
-    branch_id?: string;
-    message_id?: string;
-    kind?: string;
-    label?: string;
-  },
-) {
-  return fetchJson<ConversationCheckpoint>(`${CONVERSATIONS_API}/${conversationId}/checkpoints`, {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
 }
 
 export function createConversationStream(conversationId: string) {
@@ -234,7 +210,6 @@ export function parseConversationStreamPayload(value: string): ConversationStrea
       conversation: normalized.conversation,
       lanes: normalized.lanes ?? [],
       branches: normalized.branches ?? [],
-      checkpoints: normalized.checkpoints ?? [],
       messages: normalized.messages ?? [],
       runs: Array.isArray(detailRecord?.runs) ? detailRecord.runs as ConversationDetail["runs"] : [],
       tasks: Array.isArray(detailRecord?.tasks) ? detailRecord.tasks as ConversationDetail["tasks"] : [],

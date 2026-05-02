@@ -1,6 +1,6 @@
 use ennoia_kernel::{
-    ConversationBranchSpec, ConversationCheckpointSpec, ConversationSpec, ConversationTopology,
-    LaneSpec, MessageRole, MessageSpec, OwnerKind, OwnerRef,
+    ConversationBranchSpec, ConversationSpec, ConversationTopology, LaneSpec, MessageRole,
+    MessageSpec, OwnerKind, OwnerRef,
 };
 use sqlx::{Row, SqlitePool};
 use std::collections::{HashMap, HashSet};
@@ -109,10 +109,6 @@ impl ConversationStore {
             .bind(conversation_id)
             .execute(&self.pool)
             .await?;
-        sqlx::query("DELETE FROM checkpoints WHERE conversation_id = ?")
-            .bind(conversation_id)
-            .execute(&self.pool)
-            .await?;
         sqlx::query("DELETE FROM branches WHERE conversation_id = ?")
             .bind(conversation_id)
             .execute(&self.pool)
@@ -137,7 +133,7 @@ impl ConversationStore {
         conversation_id: &str,
     ) -> Result<Vec<ConversationBranchSpec>, sqlx::Error> {
         let rows = sqlx::query(
-            "SELECT id, conversation_id, name, kind, status, parent_branch_id, source_message_id, source_checkpoint_id, inherit_mode, created_at, updated_at
+            "SELECT id, conversation_id, name, kind, status, parent_branch_id, source_message_id, inherit_mode, created_at, updated_at
              FROM branches WHERE conversation_id = ? ORDER BY created_at ASC",
         )
         .bind(conversation_id)
@@ -152,7 +148,7 @@ impl ConversationStore {
         branch_id: &str,
     ) -> Result<Option<ConversationBranchSpec>, sqlx::Error> {
         let row = sqlx::query(
-            "SELECT id, conversation_id, name, kind, status, parent_branch_id, source_message_id, source_checkpoint_id, inherit_mode, created_at, updated_at
+            "SELECT id, conversation_id, name, kind, status, parent_branch_id, source_message_id, inherit_mode, created_at, updated_at
              FROM branches WHERE id = ?",
         )
         .bind(branch_id)
@@ -165,8 +161,8 @@ impl ConversationStore {
     pub async fn upsert_branch(&self, branch: &ConversationBranchSpec) -> Result<(), sqlx::Error> {
         sqlx::query(
             "INSERT INTO branches
-             (id, conversation_id, name, kind, status, parent_branch_id, source_message_id, source_checkpoint_id, inherit_mode, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             (id, conversation_id, name, kind, status, parent_branch_id, source_message_id, inherit_mode, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(id) DO UPDATE SET
                conversation_id = excluded.conversation_id,
                name = excluded.name,
@@ -174,7 +170,6 @@ impl ConversationStore {
                status = excluded.status,
                parent_branch_id = excluded.parent_branch_id,
                source_message_id = excluded.source_message_id,
-               source_checkpoint_id = excluded.source_checkpoint_id,
                inherit_mode = excluded.inherit_mode,
                updated_at = excluded.updated_at",
         )
@@ -185,61 +180,9 @@ impl ConversationStore {
         .bind(&branch.status)
         .bind(&branch.parent_branch_id)
         .bind(&branch.source_message_id)
-        .bind(&branch.source_checkpoint_id)
         .bind(&branch.inherit_mode)
         .bind(&branch.created_at)
         .bind(&branch.updated_at)
-        .execute(&self.pool)
-        .await?;
-        Ok(())
-    }
-
-    pub async fn list_checkpoints(
-        &self,
-        conversation_id: &str,
-    ) -> Result<Vec<ConversationCheckpointSpec>, sqlx::Error> {
-        let rows = sqlx::query(
-            "SELECT id, conversation_id, branch_id, message_id, kind, label, created_at
-             FROM checkpoints WHERE conversation_id = ? ORDER BY created_at DESC",
-        )
-        .bind(conversation_id)
-        .fetch_all(&self.pool)
-        .await?;
-
-        Ok(rows.into_iter().map(map_checkpoint).collect())
-    }
-
-    pub async fn get_checkpoint(
-        &self,
-        checkpoint_id: &str,
-    ) -> Result<Option<ConversationCheckpointSpec>, sqlx::Error> {
-        let row = sqlx::query(
-            "SELECT id, conversation_id, branch_id, message_id, kind, label, created_at
-             FROM checkpoints WHERE id = ?",
-        )
-        .bind(checkpoint_id)
-        .fetch_optional(&self.pool)
-        .await?;
-
-        Ok(row.map(map_checkpoint))
-    }
-
-    pub async fn insert_checkpoint(
-        &self,
-        checkpoint: &ConversationCheckpointSpec,
-    ) -> Result<(), sqlx::Error> {
-        sqlx::query(
-            "INSERT INTO checkpoints
-             (id, conversation_id, branch_id, message_id, kind, label, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(&checkpoint.id)
-        .bind(&checkpoint.conversation_id)
-        .bind(&checkpoint.branch_id)
-        .bind(&checkpoint.message_id)
-        .bind(&checkpoint.kind)
-        .bind(&checkpoint.label)
-        .bind(&checkpoint.created_at)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -459,22 +402,9 @@ fn map_branch(row: sqlx::sqlite::SqliteRow) -> ConversationBranchSpec {
         status: row.get("status"),
         parent_branch_id: row.get("parent_branch_id"),
         source_message_id: row.get("source_message_id"),
-        source_checkpoint_id: row.get("source_checkpoint_id"),
         inherit_mode: row.get("inherit_mode"),
         created_at: row.get("created_at"),
         updated_at: row.get("updated_at"),
-    }
-}
-
-fn map_checkpoint(row: sqlx::sqlite::SqliteRow) -> ConversationCheckpointSpec {
-    ConversationCheckpointSpec {
-        id: row.get("id"),
-        conversation_id: row.get("conversation_id"),
-        branch_id: row.get("branch_id"),
-        message_id: row.get("message_id"),
-        kind: row.get("kind"),
-        label: row.get("label"),
-        created_at: row.get("created_at"),
     }
 }
 

@@ -9,6 +9,4 @@
 - `branch.list`
 - `branch.create`
 - `branch.switch`
-- `checkpoint.list`
-- `checkpoint.create`
 - `message.append`

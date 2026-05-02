@@ -71,10 +71,6 @@ type ComposerModeState =
       kind: "rewrite";
       sourceMessageId: string;
       sourceBranchId?: string;
-    }
-  | {
-      kind: "reset";
-      sourceBranchId?: string;
     };
 
 const EMPTY_PICKER_STATE: ComposerPickerState = {
@@ -114,7 +110,6 @@ function createLocalDraft(
       : mode.sourceBranchId,
     forkFromMessageId: mode.kind === "branch" ? mode.sourceMessageId : undefined,
     rewriteFromMessageId: mode.kind === "rewrite" ? mode.sourceMessageId : undefined,
-    resetContext: mode.kind === "reset",
   };
 }
 
@@ -444,8 +439,6 @@ function branchKindLabel(
   switch (branch?.kind) {
     case "rewrite":
       return t("web.conversations.branch_kind_rewrite", "改写");
-    case "reset":
-      return t("web.conversations.branch_kind_reset", "新上下文");
     case "fork":
       return t("web.conversations.branch_kind_fork", "分支");
     default:
@@ -1191,13 +1184,6 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
         detail: source ? summarizeBody(source.body) : composerMode.sourceMessageId,
       };
     }
-    if (composerMode.kind === "reset") {
-      return {
-        tone: "warn" as const,
-        label: t("web.conversations.mode_reset", "下一条消息会开启新上下文"),
-        detail: t("web.conversations.mode_reset_detail", "旧历史会保留，但这条消息会从新的分支继续。"),
-      };
-    }
     return null;
   }, [composerMode, detail?.messages, t]);
 
@@ -1280,8 +1266,6 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
       setComposerMode({ kind: "rewrite", sourceMessageId: draft.rewriteFromMessageId, sourceBranchId: draft.branchId });
     } else if (draft.forkFromMessageId) {
       setComposerMode({ kind: "branch", sourceMessageId: draft.forkFromMessageId, sourceBranchId: draft.branchId });
-    } else if (draft.resetContext) {
-      setComposerMode({ kind: "reset", sourceBranchId: draft.branchId });
     } else {
       setComposerMode({ kind: "normal" });
     }
@@ -1335,7 +1319,6 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
           mentions: next.explicitMentions,
           fork_from_message_id: next.forkFromMessageId,
           rewrite_from_message_id: next.rewriteFromMessageId,
-          reset_context: next.resetContext,
           branch_name: next.branchName,
         });
         if (!isMountedRef.current) {

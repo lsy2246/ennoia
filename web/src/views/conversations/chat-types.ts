@@ -29,7 +29,6 @@ export type LocalMessageDraft = {
   branchId?: string;
   forkFromMessageId?: string;
   rewriteFromMessageId?: string;
-  resetContext?: boolean;
   branchName?: string;
   error?: string;
 };

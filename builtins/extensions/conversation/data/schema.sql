@@ -51,7 +51,6 @@ CREATE TABLE IF NOT EXISTS branches (
   status TEXT NOT NULL,
   parent_branch_id TEXT,
   source_message_id TEXT,
-  source_checkpoint_id TEXT,
   inherit_mode TEXT NOT NULL,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
@@ -59,19 +58,6 @@ CREATE TABLE IF NOT EXISTS branches (
 
 CREATE INDEX IF NOT EXISTS idx_branches_conversation
   ON branches(conversation_id, updated_at DESC);
-
-CREATE TABLE IF NOT EXISTS checkpoints (
-  id TEXT PRIMARY KEY,
-  conversation_id TEXT NOT NULL,
-  branch_id TEXT NOT NULL,
-  message_id TEXT,
-  kind TEXT NOT NULL,
-  label TEXT NOT NULL,
-  created_at TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_checkpoints_conversation
-  ON checkpoints(conversation_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS messages (
   id TEXT PRIMARY KEY,

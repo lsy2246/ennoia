@@ -9,8 +9,8 @@ use std::collections::{HashMap, HashSet};
 use chrono::{DateTime, Utc};
 use conversations::ConversationStore;
 use ennoia_kernel::{
-    ConversationBranchSpec, ConversationCheckpointSpec, ConversationSpec, ConversationTopology,
-    ExtensionRpcResponse, LaneSpec, MessageRole, MessageSpec, OwnerKind, OwnerRef,
+    ConversationBranchSpec, ConversationSpec, ConversationTopology, ExtensionRpcResponse, LaneSpec,
+    MessageRole, MessageSpec, OwnerKind, OwnerRef,
 };
 use ennoia_paths::RuntimePaths;
 use serde::{Deserialize, Serialize};
@@ -89,27 +89,11 @@ struct CreateBranchPayload {
     #[serde(default)]
     source_message_id: Option<String>,
     #[serde(default)]
-    source_checkpoint_id: Option<String>,
-    #[serde(default)]
     name: Option<String>,
     #[serde(default)]
     mode: Option<String>,
     #[serde(default)]
     activate: Option<bool>,
-}
-
-#[derive(Debug, Deserialize, Default)]
-struct CreateCheckpointPayload {
-    #[serde(default)]
-    conversation_id: String,
-    #[serde(default)]
-    branch_id: Option<String>,
-    #[serde(default)]
-    message_id: Option<String>,
-    #[serde(default)]
-    kind: Option<String>,
-    #[serde(default)]
-    label: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -135,8 +119,6 @@ struct ConversationMessagePayload {
     #[serde(default)]
     rewrite_from_message_id: Option<String>,
     #[serde(default)]
-    reset_context: bool,
-    #[serde(default)]
     branch_name: Option<String>,
 }
 
@@ -159,7 +141,6 @@ struct ConversationDetailResponse {
     conversation: ConversationSpec,
     lanes: Vec<LaneSpec>,
     branches: Vec<ConversationBranchView>,
-    checkpoints: Vec<ConversationCheckpointSpec>,
     messages: Vec<MessageSpec>,
 }
 
@@ -338,26 +319,6 @@ async fn handle_invocation(
                 Err(error) => error,
             }
         }
-        "conversation/checkpoints/list-by-conversation" => {
-            match parse_json::<ConversationLookupPayload>(invocation.params) {
-                Ok(payload) => match list_checkpoints(state, payload).await {
-                    Ok(checkpoints) => {
-                        ExtensionRpcResponse::success(serde_json::json!(checkpoints))
-                    }
-                    Err(error) => error,
-                },
-                Err(error) => error,
-            }
-        }
-        "conversation/checkpoints/create" => {
-            match parse_json::<CreateCheckpointPayload>(invocation.params) {
-                Ok(payload) => match create_checkpoint(state, payload).await {
-                    Ok(checkpoint) => ExtensionRpcResponse::success(serde_json::json!(checkpoint)),
-                    Err(error) => error,
-                },
-                Err(error) => error,
-            }
-        }
         "conversation/messages/list" => {
             match parse_json::<BranchLookupPayload>(invocation.params) {
                 Ok(payload) => match list_messages(state, payload).await {
@@ -461,7 +422,6 @@ async fn create_conversation(
         status: "active".to_string(),
         parent_branch_id: None,
         source_message_id: None,
-        source_checkpoint_id: None,
         inherit_mode: "inclusive".to_string(),
         created_at: lane.created_at.clone(),
         updated_at: lane.updated_at.clone(),
@@ -523,13 +483,6 @@ async fn conversation_detail(
         .map_err(|error| {
             ExtensionRpcResponse::failure("conversation_branches_failed", error.to_string())
         })?;
-    let checkpoints = state
-        .store
-        .list_checkpoints(&conversation_id)
-        .await
-        .map_err(|error| {
-            ExtensionRpcResponse::failure("conversation_checkpoints_failed", error.to_string())
-        })?;
     let all_messages = state
         .store
         .list_messages(&conversation_id, None)
@@ -556,11 +509,9 @@ async fn conversation_detail(
         branches: build_branch_views(
             &branches,
             &all_branches,
-            &checkpoints,
             &all_messages,
             active_branch_id.as_deref(),
         ),
-        checkpoints: filter_active_checkpoints(&checkpoints, &branches),
         messages,
     })
 }
@@ -623,13 +574,6 @@ async fn list_branches(
         .map_err(|error| {
             ExtensionRpcResponse::failure("conversation_branches_failed", error.to_string())
         })?;
-    let checkpoints = state
-        .store
-        .list_checkpoints(&conversation_id)
-        .await
-        .map_err(|error| {
-            ExtensionRpcResponse::failure("conversation_checkpoints_failed", error.to_string())
-        })?;
     let all_messages = state
         .store
         .list_messages(&conversation_id, None)
@@ -640,32 +584,9 @@ async fn list_branches(
     Ok(build_branch_views(
         &branches,
         &all_branches,
-        &checkpoints,
         &all_messages,
         conversation.active_branch_id.as_deref(),
     ))
-}
-
-async fn list_checkpoints(
-    state: &ConversationServiceState,
-    payload: ConversationLookupPayload,
-) -> Result<Vec<ConversationCheckpointSpec>, ExtensionRpcResponse> {
-    let conversation_id = required_conversation_id(&payload.conversation_id)?;
-    let branches = state
-        .store
-        .list_branches(&conversation_id)
-        .await
-        .map_err(|error| {
-            ExtensionRpcResponse::failure("conversation_branches_failed", error.to_string())
-        })?;
-    let checkpoints = state
-        .store
-        .list_checkpoints(&conversation_id)
-        .await
-        .map_err(|error| {
-            ExtensionRpcResponse::failure("conversation_checkpoints_failed", error.to_string())
-        })?;
-    Ok(filter_active_checkpoints(&checkpoints, &branches))
 }
 
 async fn list_messages(
@@ -726,35 +647,9 @@ async fn create_branch(
         .map_err(|error| {
             ExtensionRpcResponse::failure("conversation_messages_failed", error.to_string())
         })?;
-    let checkpoint = match payload.source_checkpoint_id.as_deref() {
-        Some(checkpoint_id) => {
-            let checkpoint = state
-                .store
-                .get_checkpoint(checkpoint_id)
-                .await
-                .map_err(|error| {
-                    ExtensionRpcResponse::failure(
-                        "conversation_checkpoint_get_failed",
-                        error.to_string(),
-                    )
-                })?
-                .ok_or_else(|| {
-                    ExtensionRpcResponse::failure("checkpoint_not_found", "checkpoint not found")
-                })?;
-            if checkpoint.conversation_id != conversation_id {
-                return Err(ExtensionRpcResponse::failure(
-                    "checkpoint_mismatch",
-                    "checkpoint does not belong to the conversation",
-                ));
-            }
-            Some(checkpoint)
-        }
-        None => None,
-    };
-    let parent_branch_id = checkpoint
-        .as_ref()
-        .map(|item| item.branch_id.clone())
-        .or_else(|| payload.from_branch_id.clone())
+    let parent_branch_id = payload
+        .from_branch_id
+        .clone()
         .or_else(|| conversation.active_branch_id.clone())
         .or_else(|| conversation.default_lane_id.clone())
         .ok_or_else(|| {
@@ -772,8 +667,7 @@ async fn create_branch(
         .source_message_id
         .as_deref()
         .and_then(|id| find_message_body(&all_messages, id))
-        .map(ToOwned::to_owned)
-        .or_else(|| checkpoint.as_ref().map(|item| item.label.clone()));
+        .map(ToOwned::to_owned);
     let branch_name = payload
         .name
         .clone()
@@ -800,14 +694,7 @@ async fn create_branch(
         kind: mode.clone(),
         status: "active".to_string(),
         parent_branch_id: Some(parent_branch_id.clone()),
-        source_message_id: payload
-            .source_message_id
-            .clone()
-            .or_else(|| checkpoint.as_ref().and_then(|item| item.message_id.clone())),
-        source_checkpoint_id: payload
-            .source_checkpoint_id
-            .clone()
-            .or_else(|| checkpoint.as_ref().map(|item| item.id.clone())),
+        source_message_id: payload.source_message_id.clone(),
         inherit_mode: inherit_mode_for_branch_mode(&mode).to_string(),
         created_at: now.clone(),
         updated_at: now.clone(),
@@ -888,55 +775,6 @@ async fn switch_branch(
             ExtensionRpcResponse::failure("conversation_update_failed", error.to_string())
         })?;
     conversation_detail(state, ConversationLookupPayload { conversation_id }).await
-}
-
-async fn create_checkpoint(
-    state: &ConversationServiceState,
-    payload: CreateCheckpointPayload,
-) -> Result<ConversationCheckpointSpec, ExtensionRpcResponse> {
-    let conversation_id = required_conversation_id(&payload.conversation_id)?;
-    let conversation = state
-        .store
-        .get_conversation(&conversation_id)
-        .await
-        .map_err(|error| {
-            ExtensionRpcResponse::failure("conversation_get_failed", error.to_string())
-        })?
-        .ok_or_else(|| {
-            ExtensionRpcResponse::failure("conversation_not_found", "conversation not found")
-        })?;
-    let branch_id = payload
-        .branch_id
-        .clone()
-        .or_else(|| conversation.active_branch_id.clone())
-        .or_else(|| conversation.default_lane_id.clone())
-        .ok_or_else(|| {
-            ExtensionRpcResponse::failure("branch_id_required", "branch_id is required")
-        })?;
-    let created_at = now_iso();
-    let checkpoint = ConversationCheckpointSpec {
-        id: format!("chk-{}", Uuid::new_v4()),
-        conversation_id,
-        branch_id,
-        message_id: payload.message_id.clone(),
-        kind: payload.kind.unwrap_or_else(|| "manual".to_string()),
-        label: payload
-            .label
-            .filter(|value| !value.trim().is_empty())
-            .unwrap_or_else(|| "检查点".to_string()),
-        created_at,
-    };
-    state
-        .store
-        .insert_checkpoint(&checkpoint)
-        .await
-        .map_err(|error| {
-            ExtensionRpcResponse::failure(
-                "conversation_checkpoint_create_failed",
-                error.to_string(),
-            )
-        })?;
-    Ok(checkpoint)
 }
 
 async fn append_user_message(
@@ -1042,9 +880,7 @@ async fn append_message(
         .or_else(|| select_branch(&active_branches, target_branch_id.as_deref()))
         .ok_or_else(|| ExtensionRpcResponse::failure("branch_not_found", "branch not found"))?;
 
-    let branch_mode = if payload.message.reset_context {
-        Some("reset".to_string())
-    } else if payload
+    let branch_mode = if payload
         .message
         .rewrite_from_message_id
         .as_deref()
@@ -1082,37 +918,10 @@ async fn append_message(
             source_message_id
                 .as_deref()
                 .and_then(|id| find_message_body(&all_messages, id)),
-            payload
-                .message
-                .rewrite_from_message_id
-                .as_ref()
-                .map(|_| "before_rewrite")
-                .or(payload
-                    .message
-                    .fork_from_message_id
-                    .as_ref()
-                    .map(|_| "fork_source"))
-                .or(if payload.message.reset_context {
-                    Some("before_reset")
-                } else {
-                    None
-                }),
         )
         .await?;
         lane = created.0;
         branch = created.1;
-        if let Some(checkpoint) = created.2 {
-            state
-                .store
-                .insert_checkpoint(&checkpoint)
-                .await
-                .map_err(|error| {
-                    ExtensionRpcResponse::failure(
-                        "conversation_checkpoint_create_failed",
-                        error.to_string(),
-                    )
-                })?;
-        }
         conversation = ConversationSpec {
             active_branch_id: Some(branch.id.clone()),
             default_lane_id: Some(lane.id.clone()),
@@ -1228,15 +1037,7 @@ async fn create_runtime_branch(
     mode: &str,
     source_message_id: Option<String>,
     source_preview: Option<&str>,
-    checkpoint_kind: Option<&str>,
-) -> Result<
-    (
-        LaneSpec,
-        ConversationBranchSpec,
-        Option<ConversationCheckpointSpec>,
-    ),
-    ExtensionRpcResponse,
-> {
+) -> Result<(LaneSpec, ConversationBranchSpec), ExtensionRpcResponse> {
     let now = now_iso();
     let branch_id = format!("branch-{}", Uuid::new_v4());
     let branch_name = requested_name
@@ -1264,7 +1065,6 @@ async fn create_runtime_branch(
         status: "active".to_string(),
         parent_branch_id: Some(parent_lane.id.clone()),
         source_message_id: source_message_id.clone(),
-        source_checkpoint_id: None,
         inherit_mode: inherit_mode_for_branch_mode(mode).to_string(),
         created_at: now.clone(),
         updated_at: now.clone(),
@@ -1277,17 +1077,7 @@ async fn create_runtime_branch(
         ExtensionRpcResponse::failure("conversation_branch_create_failed", error.to_string())
     })?;
 
-    let checkpoint = checkpoint_kind.map(|kind| ConversationCheckpointSpec {
-        id: format!("chk-{}", Uuid::new_v4()),
-        conversation_id: conversation.id.clone(),
-        branch_id: parent_lane.id.clone(),
-        message_id: source_message_id,
-        kind: kind.to_string(),
-        label: default_checkpoint_label(kind, &branch_name),
-        created_at: now,
-    });
-
-    Ok((lane, branch, checkpoint))
+    Ok((lane, branch))
 }
 
 async fn create_root_runtime_branch(
@@ -1327,7 +1117,6 @@ async fn create_root_runtime_branch(
         status: "active".to_string(),
         parent_branch_id: None,
         source_message_id: None,
-        source_checkpoint_id: None,
         inherit_mode: "inclusive".to_string(),
         created_at: now.clone(),
         updated_at: now,
@@ -1772,7 +1561,6 @@ fn choose_next_active_branch(
 fn build_branch_views(
     branches: &[ConversationBranchSpec],
     all_branches: &[ConversationBranchSpec],
-    checkpoints: &[ConversationCheckpointSpec],
     messages: &[MessageSpec],
     active_branch_id: Option<&str>,
 ) -> Vec<ConversationBranchView> {
@@ -1780,11 +1568,6 @@ fn build_branch_views(
         .iter()
         .cloned()
         .map(|branch| (branch.id.clone(), branch))
-        .collect::<HashMap<_, _>>();
-    let checkpoint_map = checkpoints
-        .iter()
-        .cloned()
-        .map(|checkpoint| (checkpoint.id.clone(), checkpoint))
         .collect::<HashMap<_, _>>();
     branches
         .iter()
@@ -1814,7 +1597,7 @@ fn build_branch_views(
                 visible_message_count: visible_messages.len(),
                 last_message_at: last_message_at.clone(),
                 last_activity_at: last_message_at.unwrap_or_else(|| branch.updated_at.clone()),
-                source_preview: branch_source_preview(&branch, messages, &checkpoint_map),
+                source_preview: branch_source_preview(&branch, messages),
                 branch,
             }
         })
@@ -1849,7 +1632,6 @@ fn branch_visible_depth(
 fn branch_source_preview(
     branch: &ConversationBranchSpec,
     messages: &[MessageSpec],
-    checkpoints: &HashMap<String, ConversationCheckpointSpec>,
 ) -> Option<String> {
     if let Some(message_id) = branch.source_message_id.as_deref() {
         if let Some(body) = find_message_body(messages, message_id) {
@@ -1859,30 +1641,7 @@ fn branch_source_preview(
             }
         }
     }
-    if let Some(checkpoint_id) = branch.source_checkpoint_id.as_deref() {
-        if let Some(checkpoint) = checkpoints.get(checkpoint_id) {
-            let summary = summarize_branch_source(&checkpoint.label);
-            if !summary.is_empty() {
-                return Some(summary);
-            }
-        }
-    }
     None
-}
-
-fn filter_active_checkpoints(
-    checkpoints: &[ConversationCheckpointSpec],
-    branches: &[ConversationBranchSpec],
-) -> Vec<ConversationCheckpointSpec> {
-    let active_ids = branches
-        .iter()
-        .map(|branch| branch.id.as_str())
-        .collect::<HashSet<_>>();
-    checkpoints
-        .iter()
-        .filter(|checkpoint| active_ids.contains(checkpoint.branch_id.as_str()))
-        .cloned()
-        .collect()
 }
 
 fn default_conversation_title(agent_ids: &[String]) -> String {
@@ -1933,18 +1692,8 @@ fn default_branch_name(
     let time = branch_time_label(created_at);
     match mode {
         "rewrite" => format!("改写 · {summary} · {time}"),
-        "reset" => format!("新上下文 · {summary} · {time}"),
         "main" => format!("继续对话 · {time}"),
         _ => format!("分支 · {summary} · {time}"),
-    }
-}
-
-fn default_checkpoint_label(kind: &str, branch_name: &str) -> String {
-    match kind {
-        "before_rewrite" => format!("改写前 · {branch_name}"),
-        "before_reset" => format!("清空上下文前 · {branch_name}"),
-        "fork_source" => format!("分支起点 · {branch_name}"),
-        _ => branch_name.to_string(),
     }
 }
 

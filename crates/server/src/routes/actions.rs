@@ -241,7 +241,6 @@ pub(super) async fn conversation_branches_create(
             "conversation_id": conversation_id,
             "from_branch_id": payload.get("from_branch_id").cloned(),
             "source_message_id": payload.get("source_message_id").cloned(),
-            "source_checkpoint_id": payload.get("source_checkpoint_id").cloned(),
             "name": payload.get("name").cloned(),
             "mode": payload.get("mode").cloned(),
             "activate": payload.get("activate").cloned(),
@@ -300,41 +299,6 @@ pub(super) async fn conversation_branch_delete(
             "conversation_id": conversation_id,
             "branch_id": branch_id,
             "mode": payload.get("mode").cloned(),
-        }),
-    )
-    .await
-}
-
-pub(super) async fn conversation_checkpoints(
-    State(state): State<AppState>,
-    Extension(request): Extension<RequestContext>,
-    Path(conversation_id): Path<String>,
-) -> ApiResult<JsonValue> {
-    dispatch_action_json(
-        &state,
-        &request,
-        "checkpoint.list",
-        serde_json::json!({ "conversation_id": conversation_id }),
-    )
-    .await
-}
-
-pub(super) async fn conversation_checkpoints_create(
-    State(state): State<AppState>,
-    Extension(request): Extension<RequestContext>,
-    Path(conversation_id): Path<String>,
-    Json(payload): Json<JsonValue>,
-) -> ApiResult<JsonValue> {
-    dispatch_action_json(
-        &state,
-        &request,
-        "checkpoint.create",
-        serde_json::json!({
-            "conversation_id": conversation_id,
-            "branch_id": payload.get("branch_id").cloned(),
-            "message_id": payload.get("message_id").cloned(),
-            "kind": payload.get("kind").cloned(),
-            "label": payload.get("label").cloned(),
         }),
     )
     .await
@@ -547,18 +511,6 @@ async fn load_conversation_detail_value(
             .await?
         }
     };
-    let checkpoints = match json_array_field(&detail, "checkpoints") {
-        Some(value) => value,
-        None => {
-            dispatch_action_value(
-                state,
-                request,
-                "checkpoint.list",
-                serde_json::json!({ "conversation_id": conversation_id }),
-            )
-            .await?
-        }
-    };
     let messages = match json_array_field(&detail, "messages") {
         Some(value) => value,
         None => {
@@ -590,7 +542,6 @@ async fn load_conversation_detail_value(
         "conversation": conversation,
         "lanes": lanes,
         "branches": branches,
-        "checkpoints": checkpoints,
         "messages": messages,
         "runs": runs,
         "tasks": [],
@@ -1161,10 +1112,6 @@ fn permission_target_id(
             .or_else(|| conversation_id.map(str::to_string)),
         "branch" => json_string_at(params, &["branch_id"])
             .or_else(|| json_string_at(params, &["from_branch_id"]))
-            .or_else(|| conversation_id.map(str::to_string)),
-        "checkpoint" => json_string_at(params, &["checkpoint_id"])
-            .or_else(|| json_string_at(params, &["source_checkpoint_id"]))
-            .or_else(|| json_string_at(params, &["message_id"]))
             .or_else(|| conversation_id.map(str::to_string)),
         "run" => json_string_at(params, &["run_id"]).or_else(|| run_id.map(str::to_string)),
         "task" => json_string_at(params, &["task_id"]).or_else(|| run_id.map(str::to_string)),

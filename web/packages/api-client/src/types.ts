@@ -308,7 +308,6 @@ export type ConversationBranch = {
   status: string;
   parent_branch_id?: string | null;
   source_message_id?: string | null;
-  source_checkpoint_id?: string | null;
   inherit_mode: string;
   created_at: string;
   updated_at: string;
@@ -319,16 +318,6 @@ export type ConversationBranch = {
   last_message_at?: string | null;
   last_activity_at?: string | null;
   source_preview?: string | null;
-};
-
-export type ConversationCheckpoint = {
-  id: string;
-  conversation_id: string;
-  branch_id: string;
-  message_id?: string | null;
-  kind: string;
-  label: string;
-  created_at: string;
 };
 
 export type ConversationLane = {
@@ -398,7 +387,6 @@ export type ConversationDetail = {
   conversation: ConversationSummary;
   lanes: ConversationLane[];
   branches: ConversationBranch[];
-  checkpoints: ConversationCheckpoint[];
   messages: ConversationMessage[];
   runs: ExecutionRun[];
   tasks: ExecutionStep[];

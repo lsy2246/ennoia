@@ -1,6 +1,6 @@
 id = "conversation"
 name = "Conversation"
-description = "提供原生会话事实（conversation / message / lane / branch / checkpoint）的统一接口实现。"
+description = "提供原生会话事实（conversation / message / lane / branch）的统一接口实现。"
 docs = "docs/overview.md"
 kind = "extension"
 
@@ -94,20 +94,6 @@ contract = "branch.delete"
 kind = "action"
 entry = "conversation/branches/delete"
 metadata = { action = { key = "branch.delete" }, permission = { action = "conversation.branch.delete", target_kind = "branch", risk_level = "high", default_decision = "ask", scope_kind = "conversation" } }
-
-[[capabilities]]
-id = "checkpoint.list"
-contract = "checkpoint.list"
-kind = "query"
-entry = "conversation/checkpoints/list-by-conversation"
-metadata = { action = { key = "checkpoint.list" }, permission = { action = "conversation.read", target_kind = "conversation", risk_level = "low", default_decision = "allow", scope_kind = "conversation" } }
-
-[[capabilities]]
-id = "checkpoint.create"
-contract = "checkpoint.create"
-kind = "action"
-entry = "conversation/checkpoints/create"
-metadata = { action = { key = "checkpoint.create" }, permission = { action = "conversation.write", target_kind = "checkpoint", risk_level = "medium", default_decision = "allow", scope_kind = "conversation" } }
 
 [[capabilities]]
 id = "message.append.operator"
