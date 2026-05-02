@@ -9,9 +9,8 @@ use super::*;
 use crate::agent_permissions::PermissionApprovalsQuery;
 use crate::app::record_trace_span;
 use crate::event_bus::HookEventWrite;
-use crate::observability::{
-    ObservationLogWrite, ObservationSpanWrite, OBSERVABILITY_COMPONENT_EVENT_BUS,
-    OBSERVABILITY_COMPONENT_PROXY,
+use crate::logs_store::{
+    LogEntryWrite, LogTraceWrite, LOGS_COMPONENT_EVENT_BUS, LOGS_COMPONENT_PROXY,
 };
 use crate::pipeline::dispatch_action_pipeline;
 
@@ -624,11 +623,11 @@ pub(crate) async fn dispatch_action_rule_execute(
     if response.ok {
         if let Some(grant_id) = permission_grant_id.as_deref() {
             if let Err(error) = state.agent_permissions.consume_grant(grant_id) {
-                let _ = state.observability.append_log_scoped(
-                    ObservationLogWrite {
+                let _ = state.logs.append_log_scoped(
+                    LogEntryWrite {
                         event: "runtime.permission.consume_grant_failed".to_string(),
                         level: "warn".to_string(),
-                        component: OBSERVABILITY_COMPONENT_PROXY.to_string(),
+                        component: LOGS_COMPONENT_PROXY.to_string(),
                         source_kind: "permission".to_string(),
                         source_id: Some(grant_id.to_string()),
                         message: "permission grant consume failed".to_string(),
@@ -645,11 +644,11 @@ pub(crate) async fn dispatch_action_rule_execute(
         }
         record_trace_span(
             state,
-            ObservationSpanWrite {
+            LogTraceWrite {
                 trace: span_trace,
                 kind: "action_rpc".to_string(),
                 name: key.to_string(),
-                component: OBSERVABILITY_COMPONENT_PROXY.to_string(),
+                component: LOGS_COMPONENT_PROXY.to_string(),
                 source_kind: "extension".to_string(),
                 source_id: Some(rule.extension_id.clone()),
                 status: "ok".to_string(),
@@ -673,11 +672,11 @@ pub(crate) async fn dispatch_action_rule_execute(
         .unwrap_or_else(|| format!("action '{key}' failed"));
     record_trace_span(
         state,
-        ObservationSpanWrite {
+        LogTraceWrite {
             trace: span_trace,
             kind: "action_rpc".to_string(),
             name: key.to_string(),
-            component: OBSERVABILITY_COMPONENT_PROXY.to_string(),
+            component: LOGS_COMPONENT_PROXY.to_string(),
             source_kind: "extension".to_string(),
             source_id: Some(rule.extension_id.clone()),
             status: "error".to_string(),
@@ -802,11 +801,11 @@ pub(crate) fn ensure_action_execute_available(
     if !action_rules_for_key(state, key, Some(ActionPhase::Execute)).is_empty() {
         return Ok(());
     }
-    let _ = state.observability.append_log_scoped(
-        ObservationLogWrite {
+    let _ = state.logs.append_log_scoped(
+        LogEntryWrite {
             event: "runtime.action.missing".to_string(),
             level: "warn".to_string(),
-            component: OBSERVABILITY_COMPONENT_PROXY.to_string(),
+            component: LOGS_COMPONENT_PROXY.to_string(),
             source_kind: "action".to_string(),
             source_id: Some(key.to_string()),
             message: "action execute rule missing".to_string(),
@@ -952,11 +951,11 @@ pub(crate) fn dispatch_hook_event(
         Ok(event_id) => {
             record_trace_span(
                 state,
-                ObservationSpanWrite {
+                LogTraceWrite {
                     trace: span_trace,
                     kind: "event_publish".to_string(),
                     name: event.to_string(),
-                    component: OBSERVABILITY_COMPONENT_EVENT_BUS.to_string(),
+                    component: LOGS_COMPONENT_EVENT_BUS.to_string(),
                     source_kind: resource_kind.to_string(),
                     source_id: Some(resource_id.to_string()),
                     status: "ok".to_string(),
@@ -973,11 +972,11 @@ pub(crate) fn dispatch_hook_event(
         Err(error) => {
             record_trace_span(
                 state,
-                ObservationSpanWrite {
+                LogTraceWrite {
                     trace: span_trace.clone(),
                     kind: "event_publish".to_string(),
                     name: event.to_string(),
-                    component: OBSERVABILITY_COMPONENT_EVENT_BUS.to_string(),
+                    component: LOGS_COMPONENT_EVENT_BUS.to_string(),
                     source_kind: resource_kind.to_string(),
                     source_id: Some(resource_id.to_string()),
                     status: "error".to_string(),
@@ -990,11 +989,11 @@ pub(crate) fn dispatch_hook_event(
                     duration_ms: started.elapsed().as_millis() as i64,
                 },
             );
-            let _ = state.observability.append_log_scoped(
-                ObservationLogWrite {
+            let _ = state.logs.append_log_scoped(
+                LogEntryWrite {
                     event: "runtime.event_bus.publish_failed".to_string(),
                     level: "warn".to_string(),
-                    component: OBSERVABILITY_COMPONENT_EVENT_BUS.to_string(),
+                    component: LOGS_COMPONENT_EVENT_BUS.to_string(),
                     source_kind: "hook".to_string(),
                     source_id: Some(event.to_string()),
                     message: "hook event publish failed".to_string(),

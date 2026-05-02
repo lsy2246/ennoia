@@ -755,6 +755,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "ennoia-logs"
+version = "0.1.0"
+dependencies = [
+ "http",
+ "serde",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
 name = "ennoia-memory"
 version = "0.1.0"
 dependencies = [
@@ -769,18 +781,6 @@ dependencies = [
  "serde_json",
  "sqlx",
  "tokio",
- "uuid",
-]
-
-[[package]]
-name = "ennoia-observability"
-version = "0.1.0"
-dependencies = [
- "http",
- "serde",
- "tracing",
- "tracing-appender",
- "tracing-subscriber",
  "uuid",
 ]
 
@@ -812,7 +812,7 @@ dependencies = [
  "ennoia-contract",
  "ennoia-extension-host",
  "ennoia-kernel",
- "ennoia-observability",
+ "ennoia-logs",
  "ennoia-paths",
  "futures-core",
  "mime_guess",

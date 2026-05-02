@@ -14,7 +14,7 @@ import { getApiBaseUrl } from "@ennoia/api-client";
 import { useRuntimeStore } from "@/stores/runtime";
 import { useUiHelpers, useUiStore } from "@/stores/ui";
 import { AgentEditorView } from "@/views/agents/Editor";
-import { ApiChannelEditorView } from "@/views/providers/Editor";
+import { ModelEndpointEditorView } from "@/views/model-endpoints/Editor";
 import { SessionView } from "@/views/conversations/Session";
 import { useWorkbenchStore, type WorkbenchViewDescriptor } from "@/stores/workbench";
 import { useSessionCommandsStore } from "@/stores/sessionCommands";
@@ -29,7 +29,7 @@ import {
 import { Agents } from "@/pages/agents";
 import { Conversations } from "@/pages/conversations";
 import { Extensions } from "@/pages/extensions";
-import { Observability } from "@/pages/observability";
+import { LogsPage } from "@/pages/logs";
 import { Schedules } from "@/pages/schedules";
 import { Settings } from "@/pages/settings";
 import { Skills } from "@/pages/skills";
@@ -138,9 +138,9 @@ const BUILTIN_NAV = [
   { id: "conversations", href: "/conversations", icon: "⌘", labelKey: "web.nav.conversations", fallback: "会话", hintKey: "web.nav.conversations_hint", hint: "统一发起 direct 和 group conversation" },
   { id: "agents", href: "/agents", icon: "A", labelKey: "web.nav.agents", fallback: "Agents", hintKey: "web.nav.agents_hint", hint: "多开 Agent 编辑视图" },
   { id: "skills", href: "/skills", icon: "S", labelKey: "web.nav.skills", fallback: "技能", hintKey: "web.nav.skills_hint", hint: "发现并分配技能给 Agent" },
-  { id: "schedules", href: "/schedules", icon: "T", labelKey: "web.nav.schedules", fallback: "定时器", hintKey: "web.nav.schedules_hint", hint: "管理定时触发的命令、Agent 与会话投递" },
-  { id: "extensions", href: "/extensions", icon: "E", labelKey: "web.nav.extensions", fallback: "扩展", hintKey: "web.nav.extensions_hint", hint: "系统插件与贡献能力" },
-  { id: "observability", href: "/observability", icon: "L", labelKey: "web.nav.observability", fallback: "日志", hintKey: "web.nav.observability_hint", hint: "统一日志与链路排查入口" },
+  { id: "schedules", href: "/schedules", icon: "T", labelKey: "web.nav.schedules", fallback: "计划", hintKey: "web.nav.schedules_hint", hint: "管理按计划触发的命令、Agent 与会话投递" },
+  { id: "extensions", href: "/extensions", icon: "E", labelKey: "web.nav.extensions", fallback: "扩展", hintKey: "web.nav.extensions_hint", hint: "扩展与贡献能力" },
+  { id: "logs", href: "/logs", icon: "L", labelKey: "web.nav.logs", fallback: "日志", hintKey: "web.nav.logs_hint", hint: "统一日志与链路排查入口" },
   { id: "settings", href: "/settings", icon: "⚙", labelKey: "web.nav.settings", fallback: "设置", hintKey: "web.nav.settings_hint", hint: "运行时配置表单" },
 ] as const;
 
@@ -204,16 +204,16 @@ function ResourceViewPanel(props: IDockviewPanelProps<ResourcePanelParams>) {
           <AgentEditorView agentId={descriptor.entityId} />
         </div>
       );
-    case "api-channel":
+    case "model-endpoint":
       return (
         <div className="resource-panel">
-          <ApiChannelEditorView channelId={descriptor.entityId} panelId={descriptor.panelId} />
+          <ModelEndpointEditorView modelEndpointId={descriptor.entityId} panelId={descriptor.panelId} />
         </div>
       );
     case "session":
       return (
         <div className="resource-panel">
-          <SessionView sessionId={descriptor.entityId} panelId={descriptor.panelId} />
+          <SessionView conversationId={descriptor.entityId} panelId={descriptor.panelId} />
         </div>
       );
     default:
@@ -237,8 +237,8 @@ function RoutedWorkbenchPanel(props: IDockviewPanelProps<RoutePanelParams>) {
         return <Schedules />;
       case "extensions":
         return <Extensions />;
-      case "observability":
-        return <Observability />;
+      case "logs":
+        return <LogsPage />;
       case "settings":
         return <Settings />;
       default:
@@ -438,13 +438,13 @@ export function App() {
       };
     }
 
-    if (descriptor.kind === "api-channel" && descriptor.entityId.startsWith("new-")) {
+    if (descriptor.kind === "model-endpoint" && descriptor.entityId.startsWith("new-")) {
       return {
         ...descriptor,
-        titleKey: "web.channels.new",
-        titleFallback: "新建渠道",
-        subtitleKey: descriptor.subtitle ? "web.channels.edit" : descriptor.subtitleKey,
-        subtitleFallback: descriptor.subtitle ? "编辑 API 上游渠道" : descriptor.subtitleFallback,
+        titleKey: "web.model_endpoints.new",
+        titleFallback: "新建模型接入",
+        subtitleKey: descriptor.subtitle ? "web.model_endpoints.edit" : descriptor.subtitleKey,
+        subtitleFallback: descriptor.subtitle ? "编辑模型接入" : descriptor.subtitleFallback,
       };
     }
 

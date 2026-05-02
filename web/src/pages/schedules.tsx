@@ -4,16 +4,16 @@ import {
   createSchedule,
   deleteSchedule,
   listAgents,
-  listChatLanes,
-  listChats,
+  listConversationLanes,
+  listConversations,
   listSchedules,
   pauseSchedule,
   resumeSchedule,
   runSchedule,
   updateSchedule,
   type AgentProfile,
-  type ChatLane,
-  type ChatThread,
+  type ConversationLane,
+  type ConversationSummary,
   type ScheduleExecutor,
   type SchedulePayload,
   type ScheduleRecord,
@@ -177,8 +177,8 @@ export function Schedules() {
   const { t } = useUiHelpers();
   const [schedules, setSchedules] = useState<ScheduleRecord[]>([]);
   const [agents, setAgents] = useState<AgentProfile[]>([]);
-  const [conversations, setConversations] = useState<ChatThread[]>([]);
-  const [lanesByConversation, setLanesByConversation] = useState<Record<string, ChatLane[]>>({});
+  const [conversations, setConversations] = useState<ConversationSummary[]>([]);
+  const [lanesByConversation, setLanesByConversation] = useState<Record<string, ConversationLane[]>>({});
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<ScheduleFormState>(() => createDefaultForm([]));
   const [error, setError] = useState<string | null>(null);
@@ -274,7 +274,7 @@ export function Schedules() {
       const [nextSchedules, nextAgents, nextConversations] = await Promise.all([
         listSchedules(),
         listAgents(),
-        listChats(),
+        listConversations(),
       ]);
       setSchedules(nextSchedules);
       setAgents(nextAgents);
@@ -297,7 +297,7 @@ export function Schedules() {
     if (!conversationId.trim() || lanesByConversation[conversationId]) {
       return;
     }
-    const lanes = await listChatLanes(conversationId);
+    const lanes = await listConversationLanes(conversationId);
     setLanesByConversation((current) => ({
       ...current,
       [conversationId]: lanes,
@@ -476,8 +476,8 @@ export function Schedules() {
       resetForm();
       setMessage(
         editingId
-          ? t("web.schedules.saved", "定时器已保存。")
-          : t("web.schedules.created", "定时器已创建。"),
+          ? t("web.schedules.saved", "计划已保存。")
+          : t("web.schedules.created", "计划已创建。"),
       );
     } catch (err) {
       setError(String(err));
@@ -509,7 +509,7 @@ export function Schedules() {
         <div className="schedules-toolbar__row">
           <div className="page-heading">
             <span>{t("web.schedules.eyebrow", "Schedules")}</span>
-            <h1>{t("web.schedules.title", "定时器按计划触发命令或 Agent。")}</h1>
+            <h1>{t("web.schedules.title", "计划按设定触发命令或 Agent。")}</h1>
             <p>{t("web.schedules.description", "系统负责保存计划、计算到期、运行命令或触发 Agent，并可把结果投递到某个会话。")}</p>
           </div>
           <div className="schedules-toolbar__actions">
@@ -522,7 +522,7 @@ export function Schedules() {
           <article className="metric-card schedules-metric-card">
             <span>{t("web.schedules.summary_total", "计划总数")}</span>
             <strong>{schedules.length}</strong>
-            <small>{t("web.schedules.list", "定时器列表")}</small>
+            <small>{t("web.schedules.list", "计划列表")}</small>
           </article>
           <article className="metric-card schedules-metric-card">
             <span>{t("web.schedules.summary_enabled", "启用中")}</span>
@@ -547,7 +547,7 @@ export function Schedules() {
           <div className="schedules-section__header">
             <div className="page-heading">
               <span>{editingId ? t("web.schedules.editing", "Editing") : t("web.schedules.create_eyebrow", "Create")}</span>
-              <h1>{editingId ? t("web.schedules.edit_title", "编辑定时器") : t("web.schedules.create_title", "新建定时器")}</h1>
+              <h1>{editingId ? t("web.schedules.edit_title", "编辑计划") : t("web.schedules.create_title", "新建计划")}</h1>
               <p>{t("web.schedules.editor_description", "把执行方式、触发器、投递规则和失败重试放在同一个编辑工作区里。")}</p>
             </div>
           </div>
@@ -593,7 +593,7 @@ export function Schedules() {
                 <input
                   value={form.description}
                   onChange={(event) => updateForm({ description: event.target.value })}
-                  placeholder={t("web.schedules.description_placeholder", "可选：补充这个定时器的用途")}
+                  placeholder={t("web.schedules.description_placeholder", "可选：补充这个计划的用途")}
                 />
               </label>
             </section>
@@ -811,7 +811,7 @@ export function Schedules() {
 
             <div className="button-row">
               <button type="submit" disabled={busy}>
-                {editingId ? t("web.schedules.save", "保存修改") : t("web.schedules.create", "创建定时器")}
+                {editingId ? t("web.schedules.save", "保存修改") : t("web.schedules.create", "创建计划")}
               </button>
               {editingId ? (
                 <button type="button" className="secondary" disabled={busy} onClick={() => resetForm()}>
@@ -825,7 +825,7 @@ export function Schedules() {
         <section className="work-panel schedules-list-panel">
           <div className="schedules-section__header">
             <div className="page-heading">
-              <span>{t("web.schedules.list", "定时器列表")}</span>
+              <span>{t("web.schedules.list", "计划列表")}</span>
               <h1>{t("web.schedules.catalog_title", "计划目录")}</h1>
               <p>{t("web.schedules.catalog_description", "这里统一查看执行方式、触发器、投递目标和最近运行状态。")}</p>
             </div>
@@ -835,7 +835,7 @@ export function Schedules() {
           {schedules.length === 0 ? (
             <div className="empty-card schedules-empty-state">
               <strong>{t("web.schedules.empty_title", "还没有计划")}</strong>
-              <p>{t("web.schedules.empty", "还没有定时器。")}</p>
+              <p>{t("web.schedules.empty", "还没有计划。")}</p>
             </div>
           ) : (
             schedules.map((schedule) => {
@@ -975,7 +975,7 @@ export function Schedules() {
                       onClick={() =>
                         void runAction(
                           () => runSchedule(schedule.id),
-                          t("web.schedules.ran", "定时器已手动运行。"),
+                          t("web.schedules.ran", "计划已手动运行。"),
                         )}
                     >
                       {t("web.schedules.run_now", "立即运行")}
@@ -988,8 +988,8 @@ export function Schedules() {
                         void runAction(
                           () => (schedule.enabled ? pauseSchedule(schedule.id) : resumeSchedule(schedule.id)),
                           schedule.enabled
-                            ? t("web.schedules.paused", "定时器已暂停。")
-                            : t("web.schedules.resumed", "定时器已恢复。"),
+                            ? t("web.schedules.paused", "计划已暂停。")
+                            : t("web.schedules.resumed", "计划已恢复。"),
                         )}
                     >
                       {schedule.enabled
@@ -1003,7 +1003,7 @@ export function Schedules() {
                       onClick={() =>
                         void runAction(
                           () => deleteSchedule(schedule.id),
-                          t("web.schedules.deleted", "定时器已删除。"),
+                          t("web.schedules.deleted", "计划已删除。"),
                         )}
                     >
                       {t("web.action.delete", "删除")}

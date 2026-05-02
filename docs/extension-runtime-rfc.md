@@ -80,7 +80,7 @@ entry = "workflow/schedules/run"
 metadata = { schedule_action = { id = "workflow.run" } }
 ```
 
-扩展源码推荐目录为 `ui/`、`worker/`、`data/` 和 `provider-presets/`。这些目录不是必备项，扩展只声明实际提供的能力。
+扩展源码推荐目录为 `ui/`、`worker/`、`data/` 和 `model-endpoint-presets/`。这些目录不是必备项，扩展只声明实际提供的能力。
 
 ## 开发热加载
 

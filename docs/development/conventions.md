@@ -90,7 +90,7 @@
 
 ### 5.4 日志边界
 
-- 长生命周期后端模块统一使用 `tracing` 记录运行日志，需要进入产品可查询观测数据时再写入宿主 `observability`
+- 长生命周期后端模块统一使用 `tracing` 记录运行日志，需要进入产品可查询日志数据时再写入宿主 `logs`
 - `server` 路由、扩展调度、Hook 派发、Worker RPC 和后台轮询不得使用 `println!`、`eprintln!` 或 `dbg!`
 - `cli` 的 `stdout` / `stderr` 只用于直接面向操作者的终端输出，不把它当作系统日志通道
 - `ennoia dev` 始终把 API、Web 和扩展 UI watcher 输出写入日志文件，并通过 `config/server.toml` 的 `logging.dev_console` 控制是否按级别镜像到命令窗口
@@ -117,9 +117,9 @@
 
 ### 6.3 前端日志
 
-- 前端运行时代码统一通过 `@ennoia/observability` 的 `createLogger()` 输出日志
+- 前端运行时代码统一通过 `@ennoia/logs` 的 `createLogger()` 输出日志
 - 业务包、运行时包、扩展 UI 和主题运行时不得直接调用 `console.log/info/warn/error/debug`
-- 浏览器控制台只作为 `web/packages/observability` 的底层适配层，不作为业务代码直接依赖的接口
+- 浏览器控制台只作为 `web/packages/logs` 的底层适配层，不作为业务代码直接依赖的接口
 - 前端日志级别优先读取 `VITE_ENNOIA_LOG_LEVEL`；若未提供，则回退到统一变量 `ENNOIA_LOG_LEVEL`
 - 需要面向用户展示状态时，使用 UI 提示、状态栏或调试面板；不要用控制台消息代替产品反馈
 

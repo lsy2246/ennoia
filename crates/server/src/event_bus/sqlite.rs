@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use chrono::{Duration, Utc};
 use ennoia_extension_host::RegisteredHookContribution;
 use ennoia_kernel::HookEventEnvelope;
-use ennoia_observability::TraceContext;
+use ennoia_logs::TraceContext;
 use ennoia_paths::RuntimePaths;
 use rusqlite::{params, Connection, OptionalExtension};
 use uuid::Uuid;

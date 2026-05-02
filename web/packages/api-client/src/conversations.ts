@@ -1,12 +1,12 @@
 import { apiUrl, fetchJson } from "./core";
 import type {
-  ChatBranch,
-  ChatCheckpoint,
-  ChatLane,
-  ChatMessage,
-  ChatSendResponse,
-  ChatThread,
-  ChatThreadDetail,
+  ConversationBranch,
+  ConversationCheckpoint,
+  ConversationLane,
+  ConversationMessage,
+  ConversationMessageAppendResponse,
+  ConversationSummary,
+  ConversationDetail,
   ConversationStreamSnapshot,
   PermissionApprovalRecord,
 } from "./types";
@@ -17,42 +17,42 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-function isChatThread(value: unknown): value is ChatThread {
+function isConversationSummary(value: unknown): value is ConversationSummary {
   return isRecord(value)
     && typeof value.id === "string"
     && (value.topology === "direct" || value.topology === "group")
     && typeof value.title === "string";
 }
 
-function normalizeChatDetailPayload(payload: unknown): {
-  conversation: ChatThread;
-  lanes?: ChatLane[];
-  branches?: ChatBranch[];
-  checkpoints?: ChatCheckpoint[];
-  messages?: ChatMessage[];
+function normalizeConversationDetailPayload(payload: unknown): {
+  conversation: ConversationSummary;
+  lanes?: ConversationLane[];
+  branches?: ConversationBranch[];
+  checkpoints?: ConversationCheckpoint[];
+  messages?: ConversationMessage[];
 } {
-  if (isChatThread(payload)) {
+  if (isConversationSummary(payload)) {
     return { conversation: payload };
   }
 
-  if (!isRecord(payload) || !isChatThread(payload.conversation)) {
+  if (!isRecord(payload) || !isConversationSummary(payload.conversation)) {
     throw new Error("invalid conversation detail payload");
   }
 
   return {
     conversation: payload.conversation,
-    lanes: Array.isArray(payload.lanes) ? payload.lanes as ChatLane[] : undefined,
-    branches: Array.isArray(payload.branches) ? payload.branches as ChatBranch[] : undefined,
-    checkpoints: Array.isArray(payload.checkpoints) ? payload.checkpoints as ChatCheckpoint[] : undefined,
-    messages: Array.isArray(payload.messages) ? payload.messages as ChatMessage[] : undefined,
+    lanes: Array.isArray(payload.lanes) ? payload.lanes as ConversationLane[] : undefined,
+    branches: Array.isArray(payload.branches) ? payload.branches as ConversationBranch[] : undefined,
+    checkpoints: Array.isArray(payload.checkpoints) ? payload.checkpoints as ConversationCheckpoint[] : undefined,
+    messages: Array.isArray(payload.messages) ? payload.messages as ConversationMessage[] : undefined,
   };
 }
 
-export async function listChats() {
-  return fetchJson<ChatThread[]>(CONVERSATIONS_API);
+export async function listConversations() {
+  return fetchJson<ConversationSummary[]>(CONVERSATIONS_API);
 }
 
-export async function createChat(payload: {
+export async function createConversation(payload: {
   topology: "direct" | "group";
   title?: string;
   agent_ids: string[];
@@ -60,24 +60,24 @@ export async function createChat(payload: {
   lane_type?: string;
   lane_goal?: string;
 }) {
-  return fetchJson<{ conversation: ChatThread; default_lane: ChatLane }>(CONVERSATIONS_API, {
+  return fetchJson<{ conversation: ConversationSummary; default_lane: ConversationLane }>(CONVERSATIONS_API, {
     method: "POST",
     body: JSON.stringify(payload),
   });
 }
 
-export async function deleteChat(chatId: string) {
-  return fetchJson<void>(`${CONVERSATIONS_API}/${chatId}`, { method: "DELETE" });
+export async function deleteConversation(conversationId: string) {
+  return fetchJson<void>(`${CONVERSATIONS_API}/${conversationId}`, { method: "DELETE" });
 }
 
-export async function getChat(chatId: string): Promise<ChatThreadDetail> {
-  const detail = await fetchJson<unknown>(`${CONVERSATIONS_API}/${chatId}`);
-  const normalized = normalizeChatDetailPayload(detail);
-  const lanes = normalized.lanes ?? await fetchJson<ChatLane[]>(`${CONVERSATIONS_API}/${chatId}/lanes`);
-  const branches = normalized.branches ?? await fetchJson<ChatBranch[]>(`${CONVERSATIONS_API}/${chatId}/branches`);
-  const checkpoints = normalized.checkpoints ?? await fetchJson<ChatCheckpoint[]>(`${CONVERSATIONS_API}/${chatId}/checkpoints`);
+export async function getConversation(conversationId: string): Promise<ConversationDetail> {
+  const detail = await fetchJson<unknown>(`${CONVERSATIONS_API}/${conversationId}`);
+  const normalized = normalizeConversationDetailPayload(detail);
+  const lanes = normalized.lanes ?? await fetchJson<ConversationLane[]>(`${CONVERSATIONS_API}/${conversationId}/lanes`);
+  const branches = normalized.branches ?? await fetchJson<ConversationBranch[]>(`${CONVERSATIONS_API}/${conversationId}/branches`);
+  const checkpoints = normalized.checkpoints ?? await fetchJson<ConversationCheckpoint[]>(`${CONVERSATIONS_API}/${conversationId}/checkpoints`);
   const messages = normalized.messages
-    ?? await fetchJson<ChatMessage[]>(`${CONVERSATIONS_API}/${chatId}/messages`);
+    ?? await fetchJson<ConversationMessage[]>(`${CONVERSATIONS_API}/${conversationId}/messages`);
   return {
     conversation: normalized.conversation,
     lanes,
@@ -90,8 +90,8 @@ export async function getChat(chatId: string): Promise<ChatThreadDetail> {
   };
 }
 
-export async function sendChatMessage(
-  chatId: string,
+export async function appendConversationMessage(
+  conversationId: string,
   payload: {
     lane_id?: string;
     branch_id?: string;
@@ -105,22 +105,22 @@ export async function sendChatMessage(
     branch_name?: string;
   },
 ) {
-  return fetchJson<ChatSendResponse>(`${CONVERSATIONS_API}/${chatId}/messages`, {
+  return fetchJson<ConversationMessageAppendResponse>(`${CONVERSATIONS_API}/${conversationId}/messages`, {
     method: "POST",
     body: JSON.stringify(payload),
   });
 }
 
-export async function listChatLanes(chatId: string) {
-  return fetchJson<ChatLane[]>(`${CONVERSATIONS_API}/${chatId}/lanes`);
+export async function listConversationLanes(conversationId: string) {
+  return fetchJson<ConversationLane[]>(`${CONVERSATIONS_API}/${conversationId}/lanes`);
 }
 
-export async function listChatBranches(chatId: string) {
-  return fetchJson<ChatBranch[]>(`${CONVERSATIONS_API}/${chatId}/branches`);
+export async function listConversationBranches(conversationId: string) {
+  return fetchJson<ConversationBranch[]>(`${CONVERSATIONS_API}/${conversationId}/branches`);
 }
 
-export async function createChatBranch(
-  chatId: string,
+export async function createConversationBranch(
+  conversationId: string,
   payload: {
     from_branch_id?: string;
     source_message_id?: string;
@@ -130,17 +130,17 @@ export async function createChatBranch(
     activate?: boolean;
   },
 ) {
-  return fetchJson<ChatBranch>(`${CONVERSATIONS_API}/${chatId}/branches`, {
+  return fetchJson<ConversationBranch>(`${CONVERSATIONS_API}/${conversationId}/branches`, {
     method: "POST",
     body: JSON.stringify(payload),
   });
 }
 
-export async function switchChatBranch(chatId: string, branchId: string) {
-  const detail = await fetchJson<unknown>(`${CONVERSATIONS_API}/${chatId}/branches/${branchId}/switch`, {
+export async function switchConversationBranch(conversationId: string, branchId: string) {
+  const detail = await fetchJson<unknown>(`${CONVERSATIONS_API}/${conversationId}/branches/${branchId}/switch`, {
     method: "POST",
   });
-  const normalized = normalizeChatDetailPayload(detail);
+  const normalized = normalizeConversationDetailPayload(detail);
   return {
     conversation: normalized.conversation,
     lanes: normalized.lanes ?? [],
@@ -150,11 +150,11 @@ export async function switchChatBranch(chatId: string, branchId: string) {
     runs: [],
     tasks: [],
     outputs: [],
-  } satisfies ChatThreadDetail;
+  } satisfies ConversationDetail;
 }
 
-export async function createChatCheckpoint(
-  chatId: string,
+export async function createConversationCheckpoint(
+  conversationId: string,
   payload: {
     branch_id?: string;
     message_id?: string;
@@ -162,15 +162,15 @@ export async function createChatCheckpoint(
     label?: string;
   },
 ) {
-  return fetchJson<ChatCheckpoint>(`${CONVERSATIONS_API}/${chatId}/checkpoints`, {
+  return fetchJson<ConversationCheckpoint>(`${CONVERSATIONS_API}/${conversationId}/checkpoints`, {
     method: "POST",
     body: JSON.stringify(payload),
   });
 }
 
-export function createConversationStream(chatId: string) {
+export function createConversationStream(conversationId: string) {
   return new EventSource(
-    apiUrl(`${CONVERSATIONS_API}/${encodeURIComponent(chatId)}/stream`),
+    apiUrl(`${CONVERSATIONS_API}/${encodeURIComponent(conversationId)}/stream`),
   );
 }
 
@@ -180,7 +180,7 @@ export function parseConversationStreamPayload(value: string): ConversationStrea
     approvals?: unknown;
   };
   const detailValue = parsed.detail;
-  const normalized = normalizeChatDetailPayload(detailValue);
+  const normalized = normalizeConversationDetailPayload(detailValue);
   const detailRecord = isRecord(detailValue) ? detailValue : null;
 
   return {
@@ -190,9 +190,9 @@ export function parseConversationStreamPayload(value: string): ConversationStrea
       branches: normalized.branches ?? [],
       checkpoints: normalized.checkpoints ?? [],
       messages: normalized.messages ?? [],
-      runs: Array.isArray(detailRecord?.runs) ? detailRecord.runs as ChatThreadDetail["runs"] : [],
-      tasks: Array.isArray(detailRecord?.tasks) ? detailRecord.tasks as ChatThreadDetail["tasks"] : [],
-      outputs: Array.isArray(detailRecord?.outputs) ? detailRecord.outputs as ChatThreadDetail["outputs"] : [],
+      runs: Array.isArray(detailRecord?.runs) ? detailRecord.runs as ConversationDetail["runs"] : [],
+      tasks: Array.isArray(detailRecord?.tasks) ? detailRecord.tasks as ConversationDetail["tasks"] : [],
+      outputs: Array.isArray(detailRecord?.outputs) ? detailRecord.outputs as ConversationDetail["outputs"] : [],
     },
     approvals: Array.isArray(parsed.approvals)
       ? parsed.approvals as PermissionApprovalRecord[]

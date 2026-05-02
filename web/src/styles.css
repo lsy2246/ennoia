@@ -2568,7 +2568,6 @@ label {
 
 .resource-layout,
 .logs-layout,
-.observability-layout,
 .settings-grid,
 .extension-view {
   display: grid;
@@ -2576,123 +2575,123 @@ label {
   min-height: 0;
 }
 
-.observability-layout {
-  --observability-page-bg: #fcfeff;
-  --observability-panel-bg: #ffffff;
-  --observability-card-bg: #ffffff;
-  --observability-surface-soft: #f8fbff;
-  --observability-line: #e6edf5;
-  --observability-line-strong: #cdd8e6;
-  --observability-accent-soft: #eff5ff;
-  --observability-text: #0f1728;
-  --observability-text-muted: #5f6b7a;
-  --observability-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
-  --observability-shadow-hover: 0 12px 28px rgba(15, 23, 42, 0.05);
+.logs-layout {
+  --logs-page-bg: #fcfeff;
+  --logs-panel-bg: #ffffff;
+  --logs-card-bg: #ffffff;
+  --logs-surface-soft: #f8fbff;
+  --logs-line: #e6edf5;
+  --logs-line-strong: #cdd8e6;
+  --logs-accent-soft: #eff5ff;
+  --logs-text: #0f1728;
+  --logs-text-muted: #5f6b7a;
+  --logs-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
+  --logs-shadow-hover: 0 12px 28px rgba(15, 23, 42, 0.05);
   padding: 0;
   border-radius: 0;
-  background: var(--observability-page-bg);
+  background: var(--logs-page-bg);
 }
 
-.observability-panel {
+.logs-panel {
   display: flex;
   flex-direction: column;
   gap: 16px;
   min-height: 0;
 }
 
-.observability-layout .work-panel {
-  border-color: var(--observability-line);
-  background: var(--observability-panel-bg);
-  box-shadow: var(--observability-shadow);
+.logs-layout .work-panel {
+  border-color: var(--logs-line);
+  background: var(--logs-panel-bg);
+  box-shadow: var(--logs-shadow);
 }
 
-.observability-layout .details-panel {
+.logs-layout .details-panel {
   border: 0;
   background: transparent;
   box-shadow: none;
   padding: 0;
 }
 
-.observability-layout .page-heading h1,
-.observability-layout .page-heading p,
-.observability-layout .page-heading span,
-.observability-layout strong,
-.observability-layout button,
-.observability-layout input,
-.observability-layout .custom-select__trigger {
-  color: var(--observability-text);
+.logs-layout .page-heading h1,
+.logs-layout .page-heading p,
+.logs-layout .page-heading span,
+.logs-layout strong,
+.logs-layout button,
+.logs-layout input,
+.logs-layout .custom-select__trigger {
+  color: var(--logs-text);
 }
 
-.observability-layout input,
-.observability-layout textarea,
-.observability-layout .custom-select__trigger,
-.observability-layout .custom-select__menu {
+.logs-layout input,
+.logs-layout textarea,
+.logs-layout .custom-select__trigger,
+.logs-layout .custom-select__menu {
   background: #ffffff;
-  border-color: var(--observability-line);
+  border-color: var(--logs-line);
 }
 
-.observability-layout button.secondary,
-.observability-filter-popover summary {
+.logs-layout button.secondary,
+.logs-filter-popover summary {
   min-height: 42px;
   padding: 0 14px;
-  border: 1px solid var(--observability-line);
+  border: 1px solid var(--logs-line);
   border-radius: var(--radius-sm);
   background: #ffffff;
-  color: var(--observability-text);
+  color: var(--logs-text);
   box-shadow: none;
   font-weight: 500;
 }
 
-.observability-layout button.secondary:hover,
-.observability-filter-popover summary:hover {
-  border-color: var(--observability-line-strong);
-  background: var(--observability-accent-soft);
+.logs-layout button.secondary:hover,
+.logs-filter-popover summary:hover {
+  border-color: var(--logs-line-strong);
+  background: var(--logs-accent-soft);
   box-shadow: none;
   transform: none;
 }
 
-.observability-layout button.secondary:active:not(:disabled) {
+.logs-layout button.secondary:active:not(:disabled) {
   transform: none;
 }
 
-.observability-layout .custom-select__trigger,
-.observability-layout input:not([type="checkbox"]):not([type="radio"]) {
+.logs-layout .custom-select__trigger,
+.logs-layout input:not([type="checkbox"]):not([type="radio"]) {
   min-height: 42px;
   box-shadow: none;
 }
 
-.observability-layout .custom-select__trigger:hover,
-.observability-layout input:not([type="checkbox"]):not([type="radio"]):hover,
-.observability-layout textarea:hover {
+.logs-layout .custom-select__trigger:hover,
+.logs-layout input:not([type="checkbox"]):not([type="radio"]):hover,
+.logs-layout textarea:hover {
   background: #ffffff;
-  border-color: var(--observability-line-strong);
+  border-color: var(--logs-line-strong);
   box-shadow: none;
 }
 
-.observability-layout .custom-select--open .custom-select__trigger,
-.observability-layout input:not([type="checkbox"]):not([type="radio"]):focus-visible,
-.observability-layout textarea:focus-visible {
+.logs-layout .custom-select--open .custom-select__trigger,
+.logs-layout input:not([type="checkbox"]):not([type="radio"]):focus-visible,
+.logs-layout textarea:focus-visible {
   background: #ffffff;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
-.observability-layout .custom-select__menu {
+.logs-layout .custom-select__menu {
   padding: 6px;
   background: #ffffff;
   box-shadow: 0 18px 42px rgba(15, 23, 42, 0.1);
 }
 
-.observability-layout .custom-select__option--focused,
-.observability-layout .custom-multi-select__option:hover {
-  background: var(--observability-accent-soft);
+.logs-layout .custom-select__option--focused,
+.logs-layout .custom-multi-select__option:hover {
+  background: var(--logs-accent-soft);
 }
 
-.observability-layout .custom-multi-select__option {
+.logs-layout .custom-multi-select__option {
   border-radius: var(--radius-xs);
 }
 
-.observability-layout .custom-multi-select__option input {
+.logs-layout .custom-multi-select__option input {
   width: 14px;
   min-height: 14px;
   height: 14px;
@@ -2706,87 +2705,87 @@ label {
   accent-color: var(--accent);
 }
 
-.observability-layout .page-heading p,
-.observability-layout .page-heading span,
-.observability-layout .empty-card,
-.observability-layout small,
-.observability-layout .helper-text {
-  color: var(--observability-text-muted);
+.logs-layout .page-heading p,
+.logs-layout .page-heading span,
+.logs-layout .empty-card,
+.logs-layout small,
+.logs-layout .helper-text {
+  color: var(--logs-text-muted);
 }
 
-.observability-header-card {
+.logs-header-card {
   gap: 20px;
   padding: 20px 22px;
 }
 
-.observability-diagnostic-grid {
+.logs-diagnostic-grid {
   display: grid;
   grid-template-columns: minmax(320px, 0.42fr) minmax(0, 0.58fr);
   gap: 18px;
   min-height: 0;
 }
 
-.observability-workbench {
+.logs-workbench {
   align-items: stretch;
   padding: 18px;
   overflow: visible;
 }
 
-.observability-column {
+.logs-column {
   min-width: 0;
 }
 
-.observability-toolbar {
+.logs-toolbar {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
 }
 
-.observability-toolbar--stack {
+.logs-toolbar--stack {
   flex-direction: column;
   align-items: stretch;
 }
 
-.observability-summary-grid {
+.logs-summary-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 10px;
 }
 
-.observability-summary-grid .metric-card small,
-.observability-inline-meta,
-.observability-feed-count,
-.observability-feed-card__kind {
-  color: var(--observability-text-muted);
+.logs-summary-grid .metric-card small,
+.logs-inline-meta,
+.logs-feed-count,
+.logs-feed-card__kind {
+  color: var(--logs-text-muted);
 }
 
-.observability-metric-card {
+.logs-metric-card {
   gap: 4px;
   padding: 14px 16px;
-  border-color: var(--observability-line);
-  background: var(--observability-card-bg);
+  border-color: var(--logs-line);
+  background: var(--logs-card-bg);
   box-shadow: none;
 }
 
-.observability-metric-card strong {
+.logs-metric-card strong {
   font-size: 28px;
   line-height: 1.1;
 }
 
-.observability-metric-card span {
+.logs-metric-card span {
   font-size: var(--text-sm);
   letter-spacing: 0.02em;
 }
 
-.observability-section-header {
+.logs-section-header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
 }
 
-.observability-feed-tools {
+.logs-feed-tools {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -2794,61 +2793,61 @@ label {
   overflow: visible;
 }
 
-.observability-filter-grid {
+.logs-filter-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
 
-.observability-filter-field {
+.logs-filter-field {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
-.observability-filter-field > span {
-  color: var(--observability-text-muted);
+.logs-filter-field > span {
+  color: var(--logs-text-muted);
   font-size: var(--text-sm);
   font-weight: 500;
 }
 
-.observability-toolbar--feed {
+.logs-toolbar--feed {
   position: relative;
   gap: 12px;
   align-items: center;
 }
 
-.observability-search {
+.logs-search {
   flex: 1;
   background: #ffffff;
-  border-color: var(--observability-line);
+  border-color: var(--logs-line);
   box-shadow: none;
   min-height: 42px;
 }
 
-.observability-filter-popover {
+.logs-filter-popover {
   position: relative;
   margin-left: auto;
   overflow: visible;
 }
 
-.observability-filter-popover summary {
+.logs-filter-popover summary {
   list-style: none;
   display: inline-flex;
   align-items: center;
   cursor: pointer;
 }
 
-.observability-filter-popover summary::-webkit-details-marker {
+.logs-filter-popover summary::-webkit-details-marker {
   display: none;
 }
 
-.observability-filter-popover[open] > summary {
+.logs-filter-popover[open] > summary {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
-.observability-filter-popover__panel {
+.logs-filter-popover__panel {
   position: absolute;
   top: calc(100% + 10px);
   left: 0;
@@ -2856,47 +2855,47 @@ label {
   width: min(680px, calc(100vw - 96px));
   max-width: calc(100vw - 96px);
   padding: 18px;
-  border: 1px solid var(--observability-line);
+  border: 1px solid var(--logs-line);
   border-radius: var(--radius-lg);
   background: #ffffff;
   box-shadow: 0 20px 56px rgba(15, 23, 42, 0.1);
   z-index: 40;
 }
 
-.observability-scroll {
+.logs-scroll {
   min-height: 280px;
   max-height: min(720px, calc(100vh - 320px));
   overflow: auto;
   padding-right: 4px;
 }
 
-.observability-item {
+.logs-item {
   cursor: pointer;
 }
 
-.observability-item--active {
+.logs-item--active {
   border-color: var(--accent);
   box-shadow:
     0 0 0 1px color-mix(in srgb, var(--accent) 26%, transparent),
     0 10px 26px rgba(37, 99, 235, 0.08);
 }
 
-.observability-feed-card {
+.logs-feed-card {
   padding: 0;
-  border: 1px solid var(--observability-line);
-  background: var(--observability-card-bg);
+  border: 1px solid var(--logs-line);
+  background: var(--logs-card-bg);
   position: relative;
   box-shadow: none;
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast), background var(--transition-fast);
 }
 
-.observability-feed-card .plain-card-button {
+.logs-feed-card .plain-card-button {
   padding: 16px 16px 16px 18px;
   gap: 8px;
   background: transparent;
 }
 
-.observability-feed-card::before {
+.logs-feed-card::before {
   content: "";
   position: absolute;
   inset: 14px auto 14px 0;
@@ -2905,43 +2904,43 @@ label {
   background: #cfd9e8;
 }
 
-.observability-feed-card--error::before {
+.logs-feed-card--error::before {
   background: rgba(194, 65, 45, 0.9);
 }
 
-.observability-feed-card--warn::before,
-.observability-feed-card--slow::before {
+.logs-feed-card--warn::before,
+.logs-feed-card--slow::before {
   background: rgba(183, 121, 31, 0.9);
 }
 
-.observability-feed-card__header {
+.logs-feed-card__header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
 }
 
-.observability-feed-card__kind {
+.logs-feed-card__kind {
   font-size: var(--text-xs);
   text-transform: uppercase;
   letter-spacing: 0.06em;
 }
 
-.observability-meta {
+.logs-meta {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   align-items: center;
 }
 
-.observability-inline-meta {
+.logs-inline-meta {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
   font-size: var(--text-sm);
 }
 
-.observability-detail {
+.logs-detail {
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -2950,226 +2949,226 @@ label {
   padding: 0;
 }
 
-.observability-detail-block {
+.logs-detail-block {
   display: flex;
   flex-direction: column;
   gap: 12px;
   padding: 16px;
-  border: 1px solid var(--observability-line);
+  border: 1px solid var(--logs-line);
   border-radius: var(--radius-md);
   background: #ffffff;
   box-shadow: none;
 }
 
-.observability-detail-block__header {
+.logs-detail-block__header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
 }
 
-.observability-context-card {
+.logs-context-card {
   display: flex;
   flex-direction: column;
   gap: 10px;
   background: #ffffff;
-  border-color: var(--observability-line);
+  border-color: var(--logs-line);
   box-shadow: none;
 }
 
-.observability-json {
+.logs-json {
   margin: 0;
   padding: 12px;
   border-radius: var(--radius-sm);
-  background: var(--observability-surface-soft);
-  border: 1px solid var(--observability-line);
+  background: var(--logs-surface-soft);
+  border: 1px solid var(--logs-line);
   overflow: auto;
   white-space: pre-wrap;
   word-break: break-word;
   max-height: 320px;
-  color: var(--observability-text);
+  color: var(--logs-text);
   line-height: 1.6;
 }
 
-.observability-layout .log-card,
-.observability-layout .resource-card,
-.observability-layout .mini-card,
-.observability-layout .empty-card,
-.observability-layout .timeline-item {
-  border-color: var(--observability-line);
-  background: var(--observability-card-bg);
+.logs-layout .log-card,
+.logs-layout .resource-card,
+.logs-layout .mini-card,
+.logs-layout .empty-card,
+.logs-layout .timeline-item {
+  border-color: var(--logs-line);
+  background: var(--logs-card-bg);
   box-shadow: none;
 }
 
-.observability-layout .resource-card:hover,
-.observability-layout .mini-card:hover,
-.observability-layout .log-card:hover,
-.observability-layout .timeline-item:hover {
+.logs-layout .resource-card:hover,
+.logs-layout .mini-card:hover,
+.logs-layout .log-card:hover,
+.logs-layout .timeline-item:hover {
   background: #ffffff;
-  border-color: var(--observability-line-strong);
-  box-shadow: var(--observability-shadow-hover);
+  border-color: var(--logs-line-strong);
+  box-shadow: var(--logs-shadow-hover);
   transform: none;
 }
 
-.observability-feed-card p,
-.observability-context-card p,
-.observability-layout .log-card p {
+.logs-feed-card p,
+.logs-context-card p,
+.logs-layout .log-card p {
   margin: 0;
-  color: var(--observability-text-muted);
+  color: var(--logs-text-muted);
   line-height: 1.6;
 }
 
-.observability-layout .log-card header,
-.observability-layout .resource-card header {
+.logs-layout .log-card header,
+.logs-layout .resource-card header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
 }
 
-.observability-related-logs {
+.logs-related-logs {
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
 
-.observability-related-log {
+.logs-related-log {
   padding: 14px 16px;
   border-radius: var(--radius-md);
 }
 
-.observability-related-log--current {
-  background: var(--observability-surface-soft);
-  border-color: color-mix(in srgb, var(--accent) 18%, var(--observability-line));
+.logs-related-log--current {
+  background: var(--logs-surface-soft);
+  border-color: color-mix(in srgb, var(--accent) 18%, var(--logs-line));
 }
 
-.observability-related-log__header {
+.logs-related-log__header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
 }
 
-.observability-related-log__title {
+.logs-related-log__title {
   gap: 4px;
 }
 
-.observability-related-log__title small {
+.logs-related-log__title small {
   font-size: var(--text-xs);
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 
-.observability-related-log__message {
+.logs-related-log__message {
   margin: 2px 0 0;
 }
 
-.observability-related-log__meta {
+.logs-related-log__meta {
   font-size: var(--text-sm);
   padding-top: 2px;
 }
 
-.observability-related-log-empty {
+.logs-related-log-empty {
   display: flex;
   flex-direction: column;
   gap: 6px;
   padding: 16px 18px;
   border-style: dashed;
-  border-color: color-mix(in srgb, var(--accent) 14%, var(--observability-line));
-  background: linear-gradient(180deg, #ffffff, var(--observability-surface-soft));
+  border-color: color-mix(in srgb, var(--accent) 14%, var(--logs-line));
+  background: linear-gradient(180deg, #ffffff, var(--logs-surface-soft));
 }
 
-.observability-related-log-empty strong {
+.logs-related-log-empty strong {
   font-size: var(--text-base);
   font-weight: 600;
-  color: var(--observability-text);
+  color: var(--logs-text);
 }
 
-.observability-related-log-empty p {
+.logs-related-log-empty p {
   margin: 0;
-  color: var(--observability-text-muted);
+  color: var(--logs-text-muted);
   line-height: 1.6;
 }
 
-.observability-kv-list {
+.logs-kv-list {
   grid-template-columns: 140px minmax(0, 1fr);
   gap: 0;
 }
 
-.observability-kv-list span,
-.observability-kv-list strong {
+.logs-kv-list span,
+.logs-kv-list strong {
   padding: 10px 0;
-  border-bottom: 1px solid var(--observability-line);
+  border-bottom: 1px solid var(--logs-line);
   background: transparent;
 }
 
-.observability-kv-list span:nth-last-child(-n+2),
-.observability-kv-list strong:nth-last-child(-n+1) {
+.logs-kv-list span:nth-last-child(-n+2),
+.logs-kv-list strong:nth-last-child(-n+1) {
   border-bottom: 0;
 }
 
-.observability-kv-list span {
-  color: var(--observability-text-muted);
+.logs-kv-list span {
+  color: var(--logs-text-muted);
 }
 
-.observability-timeline-item {
+.logs-timeline-item {
   grid-template-columns: 108px minmax(0, 1fr);
   padding: 14px;
   align-items: flex-start;
 }
 
-.observability-timeline-item .stack {
+.logs-timeline-item .stack {
   gap: 6px;
 }
 
-.observability-detail-disclosure {
-  border: 1px solid var(--observability-line);
+.logs-detail-disclosure {
+  border: 1px solid var(--logs-line);
   border-radius: var(--radius-md);
-  background: var(--observability-surface-soft);
+  background: var(--logs-surface-soft);
   padding: 14px;
 }
 
-.observability-detail-disclosure summary {
+.logs-detail-disclosure summary {
   font-weight: 600;
-  color: var(--observability-text);
+  color: var(--logs-text);
   list-style: none;
   cursor: pointer;
 }
 
-.observability-detail-disclosure summary::-webkit-details-marker {
+.logs-detail-disclosure summary::-webkit-details-marker {
   display: none;
 }
 
-.observability-layout .empty-card {
-  background: var(--observability-surface-soft);
+.logs-layout .empty-card {
+  background: var(--logs-surface-soft);
   border-style: dashed;
 }
 
-.observability-layout .badge {
+.logs-layout .badge {
   border: 1px solid transparent;
 }
 
-.observability-layout .badge--success {
+.logs-layout .badge--success {
   background: #eef9f2;
   border-color: #d8eddf;
   color: #18794e;
 }
 
-.observability-layout .badge--warn {
+.logs-layout .badge--warn {
   background: #fff7ea;
   border-color: #f2dfbf;
   color: #af6b14;
 }
 
-.observability-layout .badge--danger {
+.logs-layout .badge--danger {
   background: #fff2ef;
   border-color: #f2d4ce;
   color: #c2412d;
 }
 
-.observability-layout .badge--muted {
+.logs-layout .badge--muted {
   background: #ffffff;
-  border-color: var(--observability-line);
+  border-color: var(--logs-line);
   color: #475467;
 }
 
@@ -4661,7 +4660,7 @@ label {
   grid-template-columns: minmax(0, 1fr);
 }
 
-.settings-provider-shell {
+.settings-model-endpoints-shell {
   min-width: 0;
 }
 
@@ -4737,7 +4736,7 @@ label {
   border-top: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
 }
 
-.providers-panel--embedded {
+.model-endpoints-panel--embedded {
   display: flex;
   flex-direction: column;
   flex: 1;
@@ -4750,23 +4749,23 @@ label {
   box-shadow: var(--shadow-1);
 }
 
-.providers-embedded-header {
+.model-endpoints-embedded-header {
   display: flex;
   flex-direction: column;
   gap: 8px;
   padding: 0;
 }
 
-.providers-card-grid--embedded {
+.model-endpoints-card-grid--embedded {
   gap: 12px;
 }
 
-.providers-card--embedded {
+.model-endpoints-card--embedded {
   background: linear-gradient(180deg, color-mix(in srgb, var(--bg-panel) 88%, var(--bg-elevated)), var(--bg-elevated));
   box-shadow: none;
 }
 
-.providers-panel--embedded .resource-card {
+.model-endpoints-panel--embedded .resource-card {
   padding: 12px;
 }
 
@@ -5127,7 +5126,7 @@ label {
 }
 
 @container workbench-panel (max-width: 1040px) {
-  .observability-diagnostic-grid,
+  .logs-diagnostic-grid,
   .conversations-shell,
   .schedules-shell,
   .extensions-shell,
@@ -5160,10 +5159,10 @@ label {
   .conversations-session-card__header,
   .skills-card__header,
   .schedules-card__header,
-  .observability-toolbar,
-  .observability-section-header,
-  .observability-feed-card__header,
-  .observability-related-log__header,
+  .logs-toolbar,
+  .logs-section-header,
+  .logs-feed-card__header,
+  .logs-related-log__header,
   .extensions-toolbar__row,
   .extensions-section__header,
   .extensions-catalog-card__header,
@@ -5195,7 +5194,7 @@ label {
   .conversations-overview-grid,
   .skills-overview-grid,
   .schedules-overview-grid,
-  .observability-summary-grid,
+  .logs-summary-grid,
   .extensions-overview-grid,
   .extensions-summary-grid,
   .settings-runtime-summary {
@@ -5208,7 +5207,7 @@ label {
   .form-grid,
   .kv-list,
   .skills-meta-grid,
-  .observability-filter-grid,
+  .logs-filter-grid,
   .filter-bar {
     display: grid;
     grid-template-columns: 1fr;
@@ -5217,14 +5216,14 @@ label {
   .conversations-overview-grid,
   .skills-overview-grid,
   .schedules-overview-grid,
-  .observability-summary-grid,
+  .logs-summary-grid,
   .extensions-overview-grid,
   .extensions-summary-grid,
   .settings-runtime-summary {
     grid-template-columns: 1fr;
   }
 
-  .observability-feed-tools,
+  .logs-feed-tools,
   .queue-item,
   .message-bubble__footer,
   .composer-actions {
@@ -5242,11 +5241,11 @@ label {
     max-width: 100%;
   }
 
-  .observability-filter-popover {
+  .logs-filter-popover {
     margin-left: 0;
   }
 
-  .observability-filter-popover__panel {
+  .logs-filter-popover__panel {
     position: static;
     width: 100%;
     max-width: none;
@@ -5294,7 +5293,7 @@ label {
 
 /* --- Intermediate breakpoint: narrow desktop / large tablets --- */
 @media (max-width: 1200px) and (min-width: 901px) {
-  .observability-diagnostic-grid {
+  .logs-diagnostic-grid {
     grid-template-columns: 1fr;
   }
 
@@ -5330,7 +5329,7 @@ label {
   .conversations-overview-grid,
   .skills-overview-grid,
   .schedules-overview-grid,
-  .observability-summary-grid,
+  .logs-summary-grid,
   .extensions-overview-grid,
   .extensions-summary-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -5457,7 +5456,7 @@ label {
 
   .conversation-grid,
   .resource-layout,
-  .observability-diagnostic-grid,
+  .logs-diagnostic-grid,
   .settings-modular-grid,
   .extension-view,
   .memory-visual-grid,
@@ -5531,7 +5530,7 @@ label {
   .form-grid,
   .kv-list,
   .skills-meta-grid,
-  .observability-filter-grid,
+  .logs-filter-grid,
   .filter-bar {
     grid-template-columns: 1fr;
     display: grid;
@@ -5546,9 +5545,9 @@ label {
   .conversations-session-card__header,
   .skills-card__header,
   .schedules-card__header,
-  .observability-toolbar,
-  .observability-section-header,
-  .observability-feed-card__header {
+  .logs-toolbar,
+  .logs-section-header,
+  .logs-feed-card__header {
     flex-direction: column;
     align-items: stretch;
   }
@@ -5562,7 +5561,7 @@ label {
     align-items: stretch;
   }
 
-  .observability-related-log__header {
+  .logs-related-log__header {
     flex-direction: column;
     align-items: stretch;
   }
@@ -5596,16 +5595,16 @@ label {
     grid-template-columns: 1fr;
   }
 
-  .observability-feed-tools {
+  .logs-feed-tools {
     flex-direction: column;
     align-items: stretch;
   }
 
-  .observability-filter-popover {
+  .logs-filter-popover {
     margin-left: 0;
   }
 
-  .observability-filter-popover__panel {
+  .logs-filter-popover__panel {
     position: static;
     width: 100%;
     margin-top: 10px;
@@ -5686,7 +5685,7 @@ label {
   }
 
   .settings-runtime-summary,
-  .observability-summary-grid,
+  .logs-summary-grid,
   .conversations-overview-grid,
   .skills-overview-grid,
   .schedules-overview-grid,
@@ -5705,3 +5704,4 @@ label {
     transition: none;
   }
 }
+

@@ -6,7 +6,7 @@
 
 - `@ennoia/api-client`
 - `@ennoia/contract`
-- `@ennoia/observability`
+- `@ennoia/logs`
 - `@ennoia/ui-sdk`
 
 当前阶段提供：

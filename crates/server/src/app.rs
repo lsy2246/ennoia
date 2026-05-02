@@ -8,27 +8,26 @@ use ennoia_assets::builtins;
 use ennoia_extension_host::{ExtensionRuntime, ExtensionRuntimeConfig};
 use ennoia_kernel::{
     apply_server_log_env_overrides, AgentConfig, AgentDocument, AgentPermissionPolicy,
-    PlatformOverview, ProviderConfig, ServerConfig, SkillConfig, SkillRegistryEntry,
+    ModelEndpointConfig, PlatformOverview, ServerConfig, SkillConfig, SkillRegistryEntry,
     SkillRegistryFile, SpaceSpec, UiConfig,
 };
-use ennoia_observability::{self, next_span_id, ObservabilityGuard, TraceContext};
+use ennoia_logs::{self, next_span_id, LogsGuard, TraceContext};
 use ennoia_paths::{default_home_dir, RuntimePaths};
 use tokio::net::TcpListener;
 use tracing::info;
 
 use crate::agent_permissions::AgentPermissionStore;
 use crate::event_bus::EventBusStore;
-use crate::middleware::RateLimitState;
-use crate::observability::{
-    ObservabilityStore, ObservationLogWrite, ObservationSpanLinkWrite, ObservationSpanWrite,
-    OBSERVABILITY_COMPONENT_EVENT_BUS, OBSERVABILITY_COMPONENT_EXTENSION_HOST,
-    OBSERVABILITY_COMPONENT_HOST,
+use crate::logs_store::{
+    LogEntryWrite, LogTraceLinkWrite, LogTraceWrite, LogsStore, LOGS_COMPONENT_EVENT_BUS,
+    LOGS_COMPONENT_EXTENSION_HOST, LOGS_COMPONENT_HOST,
 };
+use crate::middleware::RateLimitState;
 use crate::routes::{build_router, run_due_schedules_once};
 
 type AppError = Box<dyn std::error::Error + Send + Sync>;
 
-const OBSERVABILITY_TARGET: &str = "server";
+const LOGS_TARGET: &str = "server";
 const DEFAULT_SPACE_ID: &str = "studio";
 const DEFAULT_SPACE_NAME: &str = "Studio";
 const EXTENSION_REFRESH_SUMMARY: &str = "polled runtime refresh";
@@ -42,14 +41,14 @@ pub struct AppState {
     pub extensions: ExtensionRuntime,
     pub agents: Vec<AgentConfig>,
     pub skills: Vec<SkillConfig>,
-    pub providers: Vec<ProviderConfig>,
+    pub model_endpoints: Vec<ModelEndpointConfig>,
     pub spaces: Vec<SpaceSpec>,
     pub rate_limit_state: RateLimitState,
     pub schedule_lock: Arc<tokio::sync::Mutex<()>>,
-    pub observability: Arc<ObservabilityStore>,
+    pub logs: Arc<LogsStore>,
     pub event_bus: Arc<EventBusStore>,
     pub agent_permissions: Arc<AgentPermissionStore>,
-    pub observability_guard: Option<Arc<ObservabilityGuard>>,
+    pub logs_guard: Option<Arc<LogsGuard>>,
 }
 
 pub fn default_app_state() -> AppState {
@@ -58,7 +57,7 @@ pub fn default_app_state() -> AppState {
     runtime_paths.ensure_layout().expect("runtime layout");
     let extensions =
         ExtensionRuntime::bootstrap(extension_runtime_config(&runtime_paths)).expect("runtime");
-    let observability = Arc::new(ObservabilityStore::new(&runtime_paths).expect("observability"));
+    let logs = Arc::new(LogsStore::new(&runtime_paths).expect("logs"));
     let event_bus = Arc::new(EventBusStore::new(&runtime_paths).expect("event bus"));
     let agent_permissions =
         Arc::new(AgentPermissionStore::new(&runtime_paths).expect("agent permissions"));
@@ -71,14 +70,14 @@ pub fn default_app_state() -> AppState {
         extensions,
         agents: Vec::new(),
         skills: builtin_skill_configs(),
-        providers: Vec::new(),
+        model_endpoints: Vec::new(),
         spaces: default_spaces(),
         rate_limit_state: RateLimitState::new(),
         schedule_lock: Arc::new(tokio::sync::Mutex::new(())),
-        observability,
+        logs,
         event_bus,
         agent_permissions,
-        observability_guard: None,
+        logs_guard: None,
     }
 }
 
@@ -92,8 +91,8 @@ pub async fn bootstrap_app_state(home_dir: impl AsRef<Path>) -> Result<AppState,
     server_config = server_config.normalize();
     apply_server_log_env_overrides(&mut server_config.logging);
     let ui_config: UiConfig = read_toml_or_default(runtime_paths.ui_config_file())?;
-    let observability_guard = Some(Arc::new(ennoia_observability::init(
-        OBSERVABILITY_TARGET,
+    let logs_guard = Some(Arc::new(ennoia_logs::init(
+        LOGS_TARGET,
         &server_config.logging.level,
         runtime_paths.server_logs_dir(),
     )?));
@@ -101,10 +100,10 @@ pub async fn bootstrap_app_state(home_dir: impl AsRef<Path>) -> Result<AppState,
 
     let agents = load_agent_configs(&runtime_paths)?;
     let skills = load_skill_configs(&runtime_paths)?;
-    let providers = load_provider_configs(&runtime_paths)?;
+    let model_endpoints = load_model_endpoint_configs(&runtime_paths)?;
     let spaces = default_spaces();
     let extensions = ExtensionRuntime::bootstrap(extension_runtime_config(&runtime_paths))?;
-    let observability = Arc::new(ObservabilityStore::new(&runtime_paths)?);
+    let logs = Arc::new(LogsStore::new(&runtime_paths)?);
     let event_bus = Arc::new(EventBusStore::new(&runtime_paths)?);
     let agent_permissions = Arc::new(AgentPermissionStore::new(&runtime_paths)?);
 
@@ -116,24 +115,24 @@ pub async fn bootstrap_app_state(home_dir: impl AsRef<Path>) -> Result<AppState,
         extensions,
         agents,
         skills,
-        providers,
+        model_endpoints,
         spaces,
         rate_limit_state: RateLimitState::new(),
         schedule_lock: Arc::new(tokio::sync::Mutex::new(())),
-        observability,
+        logs,
         event_bus,
         agent_permissions,
-        observability_guard,
+        logs_guard,
     })
 }
 
 pub async fn run_server(home_dir: impl AsRef<Path>) -> Result<(), AppError> {
     let state = bootstrap_app_state(home_dir).await?;
-    let observability = state.observability.clone();
-    let _ = state.observability.append_log(ObservationLogWrite {
+    let logs = state.logs.clone();
+    let _ = state.logs.append_log(LogEntryWrite {
         event: "runtime.host.started".to_string(),
         level: "info".to_string(),
-        component: OBSERVABILITY_COMPONENT_HOST.to_string(),
+        component: LOGS_COMPONENT_HOST.to_string(),
         source_kind: "system".to_string(),
         source_id: None,
         message: "server started".to_string(),
@@ -146,7 +145,7 @@ pub async fn run_server(home_dir: impl AsRef<Path>) -> Result<(), AppError> {
 
     let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
     let extensions = state.extensions.clone();
-    let refresh_log = state.observability.clone();
+    let refresh_log = state.logs.clone();
     let mut extension_cancel = cancel_rx.clone();
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(2));
@@ -154,10 +153,10 @@ pub async fn run_server(home_dir: impl AsRef<Path>) -> Result<(), AppError> {
             tokio::select! {
                 _ = interval.tick() => {
                     if extensions.refresh_from_disk(EXTENSION_REFRESH_SUMMARY).is_err() {
-                        let _ = refresh_log.append_log(ObservationLogWrite {
+                        let _ = refresh_log.append_log(LogEntryWrite {
                             event: "runtime.extension.refresh_failed".to_string(),
                             level: "warn".to_string(),
-                            component: OBSERVABILITY_COMPONENT_EXTENSION_HOST.to_string(),
+                            component: LOGS_COMPONENT_EXTENSION_HOST.to_string(),
                             source_kind: "system".to_string(),
                             source_id: None,
                             message: "extension refresh failed".to_string(),
@@ -215,10 +214,10 @@ pub async fn run_server(home_dir: impl AsRef<Path>) -> Result<(), AppError> {
     let listener = TcpListener::bind(&address).await?;
     let serve_result = axum::serve(listener, build_router(state)).await;
     let _ = cancel_tx.send(true);
-    let _ = observability.append_log(ObservationLogWrite {
+    let _ = logs.append_log(LogEntryWrite {
         event: "runtime.host.stopping".to_string(),
         level: "info".to_string(),
-        component: OBSERVABILITY_COMPONENT_HOST.to_string(),
+        component: LOGS_COMPONENT_HOST.to_string(),
         source_kind: "system".to_string(),
         source_id: None,
         message: "server stopping".to_string(),
@@ -233,10 +232,10 @@ fn drain_hook_deliveries_once(state: &AppState) {
     let pending = match state.event_bus.list_pending_deliveries(32) {
         Ok(items) => items,
         Err(error) => {
-            let _ = state.observability.append_log(ObservationLogWrite {
+            let _ = state.logs.append_log(LogEntryWrite {
                 event: "runtime.event_bus.pending_failed".to_string(),
                 level: "warn".to_string(),
-                component: OBSERVABILITY_COMPONENT_EVENT_BUS.to_string(),
+                component: LOGS_COMPONENT_EVENT_BUS.to_string(),
                 source_kind: "system".to_string(),
                 source_id: None,
                 message: "event bus pending delivery scan failed".to_string(),
@@ -286,11 +285,11 @@ fn drain_hook_deliveries_once(state: &AppState) {
                 let delivery_span_id = span_trace.span_id.clone();
                 record_trace_span(
                     state,
-                    ObservationSpanWrite {
+                    LogTraceWrite {
                         trace: span_trace,
                         kind: "hook_delivery".to_string(),
                         name: "event_bus.delivery".to_string(),
-                        component: OBSERVABILITY_COMPONENT_EVENT_BUS.to_string(),
+                        component: LOGS_COMPONENT_EVENT_BUS.to_string(),
                         source_kind: "extension".to_string(),
                         source_id: Some(delivery.extension_id.clone()),
                         status: "ok".to_string(),
@@ -305,17 +304,15 @@ fn drain_hook_deliveries_once(state: &AppState) {
                         duration_ms: started.elapsed().as_millis() as i64,
                     },
                 );
-                let _ = state
-                    .observability
-                    .append_span_link(ObservationSpanLinkWrite {
-                        trace_id: delivery.trace.trace_id.clone(),
-                        span_id: delivery_span_id,
-                        linked_trace_id: delivery.trace.trace_id.clone(),
-                        linked_span_id: delivery.trace.span_id.clone(),
-                        link_type: "follows_from".to_string(),
-                        attributes: serde_json::json!({}),
-                        created_at: None,
-                    });
+                let _ = state.logs.append_span_link(LogTraceLinkWrite {
+                    trace_id: delivery.trace.trace_id.clone(),
+                    span_id: delivery_span_id,
+                    linked_trace_id: delivery.trace.trace_id.clone(),
+                    linked_span_id: delivery.trace.span_id.clone(),
+                    link_type: "follows_from".to_string(),
+                    attributes: serde_json::json!({}),
+                    created_at: None,
+                });
             }
             Ok(response) => {
                 let error = response
@@ -373,11 +370,11 @@ fn handle_delivery_failure(
 ) {
     record_trace_span(
         state,
-        ObservationSpanWrite {
+        LogTraceWrite {
             trace: trace.clone(),
             kind: "hook_delivery".to_string(),
             name: "event_bus.delivery".to_string(),
-            component: OBSERVABILITY_COMPONENT_EVENT_BUS.to_string(),
+            component: LOGS_COMPONENT_EVENT_BUS.to_string(),
             source_kind: "extension".to_string(),
             source_id: Some(extension_id.to_string()),
             status: "error".to_string(),
@@ -393,27 +390,25 @@ fn handle_delivery_failure(
             duration_ms: started.elapsed().as_millis() as i64,
         },
     );
-    let _ = state
-        .observability
-        .append_span_link(ObservationSpanLinkWrite {
-            trace_id: trace.trace_id.clone(),
-            span_id: trace.span_id.clone(),
-            linked_trace_id: trace.trace_id.clone(),
-            linked_span_id: producer_span_id.to_string(),
-            link_type: "follows_from".to_string(),
-            attributes: serde_json::json!({}),
-            created_at: None,
-        });
+    let _ = state.logs.append_span_link(LogTraceLinkWrite {
+        trace_id: trace.trace_id.clone(),
+        span_id: trace.span_id.clone(),
+        linked_trace_id: trace.trace_id.clone(),
+        linked_span_id: producer_span_id.to_string(),
+        link_type: "follows_from".to_string(),
+        attributes: serde_json::json!({}),
+        created_at: None,
+    });
     let terminal = state
         .event_bus
         .mark_delivery_retry(delivery_id, error, attempt_count)
         .unwrap_or(false);
     if terminal {
-        let _ = state.observability.append_log_scoped(
-            ObservationLogWrite {
+        let _ = state.logs.append_log_scoped(
+            LogEntryWrite {
                 event: "runtime.event_bus.delivery_failed".to_string(),
                 level: "warn".to_string(),
-                component: OBSERVABILITY_COMPONENT_EVENT_BUS.to_string(),
+                component: LOGS_COMPONENT_EVENT_BUS.to_string(),
                 source_kind: "extension".to_string(),
                 source_id: Some(extension_id.to_string()),
                 message: "hook delivery exhausted retries".to_string(),
@@ -548,10 +543,13 @@ pub fn write_skill_registry(
     Ok(())
 }
 
-pub fn load_provider_configs(paths: &RuntimePaths) -> Result<Vec<ProviderConfig>, AppError> {
-    let mut providers = load_configs_from_dir::<ProviderConfig>(paths.providers_config_dir())?;
-    providers.sort_by(|left, right| left.id.cmp(&right.id));
-    Ok(providers)
+pub fn load_model_endpoint_configs(
+    paths: &RuntimePaths,
+) -> Result<Vec<ModelEndpointConfig>, AppError> {
+    let mut model_endpoints =
+        load_configs_from_dir::<ModelEndpointConfig>(paths.model_endpoints_config_dir())?;
+    model_endpoints.sort_by(|left, right| left.id.cmp(&right.id));
+    Ok(model_endpoints)
 }
 
 pub fn write_config_to_dir<T: serde::Serialize>(
@@ -687,7 +685,7 @@ mod tests {
             display_name: format!("{id}-display"),
             description: "desc".to_string(),
             system_prompt: "prompt".to_string(),
-            provider_id: "provider".to_string(),
+            model_endpoint_id: "openai".to_string(),
             model_id: "model".to_string(),
             generation_options: Default::default(),
             skills: vec!["skill-a".to_string()],
@@ -897,6 +895,6 @@ fn sort_skill_registry_entries(entries: &mut [SkillRegistryEntry]) {
     });
 }
 
-pub(crate) fn record_trace_span(state: &AppState, entry: ObservationSpanWrite) {
-    let _ = state.observability.append_span(entry);
+pub(crate) fn record_trace_span(state: &AppState, entry: LogTraceWrite) {
+    let _ = state.logs.append_span(entry);
 }

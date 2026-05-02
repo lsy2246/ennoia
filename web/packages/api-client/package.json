@@ -5,7 +5,7 @@
   "type": "module",
   "dependencies": {
     "@ennoia/contract": "workspace:*",
-    "@ennoia/observability": "workspace:*",
+    "@ennoia/logs": "workspace:*",
     "@ennoia/ui-sdk": "workspace:*"
   },
   "exports": {

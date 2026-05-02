@@ -47,8 +47,8 @@ impl RuntimePaths {
         self.config_dir().join("skills.toml")
     }
 
-    pub fn providers_config_dir(&self) -> PathBuf {
-        self.config_dir().join("providers")
+    pub fn model_endpoints_config_dir(&self) -> PathBuf {
+        self.config_dir().join("model-endpoints")
     }
 
     pub fn server_config_file(&self) -> PathBuf {
@@ -120,8 +120,8 @@ impl RuntimePaths {
         self.system_sqlite_dir().join("events.db")
     }
 
-    pub fn observability_db(&self) -> PathBuf {
-        self.system_sqlite_dir().join("observability.db")
+    pub fn logs_db(&self) -> PathBuf {
+        self.system_sqlite_dir().join("logs.db")
     }
 
     pub fn permissions_db(&self) -> PathBuf {
@@ -242,7 +242,7 @@ impl RuntimePaths {
 
     pub fn ensure_layout(&self) -> io::Result<()> {
         for dir in [
-            self.providers_config_dir(),
+            self.model_endpoints_config_dir(),
             self.preferences_dir(),
             self.space_preferences_dir(),
             self.extensions_dir(),

@@ -19,7 +19,7 @@ export const provider = {
 };
 
 export async function listModels(context = {}) {
-  const config = normalizeProviderConfig(context.provider ?? context);
+  const config = normalizeModelEndpointConfig(context.model_endpoint ?? context);
   const response = await openaiFetch(config, "/models", { method: "GET" });
   const data = await response.json();
   const models = Array.isArray(data.data)
@@ -30,13 +30,13 @@ export async function listModels(context = {}) {
     : [];
 
   return {
-    provider_id: config.id,
+    model_endpoint_id: config.id,
     models,
   };
 }
 
 export async function generate(request = {}) {
-  const config = normalizeProviderConfig(request.provider ?? {});
+  const config = normalizeModelEndpointConfig(request.model_endpoint ?? {});
   const model = request.model ?? config.default_model ?? DEFAULT_MODEL;
   const generationOptions = normalizeGenerationOptions(request.generation_options ?? request.generationOptions);
   const instructions = normalizeInstructions(request.instructions ?? request.system_prompt);
@@ -117,7 +117,7 @@ async function generateByChatCompletionStream(config, fallbackModel, payload) {
   };
 }
 
-function normalizeProviderConfig(config) {
+function normalizeModelEndpointConfig(config) {
   const baseUrl = trimTrailingSlash(config.base_url || DEFAULT_BASE_URL);
   const apiKeyEnv = config.api_key_env || "OPENAI_API_KEY";
   const apiKey = process.env[apiKeyEnv];

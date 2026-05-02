@@ -1,7 +1,7 @@
 id = "openai"
 display_name = "OpenAI"
 kind = "openai"
-description = "默认 OpenAI 上游渠道实例。"
+description = "默认 OpenAI 模型接入实例。"
 base_url = "https://api.openai.com/v1"
 api_key_env = "OPENAI_API_KEY"
 default_model = "gpt-5.4"

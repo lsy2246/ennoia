@@ -1,4 +1,4 @@
-import { createLogger } from "@ennoia/observability";
+import { createLogger } from "@ennoia/logs";
 
 export type ThemeAppearance = "light" | "dark" | "system" | "high-contrast";
 

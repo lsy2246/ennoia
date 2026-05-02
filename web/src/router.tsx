@@ -3,7 +3,7 @@ import { createRootRoute, createRoute, createRouter, Outlet, redirect } from "@t
 import { App } from "@/App";
 import { Agents } from "@/pages/agents";
 import { Extensions } from "@/pages/extensions";
-import { Observability } from "@/pages/observability";
+import { LogsPage } from "@/pages/logs";
 import { Schedules } from "@/pages/schedules";
 import { Settings } from "@/pages/settings";
 import { Skills } from "@/pages/skills";
@@ -111,10 +111,10 @@ const extensionsRoute = createRoute({
   component: Extensions,
 });
 
-const observabilityRoute = createRoute({
+const logsRoute = createRoute({
   getParentRoute: () => webRoute,
-  path: "/observability",
-  component: Observability,
+  path: "/logs",
+  component: LogsPage,
 });
 
 const settingsRoute = createRoute({
@@ -133,7 +133,7 @@ const routeTree = rootRoute.addChildren([
     schedulesRoute,
     extensionPageRoute,
     extensionsRoute,
-    observabilityRoute,
+    logsRoute,
     settingsRoute,
   ]),
 ]);

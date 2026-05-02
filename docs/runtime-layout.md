@@ -24,7 +24,7 @@
 │  ├─ preferences/
 │  │  ├─ instance.toml         # 实例级 UI 偏好
 │  │  └─ spaces/               # 空间级 UI 偏好
-│  ├─ providers/               # API 上游渠道实例配置
+│  ├─ model-endpoints/               # 模型接入实例配置
 │  ├─ skills.toml              # 技能注册表
 │  └─ extensions.toml          # 扩展注册表
 ├─ agents/
@@ -37,9 +37,9 @@
 ├─ skills/                     # 技能安装内容根目录
 ├─ data/
 │  ├─ system/
-│  │  ├─ schedules.json        # 系统 scheduler 的定时器记录
+│  │  ├─ schedules.json        # 系统 scheduler 的计划记录
 │  │  └─ sqlite/
-│  │     ├─ observability.db   # 系统观测 SQLite（logs / spans / span_links）
+│  │     ├─ logs.db            # 系统日志 SQLite（logs / spans / span_links）
 │  │     ├─ events.db          # 系统事件总线 SQLite
 │  └─ extensions/              # 扩展私有运行数据，例如 memory / workflow 的 sqlite
 └─ logs/
@@ -58,9 +58,9 @@
 
 ## 数据职责
 
-- `data/system/sqlite/observability.db`：系统观测库，统一保存 logs、traces 和 span links；不记录会话 history。
+- `data/system/sqlite/logs.db`：系统日志库，统一保存 logs、traces 和 span links；不记录会话 history。
 - `data/system/sqlite/events.db`：系统事件总线，记录会话创建、消息追加等稳定系统事件，以及它们到各扩展 Hook 的投递状态。
-- `data/system/schedules.json`：scheduler 定时器列表，记录 trigger、executor、delivery、retry、启用状态、最近执行结果和最近运行历史；executor 可以是命令或 Agent。
+- `data/system/schedules.json`：scheduler 计划列表，记录 trigger、executor、delivery、retry、启用状态、最近执行结果和最近运行历史；executor 可以是命令或 Agent。
 - `data/extensions/{extension_id}/`：扩展私有运行数据根目录。
   - 扩展私有配置、数据库、缓存和业务运行态都应保留在自己的扩展目录内，不再上浮到 `config/` 根目录。
   - `conversation` 扩展在自己的目录中维护会话、线路和消息数据。
@@ -89,4 +89,4 @@
 
 `cargo run -p ennoia-cli -- init` 会自动创建运行目录、基础配置、扩展与技能注册表、日志目录，并同步未卸载的内置扩展与技能。初始化不会预先写入会话数据、记忆数据、定时计划或运行数据。
 
-系统配置始终走 TOML；系统 Observability 与系统事件总线都走独立 SQLite；定时计划走 `data/system/schedules.json`；会话、记忆和运行等业务数据始终由扩展实现维护。
+系统配置始终走 TOML；系统日志与系统事件总线都走独立 SQLite；定时计划走 `data/system/schedules.json`；会话、记忆和运行等业务数据始终由扩展实现维护。

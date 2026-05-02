@@ -9,7 +9,7 @@ ennoia-assets = { path = "../assets" }
 ennoia-kernel = { path = "../kernel" }
 ennoia-extension-host = { path = "../extension-host" }
 ennoia-paths = { path = "../paths" }
-ennoia-observability = { path = "../observability" }
+ennoia-logs = { path = "../logs" }
 ennoia-contract = { path = "../contract" }
 async-stream = "0.3.6"
 arc-swap = "1.7.1"

@@ -9,7 +9,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use ennoia_contract::ApiError;
-use ennoia_observability::RequestContext;
+use ennoia_logs::RequestContext;
 
 use crate::app::AppState;
 use crate::middleware::path_matches;

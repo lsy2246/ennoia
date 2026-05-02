@@ -1,19 +1,19 @@
-use crate::observability::{
-    ObservationLinkQuery, ObservationLogEntry, ObservationLogQuery, ObservationOverview,
-    ObservationSpanLinkRecord, ObservationSpanQuery, ObservationSpanRecord,
+use crate::logs_store::{
+    LogEntry, LogEntryQuery, LogTraceLinkQuery, LogTraceLinkRecord, LogTraceQuery, LogTraceRecord,
+    LogsOverview,
 };
 
 use super::*;
 
 #[derive(Debug, Serialize)]
 struct LogStreamPayload {
-    overview: ObservationOverview,
-    logs: Vec<ObservationLogEntry>,
-    traces: Vec<ObservationSpanRecord>,
+    overview: LogsOverview,
+    logs: Vec<LogEntry>,
+    traces: Vec<LogTraceRecord>,
 }
 
 #[derive(Debug, Deserialize)]
-pub(super) struct ObservabilityLogsQuery {
+pub(super) struct LogEntriesQuery {
     #[serde(default)]
     event: Option<String>,
     #[serde(default)]
@@ -35,7 +35,7 @@ pub(super) struct ObservabilityLogsQuery {
 }
 
 #[derive(Debug, Deserialize)]
-pub(super) struct ObservabilityTracesQuery {
+pub(super) struct LogTracesQuery {
     #[serde(default)]
     request_id: Option<String>,
     #[serde(default)]
@@ -51,31 +51,31 @@ pub(super) struct ObservabilityTracesQuery {
 }
 
 #[derive(Debug, Serialize)]
-pub(super) struct ObservabilityTraceDetail {
+pub(super) struct LogTraceDetail {
     trace_id: String,
-    spans: Vec<ObservationSpanRecord>,
-    links: Vec<ObservationSpanLinkRecord>,
+    spans: Vec<LogTraceRecord>,
+    links: Vec<LogTraceLinkRecord>,
 }
 
-pub(super) async fn observability_overview(
+pub(super) async fn logs_overview(
     State(state): State<AppState>,
     Extension(request): Extension<RequestContext>,
-) -> ApiResult<ObservationOverview> {
+) -> ApiResult<LogsOverview> {
     state
-        .observability
+        .logs
         .overview()
         .map(Json)
         .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))
 }
 
-pub(super) async fn observability_logs(
+pub(super) async fn log_entries(
     State(state): State<AppState>,
     Extension(request): Extension<RequestContext>,
-    Query(query): Query<ObservabilityLogsQuery>,
-) -> ApiResult<Vec<ObservationLogEntry>> {
+    Query(query): Query<LogEntriesQuery>,
+) -> ApiResult<Vec<LogEntry>> {
     state
-        .observability
-        .list_logs(&ObservationLogQuery {
+        .logs
+        .list_logs(&LogEntryQuery {
             event: query.event,
             level: query.level,
             component: query.component,
@@ -91,27 +91,27 @@ pub(super) async fn observability_logs(
         .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))
 }
 
-pub(super) async fn observability_log_detail(
+pub(super) async fn log_entry_detail(
     State(state): State<AppState>,
     Extension(request): Extension<RequestContext>,
     Path(log_id): Path<String>,
-) -> ApiResult<ObservationLogEntry> {
+) -> ApiResult<LogEntry> {
     state
-        .observability
+        .logs
         .get_log(&log_id)
         .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?
         .map(Json)
-        .ok_or_else(|| scoped(ApiError::not_found("observability log not found"), &request))
+        .ok_or_else(|| scoped(ApiError::not_found("log entry not found"), &request))
 }
 
-pub(super) async fn observability_traces(
+pub(super) async fn log_traces(
     State(state): State<AppState>,
     Extension(request): Extension<RequestContext>,
-    Query(query): Query<ObservabilityTracesQuery>,
-) -> ApiResult<Vec<ObservationSpanRecord>> {
+    Query(query): Query<LogTracesQuery>,
+) -> ApiResult<Vec<LogTraceRecord>> {
     state
-        .observability
-        .list_spans(&ObservationSpanQuery {
+        .logs
+        .list_spans(&LogTraceQuery {
             trace_id: None,
             request_id: query.request_id,
             component: query.component,
@@ -125,14 +125,14 @@ pub(super) async fn observability_traces(
         .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))
 }
 
-pub(super) async fn observability_trace_detail(
+pub(super) async fn log_trace_detail(
     State(state): State<AppState>,
     Extension(request): Extension<RequestContext>,
     Path(trace_id): Path<String>,
-) -> ApiResult<ObservabilityTraceDetail> {
+) -> ApiResult<LogTraceDetail> {
     let spans = state
-        .observability
-        .list_spans(&ObservationSpanQuery {
+        .logs
+        .list_spans(&LogTraceQuery {
             trace_id: Some(trace_id.clone()),
             request_id: None,
             component: None,
@@ -144,39 +144,39 @@ pub(super) async fn observability_trace_detail(
         })
         .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?;
     let links = state
-        .observability
-        .list_span_links(&ObservationLinkQuery {
+        .logs
+        .list_span_links(&LogTraceLinkQuery {
             trace_id: Some(trace_id.clone()),
             span_id: None,
             limit: 500,
         })
         .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?;
-    Ok(Json(ObservabilityTraceDetail {
+    Ok(Json(LogTraceDetail {
         trace_id,
         spans,
         links,
     }))
 }
 
-pub(super) async fn observability_stream(
+pub(super) async fn logs_stream(
     State(state): State<AppState>,
 ) -> Sse<impl futures_core::Stream<Item = Result<Event, std::convert::Infallible>>> {
-    let observability = state.observability.clone();
+    let logs_store = state.logs.clone();
     let stream = async_stream::stream! {
-        let mut last_log_seq = latest_log_seq(&observability).unwrap_or(0);
-        let mut last_span_seq = latest_span_seq(&observability).unwrap_or(0);
+        let mut last_log_seq = latest_log_seq(&logs_store).unwrap_or(0);
+        let mut last_span_seq = latest_span_seq(&logs_store).unwrap_or(0);
         loop {
             tokio::time::sleep(Duration::from_secs(1)).await;
 
-            let next_logs = observability.list_logs(&ObservationLogQuery {
+            let next_logs = logs_store.list_logs(&LogEntryQuery {
                 after_seq: Some(last_log_seq),
                 limit: 200,
-                ..ObservationLogQuery::default()
+                ..LogEntryQuery::default()
             });
-            let next_traces = observability.list_spans(&ObservationSpanQuery {
+            let next_traces = logs_store.list_spans(&LogTraceQuery {
                 after_seq: Some(last_span_seq),
                 limit: 200,
-                ..ObservationSpanQuery::default()
+                ..LogTraceQuery::default()
             });
 
             match (next_logs, next_traces) {
@@ -190,7 +190,7 @@ pub(super) async fn observability_stream(
                     if let Some(last) = traces.last() {
                         last_span_seq = last.seq;
                     }
-                    match observability.overview() {
+                    match logs_store.overview() {
                         Ok(overview) => {
                             let payload = LogStreamPayload { overview, logs, traces };
                             yield Ok(Event::default().event("logs.delta").data(
@@ -211,22 +211,22 @@ pub(super) async fn observability_stream(
     Sse::new(stream).keep_alive(KeepAlive::default())
 }
 
-fn latest_log_seq(store: &crate::observability::ObservabilityStore) -> std::io::Result<i64> {
+fn latest_log_seq(store: &crate::logs_store::LogsStore) -> std::io::Result<i64> {
     Ok(store
-        .list_logs(&ObservationLogQuery {
+        .list_logs(&LogEntryQuery {
             limit: 1,
-            ..ObservationLogQuery::default()
+            ..LogEntryQuery::default()
         })?
         .first()
         .map(|item| item.seq)
         .unwrap_or(0))
 }
 
-fn latest_span_seq(store: &crate::observability::ObservabilityStore) -> std::io::Result<i64> {
+fn latest_span_seq(store: &crate::logs_store::LogsStore) -> std::io::Result<i64> {
     Ok(store
-        .list_spans(&ObservationSpanQuery {
+        .list_spans(&LogTraceQuery {
             limit: 1,
-            ..ObservationSpanQuery::default()
+            ..LogTraceQuery::default()
         })?
         .first()
         .map(|item| item.seq)

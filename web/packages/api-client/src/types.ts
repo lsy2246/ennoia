@@ -153,7 +153,7 @@ export type AgentProfile = {
   display_name: string;
   description: string;
   system_prompt: string;
-  provider_id: string;
+  model_endpoint_id: string;
   model_id: string;
   generation_options: Record<string, string>;
   skills: string[];
@@ -182,7 +182,7 @@ export type ProviderModelDescriptor = {
   max_input_tokens?: number | null;
 };
 
-export type ProviderConfig = {
+export type ModelEndpointConfig = {
   id: string;
   display_name: string;
   kind: string;
@@ -197,13 +197,14 @@ export type ProviderConfig = {
   enabled: boolean;
 };
 
-export type ProviderModelsResponse = {
-  provider_id: string;
+export type ModelEndpointModelsResponse = {
+  model_endpoint_id: string;
   source: string;
   models: ProviderModelDescriptor[];
   manual_allowed: boolean;
   generation_options: ExtensionProviderContribution["provider"]["generation_options"];
 };
+
 
 export type PermissionTarget = {
   kind: string;
@@ -283,7 +284,7 @@ export type PermissionApprovalRecord = {
   resolution?: string | null;
 };
 
-export type ChatThread = {
+export type ConversationSummary = {
   id: string;
   topology: "direct" | "group";
   owner: { kind: string; id: string };
@@ -296,7 +297,7 @@ export type ChatThread = {
   updated_at: string;
 };
 
-export type ChatBranch = {
+export type ConversationBranch = {
   id: string;
   conversation_id: string;
   name: string;
@@ -310,7 +311,7 @@ export type ChatBranch = {
   updated_at: string;
 };
 
-export type ChatCheckpoint = {
+export type ConversationCheckpoint = {
   id: string;
   conversation_id: string;
   branch_id: string;
@@ -320,7 +321,7 @@ export type ChatCheckpoint = {
   created_at: string;
 };
 
-export type ChatLane = {
+export type ConversationLane = {
   id: string;
   conversation_id: string;
   space_id?: string | null;
@@ -333,7 +334,7 @@ export type ChatLane = {
   updated_at: string;
 };
 
-export type ChatMessage = {
+export type ConversationMessage = {
   id: string;
   conversation_id: string;
   branch_id?: string | null;
@@ -383,32 +384,33 @@ export type RunOutput = {
   created_at: string;
 };
 
-export type ChatThreadDetail = {
-  conversation: ChatThread;
-  lanes: ChatLane[];
-  branches: ChatBranch[];
-  checkpoints: ChatCheckpoint[];
-  messages: ChatMessage[];
+export type ConversationDetail = {
+  conversation: ConversationSummary;
+  lanes: ConversationLane[];
+  branches: ConversationBranch[];
+  checkpoints: ConversationCheckpoint[];
+  messages: ConversationMessage[];
   runs: ExecutionRun[];
   tasks: ExecutionStep[];
   outputs: RunOutput[];
 };
 
 export type ConversationStreamSnapshot = {
-  detail: ChatThreadDetail;
+  detail: ConversationDetail;
   approvals: PermissionApprovalRecord[];
 };
 
-export type ChatSendResponse = {
-  conversation: ChatThread;
-  lane: ChatLane;
-  branch: ChatBranch;
-  message: ChatMessage;
+export type ConversationMessageAppendResponse = {
+  conversation: ConversationSummary;
+  lane: ConversationLane;
+  branch: ConversationBranch;
+  message: ConversationMessage;
   run?: ExecutionRun;
   runs?: ExecutionRun[];
   tasks: ExecutionStep[];
   artifacts: RunOutput[];
 };
+
 
 export type ExtensionRuntimeState = {
   id: string;
@@ -523,13 +525,13 @@ export type SystemLog = {
   at: string;
 };
 
-export type ObservationOverview = {
+export type LogsOverview = {
   log_count: number;
   span_count: number;
   trace_count: number;
 };
 
-export type ObservationLogEntry = {
+export type LogEntry = {
   id: string;
   seq: number;
   event: string;
@@ -546,7 +548,7 @@ export type ObservationLogEntry = {
   created_at: string;
 };
 
-export type ObservationSpanRecord = {
+export type LogTraceRecord = {
   id: string;
   seq: number;
   trace_id: string;
@@ -567,7 +569,7 @@ export type ObservationSpanRecord = {
   duration_ms: number;
 };
 
-export type ObservationSpanLinkRecord = {
+export type LogTraceLinkRecord = {
   id: string;
   seq: number;
   trace_id: string;
@@ -579,19 +581,19 @@ export type ObservationSpanLinkRecord = {
   created_at: string;
 };
 
-export type ObservationTraceDetail = {
+export type LogTraceDetail = {
   trace_id: string;
-  spans: ObservationSpanRecord[];
-  links: ObservationSpanLinkRecord[];
+  spans: LogTraceRecord[];
+  links: LogTraceLinkRecord[];
 };
 
 export type LogStreamDelta = {
-  overview: ObservationOverview;
-  logs: ObservationLogEntry[];
-  traces: ObservationSpanRecord[];
+  overview: LogsOverview;
+  logs: LogEntry[];
+  traces: LogTraceRecord[];
 };
 
-export type ObservationLogQuery = {
+export type LogEntryQuery = {
   event?: string;
   level?: string;
   component?: string;
@@ -603,7 +605,7 @@ export type ObservationLogQuery = {
   limit?: number;
 };
 
-export type ObservationTraceQuery = {
+export type LogTraceQuery = {
   request_id?: string;
   component?: string;
   kind?: string;

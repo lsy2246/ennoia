@@ -1,12 +1,12 @@
 import { useEffect, useState, type FormEvent } from "react";
 
 import {
-  createChat,
-  deleteChat,
+  createConversation,
+  deleteConversation,
   listAgents,
-  listChats,
+  listConversations,
   type AgentProfile,
-  type ChatThread,
+  type ConversationSummary,
 } from "@ennoia/api-client";
 import { StatusNotice } from "@/components/StatusNotice";
 import { useConversationsStore } from "@/stores/conversations";
@@ -27,7 +27,7 @@ export function Conversations() {
   const notifyChanged = useConversationsStore((state) => state.notifyChanged);
   const notifyDeleted = useConversationsStore((state) => state.notifyDeleted);
   const [agents, setAgents] = useState<AgentProfile[]>([]);
-  const [sessions, setSessions] = useState<ChatThread[]>([]);
+  const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [selectedAgentIds, setSelectedAgentIds] = useState<string[]>([]);
   const [title, setTitle] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -40,9 +40,9 @@ export function Conversations() {
   async function refresh() {
     setError(null);
     try {
-      const [nextAgents, nextSessions] = await Promise.all([listAgents(), listChats()]);
+      const [nextAgents, nextConversations] = await Promise.all([listAgents(), listConversations()]);
       setAgents(nextAgents);
-      setSessions(nextSessions);
+      setConversations(nextConversations);
       setSelectedAgentIds((current) =>
         current.length > 0 ? current : nextAgents.filter((agent) => agent.enabled).slice(0, 1).map((agent) => agent.id),
       );
@@ -68,7 +68,7 @@ export function Conversations() {
     setBusy(true);
     setError(null);
     try {
-      const created = await createChat({
+      const created = await createConversation({
         topology: selectedAgentIds.length === 1 ? "direct" : "group",
         title: title.trim() || undefined,
         agent_ids: selectedAgentIds,
@@ -100,7 +100,7 @@ export function Conversations() {
     setBusy(true);
     setError(null);
     try {
-      await deleteChat(id);
+      await deleteConversation(id);
       for (const view of openViews) {
         if (view.kind === "session" && view.entityId === id) {
           closeView(view.panelId);
@@ -115,8 +115,8 @@ export function Conversations() {
     }
   }
 
-  const directCount = sessions.filter((item) => item.topology === "direct").length;
-  const groupCount = sessions.filter((item) => item.topology === "group").length;
+  const directCount = conversations.filter((item) => item.topology === "direct").length;
+  const groupCount = conversations.filter((item) => item.topology === "group").length;
   const enabledAgents = agents.filter((item) => item.enabled).length;
   const selectedAgents = agents.filter((agent) => selectedAgentIds.includes(agent.id));
 
@@ -139,7 +139,7 @@ export function Conversations() {
         <div className="conversations-overview-grid">
           <article className="metric-card conversations-metric-card">
             <span>{t("web.conversations.summary_total", "会话总数")}</span>
-            <strong>{sessions.length}</strong>
+            <strong>{conversations.length}</strong>
             <small>{t("web.conversations.panel.conversations", "会话")}</small>
           </article>
           <article className="metric-card conversations-metric-card">
@@ -221,17 +221,17 @@ export function Conversations() {
               <h1>{t("web.conversations.catalog_title", "会话目录")}</h1>
               <p>{t("web.conversations.catalog_description", "这里保留最近的 direct 和 group 会话，便于继续打开、切换和删除。")}</p>
             </div>
-            <span className="conversations-catalog-count">{`${sessions.length} ${t("web.conversations.catalog_count", "条")}`}</span>
+            <span className="conversations-catalog-count">{`${conversations.length} ${t("web.conversations.catalog_count", "条")}`}</span>
           </div>
 
           <div className="conversations-catalog-list">
-            {sessions.length === 0 ? (
+            {conversations.length === 0 ? (
               <div className="empty-card conversations-empty-state">
                 <strong>{t("web.conversations.empty_title", "还没有会话")}</strong>
                 <p>{t("web.conversations.empty_body", "先在左侧选择 Agent，然后创建一个 direct 或 group 会话。")}</p>
               </div>
             ) : (
-              sessions.map((conversation) => (
+              conversations.map((conversation) => (
                 <article key={conversation.id} className="session-card conversations-session-card">
                   <div className="conversations-session-card__header">
                     <div className="stack conversations-session-card__title">

@@ -1,5 +1,5 @@
 use axum::{extract::Request, http::HeaderValue, middleware::Next, response::Response};
-use ennoia_observability::{
+use ennoia_logs::{
     RequestContext, REQUEST_ID_HEADER, SPAN_ID_HEADER, TRACEPARENT_HEADER, TRACE_ID_HEADER,
 };
 

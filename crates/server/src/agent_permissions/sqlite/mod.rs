@@ -9,7 +9,7 @@ use ennoia_kernel::{
     AgentDocument, AgentPermissionPolicy, AgentPermissionRule, PermissionApprovalRecord,
     PermissionDecision, PermissionEventRecord, PermissionRequest,
 };
-use ennoia_observability::RequestContext;
+use ennoia_logs::RequestContext;
 use ennoia_paths::RuntimePaths;
 use rusqlite::{params, Connection, OptionalExtension};
 use uuid::Uuid;

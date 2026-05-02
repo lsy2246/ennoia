@@ -108,7 +108,7 @@ impl TraceContext {
 }
 
 #[derive(Debug)]
-pub struct ObservabilityGuard {
+pub struct LogsGuard {
     _file_guard: WorkerGuard,
 }
 
@@ -116,7 +116,7 @@ pub fn init(
     service: &'static str,
     level: &str,
     log_dir: impl AsRef<Path>,
-) -> Result<ObservabilityGuard, Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<LogsGuard, Box<dyn std::error::Error + Send + Sync>> {
     let filter = EnvFilter::try_new(level).unwrap_or_else(|_| EnvFilter::new("info"));
     let log_dir = log_dir.as_ref();
     std::fs::create_dir_all(log_dir)?;
@@ -144,7 +144,7 @@ pub fn init(
         .with(file_layer)
         .try_init();
 
-    Ok(ObservabilityGuard {
+    Ok(LogsGuard {
         _file_guard: file_guard,
     })
 }

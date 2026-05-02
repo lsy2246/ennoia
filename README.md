@@ -1,15 +1,15 @@
-﻿# Ennoia
+# Ennoia
 
 `Ennoia` 是面向单操作者、多 Agent 的本地 AI Web 工作台。当前仓库处于开发基线阶段，不维护旧数据库或旧目录兼容。
 
 ## 产品结构
 
 - 工作台：核心只提供宿主、配置、路径、日志、权限、事件总线、动作管道与 Worker RPC；业务能力由扩展提供。
-- Agents：维护协作者档案、上游渠道、模型、技能和启用状态。
+- Agents：维护协作者档案、模型接入、模型、技能和启用状态。
 - Agent 权限：系统级权限策略、审批和事件记录统一由宿主裁决，扩展只声明能力风险，不直接放权。
 - 技能：Agent 可引用的工具与用法定义，只保留最小目录元信息与文档入口，和扩展严格分离。
-- API 上游渠道：Agent 绑定的具体模型访问实例。
-- 扩展：系统插件包，manifest 统一声明 `resource_types`、`capabilities`、`surfaces`、`locales`、`themes`、`commands`、`subscriptions`；如需进入会话目录，再额外声明 `conversation` 规则。宿主把扩展/技能目录整理成结构化 `context` 交给 provider 渲染，不再把它们直接硬拼进自然语言 prompt，也不自动注入文档正文。
+- API 模型接入：Agent 绑定的具体模型访问实例。
+- 扩展：扩展包，manifest 统一声明 `resource_types`、`capabilities`、`surfaces`、`locales`、`themes`、`commands`、`subscriptions`；如需进入会话目录，再额外声明 `conversation` 规则。宿主把扩展/技能目录整理成结构化 `context` 交给 model provider 渲染，不再把它们直接硬拼进自然语言 prompt，也不自动注入文档正文。
 - 会话：系统保留稳定 `/api/conversations` 入口，实际读写由 `conversation.*`、`message.*`、`lane.*` 等动作规则路由到内置 `conversation` 扩展。
 - 记忆：以内置 `memory` 扩展形式提供记忆、上下文、审查和图谱能力；不再镜像保存原始会话消息。
 - 编排：以内置 `workflow` 扩展承载 run、task、artifact；会话事实进入编排、编排结果回写会话与记忆，由系统动作管道与事件链承接。
@@ -49,7 +49,7 @@
 - 系统动作规则来自扩展 manifest；宿主在运行时收集规则、排序并执行。
 - 系统定时计划写入 `~/.ennoia/data/system/schedules.json`，到期后由宿主运行命令或触发 Agent，并可把完整结果、摘要或最终结论投递到会话 / lane。
 - 系统事件总线写入 `~/.ennoia/data/system/sqlite/events.db`，用于持久化会话等系统事件及其 Hook 投递状态。
-- 系统观测数据写入 `~/.ennoia/data/system/sqlite/observability.db`，统一承载 logs、traces 和 span links。
+- 系统日志数据写入 `~/.ennoia/data/system/sqlite/logs.db`，统一承载 logs、traces 和 span links。
 - Agent 基础配置与权限策略统一写入 `~/.ennoia/agents/{agent_id}/agent.toml`，权限事件与审批写入 `~/.ennoia/data/system/sqlite/permissions.db`。
 - 核心日志写入 `~/.ennoia/logs/`。
 - 扩展私有数据写入 `~/.ennoia/data/extensions/{extension_id}/`。

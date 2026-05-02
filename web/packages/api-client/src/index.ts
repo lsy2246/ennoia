@@ -6,6 +6,5 @@ export * from "./conversations";
 export * from "./extensions";
 export * from "./actions";
 export * from "./logs";
-export * from "./observability";
 export * from "./permissions";
 export * from "./schedules";

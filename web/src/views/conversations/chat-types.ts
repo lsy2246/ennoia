@@ -61,7 +61,7 @@ type ChatEntryBase = {
   createdAt: string;
 };
 
-export type ChatMessageEntry = ChatEntryBase & {
+export type ConversationMessageEntry = ChatEntryBase & {
   kind: "message";
   messageId: string;
   branchId?: string;
@@ -105,7 +105,7 @@ export type ChatApprovalEntry = ChatEntryBase & {
 };
 
 export type ChatEntryViewModel =
-  | ChatMessageEntry
+  | ConversationMessageEntry
   | ChatErrorEntry
   | ChatSystemEntry
   | ChatStatusEntry

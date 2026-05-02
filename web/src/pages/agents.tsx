@@ -2,9 +2,9 @@ import { useEffect, useState } from "react";
 
 import {
   listAgents,
-  listProviders,
+  listModelEndpoints,
   type AgentProfile,
-  type ProviderConfig,
+  type ModelEndpointConfig,
 } from "@ennoia/api-client";
 import { StatusNotice } from "@/components/StatusNotice";
 import { formatRelativePath } from "@/lib/pathDisplay";
@@ -15,7 +15,7 @@ export function Agents() {
   const { t } = useUiHelpers();
   const openView = useWorkbenchStore((state) => state.openView);
   const [agents, setAgents] = useState<AgentProfile[]>([]);
-  const [providers, setProviders] = useState<ProviderConfig[]>([]);
+  const [modelEndpoints, setModelEndpoints] = useState<ModelEndpointConfig[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -25,16 +25,16 @@ export function Agents() {
   async function refresh() {
     setError(null);
     try {
-      const [nextAgents, nextProviders] = await Promise.all([listAgents(), listProviders()]);
+      const [nextAgents, nextModelEndpoints] = await Promise.all([listAgents(), listModelEndpoints()]);
       setAgents(nextAgents);
-      setProviders(nextProviders);
+      setModelEndpoints(nextModelEndpoints);
     } catch (err) {
       setError(String(err));
     }
   }
 
-  function providerLabel(providerId: string) {
-    return providers.find((item) => item.id === providerId)?.display_name ?? providerId;
+  function modelEndpointLabel(modelEndpointId: string) {
+    return modelEndpoints.find((item) => item.id === modelEndpointId)?.display_name ?? modelEndpointId;
   }
 
   return (
@@ -76,7 +76,7 @@ export function Agents() {
               </header>
               <p>{agent.description || t("web.common.none", "无")}</p>
               <div className="tag-row">
-                <span>{providerLabel(agent.provider_id)}</span>
+                <span>{modelEndpointLabel(agent.model_endpoint_id)}</span>
                 <span>{agent.model_id}</span>
                 <span className="badge badge--accent">{agent.skills.length} skills</span>
               </div>
@@ -94,7 +94,7 @@ export function Agents() {
                       kind: "agent",
                       entityId: agent.id,
                       title: agent.display_name,
-                      subtitle: providerLabel(agent.provider_id),
+                      subtitle: modelEndpointLabel(agent.model_endpoint_id),
                     })}
                 >
                   {t("web.action.open", "打开")}

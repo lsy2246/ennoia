@@ -1,5 +1,5 @@
-﻿import type { ApiErrorBody } from "@ennoia/contract";
-import { createLogger } from "@ennoia/observability";
+import type { ApiErrorBody } from "@ennoia/contract";
+import { createLogger } from "@ennoia/logs";
 
 const logger = createLogger("api-client");
 

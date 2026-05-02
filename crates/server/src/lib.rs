@@ -3,8 +3,8 @@
 pub mod agent_permissions;
 pub mod app;
 pub mod event_bus;
+pub mod logs_store;
 pub mod middleware;
-pub mod observability;
 pub mod pipeline;
 pub mod routes;
 

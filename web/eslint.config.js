@@ -47,7 +47,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ["packages/observability/src/index.ts"],
+    files: ["packages/logs/src/index.ts"],
     rules: {
       "no-console": "off",
     },

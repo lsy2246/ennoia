@@ -315,8 +315,8 @@ pub(crate) async fn run_due_schedules_once(state: &AppState) {
     for schedule_id in due_ids {
         let request = RequestContext {
             request_id: format!("schedule-{}", Uuid::new_v4()),
-            trace_id: ennoia_observability::next_trace_id(),
-            span_id: ennoia_observability::next_span_id(),
+            trace_id: ennoia_logs::next_trace_id(),
+            span_id: ennoia_logs::next_span_id(),
             parent_span_id: None,
             sampled: true,
             source: "scheduler".to_string(),
@@ -696,7 +696,7 @@ fn render_delivery_message(
         ScheduleDeliveryContentMode::Conclusion => "最终结论",
     };
     truncate_output(&format!(
-        "[定时器] {title}\n执行方式：{executor}\n投递内容：{section}\n\n{content}"
+        "[计划] {title}\n执行方式：{executor}\n投递内容：{section}\n\n{content}"
     ))
 }
 

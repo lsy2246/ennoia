@@ -1,5 +1,22 @@
-﻿import { fetchJson } from "./core";
-import type { AgentProfile, ProviderConfig, ProviderModelsResponse, SkillConfig } from "./types";
+import { fetchJson } from "./core";
+import type {
+  AgentProfile,
+  ModelEndpointConfig,
+  ModelEndpointModelsResponse,
+  SkillConfig,
+} from "./types";
+
+const MODEL_ENDPOINTS_API = "/api/model-endpoints";
+
+function normalizeModelEndpointModelsResponse(
+  response: ModelEndpointModelsResponse,
+  fallbackId: string,
+): ModelEndpointModelsResponse {
+  return {
+    ...response,
+    model_endpoint_id: response.model_endpoint_id || fallbackId,
+  };
+}
 
 export async function listAgents() {
   return fetchJson<AgentProfile[]>("/api/agents");
@@ -49,36 +66,42 @@ export async function deleteSkill(skillId: string) {
   return fetchJson<void>(`/api/skills/${skillId}`, { method: "DELETE" });
 }
 
-export async function listProviders() {
-  return fetchJson<ProviderConfig[]>("/api/providers");
+export async function listModelEndpoints() {
+  return fetchJson<ModelEndpointConfig[]>(MODEL_ENDPOINTS_API);
 }
 
-export async function createProvider(payload: ProviderConfig) {
-  return fetchJson<ProviderConfig>("/api/providers", {
+export async function createModelEndpoint(payload: ModelEndpointConfig) {
+  return fetchJson<ModelEndpointConfig>(MODEL_ENDPOINTS_API, {
     method: "POST",
     body: JSON.stringify(payload),
   });
 }
 
-export async function updateProvider(providerId: string, payload: ProviderConfig) {
-  return fetchJson<ProviderConfig>(`/api/providers/${providerId}`, {
+export async function updateModelEndpoint(modelEndpointId: string, payload: ModelEndpointConfig) {
+  return fetchJson<ModelEndpointConfig>(`${MODEL_ENDPOINTS_API}/${modelEndpointId}`, {
     method: "PUT",
     body: JSON.stringify(payload),
   });
 }
 
-export async function deleteProvider(providerId: string) {
-  return fetchJson<void>(`/api/providers/${providerId}`, { method: "DELETE" });
+export async function deleteModelEndpoint(modelEndpointId: string) {
+  return fetchJson<void>(`${MODEL_ENDPOINTS_API}/${modelEndpointId}`, { method: "DELETE" });
 }
 
-export async function getProviderModels(providerId: string) {
-  return fetchJson<ProviderModelsResponse>(`/api/providers/${providerId}/models`);
+export async function getModelEndpointModels(modelEndpointId: string) {
+  const response = await fetchJson<ModelEndpointModelsResponse>(
+    `${MODEL_ENDPOINTS_API}/${modelEndpointId}/models`,
+  );
+  return normalizeModelEndpointModelsResponse(response, modelEndpointId);
 }
 
-export async function discoverProviderModels(payload: ProviderConfig) {
-  return fetchJson<ProviderModelsResponse>("/api/providers/discover-models", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
+export async function discoverModelEndpointModels(payload: ModelEndpointConfig) {
+  const response = await fetchJson<ModelEndpointModelsResponse>(
+    `${MODEL_ENDPOINTS_API}/discover-models`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+  );
+  return normalizeModelEndpointModelsResponse(response, payload.id);
 }
-

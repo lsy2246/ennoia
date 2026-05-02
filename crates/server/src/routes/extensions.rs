@@ -3,9 +3,7 @@ use ennoia_kernel::{ExtensionRpcRequest, ExtensionRpcResponse, HookDispatchRespo
 use std::time::Instant;
 
 use crate::app::record_trace_span;
-use crate::observability::{
-    ObservationLogWrite, ObservationSpanWrite, OBSERVABILITY_COMPONENT_EXTENSION_HOST,
-};
+use crate::logs_store::{LogEntryWrite, LogTraceWrite, LOGS_COMPONENT_EXTENSION_HOST};
 
 #[allow(dead_code)]
 const HOOK_DISPATCH_ATTEMPTS: usize = 20;
@@ -292,11 +290,11 @@ pub(super) async fn extension_rpc(
         .map(|response| {
             record_trace_span(
                 &state,
-                ObservationSpanWrite {
+                LogTraceWrite {
                     trace: span_trace.clone(),
                     kind: "extension_rpc".to_string(),
                     name: method.clone(),
-                    component: OBSERVABILITY_COMPONENT_EXTENSION_HOST.to_string(),
+                    component: LOGS_COMPONENT_EXTENSION_HOST.to_string(),
                     source_kind: "extension".to_string(),
                     source_id: Some(extension_id.clone()),
                     status: if response.ok {
@@ -318,11 +316,11 @@ pub(super) async fn extension_rpc(
         .map_err(|error| {
             record_trace_span(
                 &state,
-                ObservationSpanWrite {
+                LogTraceWrite {
                     trace: span_trace,
                     kind: "extension_rpc".to_string(),
                     name: method.clone(),
-                    component: OBSERVABILITY_COMPONENT_EXTENSION_HOST.to_string(),
+                    component: LOGS_COMPONENT_EXTENSION_HOST.to_string(),
                     source_kind: "extension".to_string(),
                     source_id: Some(extension_id.clone()),
                     status: "error".to_string(),
@@ -354,10 +352,10 @@ pub(super) async fn extension_reload(
                 &request,
             )
         })?;
-    let _ = state.observability.append_log(ObservationLogWrite {
+    let _ = state.logs.append_log(LogEntryWrite {
         event: "runtime.extension.reloaded".to_string(),
         level: "info".to_string(),
-        component: OBSERVABILITY_COMPONENT_EXTENSION_HOST.to_string(),
+        component: LOGS_COMPONENT_EXTENSION_HOST.to_string(),
         source_kind: "extension".to_string(),
         source_id: Some(extension_id),
         message: "extension reloaded".to_string(),
@@ -382,10 +380,10 @@ pub(super) async fn extension_restart(
                 &request,
             )
         })?;
-    let _ = state.observability.append_log(ObservationLogWrite {
+    let _ = state.logs.append_log(LogEntryWrite {
         event: "runtime.extension.restarted".to_string(),
         level: "info".to_string(),
-        component: OBSERVABILITY_COMPONENT_EXTENSION_HOST.to_string(),
+        component: LOGS_COMPONENT_EXTENSION_HOST.to_string(),
         source_kind: "extension".to_string(),
         source_id: Some(extension_id),
         message: "extension restarted".to_string(),
@@ -404,10 +402,10 @@ pub(super) async fn extension_attach(
         .extensions
         .attach_dev_source(&payload.path)
         .map_err(|error| scoped(ApiError::bad_request(error.to_string()), &request))?;
-    let _ = state.observability.append_log(ObservationLogWrite {
+    let _ = state.logs.append_log(LogEntryWrite {
         event: "runtime.extension.attached".to_string(),
         level: "info".to_string(),
-        component: OBSERVABILITY_COMPONENT_EXTENSION_HOST.to_string(),
+        component: LOGS_COMPONENT_EXTENSION_HOST.to_string(),
         source_kind: "extension".to_string(),
         source_id: Some(item.id.clone()),
         message: "extension attached".to_string(),
@@ -432,10 +430,10 @@ pub(super) async fn extension_detach(
             &request,
         ));
     }
-    let _ = state.observability.append_log(ObservationLogWrite {
+    let _ = state.logs.append_log(LogEntryWrite {
         event: "runtime.extension.detached".to_string(),
         level: "info".to_string(),
-        component: OBSERVABILITY_COMPONENT_EXTENSION_HOST.to_string(),
+        component: LOGS_COMPONENT_EXTENSION_HOST.to_string(),
         source_kind: "extension".to_string(),
         source_id: Some(extension_id),
         message: "extension detached".to_string(),
@@ -479,14 +477,14 @@ pub(super) async fn extension_enabled_put(
             },
             ..existing
         });
-    let _ = state.observability.append_log(ObservationLogWrite {
+    let _ = state.logs.append_log(LogEntryWrite {
         event: if payload.enabled {
             "runtime.extension.enabled".to_string()
         } else {
             "runtime.extension.disabled".to_string()
         },
         level: "info".to_string(),
-        component: OBSERVABILITY_COMPONENT_EXTENSION_HOST.to_string(),
+        component: LOGS_COMPONENT_EXTENSION_HOST.to_string(),
         source_kind: "extension".to_string(),
         source_id: Some(extension_id.clone()),
         message: "extension enablement changed".to_string(),

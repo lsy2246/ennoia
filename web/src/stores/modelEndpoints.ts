@@ -5,7 +5,7 @@ type ProvidersState = {
   notifyChanged: () => void;
 };
 
-export const useProvidersStore = create<ProvidersState>((set) => ({
+export const useModelEndpointsStore = create<ProvidersState>((set) => ({
   revision: 0,
   notifyChanged() {
     set((state) => ({ revision: state.revision + 1 }));

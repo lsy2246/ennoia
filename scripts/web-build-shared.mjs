@@ -16,7 +16,7 @@ export function buildWebModuleAliases(webDir) {
     { find: "@ennoia/api-client", replacement: resolve(webDir, "packages/api-client/src") },
     { find: "@ennoia/contract", replacement: resolve(webDir, "packages/contract/src") },
     { find: "@ennoia/i18n", replacement: resolve(webDir, "packages/i18n/src") },
-    { find: "@ennoia/observability", replacement: resolve(webDir, "packages/observability/src") },
+    { find: "@ennoia/logs", replacement: resolve(webDir, "packages/logs/src") },
     { find: "@ennoia/theme-runtime", replacement: resolve(webDir, "packages/theme-runtime/src") },
     { find: "@ennoia/ui-sdk", replacement: resolve(webDir, "packages/ui-sdk/src") },
     { find: /^react\/jsx-runtime$/, replacement: reactJsxRuntimeEntry },

@@ -26,16 +26,16 @@ use ennoia_extension_host::{
 };
 use ennoia_kernel::{
     AgentConfig, BootstrapState, ExtensionDiagnostic, ExtensionRuntimeEvent, HookEventEnvelope,
-    LocalizedText, ProviderConfig, RuntimeProfile, ServerConfig, SkillConfig, UiConfig,
+    LocalizedText, ModelEndpointConfig, RuntimeProfile, ServerConfig, SkillConfig, UiConfig,
     UiPreference, UiPreferenceRecord,
 };
-use ennoia_observability::RequestContext;
+use ennoia_logs::RequestContext;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use uuid::Uuid;
 
 use crate::app::{
-    delete_config_from_dir, delete_skill_package, load_agent_configs, load_provider_configs,
+    delete_config_from_dir, delete_skill_package, load_agent_configs, load_model_endpoint_configs,
     load_skill_configs, upsert_skill_package, write_config_to_dir, AppState,
 };
 use crate::middleware::{
@@ -47,8 +47,8 @@ pub(crate) mod actions;
 mod behavior;
 mod extensions;
 mod logs;
+mod logs_runtime;
 mod memory;
-mod observability;
 mod permissions;
 mod resources;
 mod runtime;
@@ -58,8 +58,8 @@ use actions::*;
 use behavior::*;
 use extensions::*;
 use logs::*;
+use logs_runtime::*;
 use memory::*;
-use observability::*;
 use permissions::*;
 use resources::*;
 use runtime::*;
@@ -231,18 +231,24 @@ pub fn build_router(state: AppState) -> Router {
             "/api/skills/{skill_id}",
             get(skill_detail).put(skill_update).delete(skill_delete),
         )
-        .route("/api/providers", get(providers).post(provider_create))
         .route(
-            "/api/providers/discover-models",
-            post(provider_discover_models),
+            "/api/model-endpoints",
+            get(model_endpoints).post(model_endpoint_create),
         )
         .route(
-            "/api/providers/{provider_id}",
-            get(provider_detail)
-                .put(provider_update)
-                .delete(provider_delete),
+            "/api/model-endpoints/discover-models",
+            post(model_endpoint_discover_models),
         )
-        .route("/api/providers/{provider_id}/models", get(provider_models))
+        .route(
+            "/api/model-endpoints/{model_endpoint_id}",
+            get(model_endpoint_detail)
+                .put(model_endpoint_update)
+                .delete(model_endpoint_delete),
+        )
+        .route(
+            "/api/model-endpoints/{model_endpoint_id}/models",
+            get(model_endpoint_models),
+        )
         .route("/api/schedule-actions", get(schedule_actions))
         .route("/api/schedules", get(schedules_list).post(schedule_create))
         .route(
@@ -257,15 +263,12 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/spaces", get(spaces))
         .route("/api/logs", get(logs_list))
         .route("/api/logs/frontend", post(frontend_log_create))
-        .route("/api/logs/overview", get(observability_overview))
-        .route("/api/logs/entries", get(observability_logs))
-        .route("/api/logs/entries/stream", get(observability_stream))
-        .route("/api/logs/entries/{log_id}", get(observability_log_detail))
-        .route("/api/logs/traces", get(observability_traces))
-        .route(
-            "/api/logs/traces/{trace_id}",
-            get(observability_trace_detail),
-        )
+        .route("/api/logs/overview", get(logs_overview))
+        .route("/api/logs/entries", get(log_entries))
+        .route("/api/logs/entries/stream", get(logs_stream))
+        .route("/api/logs/entries/{log_id}", get(log_entry_detail))
+        .route("/api/logs/traces", get(log_traces))
+        .route("/api/logs/traces/{trace_id}", get(log_trace_detail))
         .route(
             "/api/permissions/policies",
             get(permission_policy_summaries),
@@ -484,8 +487,8 @@ struct ExtensionAttachPayload {
 }
 
 #[derive(Debug, Serialize)]
-struct ProviderModelsResponse {
-    provider_id: String,
+struct ModelEndpointModelsResponse {
+    model_endpoint_id: String,
     source: String,
     models: Vec<ennoia_kernel::ProviderModelDescriptor>,
     manual_allowed: bool,

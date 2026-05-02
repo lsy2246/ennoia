@@ -19,7 +19,7 @@
       "@ennoia/api-client": ["./packages/api-client/src/index.ts"],
       "@ennoia/contract": ["./packages/contract/src/index.ts"],
       "@ennoia/i18n": ["./packages/i18n/src/index.ts"],
-      "@ennoia/observability": ["./packages/observability/src/index.ts"],
+      "@ennoia/logs": ["./packages/logs/src/index.ts"],
       "@ennoia/theme-runtime": ["./packages/theme-runtime/src/index.ts"],
       "@ennoia/ui-sdk": ["./packages/ui-sdk/src/index.ts"],
       "react": ["./node_modules/@types/react", "../node_modules/@types/react"],
@@ -36,7 +36,7 @@
     "./packages/api-client/src",
     "./packages/contract/src",
     "./packages/i18n/src",
-    "./packages/observability/src",
+    "./packages/logs/src",
     "./packages/theme-runtime/src",
     "./packages/ui-sdk/src",
     "../builtins/extensions/*/ui"

@@ -1,7 +1,7 @@
 use super::*;
 use crate::app::{delete_agent_config, write_agent_config};
 use crate::pipeline::{
-    invoke_provider_method, provider_runtime_request_config, resolve_provider_entry_path,
+    invoke_provider_method, model_endpoint_runtime_request_config, resolve_provider_entry_path,
 };
 
 pub(super) async fn agents(State(state): State<AppState>) -> Json<Vec<AgentConfig>> {
@@ -128,56 +128,62 @@ pub(super) async fn skill_delete(
     }
 }
 
-pub(super) async fn providers(State(state): State<AppState>) -> Json<Vec<ProviderConfig>> {
-    Json(load_provider_configs(&state.runtime_paths).unwrap_or_default())
+pub(super) async fn model_endpoints(
+    State(state): State<AppState>,
+) -> Json<Vec<ModelEndpointConfig>> {
+    Json(load_model_endpoint_configs(&state.runtime_paths).unwrap_or_default())
 }
 
-pub(super) async fn provider_detail(
+pub(super) async fn model_endpoint_detail(
     State(state): State<AppState>,
-    Path(provider_id): Path<String>,
-) -> Result<Json<ProviderConfig>, ApiError> {
-    let providers = load_provider_configs(&state.runtime_paths)
+    Path(model_endpoint_id): Path<String>,
+) -> Result<Json<ModelEndpointConfig>, ApiError> {
+    let model_endpoints = load_model_endpoint_configs(&state.runtime_paths)
         .map_err(|error| ApiError::internal(error.to_string()))?;
-    providers
+    model_endpoints
         .into_iter()
-        .find(|provider| provider.id == provider_id)
+        .find(|model_endpoint| model_endpoint.id == model_endpoint_id)
         .map(Json)
-        .ok_or_else(|| ApiError::not_found(format!("provider '{provider_id}' not found")))
+        .ok_or_else(|| {
+            ApiError::not_found(format!("model endpoint '{model_endpoint_id}' not found"))
+        })
 }
 
-pub(super) async fn provider_models(
+pub(super) async fn model_endpoint_models(
     State(state): State<AppState>,
-    Path(provider_id): Path<String>,
-) -> Result<Json<ProviderModelsResponse>, ApiError> {
-    let providers = load_provider_configs(&state.runtime_paths)
+    Path(model_endpoint_id): Path<String>,
+) -> Result<Json<ModelEndpointModelsResponse>, ApiError> {
+    let model_endpoints = load_model_endpoint_configs(&state.runtime_paths)
         .map_err(|error| ApiError::internal(error.to_string()))?;
-    let provider = providers
+    let model_endpoint = model_endpoints
         .into_iter()
-        .find(|item| item.id == provider_id)
-        .ok_or_else(|| ApiError::not_found(format!("provider '{provider_id}' not found")))?;
+        .find(|item| item.id == model_endpoint_id)
+        .ok_or_else(|| {
+            ApiError::not_found(format!("model endpoint '{model_endpoint_id}' not found"))
+        })?;
 
-    provider_models_response(&state, &provider).map(Json)
+    model_endpoint_models_response(&state, &model_endpoint).map(Json)
 }
 
-pub(super) async fn provider_discover_models(
+pub(super) async fn model_endpoint_discover_models(
     State(state): State<AppState>,
-    Json(payload): Json<ProviderConfig>,
-) -> Result<Json<ProviderModelsResponse>, ApiError> {
-    provider_models_response(&state, &payload).map(Json)
+    Json(payload): Json<ModelEndpointConfig>,
+) -> Result<Json<ModelEndpointModelsResponse>, ApiError> {
+    model_endpoint_models_response(&state, &payload).map(Json)
 }
 
-fn provider_models_response(
+fn model_endpoint_models_response(
     state: &AppState,
-    provider: &ProviderConfig,
-) -> Result<ProviderModelsResponse, ApiError> {
-    let contribution = resolve_provider_contribution(&state, &provider.kind)?;
-    let mut models = provider.available_models.clone();
+    model_endpoint: &ModelEndpointConfig,
+) -> Result<ModelEndpointModelsResponse, ApiError> {
+    let contribution = resolve_provider_contribution(&state, &model_endpoint.kind)?;
+    let mut models = model_endpoint.available_models.clone();
     let mut source = if models.is_empty() {
         "manual".to_string()
     } else {
         "configured".to_string()
     };
-    let mut manual_allowed = provider.model_discovery.manual_allowed;
+    let mut manual_allowed = model_endpoint.model_discovery.manual_allowed;
     let mut generation_options = Vec::new();
 
     if let Some(contribution) = contribution {
@@ -193,12 +199,12 @@ fn provider_models_response(
             let entry = resolve_provider_entry_path(&contribution)
                 .map_err(|error| ApiError::internal(error.to_string()))?;
             let request_payload = serde_json::json!({
-                "method": "list_models",
-                "params": {
-                    "provider": provider_runtime_request_config(&provider),
+                    "method": "list_models",
+                    "params": {
+                        "model_endpoint": model_endpoint_runtime_request_config(&model_endpoint),
                 }
             });
-            let response = invoke_provider_method(&entry, &request_payload, &provider)
+            let response = invoke_provider_method(&entry, &request_payload, &model_endpoint)
                 .map_err(ApiError::internal)?;
             let extension_models = parse_provider_models_from_response(&response)?;
             if !extension_models.is_empty() {
@@ -208,8 +214,8 @@ fn provider_models_response(
         }
     }
 
-    Ok(ProviderModelsResponse {
-        provider_id: provider.id.clone(),
+    Ok(ModelEndpointModelsResponse {
+        model_endpoint_id: model_endpoint.id.clone(),
         source,
         models,
         manual_allowed,
@@ -217,59 +223,62 @@ fn provider_models_response(
     })
 }
 
-pub(super) async fn provider_create(
+pub(super) async fn model_endpoint_create(
     State(state): State<AppState>,
-    Json(payload): Json<ProviderConfig>,
-) -> Result<Json<ProviderConfig>, ApiError> {
-    validate_provider_payload(&state, &payload)?;
+    Json(payload): Json<ModelEndpointConfig>,
+) -> Result<Json<ModelEndpointConfig>, ApiError> {
+    validate_model_endpoint_payload(&state, &payload)?;
     write_config_to_dir(
-        state.runtime_paths.providers_config_dir(),
+        state.runtime_paths.model_endpoints_config_dir(),
         &payload.id,
         &payload,
     )
     .map_err(|error| ApiError::internal(error.to_string()))?;
-    let providers = load_provider_configs(&state.runtime_paths)
+    let model_endpoints = load_model_endpoint_configs(&state.runtime_paths)
         .map_err(|error| ApiError::internal(error.to_string()))?;
-    providers
+    model_endpoints
         .into_iter()
-        .find(|provider| provider.id == payload.id)
+        .find(|model_endpoint| model_endpoint.id == payload.id)
         .map(Json)
-        .ok_or_else(|| ApiError::internal("failed to reload created provider"))
+        .ok_or_else(|| ApiError::internal("failed to reload created model endpoint"))
 }
 
-pub(super) async fn provider_update(
+pub(super) async fn model_endpoint_update(
     State(state): State<AppState>,
-    Path(provider_id): Path<String>,
-    Json(mut payload): Json<ProviderConfig>,
-) -> Result<Json<ProviderConfig>, ApiError> {
-    payload.id = provider_id.clone();
-    validate_provider_payload(&state, &payload)?;
+    Path(model_endpoint_id): Path<String>,
+    Json(mut payload): Json<ModelEndpointConfig>,
+) -> Result<Json<ModelEndpointConfig>, ApiError> {
+    payload.id = model_endpoint_id.clone();
+    validate_model_endpoint_payload(&state, &payload)?;
     write_config_to_dir(
-        state.runtime_paths.providers_config_dir(),
-        &provider_id,
+        state.runtime_paths.model_endpoints_config_dir(),
+        &model_endpoint_id,
         &payload,
     )
     .map_err(|error| ApiError::internal(error.to_string()))?;
-    let providers = load_provider_configs(&state.runtime_paths)
+    let model_endpoints = load_model_endpoint_configs(&state.runtime_paths)
         .map_err(|error| ApiError::internal(error.to_string()))?;
-    providers
+    model_endpoints
         .into_iter()
-        .find(|provider| provider.id == provider_id)
+        .find(|model_endpoint| model_endpoint.id == model_endpoint_id)
         .map(Json)
-        .ok_or_else(|| ApiError::internal("failed to reload updated provider"))
+        .ok_or_else(|| ApiError::internal("failed to reload updated model endpoint"))
 }
 
-pub(super) async fn provider_delete(
+pub(super) async fn model_endpoint_delete(
     State(state): State<AppState>,
-    Path(provider_id): Path<String>,
+    Path(model_endpoint_id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
-    let deleted = delete_config_from_dir(state.runtime_paths.providers_config_dir(), &provider_id)
-        .map_err(|error| ApiError::internal(error.to_string()))?;
+    let deleted = delete_config_from_dir(
+        state.runtime_paths.model_endpoints_config_dir(),
+        &model_endpoint_id,
+    )
+    .map_err(|error| ApiError::internal(error.to_string()))?;
     if deleted {
         Ok(StatusCode::NO_CONTENT)
     } else {
         Err(ApiError::not_found(format!(
-            "provider '{provider_id}' not found"
+            "model endpoint '{model_endpoint_id}' not found"
         )))
     }
 }
@@ -278,11 +287,14 @@ pub(super) async fn spaces(State(state): State<AppState>) -> Json<Vec<ennoia_ker
     Json(state.spaces)
 }
 
-fn validate_provider_payload(state: &AppState, payload: &ProviderConfig) -> Result<(), ApiError> {
+fn validate_model_endpoint_payload(
+    state: &AppState,
+    payload: &ModelEndpointConfig,
+) -> Result<(), ApiError> {
     let _ = resolve_provider_contribution(state, &payload.kind)?;
     if payload.enabled && payload.default_model.trim().is_empty() {
         return Err(ApiError::bad_request(
-            "启用上游渠道前必须配置默认模型；无法发现模型时使用手动输入。",
+            "启用模型接入前必须配置默认模型；无法发现模型时使用手动输入。",
         ));
     }
     let mut seen = HashSet::new();
@@ -327,7 +339,7 @@ fn resolve_provider_contribution(
         ))),
         1 => Ok(matches.into_iter().next()),
         _ => Err(ApiError::bad_request(format!(
-            "接口类型 '{normalized}' 对应多个实现扩展，当前不允许创建渠道。"
+            "接口类型 '{normalized}' 对应多个实现扩展，当前不允许创建模型接入。"
         ))),
     }
 }

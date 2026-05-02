@@ -6,16 +6,17 @@ use std::time::Duration;
 use ennoia_contract::ApiError;
 use ennoia_extension_host::RegisteredProviderContribution;
 use ennoia_kernel::{
-    ActionPhase, ActionResultMode, AgentConfig, OwnerKind, OwnerRef, PermissionApprovalRecord,
-    PermissionRequest, PermissionScope, PermissionTarget, PermissionTrigger, ProviderConfig,
-    RunContext, HOOK_EVENT_CONVERSATION_CREATED, HOOK_EVENT_CONVERSATION_MESSAGE_CREATED,
+    ActionPhase, ActionResultMode, AgentConfig, ModelEndpointConfig, OwnerKind, OwnerRef,
+    PermissionApprovalRecord, PermissionRequest, PermissionScope, PermissionTarget,
+    PermissionTrigger, RunContext, HOOK_EVENT_CONVERSATION_CREATED,
+    HOOK_EVENT_CONVERSATION_MESSAGE_CREATED,
 };
-use ennoia_observability::RequestContext;
+use ennoia_logs::RequestContext;
 use serde::Serialize;
 use serde_json::Value as JsonValue;
 
-use crate::app::{load_agent_configs, load_provider_configs, AppState};
-use crate::observability::{ObservationLogWrite, OBSERVABILITY_COMPONENT_PROXY};
+use crate::app::{load_agent_configs, load_model_endpoint_configs, AppState};
+use crate::logs_store::{LogEntryWrite, LOGS_COMPONENT_PROXY};
 use crate::routes::{
     actions::{
         action_rules_for_key, dispatch_action_rule_execute, dispatch_action_value,
@@ -317,11 +318,11 @@ async fn run_pipeline_stage(
 
     if stage == PipelineStage::AfterError {
         if let Some(error) = error {
-            let _ = state.observability.append_log_scoped(
-                ObservationLogWrite {
+            let _ = state.logs.append_log_scoped(
+                LogEntryWrite {
                     event: "runtime.pipeline.action_failed".to_string(),
                     level: "warn".to_string(),
-                    component: OBSERVABILITY_COMPONENT_PROXY.to_string(),
+                    component: LOGS_COMPONENT_PROXY.to_string(),
                     source_kind: "pipeline".to_string(),
                     source_id: Some(key.to_string()),
                     message: "action pipeline failed".to_string(),
@@ -672,11 +673,11 @@ pub(crate) fn queue_conversation_message_pipeline(
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_millis(AGENT_REPLY_DELAY_MS)).await;
         if let Err(error) = generate_conversation_agent_reply(&state, &request, &payload).await {
-            let _ = state.observability.append_log_scoped(
-                ObservationLogWrite {
+            let _ = state.logs.append_log_scoped(
+                LogEntryWrite {
                     event: "runtime.pipeline.conversation_reply_failed".to_string(),
                     level: "warn".to_string(),
-                    component: OBSERVABILITY_COMPONENT_PROXY.to_string(),
+                    component: LOGS_COMPONENT_PROXY.to_string(),
                     source_kind: "pipeline".to_string(),
                     source_id: payload_string_field(&payload, &["conversation", "id"]).or_else(
                         || payload_string_field(&payload, &["message", "conversation_id"]),
@@ -719,11 +720,11 @@ pub(crate) fn queue_permission_approval_resume(
         )
         .await
         {
-            let _ = state.observability.append_log_scoped(
-                ObservationLogWrite {
+            let _ = state.logs.append_log_scoped(
+                LogEntryWrite {
                     event: "runtime.pipeline.permission_resume_failed".to_string(),
                     level: "warn".to_string(),
-                    component: OBSERVABILITY_COMPONENT_PROXY.to_string(),
+                    component: LOGS_COMPONENT_PROXY.to_string(),
                     source_kind: "pipeline".to_string(),
                     source_id: Some(approval.approval_id),
                     message: "approved permission could not resume pipeline reply".to_string(),
@@ -812,7 +813,7 @@ async fn generate_conversation_agent_reply(
 
     let agents = load_agent_configs(&state.runtime_paths)
         .map_err(|error| scoped(ApiError::internal(error.to_string()), request))?;
-    let providers = load_provider_configs(&state.runtime_paths)
+    let model_endpoints = load_model_endpoint_configs(&state.runtime_paths)
         .map_err(|error| scoped(ApiError::internal(error.to_string()), request))?;
     let owner = payload_owner(payload).unwrap_or_else(|| OwnerRef::global("runtime"));
     let agent_runtime_paths = addressed_agents
@@ -900,7 +901,7 @@ async fn generate_conversation_agent_reply(
             state,
             request,
             &agents,
-            &providers,
+            &model_endpoints,
             &conversation_id,
             lane_id.as_deref(),
             message_id.as_deref(),
@@ -947,7 +948,7 @@ async fn generate_real_conversation_agent_reply(
     state: &AppState,
     request: &RequestContext,
     agents: &[AgentConfig],
-    providers: &[ProviderConfig],
+    model_endpoints: &[ModelEndpointConfig],
     conversation_id: &str,
     lane_id: Option<&str>,
     message_id: Option<&str>,
@@ -964,20 +965,23 @@ async fn generate_real_conversation_agent_reply(
                 request,
             )
         })?;
-    let provider = providers
+    let model_endpoint = model_endpoints
         .iter()
-        .find(|item| item.id == agent.provider_id && item.enabled)
+        .find(|item| item.id == agent.model_endpoint_id && item.enabled)
         .ok_or_else(|| {
             scoped(
-                ApiError::not_found(format!("provider '{}' not found", agent.provider_id)),
+                ApiError::not_found(format!(
+                    "model endpoint '{}' not found",
+                    agent.model_endpoint_id,
+                )),
                 request,
             )
         })?;
-    let contribution = resolve_provider_contribution_for_generate(state, provider, request)?;
+    let contribution = resolve_provider_contribution_for_generate(state, model_endpoint, request)?;
     let entry = resolve_provider_entry_path(&contribution)
         .map_err(|error| scoped(ApiError::internal(error.to_string()), request))?;
     let model_id = if agent.model_id.trim().is_empty() {
-        provider.default_model.trim().to_string()
+        model_endpoint.default_model.trim().to_string()
     } else {
         agent.model_id.trim().to_string()
     };
@@ -1001,7 +1005,7 @@ async fn generate_real_conversation_agent_reply(
     let request_payload = serde_json::json!({
         "method": "generate",
         "params": {
-            "provider": provider_runtime_request_config(provider),
+            "model_endpoint": model_endpoint_runtime_request_config(model_endpoint),
             "model": model_id,
             "instructions": instructions,
             "system_prompt": build_agent_runtime_prompt(state, agent, &run_id),
@@ -1021,19 +1025,19 @@ async fn generate_real_conversation_agent_reply(
             }
         }
     });
-    let provider_grant_id = authorize_provider_generate(
+    let model_endpoint_grant_id = authorize_model_endpoint_generate(
         state,
         request,
         agent,
-        provider,
+        model_endpoint,
         &contribution,
         conversation_id,
         &run_id,
         message_id,
     )?;
-    let response = invoke_provider_method(&entry, &request_payload, provider)
+    let response = invoke_provider_method(&entry, &request_payload, model_endpoint)
         .map_err(|error| scoped(ApiError::internal(error), request))?;
-    if let Some(grant_id) = provider_grant_id.as_deref() {
+    if let Some(grant_id) = model_endpoint_grant_id.as_deref() {
         state
             .agent_permissions
             .consume_grant(grant_id)
@@ -1076,11 +1080,11 @@ async fn assemble_workflow_memory_context(
     match result {
         Ok(value) => serde_json::from_value::<RunContext>(value).ok(),
         Err(error) => {
-            let _ = state.observability.append_log_scoped(
-                ObservationLogWrite {
+            let _ = state.logs.append_log_scoped(
+                LogEntryWrite {
                     event: "runtime.pipeline.memory_context_skipped".to_string(),
                     level: "warn".to_string(),
-                    component: OBSERVABILITY_COMPONENT_PROXY.to_string(),
+                    component: LOGS_COMPONENT_PROXY.to_string(),
                     source_kind: "pipeline".to_string(),
                     source_id: Some(conversation_id.to_string()),
                     message: "workflow memory context assembly skipped".to_string(),
@@ -1121,11 +1125,11 @@ async fn assemble_workflow_memory_context_from_rules(
     {
         Ok(value) => serde_json::from_value::<RunContext>(value).ok(),
         Err(error) => {
-            let _ = state.observability.append_log_scoped(
-                ObservationLogWrite {
+            let _ = state.logs.append_log_scoped(
+                LogEntryWrite {
                     event: "runtime.pipeline.memory_context_skipped".to_string(),
                     level: "warn".to_string(),
-                    component: OBSERVABILITY_COMPONENT_PROXY.to_string(),
+                    component: LOGS_COMPONENT_PROXY.to_string(),
                     source_kind: "pipeline".to_string(),
                     source_id: Some(conversation_id.to_string()),
                     message: "workflow memory context assembly skipped".to_string(),
@@ -1208,11 +1212,11 @@ async fn remember_workflow_run(
     if let Err(error) =
         execute_action_rules(state, request, "memory.ingest", &payload, &actor_context).await
     {
-        let _ = state.observability.append_log_scoped(
-            ObservationLogWrite {
+        let _ = state.logs.append_log_scoped(
+            LogEntryWrite {
                 event: "runtime.pipeline.workflow_memory_failed".to_string(),
                 level: "warn".to_string(),
-                component: OBSERVABILITY_COMPONENT_PROXY.to_string(),
+                component: LOGS_COMPONENT_PROXY.to_string(),
                 source_kind: "pipeline".to_string(),
                 source_id: Some(run_id.to_string()),
                 message: "workflow result could not be remembered".to_string(),
@@ -1258,22 +1262,24 @@ fn build_workflow_memory_sources(
     sources
 }
 
-pub(crate) fn provider_runtime_request_config(provider: &ProviderConfig) -> JsonValue {
+pub(crate) fn model_endpoint_runtime_request_config(
+    model_endpoint: &ModelEndpointConfig,
+) -> JsonValue {
     serde_json::json!({
-        "id": provider.id,
-        "kind": provider.kind,
-        "base_url": provider.base_url,
-        "api_key_env": provider.api_key_env,
-        "default_model": provider.default_model,
-        "available_models": provider.available_models,
+        "id": model_endpoint.id,
+        "kind": model_endpoint.kind,
+        "base_url": model_endpoint.base_url,
+        "api_key_env": model_endpoint.api_key_env,
+        "default_model": model_endpoint.default_model,
+        "available_models": model_endpoint.available_models,
     })
 }
 
-fn authorize_provider_generate(
+fn authorize_model_endpoint_generate(
     state: &AppState,
     request: &RequestContext,
     agent: &AgentConfig,
-    provider: &ProviderConfig,
+    model_endpoint: &ModelEndpointConfig,
     contribution: &RegisteredProviderContribution,
     conversation_id: &str,
     run_id: &str,
@@ -1284,11 +1290,11 @@ fn authorize_provider_generate(
         action: "provider.generate".to_string(),
         target: PermissionTarget {
             kind: "provider".to_string(),
-            id: provider.id.clone(),
+            id: model_endpoint.id.clone(),
             conversation_id: Some(conversation_id.to_string()),
             run_id: Some(run_id.to_string()),
             path: None,
-            host: normalize_optional_runtime_value(&provider.base_url),
+            host: normalize_optional_runtime_value(&model_endpoint.base_url),
         },
         scope: PermissionScope {
             conversation_id: Some(conversation_id.to_string()),
@@ -1296,7 +1302,7 @@ fn authorize_provider_generate(
             message_id: message_id.map(str::to_string),
             extension_id: Some(contribution.extension_id.clone()),
             path: None,
-            host: normalize_optional_runtime_value(&provider.base_url),
+            host: normalize_optional_runtime_value(&model_endpoint.base_url),
         },
         trigger: PermissionTrigger {
             kind: "pipeline.workflow_to_conversation".to_string(),
@@ -1348,7 +1354,7 @@ fn authorize_provider_generate(
 
 fn resolve_provider_contribution_for_generate(
     state: &AppState,
-    provider: &ProviderConfig,
+    provider: &ModelEndpointConfig,
     request: &RequestContext,
 ) -> Result<RegisteredProviderContribution, ApiError> {
     let matches = state
@@ -1676,7 +1682,7 @@ fn permission_actor_context(
 pub(crate) fn invoke_provider_method(
     entry: &PathBuf,
     payload: &JsonValue,
-    provider: &ProviderConfig,
+    provider: &ModelEndpointConfig,
 ) -> Result<JsonValue, String> {
     let payload_bytes = serde_json::to_vec(payload)
         .map_err(|error| format!("serialize provider request failed: {error}"))?;
@@ -1695,7 +1701,7 @@ pub(crate) fn invoke_provider_method(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    if let Some((name, value)) = resolve_provider_env_binding(provider) {
+    if let Some((name, value)) = resolve_model_endpoint_env_binding(provider) {
         command.env(name, value);
     }
     let mut child = command
@@ -1723,8 +1729,10 @@ pub(crate) fn invoke_provider_method(
         .map_err(|error| format!("parse provider response failed: {error}"))
 }
 
-fn resolve_provider_env_binding(provider: &ProviderConfig) -> Option<(String, String)> {
-    let env_name = provider.api_key_env.trim();
+fn resolve_model_endpoint_env_binding(
+    model_endpoint: &ModelEndpointConfig,
+) -> Option<(String, String)> {
+    let env_name = model_endpoint.api_key_env.trim();
     if env_name.is_empty() {
         return None;
     }

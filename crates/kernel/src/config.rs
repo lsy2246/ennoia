@@ -202,7 +202,7 @@ pub struct AgentConfig {
     #[serde(default)]
     pub system_prompt: String,
     #[serde(default)]
-    pub provider_id: String,
+    pub model_endpoint_id: String,
     #[serde(default)]
     pub model_id: String,
     #[serde(default)]
@@ -291,9 +291,9 @@ pub struct SkillRegistryEntry {
     pub path: String,
 }
 
-/// ProviderConfig represents one file under `config/providers/*.toml`.
+/// ModelEndpointConfig represents one file under `config/model-endpoints/*.toml`.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ProviderConfig {
+pub struct ModelEndpointConfig {
     pub id: String,
     pub display_name: String,
     #[serde(default)]
@@ -309,18 +309,18 @@ pub struct ProviderConfig {
     #[serde(default)]
     pub available_models: Vec<ProviderModelDescriptor>,
     #[serde(default)]
-    pub model_discovery: ProviderModelDiscoveryConfig,
+    pub model_discovery: ModelEndpointModelDiscoveryConfig,
     #[serde(default = "default_enabled")]
     pub enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ProviderModelDiscoveryConfig {
+pub struct ModelEndpointModelDiscoveryConfig {
     #[serde(default = "default_enabled")]
     pub manual_allowed: bool,
 }
 
-impl Default for ProviderModelDiscoveryConfig {
+impl Default for ModelEndpointModelDiscoveryConfig {
     fn default() -> Self {
         Self {
             manual_allowed: true,
@@ -354,11 +354,11 @@ fn default_enabled() -> bool {
 
 #[cfg(test)]
 mod provider_config_tests {
-    use super::ProviderConfig;
+    use super::ModelEndpointConfig;
 
     #[test]
     fn provider_config_deserializes_model_descriptors() {
-        let config = toml::from_str::<ProviderConfig>(
+        let config = toml::from_str::<ModelEndpointConfig>(
             r#"
 id = "openai"
 display_name = "OpenAI"
@@ -385,7 +385,7 @@ manual_allowed = true
 
     #[test]
     fn provider_config_deserializes_legacy_string_model_list() {
-        let config = toml::from_str::<ProviderConfig>(
+        let config = toml::from_str::<ModelEndpointConfig>(
             r#"
 id = "openai"
 display_name = "OpenAI"

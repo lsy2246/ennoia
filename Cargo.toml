@@ -6,7 +6,7 @@ members = [
   "crates/error-utils",
   "crates/extension-host",
   "crates/paths",
-  "crates/observability",
+  "crates/logs",
   "crates/contract",
   "crates/server",
   "crates/cli",

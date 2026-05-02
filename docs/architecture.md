@@ -2,7 +2,7 @@
 
 ## 目标
 
-`Ennoia` 是单操作者、多 Agent 的本地 AI 工作台。系统核心只负责运行时骨架：配置、路径、Observability、扩展生命周期、能力路由和 Worker RPC；具体业务能力通过内置实现或扩展接入。
+`Ennoia` 是单操作者、多 Agent 的本地 AI 工作台。系统核心只负责运行时骨架：配置、路径、日志、扩展生命周期、能力路由和 Worker RPC；具体业务能力通过内置实现或扩展接入。
 
 ## 总体分层
 
@@ -10,10 +10,10 @@
 Web
   -> API Client
     -> Server
-      -> Kernel / Contract / Paths / Observability
+      -> Kernel / Contract / Paths / Logs
       -> Extension Host / Wasm Worker
       -> Extension Host / Process Worker
-      -> Observability Store
+      -> Logs Store
       -> Event Bus
       -> Agent Permission Store
       -> Action Pipeline Runtime
@@ -30,7 +30,7 @@ Web
 - `Contract`：定义跨边界 DTO；当前保留 `behavior` 与 `memory` 兼容协议响应结构。
 - `Paths`：统一解析运行目录，所有运行时文件位置都通过 `RuntimePaths` 推导。
 - `Extension Host`：负责扩展扫描、attach / detach、reload / restart、诊断、Worker 解析和 Worker RPC 分发；Worker 可以是 Wasm，也可以是进程型 stdio RPC。
-- `Server`：负责 HTTP API、定时调度、Worker RPC 路由、Observability、事件总线和系统内置组件装配。
+- `Server`：负责 HTTP API、定时调度、Worker RPC 路由、日志、事件总线和系统内置组件装配。
 - `Pipeline Runtime`：负责稳定 action 的规则收集、阶段执行和结果收敛。它不拥有 conversation、memory、workflow 的主数据。
 
 ## Agent 权限裁决
@@ -64,7 +64,7 @@ Web
 - `conversation` 不直接调用 `memory` 或 `workflow`；它只维护会话事实并发出事实事件。
 - `memory` 不直接读取 `conversation.db`，也不再镜像保存整段会话消息或 shadow session state。
 - `workflow` 不假设自己一定挂在 conversation 上；会话事实是否进入 workflow，由系统动作管道与事件链决定，而不是由 builtin 互相依赖。
-- Conversation、Message、Memory Graph、Review 等业务数据组织属于扩展私有责任，不属于 Observability。
+- Conversation、Message、Memory Graph、Review 等业务数据组织属于扩展私有责任，不属于日志主数据。
 
 ## 运行与定时边界
 
@@ -87,10 +87,10 @@ Web
   - `POST /api/schedules/{schedule_id}/pause`
   - `POST /api/schedules/{schedule_id}/resume`
 
-## Observability
+## 日志
 
-- 宿主内建统一 Observability 子系统，不属于记忆层，也不混入业务主数据。
-- Observability 当前统一落到 `data/system/sqlite/observability.db`，内部按表区分 `logs`、`spans` 和 `span_links`。
+- 宿主内建统一日志子系统，不属于记忆层，也不混入业务主数据。
+- 日志数据当前统一落到 `data/system/sqlite/logs.db`，内部按表区分 `logs`、`spans` 和 `span_links`。
 - `logs` 记录系统级事件，例如：宿主启动、扩展 attach / reload / restart、行为路由失败、Worker RPC 失败等。
 - `spans` 记录调用链节点；`span_links` 记录异步关联，避免把所有异步链路都硬塞成父子关系。
 - Trace 模型固定使用 `trace_id`、`span_id`、`parent_span_id`、`request_id`、`sampled` 和 `source`。
@@ -144,7 +144,7 @@ Web
 ## 存储划分
 
 - 系统级配置：`~/.ennoia/config/*.toml`
-- 系统级观测：`~/.ennoia/data/system/sqlite/observability.db`
+- 系统级日志：`~/.ennoia/data/system/sqlite/logs.db`
 - 系统级事件总线：`~/.ennoia/data/system/sqlite/events.db`
 - Agent 权限事件与审批：`~/.ennoia/data/system/sqlite/permissions.db`
 - Agent 基础配置与权限策略：`~/.ennoia/agents/{agent_id}/agent.toml`

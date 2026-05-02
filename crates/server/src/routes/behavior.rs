@@ -3,14 +3,12 @@ use axum::http::Method;
 use axum::response::{IntoResponse, Response};
 use ennoia_contract::behavior::BehaviorStatusResponse;
 use ennoia_extension_host::RegisteredBehaviorContribution;
-use ennoia_observability::RequestContext;
+use ennoia_logs::RequestContext;
 use std::time::Instant;
 
 use super::*;
 use crate::app::record_trace_span;
-use crate::observability::{
-    ObservationLogWrite, ObservationSpanWrite, OBSERVABILITY_COMPONENT_BEHAVIOR,
-};
+use crate::logs_store::{LogEntryWrite, LogTraceWrite, LOGS_COMPONENT_BEHAVIOR};
 
 #[derive(Debug, Serialize)]
 pub(super) struct BehaviorProviderRecord {
@@ -112,7 +110,7 @@ pub(super) async fn behavior_api_proxy(
         &path,
         method,
         body,
-        OBSERVABILITY_COMPONENT_BEHAVIOR,
+        LOGS_COMPONENT_BEHAVIOR,
     )
     .await
 }
@@ -125,10 +123,10 @@ pub(super) fn resolve_active_behavior(
     match behaviors.as_slice() {
         [only] => Ok(only.clone()),
         [] => {
-            let _ = state.observability.append_log(ObservationLogWrite {
+            let _ = state.logs.append_log(LogEntryWrite {
                 event: "runtime.behavior.resolve_failed".to_string(),
                 level: "warn".to_string(),
-                component: OBSERVABILITY_COMPONENT_BEHAVIOR.to_string(),
+                component: LOGS_COMPONENT_BEHAVIOR.to_string(),
                 source_kind: "system".to_string(),
                 source_id: None,
                 message: "active behavior not found".to_string(),
@@ -157,8 +155,8 @@ pub(super) async fn dispatch_worker_capability_request(
     component: &str,
 ) -> Result<Response, ApiError> {
     let extension = state.extensions.get(extension_id).ok_or_else(|| {
-        let _ = state.observability.append_log_scoped(
-            ObservationLogWrite {
+        let _ = state.logs.append_log_scoped(
+            LogEntryWrite {
                 event: "runtime.extension.resolve_failed".to_string(),
                 level: "warn".to_string(),
                 component: component.to_string(),
@@ -221,7 +219,7 @@ pub(super) async fn dispatch_worker_capability_request(
     if response.ok {
         record_trace_span(
             state,
-            ObservationSpanWrite {
+            LogTraceWrite {
                 trace: span_trace,
                 kind: "behavior_rpc".to_string(),
                 name: routed_path.clone(),
@@ -248,7 +246,7 @@ pub(super) async fn dispatch_worker_capability_request(
         .unwrap_or_else(|| "worker request failed".to_string());
     record_trace_span(
         state,
-        ObservationSpanWrite {
+        LogTraceWrite {
             trace: span_trace,
             kind: "behavior_rpc".to_string(),
             name: routed_path.clone(),

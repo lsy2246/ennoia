@@ -4,7 +4,7 @@ mod schema;
 use std::path::PathBuf;
 
 use chrono::Utc;
-use ennoia_observability::TraceContext;
+use ennoia_logs::TraceContext;
 use ennoia_paths::RuntimePaths;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -14,16 +14,16 @@ use uuid::Uuid;
 use self::query::{ColumnCount, FilterOperator, SelectQuery};
 use self::schema::{LogsSchema, SpanLinksSchema, SpansSchema, TableSchema};
 
-pub const OBSERVABILITY_COMPONENT_HOST: &str = "host";
-pub const OBSERVABILITY_COMPONENT_EXTENSION_HOST: &str = "extension_host";
-pub const OBSERVABILITY_COMPONENT_BEHAVIOR: &str = "behavior_router";
-pub const OBSERVABILITY_COMPONENT_PROXY: &str = "extension_proxy";
-pub const OBSERVABILITY_COMPONENT_EVENT_BUS: &str = "event_bus";
+pub const LOGS_COMPONENT_HOST: &str = "host";
+pub const LOGS_COMPONENT_EXTENSION_HOST: &str = "extension_host";
+pub const LOGS_COMPONENT_BEHAVIOR: &str = "behavior_router";
+pub const LOGS_COMPONENT_PROXY: &str = "extension_proxy";
+pub const LOGS_COMPONENT_EVENT_BUS: &str = "event_bus";
 
 const SQLITE_PRAGMAS: &[&str] = &["PRAGMA journal_mode=WAL;", "PRAGMA synchronous=NORMAL;"];
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct ObservationLogEntry {
+pub struct LogEntry {
     pub id: String,
     pub seq: i64,
     pub event: String,
@@ -47,7 +47,7 @@ pub struct ObservationLogEntry {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct ObservationLogQuery {
+pub struct LogEntryQuery {
     pub event: Option<String>,
     pub level: Option<String>,
     pub component: Option<String>,
@@ -61,7 +61,7 @@ pub struct ObservationLogQuery {
 }
 
 #[derive(Debug, Clone)]
-pub struct ObservationLogWrite {
+pub struct LogEntryWrite {
     pub event: String,
     pub level: String,
     pub component: String,
@@ -73,7 +73,7 @@ pub struct ObservationLogWrite {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct ObservationSpanRecord {
+pub struct LogTraceRecord {
     pub id: String,
     pub seq: i64,
     pub trace_id: String,
@@ -98,7 +98,7 @@ pub struct ObservationSpanRecord {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct ObservationSpanQuery {
+pub struct LogTraceQuery {
     pub trace_id: Option<String>,
     pub request_id: Option<String>,
     pub component: Option<String>,
@@ -110,7 +110,7 @@ pub struct ObservationSpanQuery {
 }
 
 #[derive(Debug, Clone)]
-pub struct ObservationSpanWrite {
+pub struct LogTraceWrite {
     pub trace: TraceContext,
     pub kind: String,
     pub name: String,
@@ -125,7 +125,7 @@ pub struct ObservationSpanWrite {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct ObservationSpanLinkRecord {
+pub struct LogTraceLinkRecord {
     pub id: String,
     pub seq: i64,
     pub trace_id: String,
@@ -139,14 +139,14 @@ pub struct ObservationSpanLinkRecord {
 }
 
 #[derive(Debug, Clone, Default)]
-pub struct ObservationLinkQuery {
+pub struct LogTraceLinkQuery {
     pub trace_id: Option<String>,
     pub span_id: Option<String>,
     pub limit: usize,
 }
 
 #[derive(Debug, Clone)]
-pub struct ObservationSpanLinkWrite {
+pub struct LogTraceLinkWrite {
     pub trace_id: String,
     pub span_id: String,
     pub linked_trace_id: String,
@@ -157,38 +157,38 @@ pub struct ObservationSpanLinkWrite {
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct ObservationOverview {
+pub struct LogsOverview {
     pub log_count: i64,
     pub span_count: i64,
     pub trace_count: i64,
 }
 
 #[derive(Debug, Clone)]
-pub struct ObservabilityStore {
+pub struct LogsStore {
     db_path: PathBuf,
 }
 
-impl ObservabilityStore {
+impl LogsStore {
     pub fn new(paths: &RuntimePaths) -> std::io::Result<Self> {
-        if let Some(parent) = paths.observability_db().parent() {
+        if let Some(parent) = paths.logs_db().parent() {
             std::fs::create_dir_all(parent)?;
         }
         let store = Self {
-            db_path: paths.observability_db(),
+            db_path: paths.logs_db(),
         };
         store.ensure_schema()?;
         Ok(store)
     }
 
-    pub fn append_log(&self, entry: ObservationLogWrite) -> std::io::Result<ObservationLogEntry> {
+    pub fn append_log(&self, entry: LogEntryWrite) -> std::io::Result<LogEntry> {
         self.append_log_scoped(entry, None)
     }
 
     pub fn append_log_scoped(
         &self,
-        entry: ObservationLogWrite,
+        entry: LogEntryWrite,
         trace: Option<&TraceContext>,
-    ) -> std::io::Result<ObservationLogEntry> {
+    ) -> std::io::Result<LogEntry> {
         let connection = self.open()?;
         let created_at = entry.created_at.unwrap_or_else(now_iso);
         let id = format!("log-{}", Uuid::new_v4());
@@ -215,7 +215,7 @@ impl ObservabilityStore {
             )
             .map_err(std::io::Error::other)?;
         let seq = connection.last_insert_rowid();
-        Ok(ObservationLogEntry {
+        Ok(LogEntry {
             id,
             seq,
             event: entry.event,
@@ -233,10 +233,7 @@ impl ObservabilityStore {
         })
     }
 
-    pub fn list_logs(
-        &self,
-        query: &ObservationLogQuery,
-    ) -> std::io::Result<Vec<ObservationLogEntry>> {
+    pub fn list_logs(&self, query: &LogEntryQuery) -> std::io::Result<Vec<LogEntry>> {
         let connection = self.open()?;
         let prepared = build_logs_query(query).build();
         let mut statement = prepared.prepare(&connection)?;
@@ -247,7 +244,7 @@ impl ObservabilityStore {
             .map_err(std::io::Error::other)
     }
 
-    pub fn get_log(&self, id: &str) -> std::io::Result<Option<ObservationLogEntry>> {
+    pub fn get_log(&self, id: &str) -> std::io::Result<Option<LogEntry>> {
         let connection = self.open()?;
         connection
             .query_row(
@@ -259,10 +256,7 @@ impl ObservabilityStore {
             .map_err(std::io::Error::other)
     }
 
-    pub fn append_span(
-        &self,
-        entry: ObservationSpanWrite,
-    ) -> std::io::Result<ObservationSpanRecord> {
+    pub fn append_span(&self, entry: LogTraceWrite) -> std::io::Result<LogTraceRecord> {
         let connection = self.open()?;
         let id = format!("span-{}", Uuid::new_v4());
         let attributes_json =
@@ -292,7 +286,7 @@ impl ObservabilityStore {
             )
             .map_err(std::io::Error::other)?;
         let seq = connection.last_insert_rowid();
-        Ok(ObservationSpanRecord {
+        Ok(LogTraceRecord {
             id,
             seq,
             trace_id: entry.trace.trace_id,
@@ -314,10 +308,7 @@ impl ObservabilityStore {
         })
     }
 
-    pub fn list_spans(
-        &self,
-        query: &ObservationSpanQuery,
-    ) -> std::io::Result<Vec<ObservationSpanRecord>> {
+    pub fn list_spans(&self, query: &LogTraceQuery) -> std::io::Result<Vec<LogTraceRecord>> {
         let connection = self.open()?;
         let prepared = build_spans_query(query).build();
         let mut statement = prepared.prepare(&connection)?;
@@ -330,8 +321,8 @@ impl ObservabilityStore {
 
     pub fn append_span_link(
         &self,
-        entry: ObservationSpanLinkWrite,
-    ) -> std::io::Result<ObservationSpanLinkRecord> {
+        entry: LogTraceLinkWrite,
+    ) -> std::io::Result<LogTraceLinkRecord> {
         let connection = self.open()?;
         let id = format!("link-{}", Uuid::new_v4());
         let created_at = entry.created_at.unwrap_or_else(now_iso);
@@ -353,7 +344,7 @@ impl ObservabilityStore {
             )
             .map_err(std::io::Error::other)?;
         let seq = connection.last_insert_rowid();
-        Ok(ObservationSpanLinkRecord {
+        Ok(LogTraceLinkRecord {
             id,
             seq,
             trace_id: entry.trace_id,
@@ -368,8 +359,8 @@ impl ObservabilityStore {
 
     pub fn list_span_links(
         &self,
-        query: &ObservationLinkQuery,
-    ) -> std::io::Result<Vec<ObservationSpanLinkRecord>> {
+        query: &LogTraceLinkQuery,
+    ) -> std::io::Result<Vec<LogTraceLinkRecord>> {
         let connection = self.open()?;
         let prepared = build_span_links_query(query).build();
         let mut statement = prepared.prepare(&connection)?;
@@ -383,7 +374,7 @@ impl ObservabilityStore {
             .map_err(std::io::Error::other)
     }
 
-    pub fn overview(&self) -> std::io::Result<ObservationOverview> {
+    pub fn overview(&self) -> std::io::Result<LogsOverview> {
         let connection = self.open()?;
         let log_count = query_count(&connection, &LogsSchema::count_statement(ColumnCount::All))?;
         let span_count = query_count(&connection, &SpansSchema::count_statement(ColumnCount::All))?;
@@ -391,7 +382,7 @@ impl ObservabilityStore {
             &connection,
             &SpansSchema::count_statement(ColumnCount::Distinct(SpansSchema::TRACE_ID)),
         )?;
-        Ok(ObservationOverview {
+        Ok(LogsOverview {
             log_count,
             span_count,
             trace_count,
@@ -419,7 +410,7 @@ impl ObservabilityStore {
     }
 }
 
-fn build_logs_query(query: &ObservationLogQuery) -> SelectQuery {
+fn build_logs_query(query: &LogEntryQuery) -> SelectQuery {
     let mut builder = SelectQuery::new(LogsSchema::NAME, LogsSchema::SELECT_COLUMNS);
     if let Some(event) = &query.event {
         builder.push_filter(LogsSchema::EVENT, FilterOperator::Eq, event.clone().into());
@@ -478,7 +469,7 @@ fn build_logs_query(query: &ObservationLogQuery) -> SelectQuery {
         .limit(query.limit.max(1) as i64)
 }
 
-fn build_spans_query(query: &ObservationSpanQuery) -> SelectQuery {
+fn build_spans_query(query: &LogTraceQuery) -> SelectQuery {
     let mut builder = SelectQuery::new(SpansSchema::NAME, SpansSchema::SELECT_COLUMNS);
     if let Some(trace_id) = &query.trace_id {
         builder.push_filter(
@@ -528,7 +519,7 @@ fn build_spans_query(query: &ObservationSpanQuery) -> SelectQuery {
         .limit(query.limit.max(1) as i64)
 }
 
-fn build_span_links_query(query: &ObservationLinkQuery) -> SelectQuery {
+fn build_span_links_query(query: &LogTraceLinkQuery) -> SelectQuery {
     let mut builder = SelectQuery::new(SpanLinksSchema::NAME, SpanLinksSchema::SELECT_COLUMNS);
     if let Some(trace_id) = &query.trace_id {
         builder.push_filter(
@@ -549,9 +540,9 @@ fn build_span_links_query(query: &ObservationLinkQuery) -> SelectQuery {
         .limit(query.limit.max(1) as i64)
 }
 
-fn map_log_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<ObservationLogEntry> {
+fn map_log_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<LogEntry> {
     let attributes_json: String = row.get(LogsSchema::ATTRIBUTES_JSON)?;
-    Ok(ObservationLogEntry {
+    Ok(LogEntry {
         seq: row.get(LogsSchema::SEQ)?,
         id: row.get(LogsSchema::ID)?,
         event: row.get(LogsSchema::EVENT)?,
@@ -569,9 +560,9 @@ fn map_log_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<ObservationLogEntr
     })
 }
 
-fn map_span_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<ObservationSpanRecord> {
+fn map_span_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<LogTraceRecord> {
     let attributes_json: String = row.get(SpansSchema::ATTRIBUTES_JSON)?;
-    Ok(ObservationSpanRecord {
+    Ok(LogTraceRecord {
         seq: row.get(SpansSchema::SEQ)?,
         id: row.get(SpansSchema::ID)?,
         trace_id: row.get(SpansSchema::TRACE_ID)?,
@@ -593,9 +584,9 @@ fn map_span_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<ObservationSpanR
     })
 }
 
-fn map_span_link_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<ObservationSpanLinkRecord> {
+fn map_span_link_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<LogTraceLinkRecord> {
     let attributes_json: String = row.get(SpanLinksSchema::ATTRIBUTES_JSON)?;
-    Ok(ObservationSpanLinkRecord {
+    Ok(LogTraceLinkRecord {
         seq: row.get(SpanLinksSchema::SEQ)?,
         id: row.get(SpanLinksSchema::ID)?,
         trace_id: row.get(SpanLinksSchema::TRACE_ID)?,

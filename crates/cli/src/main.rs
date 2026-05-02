@@ -1298,7 +1298,7 @@ fn sync_builtin_provider_presets(paths: &RuntimePaths) -> io::Result<()> {
         .filter(|item| item.source == "builtin" && item.enabled && !item.removed)
     {
         let root = paths.expand_home_token(&entry.path);
-        let presets_dir = root.join("provider-presets");
+        let presets_dir = root.join("model-endpoint-presets");
         if !presets_dir.exists() {
             continue;
         }
@@ -1308,7 +1308,7 @@ fn sync_builtin_provider_presets(paths: &RuntimePaths) -> io::Result<()> {
             if !preset.file_type()?.is_file() {
                 continue;
             }
-            let destination = paths.providers_config_dir().join(preset.file_name());
+            let destination = paths.model_endpoints_config_dir().join(preset.file_name());
             let contents = fs::read_to_string(preset.path())?;
             write_if_missing(&destination, &contents)?;
         }

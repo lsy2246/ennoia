@@ -17,9 +17,9 @@ pub mod ui;
 // ========== Re-exports ==========
 
 pub use config::{
-    AgentConfig, AgentDocument, ExtensionRegistryEntry, ExtensionRegistryFile, ProviderConfig,
-    ProviderModelDiscoveryConfig, ServerConfig, SkillConfig, SkillRegistryEntry, SkillRegistryFile,
-    UiConfig,
+    AgentConfig, AgentDocument, ExtensionRegistryEntry, ExtensionRegistryFile, ModelEndpointConfig,
+    ModelEndpointModelDiscoveryConfig, ServerConfig, SkillConfig, SkillRegistryEntry,
+    SkillRegistryFile, UiConfig,
 };
 pub use context::{ContextFrame, ContextLayer, RunContext};
 pub use decision::{Decision, DecisionSnapshot, NextAction};

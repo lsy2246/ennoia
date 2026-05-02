@@ -10,7 +10,7 @@ import { StatusNotice } from "@/components/StatusNotice";
 import { buildTimeZoneOptionGroups } from "@/lib/timeZones";
 import { resolveDefaultDisplayName, resolveDefaultTimeZone } from "@/lib/uiDefaults";
 import { Select } from "@/components/Select";
-import { Providers } from "@/pages/providers";
+import { ModelEndpointsPage } from "@/pages/model-endpoints";
 import { useRuntimeStore } from "@/stores/runtime";
 import { useUiHelpers } from "@/stores/ui";
 
@@ -409,10 +409,10 @@ export function Settings() {
             </article>
 
             <section
-              id="settings-providers"
-              className="settings-provider-shell settings-module settings-section-anchor"
+              id="settings-model-endpoints"
+              className="settings-model-endpoints-shell settings-module settings-section-anchor"
             >
-              <Providers embedded />
+              <ModelEndpointsPage embedded />
             </section>
 
             <article

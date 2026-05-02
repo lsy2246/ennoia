@@ -16,7 +16,7 @@
     "@ennoia/api-client": "workspace:*",
     "@ennoia/contract": "workspace:*",
     "@ennoia/i18n": "workspace:*",
-    "@ennoia/observability": "workspace:*",
+    "@ennoia/logs": "workspace:*",
     "@ennoia/theme-runtime": "workspace:*",
     "@ennoia/ui-sdk": "workspace:*",
     "@tanstack/react-query": "^5.99.0",

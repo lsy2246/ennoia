@@ -1511,7 +1511,7 @@ mod tests {
         format!(
             r##"
 id = "{id}"
-name = "Observatory"
+name = "Logs"
 kind = "extension"
 description = "Test extension"
 docs = "docs/overview.md"
@@ -1548,7 +1548,7 @@ tags = ["activity"]
 id = "{id}.events"
 kind = "page"
 mount = "{id}.events.page"
-title = {{ key = "ext.{id}.page.events", fallback = "Observatory" }}
+title = {{ key = "ext.{id}.page.events", fallback = "Logs" }}
 route = "/{id}"
 icon = "activity"
 
@@ -1581,7 +1581,7 @@ entry = "ui/locales/en-US.json"
 
 [[commands]]
 id = "{id}.open"
-title = {{ key = "ext.{id}.command.open", fallback = "Open Observatory" }}
+title = {{ key = "ext.{id}.command.open", fallback = "Open Logs" }}
 action = "open-page"
 shortcut = "Ctrl+Shift+O"
 

@@ -176,7 +176,7 @@ Provider、Behavior、Memory、Hook、Action 和 Schedule Action 都只声明能
 ├─ bin/              # 可选：process Worker
 ├─ worker/           # 可选：Wasm Worker
 ├─ data/             # 可选：schema、私有模型、资源
-└─ provider-presets/ # 可选：初始化上游渠道实例
+└─ model-endpoint-presets/ # 可选：初始化模型接入实例
 ```
 
 Skill 目录独立：
@@ -200,7 +200,7 @@ Skill 目录独立：
 
 1. `cargo run -p ennoia-cli -- dev` 初始化运行目录。
 2. CLI 把内置扩展同步到 `<ENNOIA_HOME>/extensions/<extension_id>/`，并更新 `config/extensions.toml`。
-3. CLI 扫描内置扩展中的 `provider-presets/*.toml`，把默认渠道实例写入 `config/providers/`。
+3. CLI 扫描内置扩展中的 `model-endpoint-presets/*.toml`，把默认模型接入实例写入 `config/model-endpoints/`。
 4. CLI 把仓库内 `builtins/extensions/*` 追加为开发来源，供开发模式覆盖安装目录。
 5. Extension Host 扫描扩展，解析 `ui`、`worker` 和贡献能力，不启动扩展私有进程。
 6. Server 暴露 runtime snapshot、事件流、诊断、日志、资源贡献接口、接口绑定 API、scheduler API，以及 `/api/extensions/{extension_id}/rpc/{method}` Worker RPC 入口。

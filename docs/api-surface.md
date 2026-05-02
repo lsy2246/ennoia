@@ -18,7 +18,7 @@
 - `GET /api/runtime/server-config`
 - `PUT /api/runtime/server-config`
 
-## Agent / Skill / API 上游渠道
+## Agent / Skill / 模型接入
 
 - `GET /api/agents`
 - `POST /api/agents`
@@ -34,12 +34,12 @@
 - `PUT /api/skills/{skill_id}`
 - `DELETE /api/skills/{skill_id}`
 
-- `GET /api/providers`
-- `POST /api/providers`
-- `GET /api/providers/{provider_id}`
-- `GET /api/providers/{provider_id}/models`
-- `PUT /api/providers/{provider_id}`
-- `DELETE /api/providers/{provider_id}`
+- `GET /api/model-endpoints`
+- `POST /api/model-endpoints`
+- `GET /api/model-endpoints/{model_endpoint_id}`
+- `GET /api/model-endpoints/{model_endpoint_id}/models`
+- `PUT /api/model-endpoints/{model_endpoint_id}`
+- `DELETE /api/model-endpoints/{model_endpoint_id}`
 
 ## Extension
 

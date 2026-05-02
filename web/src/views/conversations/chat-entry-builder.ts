@@ -1,4 +1,4 @@
-import type { AgentProfile, ChatMessage, PermissionApprovalRecord } from "@ennoia/api-client";
+import type { AgentProfile, ConversationMessage, PermissionApprovalRecord } from "@ennoia/api-client";
 
 import type {
   ChatEntryRecipient,
@@ -30,7 +30,7 @@ function detectMessageFormat(body: string) {
   return "markdown" as const;
 }
 
-function isLikelyErrorMessage(role: ChatMessage["role"], body: string) {
+function isLikelyErrorMessage(role: ConversationMessage["role"], body: string) {
   if (role === "operator") {
     return false;
   }
@@ -68,7 +68,7 @@ function createErrorDetail(message: string) {
 }
 
 export function buildChatEntries(params: {
-  messages: ChatMessage[];
+  messages: ConversationMessage[];
   approvals: PermissionApprovalRecord[];
   localDrafts: LocalMessageDraft[];
   resolveRecipients: (mentions: string[]) => AgentProfile[];

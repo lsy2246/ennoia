@@ -1,20 +1,20 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 
 import {
-  createProvider,
-  deleteProvider,
-  discoverProviderModels,
-  listProviders,
-  updateProvider,
-  type ProviderConfig,
+  createModelEndpoint,
+  deleteModelEndpoint,
+  discoverModelEndpointModels,
+  listModelEndpoints,
+  updateModelEndpoint,
+  type ModelEndpointConfig,
   type ProviderModelDescriptor,
 } from "@ennoia/api-client";
 import { StatusNotice } from "@/components/StatusNotice";
-import { useProvidersStore } from "@/stores/providers";
+import { useModelEndpointsStore } from "@/stores/modelEndpoints";
 import { useUiHelpers } from "@/stores/ui";
 import { useWorkbenchStore } from "@/stores/workbench";
 
-const EMPTY_CHANNEL: ProviderConfig = {
+const EMPTY_CHANNEL: ModelEndpointConfig = {
   id: "",
   display_name: "",
   kind: "",
@@ -101,19 +101,19 @@ function resolveProviderImplementationKind(
   return contribution.provider.kind || contribution.provider.id || "";
 }
 
-export function ApiChannelEditorView({ channelId, panelId }: { channelId: string; panelId?: string }) {
+export function ModelEndpointEditorView({ modelEndpointId, panelId }: { modelEndpointId: string; panelId?: string }) {
   const { runtime, t } = useUiHelpers();
   const closeView = useWorkbenchStore((state) => state.closeView);
   const updateViewDescriptor = useWorkbenchStore((state) => state.updateViewDescriptor);
   const workbenchApi = useWorkbenchStore((state) => state.api);
-  const notifyProvidersChanged = useProvidersStore((state) => state.notifyChanged);
-  const [form, setForm] = useState<ProviderConfig>(EMPTY_CHANNEL);
+  const notifyProvidersChanged = useModelEndpointsStore((state) => state.notifyChanged);
+  const [form, setForm] = useState<ModelEndpointConfig>(EMPTY_CHANNEL);
   const [modelEntries, setModelEntries] = useState<ModelEntry[]>([]);
   const [defaultModelKey, setDefaultModelKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [modelsBusy, setModelsBusy] = useState(false);
-  const isNew = channelId.startsWith("new-");
+  const isNew = modelEndpointId.startsWith("new-");
 
   const interfaceTypes = useMemo(() => {
     return (runtime?.registry.providers ?? [])
@@ -144,11 +144,11 @@ export function ApiChannelEditorView({ channelId, panelId }: { channelId: string
     }
 
     const nextTitle =
-      (form.display_name ?? "").trim() || (form.id ?? "").trim() || (isNew ? t("web.channels.new", "新建渠道") : channelId);
+      (form.display_name ?? "").trim() || (form.id ?? "").trim() || (isNew ? t("web.model_endpoints.new", "新建模型接入") : modelEndpointId);
     const panel = workbenchApi.getPanel?.(panelId);
     panel?.api?.setTitle?.(nextTitle);
     updateViewDescriptor(panelId, { title: nextTitle });
-  }, [channelId, form.display_name, form.id, isNew, panelId, t, updateViewDescriptor, workbenchApi]);
+  }, [modelEndpointId, form.display_name, form.id, isNew, panelId, t, updateViewDescriptor, workbenchApi]);
 
   const applyModelState = useCallback((models: ProviderModelDescriptor[], preferredDefault?: string) => {
     const normalizedModels = normalizeModelDescriptors(models);
@@ -207,7 +207,7 @@ export function ApiChannelEditorView({ channelId, panelId }: { channelId: string
   const hydrate = useCallback(async () => {
     setError(null);
     try {
-      const next = await listProviders();
+      const next = await listModelEndpoints();
 
       if (isNew) {
         const defaultKind = interfaceTypes[0]?.[0] ?? "";
@@ -215,7 +215,7 @@ export function ApiChannelEditorView({ channelId, panelId }: { channelId: string
         return;
       }
 
-      const current = next.find((item) => item.id === channelId);
+      const current = next.find((item) => item.id === modelEndpointId);
       if (current) {
         const normalized = applyModelState(current.available_models, current.default_model);
         setForm({
@@ -227,7 +227,7 @@ export function ApiChannelEditorView({ channelId, panelId }: { channelId: string
     } catch (err) {
       setError(String(err));
     }
-  }, [applyInterfaceDefaults, applyModelState, channelId, interfaceTypes, isNew]);
+  }, [applyInterfaceDefaults, applyModelState, modelEndpointId, interfaceTypes, isNew]);
 
   useEffect(() => {
     void hydrate();
@@ -254,13 +254,13 @@ export function ApiChannelEditorView({ channelId, panelId }: { channelId: string
 
       if (!payload.kind) {
         throw new Error(
-          t("web.channels.interface_type_required", "请先选择一个可用的接口类型。"),
+          t("web.model_endpoints.interface_type_required", "请先选择一个可用的接口类型。"),
         );
       }
 
       const saved = isNew
-        ? await createProvider(payload)
-        : await updateProvider(channelId, payload);
+        ? await createModelEndpoint(payload)
+        : await updateModelEndpoint(modelEndpointId, payload);
 
       if (panelId && workbenchApi) {
         const panel = workbenchApi.getPanel?.(panelId);
@@ -272,7 +272,7 @@ export function ApiChannelEditorView({ channelId, panelId }: { channelId: string
             descriptor: {
               ...(panel?.params?.descriptor ?? {}),
               panelId,
-              kind: "api-channel",
+              kind: "model-endpoint",
               entityId: saved.id,
               title: nextTitle,
               subtitle: saved.kind,
@@ -281,7 +281,7 @@ export function ApiChannelEditorView({ channelId, panelId }: { channelId: string
           },
         });
         updateViewDescriptor(panelId, {
-          kind: "api-channel",
+          kind: "model-endpoint",
           entityId: saved.id,
           title: nextTitle,
           subtitle: saved.kind,
@@ -313,7 +313,7 @@ export function ApiChannelEditorView({ channelId, panelId }: { channelId: string
     setBusy(true);
     setError(null);
     try {
-      await deleteProvider(form.id);
+      await deleteModelEndpoint(form.id);
       notifyProvidersChanged();
       if (panelId) {
         closeView(panelId);
@@ -334,7 +334,7 @@ export function ApiChannelEditorView({ channelId, panelId }: { channelId: string
     setModelsBusy(true);
     setError(null);
     try {
-      const response = await discoverProviderModels({
+      const response = await discoverModelEndpointModels({
         ...form,
         available_models: serializeModelEntries(modelEntries),
       });
@@ -399,13 +399,13 @@ export function ApiChannelEditorView({ channelId, panelId }: { channelId: string
       <div className="resource-editor__header">
         <div>
           <span className="resource-editor__eyebrow">
-            {t("web.channels.eyebrow", "API 上游渠道")}
+            {t("web.model_endpoints.eyebrow", "模型接入")}
           </span>
-          <h2>{isNew ? t("web.channels.new", "新建渠道") : form.display_name || form.id}</h2>
+          <h2>{isNew ? t("web.model_endpoints.new", "新建模型接入") : form.display_name || form.id}</h2>
           <p>
             {t(
-              "web.channels.editor_description",
-              "一个渠道就是一个可绑定给 Agent 的实际访问入口；接口类型只表示已安装实现，不展示实现清单。",
+              "web.model_endpoints.editor_description",
+              "一个模型接入就是一个可绑定给 Agent 的实际访问入口；模型提供方只表示已安装实现，不展示实现清单。",
             )}
           </p>
         </div>
@@ -420,7 +420,7 @@ export function ApiChannelEditorView({ channelId, panelId }: { channelId: string
           />
         </label>
         <label>
-          {t("web.channels.display_name", "显示名")}
+          {t("web.model_endpoints.display_name", "显示名")}
           <input
             value={form.display_name}
             onChange={(event) => setForm({ ...form, display_name: event.target.value })}
@@ -428,7 +428,7 @@ export function ApiChannelEditorView({ channelId, panelId }: { channelId: string
           />
         </label>
         <label>
-          {t("web.channels.interface_type", "接口类型")}
+          {t("web.model_endpoints.interface_type", "接口类型")}
           <select
             value={form.kind}
             onChange={(event) => applyInterfaceDefaults(event.target.value)}
@@ -436,7 +436,7 @@ export function ApiChannelEditorView({ channelId, panelId }: { channelId: string
           >
             {interfaceTypes.length === 0 ? (
               <option value="">
-                {t("web.channels.interface_type_empty", "当前没有可用接口类型")}
+                {t("web.model_endpoints.interface_type_empty", "当前没有可用接口类型")}
               </option>
             ) : null}
             {interfaceTypes.map(([kind, label]) => (
@@ -447,8 +447,8 @@ export function ApiChannelEditorView({ channelId, panelId }: { channelId: string
           </select>
           <p className="helper-text">
             {t(
-              "web.channels.interface_type_help",
-              "这里选择当前已经装配完成的上游接口类型；扩展装入后会自动出现在这里。",
+              "web.model_endpoints.interface_type_help",
+              "这里只能选择当前已经装配完成的模型提供方；扩展装入后会自动出现在这里。",
             )}
           </p>
         </label>
@@ -462,14 +462,14 @@ export function ApiChannelEditorView({ channelId, panelId }: { channelId: string
         </label>
       </div>
       <label>
-        {t("web.channels.base_url", "Base URL")}
+        {t("web.model_endpoints.base_url", "Base URL")}
         <input
           value={form.base_url}
           onChange={(event) => setForm({ ...form, base_url: event.target.value })}
         />
       </label>
       <label>
-        {t("web.channels.api_key_env", "API Key 环境变量")}
+        {t("web.model_endpoints.api_key_env", "API Key 环境变量")}
         <input
           value={form.api_key_env}
           onChange={(event) => setForm({ ...form, api_key_env: event.target.value })}
@@ -477,7 +477,7 @@ export function ApiChannelEditorView({ channelId, panelId }: { channelId: string
       </label>
       <div className="form-grid">
         <label>
-          {t("web.channels.default_model", "默认模型")}
+          {t("web.model_endpoints.default_model", "默认模型")}
           <input
             value={form.default_model}
             required={form.enabled}
@@ -485,17 +485,17 @@ export function ApiChannelEditorView({ channelId, panelId }: { channelId: string
           />
           <p className="helper-text">
             {selectedContribution?.provider.model_discovery
-              ? t("web.channels.model_discovery_extension", "当前接口实现可以返回模型列表；保存时仍以这里的默认模型为准。")
-              : t("web.channels.model_discovery_manual", "当前接口没有模型发现能力，请手动维护模型列表和默认模型。")}
+              ? t("web.model_endpoints.model_discovery_extension", "当前接口实现可以返回模型列表；保存时仍以这里的默认模型为准。")
+              : t("web.model_endpoints.model_discovery_manual", "当前接口没有模型发现能力，请手动维护模型列表和默认模型。")}
           </p>
         </label>
         <div className="stack">
           <div className="model-toolbar">
             <div>
-              <div className="panel-title">{t("web.channels.models", "模型列表")}</div>
+              <div className="panel-title">{t("web.model_endpoints.models", "模型列表")}</div>
               <p className="helper-text">
                 {t(
-                  "web.channels.models_help",
+                  "web.model_endpoints.models_help",
                   "每行一个模型，直接维护模型名、总上下文大小和最大输入上限；保存前会自动去重并清理空项。",
                 )}
               </p>
@@ -507,7 +507,7 @@ export function ApiChannelEditorView({ channelId, panelId }: { channelId: string
                 disabled={modelsBusy || busy || !(form.kind ?? "").trim()}
                 onClick={() => void handleDiscoverModels()}
               >
-                {t("web.channels.refresh_models", "一键获取上游模型")}
+                {t("web.model_endpoints.refresh_models", "一键获取上游模型")}
               </button>
             ) : null}
           </div>
@@ -517,14 +517,14 @@ export function ApiChannelEditorView({ channelId, panelId }: { channelId: string
                 <div key={entry.key} className="model-row">
                   <input
                     value={entry.id}
-                    placeholder={t("web.channels.model_placeholder", "模型 ID，例如 gpt-5.4")}
+                    placeholder={t("web.model_endpoints.model_placeholder", "模型 ID，例如 gpt-5.4")}
                     onChange={(event) => handleModelChange(entry.key, event.target.value)}
                   />
                   <input
                     type="number"
                     min="1"
                     value={entry.maxContextTokens}
-                    placeholder={t("web.channels.model_context_placeholder", "总上下文大小")}
+                    placeholder={t("web.model_endpoints.model_context_placeholder", "总上下文大小")}
                     onChange={(event) =>
                       handleModelBudgetChange(entry.key, "maxContextTokens", event.target.value)
                     }
@@ -533,7 +533,7 @@ export function ApiChannelEditorView({ channelId, panelId }: { channelId: string
                     type="number"
                     min="1"
                     value={entry.maxInputTokens}
-                    placeholder={t("web.channels.model_input_placeholder", "最大输入上限")}
+                    placeholder={t("web.model_endpoints.model_input_placeholder", "最大输入上限")}
                     onChange={(event) =>
                       handleModelBudgetChange(entry.key, "maxInputTokens", event.target.value)
                     }
@@ -544,8 +544,8 @@ export function ApiChannelEditorView({ channelId, panelId }: { channelId: string
                     onClick={() => handleDefaultModelSelect(entry.key)}
                   >
                     {defaultModelKey === entry.key
-                      ? t("web.channels.model_is_default", "默认模型")
-                      : t("web.channels.model_set_default", "设为默认")}
+                      ? t("web.model_endpoints.model_is_default", "默认模型")
+                      : t("web.model_endpoints.model_set_default", "设为默认")}
                   </button>
                   <button
                     type="button"
@@ -558,17 +558,17 @@ export function ApiChannelEditorView({ channelId, panelId }: { channelId: string
               ))
             ) : (
               <div className="empty-card">
-                {t("web.channels.models_empty", "还没有模型。先新增一项，或直接一键获取上游模型。")}
+                {t("web.model_endpoints.models_empty", "还没有模型。先新增一项，或直接一键获取上游模型。")}
               </div>
             )}
             <button type="button" className="secondary" onClick={handleModelAdd}>
-              {t("web.channels.model_add", "新增模型")}
+              {t("web.model_endpoints.model_add", "新增模型")}
             </button>
           </div>
         </div>
       </div>
       <label>
-        {t("web.channels.description_field", "描述")}
+        {t("web.model_endpoints.description_field", "描述")}
         <textarea
           value={form.description}
           onChange={(event) => setForm({ ...form, description: event.target.value })}

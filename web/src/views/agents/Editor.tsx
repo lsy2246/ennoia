@@ -13,18 +13,18 @@ import {
   deleteAgent,
   getAgentPermissionPolicy,
   listAgents,
+  listModelEndpoints,
   listPermissionApprovals,
   listPermissionEvents,
-  listProviders,
   listSkills,
   updateAgent,
   updateAgentPermissionPolicy,
   type AgentPermissionPolicy,
   type AgentPermissionRule,
   type AgentProfile,
+  type ModelEndpointConfig,
   type PermissionApprovalRecord,
   type PermissionEventRecord,
-  type ProviderConfig,
   type SkillConfig,
 } from "@ennoia/api-client";
 import type { ExtensionProviderContribution } from "@ennoia/ui-sdk";
@@ -38,7 +38,7 @@ const EMPTY_AGENT: AgentProfile = {
   display_name: "",
   description: "",
   system_prompt: "",
-  provider_id: "",
+  model_endpoint_id: "",
   model_id: "",
   generation_options: {},
   skills: [],
@@ -62,7 +62,7 @@ export function AgentEditorView({
   );
   const [agents, setAgents] = useState<AgentProfile[]>([]);
   const [skills, setSkills] = useState<SkillConfig[]>([]);
-  const [providers, setProviders] = useState<ProviderConfig[]>([]);
+  const [modelEndpoints, setModelEndpoints] = useState<ModelEndpointConfig[]>([]);
   const [form, setForm] = useState<AgentProfile>(EMPTY_AGENT);
   const [policyForm, setPolicyForm] = useState<AgentPermissionPolicy>(EMPTY_POLICY);
   const [permissionApprovals, setPermissionApprovals] = useState<PermissionApprovalRecord[]>([]);
@@ -73,8 +73,8 @@ export function AgentEditorView({
   const isNew = agentId.startsWith("new-");
 
   const selectedProvider = useMemo(
-    () => providers.find((provider) => provider.id === form.provider_id) ?? providers[0] ?? null,
-    [form.provider_id, providers],
+    () => modelEndpoints.find((item) => item.id === form.model_endpoint_id) ?? modelEndpoints[0] ?? null,
+    [form.model_endpoint_id, modelEndpoints],
   );
   const selectedProviderContribution = useMemo(
     () => findProviderContribution(providerContributions, selectedProvider),
@@ -96,22 +96,22 @@ export function AgentEditorView({
   const hydrate = useCallback(async () => {
     setError(null);
     try {
-      const [nextAgents, nextSkills, nextProviders] = await Promise.all([
+      const [nextAgents, nextSkills, nextModelEndpoints] = await Promise.all([
         listAgents(),
         listSkills(),
-        listProviders(),
+        listModelEndpoints(),
       ]);
       setAgents(nextAgents);
       setSkills(nextSkills);
-      setProviders(nextProviders);
+      setModelEndpoints(nextModelEndpoints);
 
       if (isNew) {
         setForm({
           ...EMPTY_AGENT,
-          provider_id: nextProviders[0]?.id ?? "",
-          model_id: nextProviders[0]?.default_model ?? "",
+          model_endpoint_id: nextModelEndpoints[0]?.id ?? "",
+          model_id: nextModelEndpoints[0]?.default_model ?? "",
           generation_options: defaultGenerationOptions(
-            findProviderContribution(providerContributions, nextProviders[0] ?? null),
+            findProviderContribution(providerContributions, nextModelEndpoints[0] ?? null),
           ),
         });
         setPolicyForm(EMPTY_POLICY);
@@ -215,7 +215,7 @@ export function AgentEditorView({
           <span className={`badge ${form.enabled ? "badge--success" : "badge--muted"}`}>
             {form.enabled ? t("web.common.enabled", "启用") : t("web.common.disabled", "停用")}
           </span>
-          {form.provider_id ? <span className="badge badge--muted">{form.provider_id}</span> : null}
+          {form.model_endpoint_id ? <span className="badge badge--muted">{form.model_endpoint_id}</span> : null}
           {form.model_id ? <span className="badge badge--muted">{form.model_id}</span> : null}
         </div>
       </div>
@@ -240,20 +240,20 @@ export function AgentEditorView({
                     />
                   </label>
                   <label>
-                    {t("web.agents.api_channel", "API 上游渠道")}
+                    {t("web.agents.api_channel", "模型接入")}
                     <Select
-                      value={form.provider_id}
+                      value={form.model_endpoint_id}
                       onChange={(value) => {
-                        const provider = providers.find((item) => item.id === value);
+                        const provider = modelEndpoints.find((item) => item.id === value);
                         const contribution = findProviderContribution(providerContributions, provider ?? null);
                         setForm({
                           ...form,
-                          provider_id: value,
+                          model_endpoint_id: value,
                           model_id: provider?.default_model ?? form.model_id,
                           generation_options: defaultGenerationOptions(contribution),
                         });
                       }}
-                      options={providers.map((provider) => ({ value: provider.id, label: provider.display_name }))}
+                      options={modelEndpoints.map((provider) => ({ value: provider.id, label: provider.display_name }))}
                     />
                   </label>
                   <label>
@@ -649,7 +649,7 @@ function permissionDecisionClass(decision: string) {
 
 function findProviderContribution(
   contributions: ExtensionProviderContribution[],
-  provider: ProviderConfig | null,
+  provider: ModelEndpointConfig | null,
 ) {
   if (!provider) {
     return null;

@@ -124,7 +124,7 @@ async function ensureAgent(baseUrl, id, displayName) {
       display_name: displayName,
       description: "",
       system_prompt: "",
-      provider_id: "",
+      model_endpoint_id: "",
       model_id: "",
       generation_options: {},
       skills: [],

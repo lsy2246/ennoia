@@ -2,21 +2,21 @@ import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent }
 
 import {
   ApiError,
-  createChatBranch,
-  createChatCheckpoint,
+  appendConversationMessage,
+  createConversationBranch,
+  createConversationCheckpoint,
   createConversationStream,
-  getChat,
+  getConversation,
   listAgents,
   listConversationPermissionApprovals,
   listSkills,
   parseConversationStreamPayload,
   resolvePermissionApproval,
-  sendChatMessage,
-  switchChatBranch,
-  type ChatBranch,
+  switchConversationBranch,
   type AgentProfile,
-  type ChatMessage,
-  type ChatThreadDetail,
+  type ConversationBranch,
+  type ConversationDetail,
+  type ConversationMessage,
   type PermissionApprovalRecord,
   type SkillConfig,
 } from "@ennoia/api-client";
@@ -432,12 +432,12 @@ function summarizeBody(body: string) {
   return `${normalized.slice(0, 56)}…`;
 }
 
-function findMessageById(messages: ChatMessage[], messageId: string) {
+function findMessageById(messages: ConversationMessage[], messageId: string) {
   return messages.find((message) => message.id === messageId) ?? null;
 }
 
 function branchKindLabel(
-  branch: ChatBranch | null | undefined,
+  branch: ConversationBranch | null | undefined,
   t: (key: string, fallback: string) => string,
 ) {
   switch (branch?.kind) {
@@ -529,7 +529,7 @@ function normalizeDraftBody(body: string) {
   return body.replace(/\s+/g, " ").trim();
 }
 
-function matchesRemoteMessage(draft: LocalMessageDraft, message: ChatMessage) {
+function matchesRemoteMessage(draft: LocalMessageDraft, message: ConversationMessage) {
   if (message.role !== "operator") {
     return false;
   }
@@ -552,7 +552,7 @@ function matchesRemoteMessage(draft: LocalMessageDraft, message: ChatMessage) {
 
 function reconcileDraftsWithRemote(
   drafts: LocalMessageDraft[],
-  messages: ChatMessage[],
+  messages: ConversationMessage[],
 ) {
   if (drafts.length === 0 || messages.length === 0) {
     return drafts;
@@ -577,7 +577,7 @@ function reconcileDraftsWithRemote(
 
 function reconcilePendingRepliesWithRemote(
   pendingReplies: PendingReplyMarker[],
-  messages: ChatMessage[],
+  messages: ConversationMessage[],
   approvals: PermissionApprovalRecord[],
 ) {
   if (pendingReplies.length === 0 || messages.length === 0) {
@@ -599,7 +599,8 @@ function reconcilePendingRepliesWithRemote(
   );
 }
 
-export function SessionView({ sessionId, panelId }: { sessionId: string; panelId?: string }) {
+export function SessionView({ conversationId, panelId }: { conversationId: string; panelId?: string }) {
+  const sessionId = conversationId;
   const { formatDateTime, t } = useUiHelpers();
   const openView = useWorkbenchStore((state) => state.openView);
   const closeView = useWorkbenchStore((state) => state.closeView);
@@ -609,7 +610,7 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
   const notifyChanged = useConversationsStore((state) => state.notifyChanged);
   const [agents, setAgents] = useState<AgentProfile[]>([]);
   const [skills, setSkills] = useState<SkillConfig[]>([]);
-  const [detail, setDetail] = useState<ChatThreadDetail | null>(null);
+  const [detail, setDetail] = useState<ConversationDetail | null>(null);
   const [approvals, setApprovals] = useState<PermissionApprovalRecord[]>([]);
   const [localDrafts, setLocalDrafts] = useState<LocalMessageDraft[]>(() => loadPersistedDrafts(sessionId));
   const [pendingReplies, setPendingReplies] = useState<PendingReplyMarker[]>(() => loadPersistedPendingReplies(sessionId));
@@ -653,7 +654,7 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
   const refreshThread = useCallback(async () => {
     try {
       const [nextDetail, nextApprovals] = await Promise.all([
-        getChat(sessionId),
+        getConversation(sessionId),
         listConversationPermissionApprovals(sessionId, { limit: 80 }),
       ]);
       if (!isMountedRef.current) {
@@ -680,7 +681,7 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
       const [nextAgents, nextSkills, nextDetail, nextApprovals] = await Promise.all([
         listAgents(),
         listSkills(),
-        getChat(sessionId),
+        getConversation(sessionId),
         listConversationPermissionApprovals(sessionId, { limit: 80 }),
       ]);
       if (!isMountedRef.current) {
@@ -1176,7 +1177,7 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
 
     void (async () => {
       try {
-        const response = await sendChatMessage(conversation.id, {
+        const response = await appendConversationMessage(conversation.id, {
           lane_id: next.branchId ?? conversation.default_lane_id ?? undefined,
           branch_id: next.branchId ?? conversation.active_branch_id ?? undefined,
           body: next.body,
@@ -1357,7 +1358,7 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
     }
     setError(null);
     try {
-      const nextDetail = await switchChatBranch(conversation.id, branchId);
+      const nextDetail = await switchConversationBranch(conversation.id, branchId);
       if (!isMountedRef.current) {
         return;
       }
@@ -1380,7 +1381,7 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
       .find((message) => (message.branch_id ?? message.lane_id) === (activeBranch?.id ?? conversation.active_branch_id));
     setError(null);
     try {
-      const checkpoint = await createChatCheckpoint(conversation.id, {
+      const checkpoint = await createConversationCheckpoint(conversation.id, {
         branch_id: activeBranch?.id ?? conversation.active_branch_id ?? undefined,
         message_id: latestMessage?.id,
         kind: "manual",
@@ -1408,7 +1409,7 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
     }
     setError(null);
     try {
-      await createChatBranch(conversation.id, {
+      await createConversationBranch(conversation.id, {
         source_checkpoint_id: checkpointId,
         mode: "fork",
         activate: true,
@@ -1569,7 +1570,7 @@ export function SessionView({ sessionId, panelId }: { sessionId: string; panelId
                       kind: "agent",
                       entityId: agent.id,
                       title: agent.display_name,
-                      subtitle: agent.provider_id,
+                      subtitle: agent.model_endpoint_id,
                     })}
                 >
                   {agent.display_name}

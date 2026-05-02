@@ -4,13 +4,13 @@ use axum::{
     response::Response,
 };
 use chrono::Utc;
-use ennoia_observability::RequestContext;
+use ennoia_logs::RequestContext;
 use std::time::Instant;
 use tracing::info;
 
 use crate::app::record_trace_span;
 use crate::app::AppState;
-use crate::observability::ObservationSpanWrite;
+use crate::logs_store::LogTraceWrite;
 
 /// logging_middleware emits one line per request: method path status latency-ms.
 /// Sampling and redaction are honored from the live LoggingConfig.
@@ -64,7 +64,7 @@ pub async fn logging_middleware(
     if request_id.trace_id != "unknown" && request_id.span_id != "unknown" {
         record_trace_span(
             &state,
-            ObservationSpanWrite {
+            LogTraceWrite {
                 trace: request_id.trace_context(),
                 kind: "http".to_string(),
                 name: format!("{} {}", method, path),
