@@ -533,6 +533,20 @@ async fn load_conversation_detail_value(
             .await?
         }
     };
+    let runs = match json_array_field(&detail, "runs") {
+        Some(value) => value,
+        None => dispatch_action_value(
+            state,
+            request,
+            "run.list",
+            serde_json::json!({
+                "conversation_id": conversation_id,
+                "limit": 24,
+            }),
+        )
+        .await
+        .unwrap_or_else(|_| JsonValue::Array(Vec::new())),
+    };
 
     Ok(serde_json::json!({
         "conversation": conversation,
@@ -540,7 +554,7 @@ async fn load_conversation_detail_value(
         "branches": branches,
         "checkpoints": checkpoints,
         "messages": messages,
-        "runs": [],
+        "runs": runs,
         "tasks": [],
         "outputs": [],
     }))

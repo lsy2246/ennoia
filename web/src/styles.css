@@ -2306,6 +2306,27 @@ label {
   gap: 8px;
 }
 
+.session-extension-zone {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 920px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+.session-extension-card {
+  min-width: 0;
+}
+
+.session-extension-card--error {
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid color-mix(in srgb, var(--danger) 28%, transparent);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  color: var(--danger);
+}
+
 .command-palette-backdrop {
   position: fixed;
   inset: 0;
@@ -5372,6 +5393,7 @@ label {
   .settings-toolbar__copy h1 {
     font-size: 24px;
   }
+
 }
 
 @media (max-width: 1400px) {

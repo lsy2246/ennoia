@@ -1036,6 +1036,8 @@ fn ensure_builtin_process_workers(repo_root: &Path) -> io::Result<()> {
         .arg("ennoia-conversation-service")
         .arg("-p")
         .arg("ennoia-memory")
+        .arg("-p")
+        .arg("ennoia-workflow")
         .current_dir(repo_root)
         .status()?;
     if !status.success() {
@@ -1095,6 +1097,33 @@ fn ensure_builtin_process_workers(repo_root: &Path) -> io::Result<()> {
         copy_builtin_process_worker(&built_binary, &destination)?;
     }
 
+    let workflow_root = repo_root
+        .join("builtins")
+        .join("extensions")
+        .join("workflow");
+    if workflow_root.join("extension.toml").exists() {
+        let built_binary = repo_root
+            .join("target")
+            .join("debug")
+            .join(if cfg!(windows) {
+                "ennoia-workflow-extension.exe"
+            } else {
+                "ennoia-workflow-extension"
+            });
+        if !built_binary.exists() {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!(
+                    "workflow process worker not found at {}",
+                    built_binary.display()
+                ),
+            ));
+        }
+
+        let destination = workflow_root.join("bin").join(workflow_service_name());
+        copy_builtin_process_worker(&built_binary, &destination)?;
+    }
+
     Ok(())
 }
 
@@ -1127,6 +1156,14 @@ fn memory_service_name() -> &'static str {
         "memory-service.exe"
     } else {
         "memory-service"
+    }
+}
+
+fn workflow_service_name() -> &'static str {
+    if cfg!(windows) {
+        "workflow-service.exe"
+    } else {
+        "workflow-service"
     }
 }
 

@@ -9,10 +9,20 @@ mode = "package"
 root = "."
 dev = false
 
+[ui]
+runtime = "browser-esm"
+hmr = true
+
 [worker]
-kind = "wasm"
-entry = "worker/workflow.wasm"
-abi = "ennoia.worker"
+kind = "process"
+entry = "bin/workflow-service"
+protocol = "jsonrpc-stdio"
+
+[build]
+ui_bundle = "ui/dist/entry.js"
+
+[assets]
+locales_dir = "ui/locales"
 
 [permissions]
 storage = "extension"
@@ -26,6 +36,42 @@ capabilities = [
   "run.get",
   "artifact.list",
 ]
+
+[[surfaces]]
+id = "workflow.page"
+kind = "page"
+title = { key = "ext.workflow.page", fallback = "工作编排" }
+route = "/workflow"
+mount = "workflow.page"
+icon = "workflow"
+nav = { default_pinned = false, order = 35 }
+
+[[surfaces]]
+id = "workflow.conversation.card"
+kind = "conversation_card"
+title = { key = "ext.workflow.session.surface", fallback = "会话执行卡" }
+mount = "workflow.conversation.card"
+priority = 100
+
+[[entrypoints]]
+id = "workflow.workspace"
+label = { key = "ext.workflow.entry.workspace", fallback = "工作编排工作台" }
+description = { key = "ext.workflow.entry.workspace_description", fallback = "查看 run 的阶段流转、判定关卡、任务分支与产物输出。" }
+kind = "page"
+page_id = "workflow.page"
+icon = "workflow"
+order = 10
+prominent = false
+
+[[locales]]
+locale = "zh-CN"
+namespace = "ext.workflow"
+entry = "ui/locales/zh-CN.json"
+
+[[locales]]
+locale = "en-US"
+namespace = "ext.workflow"
+entry = "ui/locales/en-US.json"
 
 [[capabilities]]
 id = "workflow.default"

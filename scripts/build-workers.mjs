@@ -9,6 +9,8 @@ const conversationBinaryName =
   process.platform === "win32" ? "conversation-service.exe" : "conversation-service";
 const memoryBinaryName =
   process.platform === "win32" ? "memory-service.exe" : "memory-service";
+const workflowBinaryName =
+  process.platform === "win32" ? "workflow-service.exe" : "workflow-service";
 
 function run(command, args) {
   const result = spawnSync(command, args, {
@@ -58,6 +60,8 @@ run(cargo, [
   "ennoia-conversation-service",
   "-p",
   "ennoia-memory",
+  "-p",
+  "ennoia-workflow",
   "--release",
 ]);
 run(cargo, [
@@ -87,4 +91,11 @@ copyNativeWorker(
     ? "ennoia-memory-extension.exe"
     : "ennoia-memory-extension",
   `builtins/extensions/memory/bin/${memoryBinaryName}`,
+);
+copyNativeWorker(
+  "ennoia-workflow",
+  process.platform === "win32"
+    ? "ennoia-workflow-extension.exe"
+    : "ennoia-workflow-extension",
+  `builtins/extensions/workflow/bin/${workflowBinaryName}`,
 );

@@ -194,6 +194,12 @@ export type ExtensionPanelMountContext = ExtensionViewMountContext & {
   panel: ExtensionPanelContribution;
 };
 
+export type ExtensionConversationCardMountContext = ExtensionViewMountContext & {
+  kind: "conversation_card";
+  surface: ExtensionSurfaceContribution;
+  conversationId: string;
+};
+
 export type ExtensionViewHandle = {
   unmount?: () => void | Promise<void>;
 };
@@ -208,9 +214,15 @@ export type ExtensionPanelMount = (
   context: ExtensionPanelMountContext,
 ) => void | ExtensionViewHandle | Promise<void | ExtensionViewHandle>;
 
+export type ExtensionConversationCardMount = (
+  container: HTMLElement,
+  context: ExtensionConversationCardMountContext,
+) => void | ExtensionViewHandle | Promise<void | ExtensionViewHandle>;
+
 export type ExtensionUiModule = {
   pages?: Record<string, ExtensionPageMount>;
   panels?: Record<string, ExtensionPanelMount>;
+  conversationCards?: Record<string, ExtensionConversationCardMount>;
 };
 
 export type ExtensionCommandContribution = RegisteredContributionBase & {

@@ -8,3 +8,4 @@ export * from "./actions";
 export * from "./logs";
 export * from "./permissions";
 export * from "./schedules";
+export * from "./workflow";

@@ -5,9 +5,11 @@
 
 pub mod orchestrator;
 pub mod pipeline;
+pub mod process;
 pub mod runtime;
 
 pub use ennoia_contract::behavior::{
     BehaviorRunDetailResponse, BehaviorRunRequest, BehaviorRunResponse, BehaviorStatusResponse,
 };
 pub use pipeline::{run_behavior, WorkflowRuntime};
+pub use process::run;

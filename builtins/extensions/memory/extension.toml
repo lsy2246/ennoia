@@ -45,7 +45,7 @@ title = { key = "ext.memory.page", fallback = "记忆" }
 route = "/memory"
 mount = "memory.page"
 icon = "memory"
-nav = { default_pinned = true, order = 30 }
+nav = { default_pinned = false, order = 30 }
 
 [[surfaces]]
 id = "memory.about"
@@ -62,7 +62,7 @@ kind = "page"
 page_id = "memory.page"
 icon = "memory"
 order = 10
-prominent = true
+prominent = false
 
 [[settings]]
 key = "default_owner_kind"

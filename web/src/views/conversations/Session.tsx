@@ -25,6 +25,7 @@ import { useConversationsStore } from "@/stores/conversations";
 import { useSessionCommandsStore } from "@/stores/sessionCommands";
 import { useUiHelpers } from "@/stores/ui";
 import { useWorkbenchStore } from "@/stores/workbench";
+import { ConversationExtensionCards } from "@/views/extensions/ConversationCards";
 import { ChatStream } from "./ChatStream";
 import { buildChatEntries, buildStatusEntries } from "./chat-entry-builder";
 import type {
@@ -645,7 +646,6 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
     [skills],
   );
   const canUseSkills = enabledSkills.length > 0;
-
   const agentMap = useMemo(
     () => new Map(activeAgents.map((agent) => [agent.id, agent])),
     [activeAgents],
@@ -1608,6 +1608,8 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
               </div>
             ) : null}
           </div>
+
+          <ConversationExtensionCards conversationId={sessionId} />
 
           <div ref={scrollRef} className="message-stream message-stream--chat">
             <ChatStream

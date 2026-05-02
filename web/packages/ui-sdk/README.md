@@ -4,4 +4,4 @@
 
 当前入口：
 
-- `src/extension-runtime.ts`：extension page/panel contribution 类型、slot 归一化与分组辅助函数
+- `src/extension-runtime.ts`：extension page/panel/conversation card contribution 类型、slot 归一化与分组辅助函数

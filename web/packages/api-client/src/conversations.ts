@@ -8,7 +8,10 @@ import type {
   ConversationSummary,
   ConversationDetail,
   ConversationStreamSnapshot,
+  ExecutionRun,
+  ExecutionStep,
   PermissionApprovalRecord,
+  RunOutput,
 } from "./types";
 
 const CONVERSATIONS_API = "/api/conversations";
@@ -30,6 +33,9 @@ function normalizeConversationDetailPayload(payload: unknown): {
   branches?: ConversationBranch[];
   checkpoints?: ConversationCheckpoint[];
   messages?: ConversationMessage[];
+  runs?: ExecutionRun[];
+  tasks?: ExecutionStep[];
+  outputs?: RunOutput[];
 } {
   if (isConversationSummary(payload)) {
     return { conversation: payload };
@@ -45,6 +51,9 @@ function normalizeConversationDetailPayload(payload: unknown): {
     branches: Array.isArray(payload.branches) ? payload.branches as ConversationBranch[] : undefined,
     checkpoints: Array.isArray(payload.checkpoints) ? payload.checkpoints as ConversationCheckpoint[] : undefined,
     messages: Array.isArray(payload.messages) ? payload.messages as ConversationMessage[] : undefined,
+    runs: Array.isArray(payload.runs) ? payload.runs as ExecutionRun[] : undefined,
+    tasks: Array.isArray(payload.tasks) ? payload.tasks as ExecutionStep[] : undefined,
+    outputs: Array.isArray(payload.outputs) ? payload.outputs as RunOutput[] : undefined,
   };
 }
 
@@ -84,9 +93,9 @@ export async function getConversation(conversationId: string): Promise<Conversat
     branches,
     checkpoints,
     messages,
-    runs: [],
-    tasks: [],
-    outputs: [],
+    runs: normalized.runs ?? [],
+    tasks: normalized.tasks ?? [],
+    outputs: normalized.outputs ?? [],
   };
 }
 
@@ -147,9 +156,9 @@ export async function switchConversationBranch(conversationId: string, branchId:
     branches: normalized.branches ?? [],
     checkpoints: normalized.checkpoints ?? [],
     messages: normalized.messages ?? [],
-    runs: [],
-    tasks: [],
-    outputs: [],
+    runs: normalized.runs ?? [],
+    tasks: normalized.tasks ?? [],
+    outputs: normalized.outputs ?? [],
   } satisfies ConversationDetail;
 }
 
