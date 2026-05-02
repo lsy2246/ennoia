@@ -82,6 +82,20 @@ entry = "conversation/branches/switch"
 metadata = { action = { key = "branch.switch" }, permission = { action = "conversation.branch.switch", target_kind = "branch", risk_level = "medium", default_decision = "allow", scope_kind = "conversation" } }
 
 [[capabilities]]
+id = "branch.update"
+contract = "branch.update"
+kind = "action"
+entry = "conversation/branches/update"
+metadata = { action = { key = "branch.update" }, permission = { action = "conversation.branch.update", target_kind = "branch", risk_level = "medium", default_decision = "allow", scope_kind = "conversation" } }
+
+[[capabilities]]
+id = "branch.delete"
+contract = "branch.delete"
+kind = "action"
+entry = "conversation/branches/delete"
+metadata = { action = { key = "branch.delete" }, permission = { action = "conversation.branch.delete", target_kind = "branch", risk_level = "high", default_decision = "ask", scope_kind = "conversation" } }
+
+[[capabilities]]
 id = "checkpoint.list"
 contract = "checkpoint.list"
 kind = "query"

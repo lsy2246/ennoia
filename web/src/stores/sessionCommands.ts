@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-import type { ConversationBranch, ConversationCheckpoint } from "@ennoia/api-client";
+import type { ConversationBranch } from "@ennoia/api-client";
 
 export type SessionCommandRegistration = {
   panelId: string;
@@ -8,12 +8,8 @@ export type SessionCommandRegistration = {
   title: string;
   activeBranchId?: string | null;
   branches: ConversationBranch[];
-  checkpoints: ConversationCheckpoint[];
   actions: {
-    resetContext: () => void;
-    createCheckpoint: () => void;
     switchBranch: (branchId: string) => void;
-    branchFromCheckpoint: (checkpointId: string) => void;
   };
 };
 

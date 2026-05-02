@@ -88,6 +88,7 @@ export function ConversationExtensionCards({ conversationId }: ConversationExten
     () =>
       [...(runtime?.registry.surfaces ?? [])]
         .filter((item) => item.surface.kind === "conversation_card")
+        .filter((item) => item.extension_id !== "workflow")
         .sort((left, right) =>
           (right.surface.priority ?? 0) - (left.surface.priority ?? 0)
             || left.extension_id.localeCompare(right.extension_id)),

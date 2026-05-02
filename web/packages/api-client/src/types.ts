@@ -312,6 +312,13 @@ export type ConversationBranch = {
   inherit_mode: string;
   created_at: string;
   updated_at: string;
+  is_active?: boolean;
+  depth?: number;
+  own_message_count?: number;
+  visible_message_count?: number;
+  last_message_at?: string | null;
+  last_activity_at?: string | null;
+  source_preview?: string | null;
 };
 
 export type ConversationCheckpoint = {

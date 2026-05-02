@@ -1,11 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 
 import {
   ApiError,
   appendConversationMessage,
-  createConversationBranch,
-  createConversationCheckpoint,
   createConversationStream,
+  deleteConversationBranch,
   getConversation,
   listAgents,
   listConversationPermissionApprovals,
@@ -13,6 +12,7 @@ import {
   parseConversationStreamPayload,
   resolvePermissionApproval,
   switchConversationBranch,
+  updateConversationBranch,
   type AgentProfile,
   type ConversationBranch,
   type ConversationDetail,
@@ -449,8 +449,53 @@ function branchKindLabel(
     case "fork":
       return t("web.conversations.branch_kind_fork", "分支");
     default:
-      return t("web.conversations.branch_kind_main", "主线");
+      return t("web.conversations.branch_kind_main", "根分支");
   }
+}
+
+function branchMessageCount(branch: ConversationBranch) {
+  return branch.visible_message_count ?? branch.own_message_count ?? 0;
+}
+
+function branchLastActivity(branch: ConversationBranch) {
+  return branch.last_activity_at ?? branch.last_message_at ?? branch.updated_at;
+}
+
+function branchSourcePreview(
+  branch: ConversationBranch,
+  messages: ConversationMessage[],
+) {
+  if (branch.source_preview?.trim()) {
+    return branch.source_preview.trim();
+  }
+  if (branch.source_message_id) {
+    const source = messages.find((message) => message.id === branch.source_message_id);
+    if (source?.body.trim()) {
+      return summarizeBody(source.body);
+    }
+  }
+  return "";
+}
+
+function sortBranchesForManager(branches: ConversationBranch[]) {
+  return [...branches].sort((left, right) =>
+    Number(Boolean(right.is_active)) - Number(Boolean(left.is_active))
+      || branchLastActivity(right).localeCompare(branchLastActivity(left))
+      || right.created_at.localeCompare(left.created_at)
+      || left.name.localeCompare(right.name));
+}
+
+function branchDepthLabel(
+  depth: number,
+  t: (key: string, fallback: string) => string,
+) {
+  if (depth <= 0) {
+    return t("web.conversations.branch_depth_root", "根层");
+  }
+  return t("web.conversations.branch_depth_level", "第 {depth} 层").replace(
+    "{depth}",
+    String(depth),
+  );
 }
 
 function outboxStorageKey(sessionId: string) {
@@ -620,6 +665,12 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
   const [composerMode, setComposerMode] = useState<ComposerModeState>({ kind: "normal" });
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [streamNeedsResync, setStreamNeedsResync] = useState(false);
+  const [agentManagerOpen, setAgentManagerOpen] = useState(false);
+  const [branchManagerOpen, setBranchManagerOpen] = useState(false);
+  const [editingBranchId, setEditingBranchId] = useState<string | null>(null);
+  const [editingBranchName, setEditingBranchName] = useState("");
+  const [branchBusyId, setBranchBusyId] = useState<string | null>(null);
   const editorRef = useRef<HTMLDivElement | null>(null);
   const isMountedRef = useRef(true);
   const inFlightDraftIdRef = useRef<string | null>(null);
@@ -637,6 +688,76 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
   const activeBranch = useMemo(
     () => detail?.branches.find((branch) => branch.id === detail.conversation.active_branch_id) ?? detail?.branches[0] ?? null,
     [detail],
+  );
+  const branchManagerTree = useMemo(
+    () => {
+      const branches = detail?.branches ?? [];
+      const branchMap = new Map(branches.map((branch) => [branch.id, branch]));
+      const childrenMap = new Map<string | null, ConversationBranch[]>();
+      const parentNameMap = new Map<string, string>();
+      const descendantCountMap = new Map<string, number>();
+      const lineageMap = new Map<string, string[]>();
+      const ordered: ConversationBranch[] = [];
+      const visited = new Set<string>();
+
+      for (const branch of branches) {
+        const parentId = branch.parent_branch_id && branchMap.has(branch.parent_branch_id)
+          ? branch.parent_branch_id
+          : null;
+        const siblings = childrenMap.get(parentId) ?? [];
+        siblings.push(branch);
+        childrenMap.set(parentId, siblings);
+        if (parentId) {
+          parentNameMap.set(branch.id, branchMap.get(parentId)?.name ?? parentId);
+        }
+      }
+
+      const visit = (parentId: string | null, ancestors: string[]) => {
+        for (const branch of sortBranchesForManager(childrenMap.get(parentId) ?? [])) {
+          if (visited.has(branch.id)) {
+            continue;
+          }
+          visited.add(branch.id);
+          const lineage = [...ancestors, branch.name];
+          lineageMap.set(branch.id, lineage);
+          ordered.push(branch);
+          visit(branch.id, lineage);
+        }
+      };
+
+      visit(null, []);
+
+      for (const branch of sortBranchesForManager(branches)) {
+        if (visited.has(branch.id)) {
+          continue;
+        }
+        const lineage = [branch.name];
+        lineageMap.set(branch.id, lineage);
+        ordered.push(branch);
+        visit(branch.id, lineage);
+      }
+
+      const countDescendants = (branchId: string): number => {
+        const children = childrenMap.get(branchId) ?? [];
+        const count = children.reduce((total, child) => total + 1 + countDescendants(child.id), 0);
+        descendantCountMap.set(branchId, count);
+        return count;
+      };
+
+      for (const branch of branches) {
+        if (!descendantCountMap.has(branch.id)) {
+          countDescendants(branch.id);
+        }
+      }
+
+      return {
+        ordered,
+        parentNameMap,
+        descendantCountMap,
+        lineageMap,
+      };
+    },
+    [detail?.branches],
   );
 
   const canMention = activeAgents.length > 1;
@@ -692,6 +813,7 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
       setSkills(nextSkills);
       setDetail(nextDetail);
       setApprovals(nextApprovals);
+      setStreamNeedsResync(false);
       conversationUpdatedAtRef.current = nextDetail.conversation.updated_at;
     } catch (err) {
       if (err instanceof ApiError && err.status === 404 && panelId) {
@@ -726,8 +848,30 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
     setPendingReplies(loadPersistedPendingReplies(sessionId));
     setApprovals([]);
     setComposerMode({ kind: "normal" });
+    setAgentManagerOpen(false);
+    setBranchManagerOpen(false);
+    setEditingBranchId(null);
+    setEditingBranchName("");
+    setBranchBusyId(null);
+    setStreamNeedsResync(false);
     conversationUpdatedAtRef.current = null;
   }, [sessionId]);
+
+  useEffect(() => {
+    if (!agentManagerOpen && !branchManagerOpen) {
+      return;
+    }
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setAgentManagerOpen(false);
+        setBranchManagerOpen(false);
+        setEditingBranchId(null);
+        setEditingBranchName("");
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [agentManagerOpen, branchManagerOpen]);
 
   useEffect(() => {
     persistDrafts(sessionId, localDrafts);
@@ -770,6 +914,7 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
         }
         setDetail(snapshot.detail);
         setApprovals(snapshot.approvals);
+        setStreamNeedsResync(false);
         if (shouldNotifyChanged) {
           notifyChanged();
         }
@@ -786,10 +931,12 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
       try {
         const payload = JSON.parse(event.data) as { message?: string };
         if (isMountedRef.current) {
+          setStreamNeedsResync(true);
           setError(payload.message?.trim() || streamDisconnectedMessage);
         }
       } catch {
         if (isMountedRef.current) {
+          setStreamNeedsResync(true);
           setError(streamDisconnectedMessage);
         }
       }
@@ -799,11 +946,13 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
     stream.addEventListener("conversation.error", handleStreamError);
     stream.onopen = () => {
       if (isMountedRef.current) {
+        setStreamNeedsResync(false);
         setError((current) => current === streamDisconnectedMessage ? null : current);
       }
     };
     stream.onerror = () => {
       if (isMountedRef.current) {
+        setStreamNeedsResync(true);
         setError(streamDisconnectedMessage);
       }
     };
@@ -1346,14 +1495,6 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
     focusComposerEnd(editorRef.current);
   }, [activeBranch?.id, detail?.messages, syncComposerState]);
 
-  const startResetContext = useCallback(() => {
-    setComposerMode({
-      kind: "reset",
-      sourceBranchId: activeBranch?.id ?? conversation?.active_branch_id ?? undefined,
-    });
-    focusComposerEnd(editorRef.current);
-  }, [activeBranch?.id, conversation?.active_branch_id]);
-
   const switchBranch = useCallback(async (branchId: string) => {
     if (!conversation) {
       return;
@@ -1374,59 +1515,92 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
     }
   }, [conversation]);
 
-  const createCheckpoint = useCallback(async () => {
+  const startRenameBranch = useCallback((branch: ConversationBranch) => {
+    setEditingBranchId(branch.id);
+    setEditingBranchName(branch.name);
+    setBranchManagerOpen(true);
+  }, []);
+
+  const cancelRenameBranch = useCallback(() => {
+    setEditingBranchId(null);
+    setEditingBranchName("");
+  }, []);
+
+  const saveBranchName = useCallback(async (branch: ConversationBranch) => {
     if (!conversation) {
       return;
     }
-    const latestMessage = [...(detail?.messages ?? [])]
-      .reverse()
-      .find((message) => (message.branch_id ?? message.lane_id) === (activeBranch?.id ?? conversation.active_branch_id));
+    const nextName = editingBranchName.trim();
+    if (!nextName || nextName === branch.name) {
+      cancelRenameBranch();
+      return;
+    }
     setError(null);
+    setBranchBusyId(branch.id);
     try {
-      const checkpoint = await createConversationCheckpoint(conversation.id, {
-        branch_id: activeBranch?.id ?? conversation.active_branch_id ?? undefined,
-        message_id: latestMessage?.id,
-        kind: "manual",
-        label: latestMessage
-          ? `${t("web.conversations.checkpoint_prefix", "检查点")} · ${summarizeBody(latestMessage.body)}`
-          : t("web.conversations.checkpoint_prefix", "检查点"),
+      const updated = await updateConversationBranch(conversation.id, branch.id, {
+        name: nextName,
       });
       if (!isMountedRef.current) {
         return;
       }
       setDetail((current) => current ? {
         ...current,
-        checkpoints: [checkpoint, ...current.checkpoints],
+        branches: current.branches.map((item) => item.id === updated.id ? { ...item, ...updated } : item),
       } : current);
+      setSuccess(t("web.conversations.branch_renamed", "分支名称已更新。"));
+      cancelRenameBranch();
     } catch (err) {
       if (isMountedRef.current) {
         setError(String(err));
       }
+    } finally {
+      if (isMountedRef.current) {
+        setBranchBusyId(null);
+      }
     }
-  }, [activeBranch?.id, conversation, detail?.messages, t]);
+  }, [cancelRenameBranch, conversation, editingBranchName, t]);
 
-  const branchFromCheckpoint = useCallback(async (checkpointId: string) => {
+  const removeBranch = useCallback(async (
+    branch: ConversationBranch,
+    mode: "detach_children" | "delete_tree",
+  ) => {
     if (!conversation) {
       return;
     }
+    const confirmMessage = mode === "delete_tree"
+      ? t("web.conversations.branch_delete_tree_confirm", "确认删除这个分支及其所有子分支吗？")
+      : t("web.conversations.branch_delete_detach_confirm", "确认删除这个分支，并把其余子分支保留下来吗？");
+    if (!window.confirm(confirmMessage)) {
+      return;
+    }
     setError(null);
+    setBranchBusyId(branch.id);
     try {
-      await createConversationBranch(conversation.id, {
-        source_checkpoint_id: checkpointId,
-        mode: "fork",
-        activate: true,
-      });
+      const nextDetail = await deleteConversationBranch(conversation.id, branch.id, { mode });
       if (!isMountedRef.current) {
         return;
       }
+      conversationUpdatedAtRef.current = nextDetail.conversation.updated_at;
+      setDetail(nextDetail);
       setComposerMode({ kind: "normal" });
-      await refreshThread();
+      cancelRenameBranch();
+      setSuccess(
+        mode === "delete_tree"
+          ? t("web.conversations.branch_deleted_tree", "分支及其子树已删除。")
+          : t("web.conversations.branch_deleted", "分支已删除。"),
+      );
+      notifyChanged();
     } catch (err) {
       if (isMountedRef.current) {
         setError(String(err));
       }
+    } finally {
+      if (isMountedRef.current) {
+        setBranchBusyId(null);
+      }
     }
-  }, [conversation, refreshThread]);
+  }, [cancelRenameBranch, conversation, notifyChanged, t]);
 
   const choosePickerOption = useCallback((option: ComposerPickerOption) => {
     if (replaceComposerTriggerAtCaret(editorRef.current, option)) {
@@ -1445,15 +1619,9 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
       title: conversation.title,
       activeBranchId: conversation.active_branch_id,
       branches: detail?.branches ?? [],
-      checkpoints: detail?.checkpoints ?? [],
       actions: {
-        resetContext: startResetContext,
-        createCheckpoint,
         switchBranch: (branchId) => {
           void switchBranch(branchId);
-        },
-        branchFromCheckpoint: (checkpointId) => {
-          void branchFromCheckpoint(checkpointId);
         },
       },
     });
@@ -1461,14 +1629,10 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
       unregisterSessionCommands(panelId);
     };
   }, [
-    branchFromCheckpoint,
     conversation,
-    createCheckpoint,
     detail?.branches,
-    detail?.checkpoints,
     panelId,
     registerSessionCommands,
-    startResetContext,
     switchBranch,
     unregisterSessionCommands,
   ]);
@@ -1549,68 +1713,27 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
               </p>
             </div>
             <div className="button-row">
-              <button type="button" className="secondary" onClick={() => void createCheckpoint()}>
-                {t("web.conversations.create_checkpoint", "创建检查点")}
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => setAgentManagerOpen(true)}
+              >
+                {t("web.conversations.agent_manager_show", "管理 Agent")}
               </button>
-              <button type="button" className="secondary" onClick={startResetContext}>
-                {t("web.conversations.reset_context", "清空上下文")}
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => setBranchManagerOpen(true)}
+              >
+                {t("web.conversations.branch_manager_show", "管理分支")}
               </button>
-              <button type="button" className="secondary" onClick={() => void hydrate()}>
-                {t("web.action.refresh", "刷新")}
-              </button>
+              {streamNeedsResync ? (
+                <button type="button" className="secondary" onClick={() => void hydrate()}>
+                  {t("web.conversations.resync", "重新同步")}
+                </button>
+              ) : null}
             </div>
           </header>
-
-          <div className="session-view__meta session-view__meta--chat">
-            <div className="tag-row">
-              {activeAgents.map((agent) => (
-                <button
-                  key={agent.id}
-                  type="button"
-                  className="chip"
-                  onClick={() =>
-                    openView({
-                      kind: "agent",
-                      entityId: agent.id,
-                      title: agent.display_name,
-                      subtitle: agent.model_endpoint_id,
-                    })}
-                >
-                  {agent.display_name}
-                </button>
-              ))}
-            </div>
-            {detail.branches.length > 0 ? (
-              <div className="branch-strip">
-                {detail.branches.map((branch) => (
-                  <button
-                    key={branch.id}
-                    type="button"
-                    className={branch.id === activeBranch?.id ? "chip chip--active" : "chip"}
-                    onClick={() => void switchBranch(branch.id)}
-                  >
-                    {branch.name}
-                    {" · "}
-                    {branchKindLabel(branch, t)}
-                  </button>
-                ))}
-              </div>
-            ) : null}
-            {detail.checkpoints.length > 0 ? (
-              <div className="branch-strip">
-                {detail.checkpoints.map((checkpoint) => (
-                  <button
-                    key={checkpoint.id}
-                    type="button"
-                    className="chip"
-                    onClick={() => void branchFromCheckpoint(checkpoint.id)}
-                  >
-                    {checkpoint.label}
-                  </button>
-                ))}
-              </div>
-            ) : null}
-          </div>
 
           {detail.messages.length > 0 ? (
             <ConversationExtensionCards conversationId={sessionId} />
@@ -1738,6 +1861,223 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
               </div>
             </form>
           </div>
+
+          {agentManagerOpen ? (
+            <div className="session-manager-modal-root">
+              <button
+                type="button"
+                className="session-manager-modal__backdrop"
+                aria-label={t("web.action.close", "关闭")}
+                onClick={() => setAgentManagerOpen(false)}
+              />
+              <section className="session-manager-modal" role="dialog" aria-modal="true" aria-label={t("web.conversations.agent_manager_title", "会话 Agent 管理")}>
+                <div className="session-manager-modal__header">
+                  <div>
+                    <span>{t("web.conversations.agent_manager_eyebrow", "Session Agents")}</span>
+                    <h2>{t("web.conversations.agent_manager_title", "会话 Agent 管理")}</h2>
+                    <p>{t("web.conversations.agent_manager_help", "查看当前会话里有哪些 Agent，确认他们各自接到的是哪个模型入口。")}</p>
+                  </div>
+                  <button type="button" className="secondary" onClick={() => setAgentManagerOpen(false)}>
+                    {t("web.action.close", "关闭")}
+                  </button>
+                </div>
+                {activeAgents.length > 0 ? (
+                  <div className="session-manager-modal__list">
+                    {activeAgents.map((agent) => (
+                      <article key={agent.id} className="session-manager-modal__item">
+                        <div className="session-manager-modal__main">
+                          <strong>{agent.display_name}</strong>
+                          <div className="session-manager-modal__meta">
+                            <span>{agent.id}</span>
+                            <span>{agent.model_endpoint_id || t("web.conversations.agent_endpoint_empty", "未配置模型入口")}</span>
+                          </div>
+                          <p>{agent.description?.trim() || t("web.conversations.agent_description_empty", "这个 Agent 还没有填写描述。")}</p>
+                        </div>
+                        <div className="session-manager-modal__actions">
+                          <button
+                            type="button"
+                            className="secondary"
+                            onClick={() =>
+                              openView({
+                                kind: "agent",
+                                entityId: agent.id,
+                                title: agent.display_name,
+                                subtitle: agent.model_endpoint_id,
+                              })}
+                          >
+                            {t("web.conversations.agent_open_detail", "打开 Agent 详情")}
+                          </button>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="empty-card">
+                    {t("web.conversations.agent_manager_empty", "当前会话还没有可用 Agent。")}
+                  </div>
+                )}
+              </section>
+            </div>
+          ) : null}
+
+          {branchManagerOpen ? (
+            <div className="session-manager-modal-root">
+              <button
+                type="button"
+                className="session-manager-modal__backdrop"
+                aria-label={t("web.action.close", "关闭")}
+                onClick={() => {
+                  setBranchManagerOpen(false);
+                  cancelRenameBranch();
+                }}
+              />
+              <section className="session-manager-modal session-manager-modal--wide" role="dialog" aria-modal="true" aria-label={t("web.conversations.branch_manager_title", "分支管理")}>
+                <div className="session-manager-modal__header">
+                  <div>
+                    <span>{t("web.conversations.branch_manager_eyebrow", "Branch Manager")}</span>
+                    <h2>{t("web.conversations.branch_manager_title", "分支管理")}</h2>
+                    <p>{t("web.conversations.branch_manager_help", "在这里切换、重命名，或删除单个分支 / 整棵子树。")}</p>
+                  </div>
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() => {
+                      setBranchManagerOpen(false);
+                      cancelRenameBranch();
+                    }}
+                  >
+                    {t("web.action.close", "关闭")}
+                  </button>
+                </div>
+                {activeBranch ? (
+                  <section className="session-manager-modal__summary">
+                    <span className="badge badge--accent">{branchKindLabel(activeBranch, t)}</span>
+                    <strong>{activeBranch.name}</strong>
+                    <p>
+                      {t("web.conversations.branch_messages", "{count} 条消息").replace(
+                        "{count}",
+                        String(branchMessageCount(activeBranch)),
+                      )}
+                      {" · "}
+                      {formatDateTime(branchLastActivity(activeBranch))}
+                    </p>
+                  </section>
+                ) : null}
+                {branchManagerTree.ordered.length > 0 ? (
+                  <div className="branch-manager__list">
+                    {branchManagerTree.ordered.map((branch) => {
+                      const isEditing = editingBranchId === branch.id;
+                      const busy = branchBusyId === branch.id;
+                      const preview = branchSourcePreview(branch, detail.messages);
+                      const depth = branch.depth ?? 0;
+                      const parentName = branchManagerTree.parentNameMap.get(branch.id);
+                      const descendantCount = branchManagerTree.descendantCountMap.get(branch.id) ?? 0;
+                      const lineage = branchManagerTree.lineageMap.get(branch.id) ?? [branch.name];
+                      return (
+                        <article
+                          key={branch.id}
+                          className={[
+                            "branch-manager__item",
+                            branch.is_active ? "branch-manager__item--active" : "",
+                            depth > 0 ? "branch-manager__item--nested" : "",
+                          ].filter(Boolean).join(" ")}
+                          style={{ "--branch-depth": String(depth) } as CSSProperties}
+                        >
+                          <div className="branch-manager__main">
+                            <div className="branch-manager__top">
+                              <span className={branch.is_active ? "badge badge--accent" : "badge badge--muted"}>
+                                {branchKindLabel(branch, t)}
+                              </span>
+                              <span className="badge badge--muted">
+                                {branchDepthLabel(depth, t)}
+                              </span>
+                              <span className="badge badge--muted">
+                                {descendantCount > 0
+                                  ? t("web.conversations.branch_has_children", "{count} 个子分支").replace("{count}", String(descendantCount))
+                                  : t("web.conversations.branch_leaf", "叶子分支")}
+                              </span>
+                              {branch.is_active ? (
+                                <span className="badge badge--accent">{t("web.conversations.branch_current", "当前")}</span>
+                              ) : null}
+                            </div>
+                            {isEditing ? (
+                              <div className="branch-manager__rename">
+                                <input
+                                  value={editingBranchName}
+                                  onChange={(event) => setEditingBranchName(event.target.value)}
+                                  placeholder={t("web.conversations.branch_name_placeholder", "输入分支名称")}
+                                  disabled={busy}
+                                />
+                                <div className="button-row">
+                                  <button type="button" onClick={() => void saveBranchName(branch)} disabled={busy || !editingBranchName.trim()}>
+                                    {t("web.action.save", "保存")}
+                                  </button>
+                                  <button type="button" className="secondary" onClick={cancelRenameBranch} disabled={busy}>
+                                    {t("web.action.cancel", "取消")}
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <>
+                                <strong>{branch.name}</strong>
+                                <div className="branch-manager__hierarchy">
+                                  <span>
+                                    {parentName
+                                      ? t("web.conversations.branch_parent_name", "父分支：{name}").replace("{name}", parentName)
+                                      : t("web.conversations.branch_root_hint", "这是根分支")}
+                                  </span>
+                                  <span>
+                                    {lineage.join(" / ")}
+                                  </span>
+                                </div>
+                                <div className="branch-manager__meta">
+                                  <span>{t("web.conversations.branch_messages", "{count} 条消息").replace("{count}", String(branchMessageCount(branch)))}</span>
+                                  <span>{formatDateTime(branchLastActivity(branch))}</span>
+                                </div>
+                                {preview ? <p className="branch-manager__source">{preview}</p> : null}
+                              </>
+                            )}
+                          </div>
+                          <div className="branch-manager__actions">
+                            {!branch.is_active ? (
+                              <button type="button" className="secondary" onClick={() => void switchBranch(branch.id)} disabled={busy}>
+                                {t("web.conversations.branch_switch", "切换")}
+                              </button>
+                            ) : null}
+                            {!isEditing ? (
+                              <button type="button" className="secondary" onClick={() => startRenameBranch(branch)} disabled={busy}>
+                                {t("web.action.rename", "重命名")}
+                              </button>
+                            ) : null}
+                            <button
+                              type="button"
+                              className="secondary"
+                              onClick={() => void removeBranch(branch, "detach_children")}
+                              disabled={busy}
+                            >
+                              {t("web.conversations.branch_delete_keep_children", "删分支保留子分支")}
+                            </button>
+                            <button
+                              type="button"
+                              className="secondary"
+                              onClick={() => void removeBranch(branch, "delete_tree")}
+                              disabled={busy}
+                            >
+                              {t("web.conversations.branch_delete_tree", "删除整棵子树")}
+                            </button>
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="empty-card">
+                    {t("web.conversations.branch_manager_empty", "当前会话还没有分支。发送下一条消息时会自动创建新的根分支。")}
+                  </div>
+                )}
+              </section>
+            </div>
+          ) : null}
         </>
       ) : (
         <div className="empty-card">{t("web.common.loading", "加载中…")}</div>

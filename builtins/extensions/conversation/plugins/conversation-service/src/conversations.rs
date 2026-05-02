@@ -124,6 +124,18 @@ impl ConversationStore {
         &self,
         conversation_id: &str,
     ) -> Result<Vec<ConversationBranchSpec>, sqlx::Error> {
+        Ok(self
+            .list_all_branches(conversation_id)
+            .await?
+            .into_iter()
+            .filter(|branch| branch.status != "deleted")
+            .collect())
+    }
+
+    pub async fn list_all_branches(
+        &self,
+        conversation_id: &str,
+    ) -> Result<Vec<ConversationBranchSpec>, sqlx::Error> {
         let rows = sqlx::query(
             "SELECT id, conversation_id, name, kind, status, parent_branch_id, source_message_id, source_checkpoint_id, inherit_mode, created_at, updated_at
              FROM branches WHERE conversation_id = ? ORDER BY created_at ASC",
@@ -297,7 +309,7 @@ impl ConversationStore {
             return Ok(all_messages);
         };
 
-        let branches = self.list_branches(conversation_id).await?;
+        let branches = self.list_all_branches(conversation_id).await?;
         Ok(filter_visible_messages(
             &all_messages,
             &branches,
@@ -482,7 +494,7 @@ fn map_message(row: sqlx::sqlite::SqliteRow) -> MessageSpec {
     }
 }
 
-fn filter_visible_messages(
+pub(crate) fn filter_visible_messages(
     messages: &[MessageSpec],
     branches: &[ConversationBranchSpec],
     branch_id: &str,

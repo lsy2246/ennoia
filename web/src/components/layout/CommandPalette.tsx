@@ -96,7 +96,7 @@ export function CommandPalette({ open, actions, onClose, t }: Props) {
           className="command-palette__input"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder={t("web.command_palette.placeholder", "输入命令，例如：清空上下文、切换分支、打开会话")}
+          placeholder={t("web.command_palette.placeholder", "输入命令，例如：切换分支、打开会话、打开 Agent")}
         />
         <div className="command-palette__list">
           {filtered.length === 0 ? (

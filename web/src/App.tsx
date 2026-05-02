@@ -576,33 +576,12 @@ export function App() {
 
     const sessionActions = activeSessionCommands
       ? [
-          {
-            id: `session:${activeSessionCommands.sessionId}:reset`,
-            title: t("web.conversations.reset_context", "清空上下文"),
-            hint: activeSessionCommands.title,
-            keywords: ["session", "conversation", "reset", "branch"],
-            run: () => activeSessionCommands.actions.resetContext(),
-          },
-          {
-            id: `session:${activeSessionCommands.sessionId}:checkpoint`,
-            title: t("web.conversations.create_checkpoint", "创建检查点"),
-            hint: activeSessionCommands.title,
-            keywords: ["session", "conversation", "checkpoint"],
-            run: () => activeSessionCommands.actions.createCheckpoint(),
-          },
           ...activeSessionCommands.branches.map<CommandPaletteAction>((branch) => ({
             id: `session:${activeSessionCommands.sessionId}:branch:${branch.id}`,
             title: `${t("web.command_palette.switch_branch", "切换到分支")} · ${branch.name}`,
             hint: branch.kind,
             keywords: ["branch", "switch", branch.name, branch.kind],
             run: () => activeSessionCommands.actions.switchBranch(branch.id),
-          })),
-          ...activeSessionCommands.checkpoints.map<CommandPaletteAction>((checkpoint) => ({
-            id: `session:${activeSessionCommands.sessionId}:checkpoint:${checkpoint.id}`,
-            title: `${t("web.command_palette.branch_from_checkpoint", "从检查点创建分支")} · ${checkpoint.label}`,
-            hint: checkpoint.kind,
-            keywords: ["checkpoint", "branch", checkpoint.label, checkpoint.kind],
-            run: () => activeSessionCommands.actions.branchFromCheckpoint(checkpoint.id),
           })),
         ]
       : [];

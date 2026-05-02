@@ -267,6 +267,44 @@ pub(super) async fn conversation_branch_switch(
     .await
 }
 
+pub(super) async fn conversation_branch_update(
+    State(state): State<AppState>,
+    Extension(request): Extension<RequestContext>,
+    Path((conversation_id, branch_id)): Path<(String, String)>,
+    Json(payload): Json<JsonValue>,
+) -> ApiResult<JsonValue> {
+    dispatch_action_json(
+        &state,
+        &request,
+        "branch.update",
+        serde_json::json!({
+            "conversation_id": conversation_id,
+            "branch_id": branch_id,
+            "name": payload.get("name").cloned(),
+        }),
+    )
+    .await
+}
+
+pub(super) async fn conversation_branch_delete(
+    State(state): State<AppState>,
+    Extension(request): Extension<RequestContext>,
+    Path((conversation_id, branch_id)): Path<(String, String)>,
+    Json(payload): Json<JsonValue>,
+) -> ApiResult<JsonValue> {
+    dispatch_action_json(
+        &state,
+        &request,
+        "branch.delete",
+        serde_json::json!({
+            "conversation_id": conversation_id,
+            "branch_id": branch_id,
+            "mode": payload.get("mode").cloned(),
+        }),
+    )
+    .await
+}
+
 pub(super) async fn conversation_checkpoints(
     State(state): State<AppState>,
     Extension(request): Extension<RequestContext>,

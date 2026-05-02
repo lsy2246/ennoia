@@ -206,6 +206,10 @@ pub fn build_router(state: AppState) -> Router {
             post(conversation_branch_switch),
         )
         .route(
+            "/api/conversations/{conversation_id}/branches/{branch_id}",
+            put(conversation_branch_update).delete(conversation_branch_delete),
+        )
+        .route(
             "/api/conversations/{conversation_id}/checkpoints",
             get(conversation_checkpoints).post(conversation_checkpoints_create),
         )

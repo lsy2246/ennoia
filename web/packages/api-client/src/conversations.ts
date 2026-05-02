@@ -162,6 +162,43 @@ export async function switchConversationBranch(conversationId: string, branchId:
   } satisfies ConversationDetail;
 }
 
+export async function updateConversationBranch(
+  conversationId: string,
+  branchId: string,
+  payload: {
+    name: string;
+  },
+) {
+  return fetchJson<ConversationBranch>(`${CONVERSATIONS_API}/${conversationId}/branches/${branchId}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteConversationBranch(
+  conversationId: string,
+  branchId: string,
+  payload: {
+    mode: "detach_children" | "delete_tree";
+  },
+) {
+  const detail = await fetchJson<unknown>(`${CONVERSATIONS_API}/${conversationId}/branches/${branchId}`, {
+    method: "DELETE",
+    body: JSON.stringify(payload),
+  });
+  const normalized = normalizeConversationDetailPayload(detail);
+  return {
+    conversation: normalized.conversation,
+    lanes: normalized.lanes ?? [],
+    branches: normalized.branches ?? [],
+    checkpoints: normalized.checkpoints ?? [],
+    messages: normalized.messages ?? [],
+    runs: normalized.runs ?? [],
+    tasks: normalized.tasks ?? [],
+    outputs: normalized.outputs ?? [],
+  } satisfies ConversationDetail;
+}
+
 export async function createConversationCheckpoint(
   conversationId: string,
   payload: {
