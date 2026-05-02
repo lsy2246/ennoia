@@ -133,9 +133,29 @@
 - `role`
 - `body`
 - `mentions`
+- `parent_message_id`
 - `reply_to_message_id`
 - `rewrite_from_message_id`
 - `created_at`
+
+约定：
+
+- `parent_message_id` 用于把工具输出、系统过程或其他附属消息稳定挂到某条主消息下，不替代分支语义。
+
+## Run 接口域
+
+`RunSpec` 字段：
+
+- `id`
+- `owner`
+- `conversation_id`
+- `lane_id`
+- `source_message_id`
+- `trigger`
+- `stage`
+- `goal`
+- `created_at`
+- `updated_at`
 
 ## Agent 域
 

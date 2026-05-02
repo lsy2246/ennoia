@@ -115,6 +115,8 @@ struct ConversationMessagePayload {
     #[serde(default)]
     branch_id: Option<String>,
     #[serde(default)]
+    parent_message_id: Option<String>,
+    #[serde(default)]
     fork_from_message_id: Option<String>,
     #[serde(default)]
     rewrite_from_message_id: Option<String>,
@@ -936,6 +938,9 @@ async fn append_message(
                 ExtensionRpcResponse::failure("conversation_update_failed", error.to_string())
             })?;
     }
+    if let Some(parent_message_id) = payload.message.parent_message_id.as_deref() {
+        ensure_message_exists(&all_messages, parent_message_id)?;
+    }
     let target_agents =
         resolve_addressed_agents(&conversation, &lane, payload.message.addressed_agents);
     if target_agents.is_empty() {
@@ -975,6 +980,7 @@ async fn append_message(
         role,
         body,
         mentions: explicit_mentions,
+        parent_message_id: payload.message.parent_message_id.clone(),
         reply_to_message_id: payload.message.fork_from_message_id.clone(),
         rewrite_from_message_id: payload.message.rewrite_from_message_id.clone(),
         created_at: now.clone(),

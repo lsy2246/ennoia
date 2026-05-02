@@ -1,4 +1,4 @@
-import type { AgentProfile, ConversationMessage, PermissionApprovalRecord } from "@ennoia/api-client";
+import type { AgentProfile, ConversationMessage } from "@ennoia/api-client";
 
 import type {
   ChatEntryRecipient,
@@ -69,10 +69,8 @@ function createErrorDetail(message: string) {
 
 export function buildChatEntries(params: {
   messages: ConversationMessage[];
-  approvals: PermissionApprovalRecord[];
   localDrafts: LocalMessageDraft[];
   resolveRecipients: (mentions: string[]) => AgentProfile[];
-  resolveAgentLabel: (agentId: string) => string;
 }): ChatEntryViewModel[] {
   const entries: Array<{ order: number; entry: ChatEntryViewModel }> = [];
   let order = 0;
@@ -93,6 +91,26 @@ export function buildChatEntries(params: {
     };
 
     if (isLikelyErrorMessage(message.role, message.body)) {
+      if (message.role === "agent") {
+        entries.push({
+          order: order++,
+          entry: {
+            ...base,
+            kind: "message",
+            state: "failed",
+            messageId: message.id,
+            branchId: message.branch_id ?? message.lane_id ?? undefined,
+            parentMessageId: message.parent_message_id ?? undefined,
+            replyToMessageId: message.reply_to_message_id ?? undefined,
+            rewriteFromMessageId: message.rewrite_from_message_id ?? undefined,
+            recipients,
+            mentions: message.mentions,
+            source: "remote",
+          },
+        });
+        continue;
+      }
+
       entries.push({
         order: order++,
         entry: {
@@ -102,6 +120,7 @@ export function buildChatEntries(params: {
           summary: summarizeError(message.body),
           detail: createErrorDetail(message.body),
           tone: "danger",
+          relatedMessageId: message.parent_message_id ?? undefined,
         },
       });
       continue;
@@ -114,6 +133,7 @@ export function buildChatEntries(params: {
           ...base,
           kind: "system",
           role: "system",
+          relatedMessageId: message.parent_message_id ?? undefined,
         },
       });
       continue;
@@ -127,6 +147,7 @@ export function buildChatEntries(params: {
           kind: "tool_result",
           role: "tool",
           title: message.sender,
+          relatedMessageId: message.parent_message_id ?? undefined,
         },
       });
       continue;
@@ -139,30 +160,12 @@ export function buildChatEntries(params: {
         kind: "message",
         messageId: message.id,
         branchId: message.branch_id ?? message.lane_id ?? undefined,
+        parentMessageId: message.parent_message_id ?? undefined,
         replyToMessageId: message.reply_to_message_id ?? undefined,
         rewriteFromMessageId: message.rewrite_from_message_id ?? undefined,
         recipients,
         mentions: message.mentions,
         source: "remote",
-      },
-    });
-  }
-
-  for (const approval of params.approvals) {
-    entries.push({
-      order: order++,
-      entry: {
-        id: `approval:${approval.approval_id}`,
-        role: "system",
-        kind: "approval",
-        format: "plain",
-        state: approval.status === "pending" ? "pending" : "done",
-        sender: params.resolveAgentLabel(approval.agent_id),
-        agentLabel: params.resolveAgentLabel(approval.agent_id),
-        title: approval.action,
-        body: approval.reason,
-        createdAt: approval.created_at,
-        approval,
       },
     });
   }

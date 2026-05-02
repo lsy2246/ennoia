@@ -17,6 +17,7 @@ pub async fn initialize_conversation_schema(pool: &SqlitePool) -> Result<(), sql
     }
     ensure_column(pool, "conversations", "active_branch_id", "TEXT").await?;
     ensure_column(pool, "messages", "branch_id", "TEXT").await?;
+    ensure_column(pool, "messages", "parent_message_id", "TEXT").await?;
     ensure_column(pool, "messages", "reply_to_message_id", "TEXT").await?;
     ensure_column(pool, "messages", "rewrite_from_message_id", "TEXT").await?;
     migrate_legacy_branch_schema(pool).await?;

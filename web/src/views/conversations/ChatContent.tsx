@@ -1,8 +1,10 @@
 import {
   Children,
   cloneElement,
+  createContext,
   Fragment,
   isValidElement,
+  useContext,
   type ReactElement,
   type ReactNode,
 } from "react";
@@ -12,6 +14,23 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import type { ChatEntryFormat } from "./chat-types";
+
+const MarkdownCodeBlockContext = createContext(false);
+
+function extractNodeText(node: ReactNode): string {
+  if (typeof node === "string" || typeof node === "number") {
+    return String(node);
+  }
+  if (Array.isArray(node)) {
+    return node.map((item) => extractNodeText(item)).join("");
+  }
+  if (!isValidElement(node)) {
+    return "";
+  }
+
+  const element = node as ReactElement<{ children?: ReactNode }>;
+  return extractNodeText(element.props.children);
+}
 
 function buildSkillMap(skills: SkillConfig[]) {
   const skillMap = new Map<string, string>();
@@ -158,6 +177,39 @@ function DiagramContent({ body }: { body: string }) {
   );
 }
 
+function MarkdownPreNode({ children }: { children?: ReactNode }) {
+  return (
+    <MarkdownCodeBlockContext.Provider value={true}>
+      {children}
+    </MarkdownCodeBlockContext.Provider>
+  );
+}
+
+function MarkdownCodeNode({
+  className,
+  children,
+}: {
+  className?: string;
+  children?: ReactNode;
+}) {
+  const isBlock = useContext(MarkdownCodeBlockContext);
+  const raw = extractNodeText(children).replace(/\n$/, "");
+  if (!isBlock) {
+    return <code className="message-code-inline">{raw}</code>;
+  }
+
+  const language = className?.replace("language-", "").toLowerCase() ?? "";
+  if (["mermaid", "diagram", "flowchart"].includes(language)) {
+    return <DiagramContent body={`\`\`\`${language}\n${raw}\n\`\`\``} />;
+  }
+
+  return (
+    <pre className="message-pre">
+      <code>{raw}</code>
+    </pre>
+  );
+}
+
 function MarkdownContent({ body, agents, skills, mentionAgentIds }: {
   body: string;
   agents: AgentProfile[];
@@ -179,31 +231,18 @@ function MarkdownContent({ body, agents, skills, mentionAgentIds }: {
         table: ({ children }) => <div className="message-markdown__table-wrap"><table className="message-markdown__table">{decorateChildren(children, agents, skills, mentionAgentIds)}</table></div>,
         th: ({ children }) => <th>{decorateChildren(children, agents, skills, mentionAgentIds)}</th>,
         td: ({ children }) => <td>{decorateChildren(children, agents, skills, mentionAgentIds)}</td>,
+        pre: ({ children }) => <MarkdownPreNode>{children}</MarkdownPreNode>,
         a: ({ children, href }) => (
           <a className="message-markdown__link" href={href} target="_blank" rel="noreferrer">
             {decorateChildren(children, agents, skills, mentionAgentIds)}
           </a>
         ),
-        code: (props) => {
-          const isInline = "inline" in props && props.inline === true;
-          const className = "className" in props ? props.className : undefined;
-          const children = "children" in props ? props.children : undefined;
-          const raw = String(children).replace(/\n$/, "");
-          if (isInline) {
-            return <code className="message-code-inline">{raw}</code>;
-          }
-
-          const language = className?.replace("language-", "").toLowerCase() ?? "";
-          if (["mermaid", "diagram", "flowchart"].includes(language)) {
-            return <DiagramContent body={`\`\`\`${language}\n${raw}\n\`\`\``} />;
-          }
-
-          return (
-            <pre className="message-pre">
-              <code>{raw}</code>
-            </pre>
-          );
-        },
+        code: (props) => (
+          <MarkdownCodeNode
+            className={"className" in props ? props.className : undefined}
+            children={"children" in props ? props.children : undefined}
+          />
+        ),
       }}
     >
       {body}

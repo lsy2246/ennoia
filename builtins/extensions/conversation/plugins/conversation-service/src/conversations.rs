@@ -240,7 +240,7 @@ impl ConversationStore {
         branch_id: Option<&str>,
     ) -> Result<Vec<MessageSpec>, sqlx::Error> {
         let rows = sqlx::query(
-            "SELECT id, conversation_id, branch_id, lane_id, sender, role, body, mentions_json, reply_to_message_id, rewrite_from_message_id, created_at
+            "SELECT id, conversation_id, branch_id, lane_id, sender, role, body, mentions_json, parent_message_id, reply_to_message_id, rewrite_from_message_id, created_at
              FROM messages WHERE conversation_id = ? ORDER BY created_at ASC",
         )
         .bind(conversation_id)
@@ -263,8 +263,8 @@ impl ConversationStore {
     pub async fn insert_message(&self, message: &MessageSpec) -> Result<(), sqlx::Error> {
         sqlx::query(
             "INSERT INTO messages
-             (id, conversation_id, branch_id, lane_id, sender, role, body, mentions_json, reply_to_message_id, rewrite_from_message_id, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             (id, conversation_id, branch_id, lane_id, sender, role, body, mentions_json, parent_message_id, reply_to_message_id, rewrite_from_message_id, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&message.id)
         .bind(&message.conversation_id)
@@ -274,6 +274,7 @@ impl ConversationStore {
         .bind(role_str(message.role))
         .bind(&message.body)
         .bind(serde_json::to_string(&message.mentions).unwrap_or_else(|_| "[]".to_string()))
+        .bind(&message.parent_message_id)
         .bind(&message.reply_to_message_id)
         .bind(&message.rewrite_from_message_id)
         .bind(&message.created_at)
@@ -418,6 +419,7 @@ fn map_message(row: sqlx::sqlite::SqliteRow) -> MessageSpec {
         role: role_from_str(&row.get::<String, _>("role")),
         body: row.get("body"),
         mentions: serde_json::from_str(&row.get::<String, _>("mentions_json")).unwrap_or_default(),
+        parent_message_id: row.get("parent_message_id"),
         reply_to_message_id: row.get("reply_to_message_id"),
         rewrite_from_message_id: row.get("rewrite_from_message_id"),
         created_at: row.get("created_at"),

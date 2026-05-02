@@ -103,6 +103,7 @@ export async function appendConversationMessage(
     goal?: string;
     addressed_agents?: string[];
     mentions?: string[];
+    parent_message_id?: string;
     fork_from_message_id?: string;
     rewrite_from_message_id?: string;
     branch_name?: string;

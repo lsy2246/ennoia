@@ -68,6 +68,7 @@ CREATE TABLE IF NOT EXISTS messages (
   role TEXT NOT NULL,
   body TEXT NOT NULL,
   mentions_json TEXT NOT NULL,
+  parent_message_id TEXT,
   reply_to_message_id TEXT,
   rewrite_from_message_id TEXT,
   created_at TEXT NOT NULL

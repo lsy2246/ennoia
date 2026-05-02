@@ -342,6 +342,7 @@ export type ConversationMessage = {
   role: "operator" | "agent" | "system" | "tool";
   body: string;
   mentions: string[];
+  parent_message_id?: string | null;
   reply_to_message_id?: string | null;
   rewrite_from_message_id?: string | null;
   created_at: string;
@@ -352,6 +353,7 @@ export type ExecutionRun = {
   owner: { kind: string; id: string };
   conversation_id: string;
   lane_id?: string | null;
+  source_message_id?: string | null;
   trigger: string;
   stage: string;
   goal: string;

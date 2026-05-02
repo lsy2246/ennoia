@@ -12,6 +12,8 @@ pub struct RunRequest {
     pub conversation_id: String,
     #[serde(default)]
     pub lane_id: Option<String>,
+    #[serde(default)]
+    pub source_message_id: Option<String>,
     pub trigger: BehaviorTrigger,
     pub goal: String,
     #[serde(default)]

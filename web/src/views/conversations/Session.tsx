@@ -659,6 +659,7 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [streamNeedsResync, setStreamNeedsResync] = useState(false);
+  const [approvalManagerOpen, setApprovalManagerOpen] = useState(false);
   const [agentManagerOpen, setAgentManagerOpen] = useState(false);
   const [branchManagerOpen, setBranchManagerOpen] = useState(false);
   const [editingBranchId, setEditingBranchId] = useState<string | null>(null);
@@ -846,16 +847,18 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
     setEditingBranchId(null);
     setEditingBranchName("");
     setBranchBusyId(null);
+    setApprovalManagerOpen(false);
     setStreamNeedsResync(false);
     conversationUpdatedAtRef.current = null;
   }, [sessionId]);
 
   useEffect(() => {
-    if (!agentManagerOpen && !branchManagerOpen) {
+    if (!approvalManagerOpen && !agentManagerOpen && !branchManagerOpen) {
       return;
     }
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.key === "Escape") {
+        setApprovalManagerOpen(false);
         setAgentManagerOpen(false);
         setBranchManagerOpen(false);
         setEditingBranchId(null);
@@ -864,7 +867,7 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [agentManagerOpen, branchManagerOpen]);
+  }, [agentManagerOpen, approvalManagerOpen, branchManagerOpen]);
 
   useEffect(() => {
     persistDrafts(sessionId, localDrafts);
@@ -1147,24 +1150,26 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
 
   const chatEntries = useMemo(() => buildChatEntries({
     messages: detail?.messages ?? [],
-    approvals: visibleApprovals,
     localDrafts,
     resolveRecipients,
-    resolveAgentLabel,
-  }), [detail?.messages, localDrafts, resolveAgentLabel, resolveRecipients, visibleApprovals]);
+  }), [detail?.messages, localDrafts, resolveRecipients]);
 
   const statusEntries = useMemo(() => buildStatusEntries({
     typingAgents,
     pendingCreatedAt: pendingReplies[0]?.createdAt,
     texts: {
-      typingLabel: t("web.conversations.status_ai_typing", "AI 正在输入…"),
-      typingDetail: t("web.conversations.status_ai_typing_detail", "已发送给 Agent，正在等待回复写回会话。"),
+      typingLabel: t("web.conversations.status_ai_thinking", "思考中"),
+      typingDetail: t("web.conversations.status_ai_thinking_detail", "Agent 已接到消息，正在组织回复与处理工具步骤。"),
     },
   }), [pendingReplies, t, typingAgents]);
 
   const streamEntries = useMemo(
     () => [...chatEntries, ...statusEntries],
     [chatEntries, statusEntries],
+  );
+  const pendingApprovals = useMemo(
+    () => visibleApprovals.filter((approval) => approval.status === "pending"),
+    [visibleApprovals],
   );
 
   const composerModeStatus = useMemo(() => {
@@ -1696,6 +1701,17 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
               </p>
             </div>
             <div className="button-row">
+              {visibleApprovals.length > 0 ? (
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => setApprovalManagerOpen(true)}
+                >
+                  {pendingApprovals.length > 0
+                    ? t("web.conversations.approval_manager_pending", "审批 {count}").replace("{count}", String(pendingApprovals.length))
+                    : t("web.conversations.approval_manager_show", "查看审批")}
+                </button>
+              ) : null}
               <button
                 type="button"
                 className="secondary"
@@ -1725,16 +1741,15 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
           <div ref={scrollRef} className="message-stream message-stream--chat">
             <ChatStream
               entries={streamEntries}
+              runs={detail?.runs ?? []}
               agents={activeAgents}
               skills={skills}
-              formatDateTime={formatDateTime}
               t={t}
               onCopy={copyMessageBody}
               onBranchFrom={startBranchFromMessage}
               onEditAndResend={startRewriteFromMessage}
               onRetry={retryLocalMessage}
               onRemove={removeLocalMessage}
-              onResolveApproval={resolveApproval}
             />
           </div>
 
@@ -1844,6 +1859,84 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
               </div>
             </form>
           </div>
+
+          {approvalManagerOpen ? (
+            <div className="session-manager-modal-root">
+              <button
+                type="button"
+                className="session-manager-modal__backdrop"
+                aria-label={t("web.action.close", "关闭")}
+                onClick={() => setApprovalManagerOpen(false)}
+              />
+              <section className="session-manager-modal" role="dialog" aria-modal="true" aria-label={t("web.conversations.approval_manager_title", "审批处理")}>
+                <div className="session-manager-modal__header">
+                  <div>
+                    <span>{t("web.conversations.approval_manager_eyebrow", "Approvals")}</span>
+                    <h2>{t("web.conversations.approval_manager_title", "审批处理")}</h2>
+                    <p>{t("web.conversations.approval_manager_help", "审批从消息流中分离出来，集中在这里处理。")}</p>
+                  </div>
+                  <button type="button" className="secondary" onClick={() => setApprovalManagerOpen(false)}>
+                    {t("web.action.close", "关闭")}
+                  </button>
+                </div>
+                {visibleApprovals.length > 0 ? (
+                  <div className="session-manager-modal__list">
+                    {visibleApprovals.map((approval) => {
+                      const statusTone = approval.status === "approved"
+                        ? "badge--success"
+                        : approval.status === "pending"
+                          ? "badge--warn"
+                          : approval.status === "expired"
+                            ? "badge--muted"
+                            : "badge--danger";
+                      return (
+                        <article key={approval.approval_id} className="session-manager-modal__item">
+                          <div className="session-manager-modal__main">
+                            <strong>{resolveAgentLabel(approval.agent_id)}</strong>
+                            <div className="session-manager-modal__meta">
+                              <span className={`badge ${statusTone}`}>{approval.status}</span>
+                              <span>{approval.action}</span>
+                              <span>{formatDateTime(approval.created_at)}</span>
+                            </div>
+                            <p>{approval.reason || t("web.conversations.approval_reason_empty", "没有附加说明。")}</p>
+                            <div className="session-manager-modal__meta">
+                              <span>{approval.target.kind}:{approval.target.id}</span>
+                              {approval.expires_at ? (
+                                <span>{t("web.permissions.expires_at", "截止")} {formatDateTime(approval.expires_at)}</span>
+                              ) : null}
+                            </div>
+                          </div>
+                          {approval.status === "pending" ? (
+                            <div className="session-manager-modal__actions">
+                              <button type="button" onClick={() => void resolveApproval(approval.approval_id, "allow_once")}>
+                                {t("web.permissions.allow_once", "允许一次")}
+                              </button>
+                              <button type="button" className="secondary" onClick={() => void resolveApproval(approval.approval_id, "allow_conversation")}>
+                                {t("web.permissions.allow_conversation", "允许本会话")}
+                              </button>
+                              <button type="button" className="secondary" onClick={() => void resolveApproval(approval.approval_id, "allow_run")}>
+                                {t("web.permissions.allow_run", "允许本次 run")}
+                              </button>
+                              <button type="button" className="secondary" onClick={() => void resolveApproval(approval.approval_id, "allow_policy")}>
+                                {t("web.permissions.allow_policy", "写入策略")}
+                              </button>
+                              <button type="button" className="secondary" onClick={() => void resolveApproval(approval.approval_id, "deny")}>
+                                {t("web.action.reject", "拒绝")}
+                              </button>
+                            </div>
+                          ) : null}
+                        </article>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="empty-card">
+                    {t("web.conversations.approval_manager_empty", "当前没有待查看的审批。")}
+                  </div>
+                )}
+              </section>
+            </div>
+          ) : null}
 
           {agentManagerOpen ? (
             <div className="session-manager-modal-root">

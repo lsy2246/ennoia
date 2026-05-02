@@ -64,6 +64,7 @@ export type ConversationMessageEntry = ChatEntryBase & {
   kind: "message";
   messageId: string;
   branchId?: string;
+  parentMessageId?: string;
   replyToMessageId?: string;
   rewriteFromMessageId?: string;
   recipients: ChatEntryRecipient[];
@@ -79,11 +80,12 @@ export type ChatErrorEntry = ChatEntryBase & {
   summary: string;
   detail?: string;
   tone: "danger" | "warn";
-  relatedEntryId?: string;
+  relatedMessageId?: string;
 };
 
 export type ChatSystemEntry = ChatEntryBase & {
   kind: "system";
+  relatedMessageId?: string;
 };
 
 export type ChatStatusEntry = ChatEntryBase & {
@@ -95,6 +97,7 @@ export type ChatStatusEntry = ChatEntryBase & {
 
 export type ChatToolResultEntry = ChatEntryBase & {
   kind: "tool_result";
+  relatedMessageId?: string;
 };
 
 export type ChatApprovalEntry = ChatEntryBase & {

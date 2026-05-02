@@ -58,6 +58,7 @@ impl OrchestratorService {
             owner: request.owner.clone(),
             conversation_id: request.conversation_id.clone(),
             lane_id: request.lane_id.clone(),
+            source_message_id: request.source_message_id.clone(),
             trigger: request.trigger.as_str().to_string(),
             stage: transition.to,
             goal: request.goal.clone(),

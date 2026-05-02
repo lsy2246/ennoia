@@ -63,10 +63,15 @@ pub async fn run_behavior(
         .source_refs
         .iter()
         .find_map(|item| item.lane_id.clone());
+    let source_message_id = payload
+        .source_refs
+        .iter()
+        .find_map(|item| item.message_id.clone());
     let request = RunRequest {
         owner: payload.owner.clone(),
         conversation_id,
         lane_id: lane_id.clone(),
+        source_message_id,
         trigger: payload.trigger.clone(),
         goal: payload.goal.clone(),
         requested_model_id: requested_model_id.clone(),

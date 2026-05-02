@@ -36,6 +36,8 @@ pub struct BehaviorSourceRef {
     #[serde(default)]
     pub lane_id: Option<String>,
     #[serde(default)]
+    pub message_id: Option<String>,
+    #[serde(default)]
     pub run_id: Option<String>,
     #[serde(default)]
     pub artifact_id: Option<String>,
