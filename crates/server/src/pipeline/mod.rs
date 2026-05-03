@@ -10,7 +10,7 @@ use ennoia_extension_host::RegisteredProviderContribution;
 use ennoia_kernel::{
     ActionPhase, ActionResultMode, AgentConfig, ModelEndpointConfig, OwnerKind, OwnerRef,
     PermissionApprovalRecord, PermissionRequest, PermissionScope, PermissionTarget,
-    PermissionTrigger, RunContext, HOOK_EVENT_CONVERSATION_CREATED,
+    PermissionTrigger, RunContext, RunStage, HOOK_EVENT_CONVERSATION_CREATED,
     HOOK_EVENT_CONVERSATION_MESSAGE_CREATED,
 };
 use ennoia_logs::RequestContext;
@@ -980,23 +980,27 @@ async fn generate_conversation_agent_reply(
             .get("run")
             .and_then(|item| item.get("id"))
             .and_then(JsonValue::as_str);
-        let reply_body = match generate_real_conversation_agent_reply(
-            state,
-            request,
-            &agents,
-            &model_endpoints,
-            &conversation_id,
-            lane_id.as_deref(),
-            message_id.as_deref(),
-            &conversation_messages,
-            &run_response,
-            agent_id,
-        )
-        .await
-        {
-            Ok(reply) => reply,
-            Err(error) if is_permission_approval_error(&error) => continue,
-            Err(error) => error.to_string(),
+        let reply_body = if run_stage_allows_agent_reply(&run_response) {
+            match generate_real_conversation_agent_reply(
+                state,
+                request,
+                &agents,
+                &model_endpoints,
+                &conversation_id,
+                lane_id.as_deref(),
+                message_id.as_deref(),
+                &conversation_messages,
+                &run_response,
+                agent_id,
+            )
+            .await
+            {
+                Ok(reply) => reply,
+                Err(error) if is_permission_approval_error(&error) => continue,
+                Err(error) => error.to_string(),
+            }
+        } else {
+            build_workflow_hold_reply(&run_response)
         };
         let _ = dispatch_action_value_with_context(
             state,
@@ -1025,6 +1029,46 @@ async fn generate_conversation_agent_reply(
     }
 
     Ok(())
+}
+
+fn run_stage_allows_agent_reply(run_response: &JsonValue) -> bool {
+    matches!(run_response_stage(run_response), RunStage::Dispatched)
+}
+
+fn run_response_stage(run_response: &JsonValue) -> RunStage {
+    run_response
+        .get("run")
+        .and_then(|item| item.get("stage"))
+        .and_then(JsonValue::as_str)
+        .map(RunStage::from_str)
+        .unwrap_or(RunStage::Pending)
+}
+
+fn build_workflow_hold_reply(run_response: &JsonValue) -> String {
+    let run_id = run_response
+        .get("run")
+        .and_then(|item| item.get("id"))
+        .and_then(JsonValue::as_str)
+        .unwrap_or_default();
+    let stage = run_response_stage(run_response).as_str().to_string();
+    let reason = run_response
+        .get("decision")
+        .and_then(|item| item.get("reason"))
+        .and_then(JsonValue::as_str)
+        .or_else(|| {
+            run_response
+                .get("decision")
+                .and_then(|item| item.get("summary"))
+                .and_then(JsonValue::as_str)
+        })
+        .unwrap_or("workflow 尚未进入可执行阶段");
+    if run_id.is_empty() {
+        format!("当前请求已进入任务编排，但还没有开始执行。原因：{reason}")
+    } else {
+        format!(
+            "当前请求已进入任务编排，但还没有开始执行。run={run_id}，阶段={stage}，原因：{reason}"
+        )
+    }
 }
 
 async fn generate_real_conversation_agent_reply(
@@ -1359,7 +1403,12 @@ async fn remember_workflow_run(
         .unwrap_or("unknown");
     let decision = run_response
         .get("decision")
-        .and_then(|item| item.get("summary"))
+        .and_then(|item| item.get("reason"))
+        .or_else(|| {
+            run_response
+                .get("decision")
+                .and_then(|item| item.get("summary"))
+        })
         .and_then(JsonValue::as_str)
         .unwrap_or_default();
     let artifact_refs = artifacts

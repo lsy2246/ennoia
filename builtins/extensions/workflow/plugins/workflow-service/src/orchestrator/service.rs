@@ -50,8 +50,8 @@ impl OrchestratorService {
 
         let signals = build_signals(&request, &context, &assigned_agents, &available_agents);
 
-        let stage = RunStage::Pending;
-        let (decision, transition) = self.stage_machine.decide(stage, &signals);
+        let (stage, decision, stage_events, decision_snapshots) =
+            build_initial_plan_trace(&*self.stage_machine, &signals, &run_id);
 
         let run = RunSpec {
             id: run_id.clone(),
@@ -60,7 +60,7 @@ impl OrchestratorService {
             lane_id: request.lane_id.clone(),
             source_message_id: request.source_message_id.clone(),
             trigger: request.trigger.as_str().to_string(),
-            stage: transition.to,
+            stage,
             goal: request.goal.clone(),
             created_at: now.clone(),
             updated_at: now.clone(),
@@ -83,16 +83,6 @@ impl OrchestratorService {
             })
             .collect();
 
-        let stage_event = RunStageEvent {
-            id: format!("rse-{}", Uuid::new_v4()),
-            run_id: run.id.clone(),
-            from_stage: Some(stage),
-            to_stage: transition.to,
-            policy_rule_id: Some(transition.policy_rule_id.clone()),
-            reason: Some(transition.reason.clone()),
-            at: now.clone(),
-        };
-
         let gate_ctx = GateContext {
             run: run.clone(),
             signals: signals.clone(),
@@ -107,16 +97,21 @@ impl OrchestratorService {
             .collect();
 
         let signals_json = serde_json::to_string(&signals).unwrap_or_else(|_| "{}".to_string());
-        let decision_snapshot = DecisionSnapshot {
-            id: format!("dec-{}", Uuid::new_v4()),
-            run_id: Some(run.id.clone()),
-            task_id: None,
-            stage: stage.as_str().to_string(),
-            signals_json,
-            next_action: decision.next_action.as_str().to_string(),
-            policy_rule_id: decision.policy_rule_id.clone(),
-            at: now.clone(),
-        };
+        let decision_snapshots = decision_snapshots
+            .into_iter()
+            .map(|snapshot| DecisionSnapshot {
+                run_id: Some(run.id.clone()),
+                signals_json: signals_json.clone(),
+                ..snapshot
+            })
+            .collect();
+        let stage_events = stage_events
+            .into_iter()
+            .map(|event| RunStageEvent {
+                run_id: run.id.clone(),
+                ..event
+            })
+            .collect();
 
         PlannedRun {
             run,
@@ -124,12 +119,62 @@ impl OrchestratorService {
             context,
             signals,
             decision,
-            stage_event,
+            stage_events,
             gate_verdicts,
             gate_records,
-            decision_snapshot,
+            decision_snapshots,
         }
     }
+}
+
+fn build_initial_plan_trace(
+    stage_machine: &dyn StageMachine,
+    signals: &Signals,
+    run_id: &str,
+) -> (
+    RunStage,
+    ennoia_kernel::Decision,
+    Vec<RunStageEvent>,
+    Vec<DecisionSnapshot>,
+) {
+    let mut stage = RunStage::Pending;
+    let mut stage_events = Vec::new();
+    let mut decision_snapshots = Vec::new();
+    let final_decision = loop {
+        let now = now_iso();
+        let (decision, transition) = stage_machine.decide(stage, signals);
+        decision_snapshots.push(DecisionSnapshot {
+            id: format!("dec-{}", Uuid::new_v4()),
+            run_id: Some(run_id.to_string()),
+            task_id: None,
+            stage: stage.as_str().to_string(),
+            signals_json: String::new(),
+            next_action: decision.next_action.as_str().to_string(),
+            policy_rule_id: decision.policy_rule_id.clone(),
+            at: now.clone(),
+        });
+
+        if transition.to == stage {
+            break decision;
+        }
+
+        stage_events.push(RunStageEvent {
+            id: format!("rse-{}", Uuid::new_v4()),
+            run_id: run_id.to_string(),
+            from_stage: Some(stage),
+            to_stage: transition.to,
+            policy_rule_id: Some(transition.policy_rule_id.clone()),
+            reason: Some(transition.reason.clone()),
+            at: now,
+        });
+        stage = transition.to;
+
+        if stage != RunStage::Planning {
+            break decision;
+        }
+    };
+
+    (stage, final_decision, stage_events, decision_snapshots)
 }
 
 fn build_signals(
@@ -203,4 +248,71 @@ fn to_gate_record(run_id: &str, verdict: &GateVerdict, at: &str) -> GateRecord {
 
 fn now_iso() -> String {
     Utc::now().to_rfc3339()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::runtime::{GatePipeline, PolicyStageMachine};
+    use ennoia_kernel::{OwnerRef, StagePolicy};
+
+    fn build_request(agent_id: &str) -> RunRequest {
+        RunRequest {
+            owner: OwnerRef::global("runtime"),
+            conversation_id: "conversation-1".to_string(),
+            lane_id: None,
+            source_message_id: Some("message-1".to_string()),
+            trigger: ennoia_contract::behavior::BehaviorTrigger::Message,
+            goal: "test goal".to_string(),
+            requested_model_id: None,
+            requested_max_turns: None,
+            participants: vec![agent_id.to_string()],
+            addressed_agents: vec![agent_id.to_string()],
+        }
+    }
+
+    #[tokio::test]
+    async fn plan_run_advances_to_dispatched_when_agent_is_ready() {
+        let orchestrator = OrchestratorService::new(
+            Arc::new(PolicyStageMachine::new(Arc::new(StagePolicy::builtin()))),
+            GatePipeline::new(Vec::new()),
+        );
+
+        let plan = orchestrator
+            .plan_run(
+                build_request("agent-a"),
+                RunContext::default(),
+                vec!["agent-a".to_string()],
+            )
+            .await;
+
+        assert_eq!(plan.run.stage, RunStage::Dispatched);
+        assert_eq!(plan.stage_events.len(), 2);
+        assert_eq!(plan.stage_events[0].to_stage, RunStage::Planning);
+        assert_eq!(plan.stage_events[1].to_stage, RunStage::Dispatched);
+        assert_eq!(plan.decision.reason, "plan-ready-agent-available");
+        assert_eq!(plan.decision_snapshots.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn plan_run_stays_in_planning_when_agent_is_not_ready() {
+        let orchestrator = OrchestratorService::new(
+            Arc::new(PolicyStageMachine::new(Arc::new(StagePolicy::builtin()))),
+            GatePipeline::new(Vec::new()),
+        );
+
+        let plan = orchestrator
+            .plan_run(
+                build_request("missing-agent"),
+                RunContext::default(),
+                Vec::new(),
+            )
+            .await;
+
+        assert_eq!(plan.run.stage, RunStage::Planning);
+        assert_eq!(plan.stage_events.len(), 1);
+        assert_eq!(plan.stage_events[0].to_stage, RunStage::Planning);
+        assert_eq!(plan.decision.reason, "no-rule-matched");
+        assert_eq!(plan.decision_snapshots.len(), 2);
+    }
 }

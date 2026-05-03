@@ -33,8 +33,8 @@ pub struct PlannedRun {
     pub context: RunContext,
     pub signals: Signals,
     pub decision: Decision,
-    pub stage_event: RunStageEvent,
+    pub stage_events: Vec<RunStageEvent>,
     pub gate_verdicts: Vec<GateVerdict>,
     pub gate_records: Vec<GateRecord>,
-    pub decision_snapshot: DecisionSnapshot,
+    pub decision_snapshots: Vec<DecisionSnapshot>,
 }

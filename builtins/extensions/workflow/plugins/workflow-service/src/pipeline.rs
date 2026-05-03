@@ -84,16 +84,20 @@ pub async fn run_behavior(
         .plan_run(request, context.clone(), available_agents)
         .await;
 
-    runtime
-        .runtime_store
-        .log_stage_event(&plan.stage_event)
-        .await
-        .map_err(|error| error.to_string())?;
-    runtime
-        .runtime_store
-        .log_decision(&plan.decision_snapshot)
-        .await
-        .map_err(|error| error.to_string())?;
+    for event in &plan.stage_events {
+        runtime
+            .runtime_store
+            .log_stage_event(event)
+            .await
+            .map_err(|error| error.to_string())?;
+    }
+    for snapshot in &plan.decision_snapshots {
+        runtime
+            .runtime_store
+            .log_decision(snapshot)
+            .await
+            .map_err(|error| error.to_string())?;
+    }
     for record in &plan.gate_records {
         runtime
             .runtime_store
@@ -124,7 +128,7 @@ pub async fn run_behavior(
         tasks: plan.tasks,
         artifacts: vec![artifact],
         handoffs,
-        stage_events: vec![plan.stage_event],
+        stage_events: plan.stage_events,
         decision: plan.decision,
         gate_verdicts: plan.gate_verdicts,
     })
