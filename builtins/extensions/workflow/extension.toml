@@ -130,3 +130,23 @@ kind = "action"
 entry = "workflow/schedules/run"
 title = { key = "ext.workflow.schedule.run", fallback = "Run workflow" }
 metadata = { schedule_action = { id = "workflow.run" } }
+
+[[capabilities]]
+id = "workflow.conversation.message.created"
+contract = "hook.conversation.message.created"
+kind = "event_handler"
+entry = "hooks/conversation-message-created"
+
+[[capabilities]]
+id = "workflow.permission.approval.resolved"
+contract = "hook.permission.approval.resolved"
+kind = "event_handler"
+entry = "hooks/permission-approval-resolved"
+
+[[subscriptions]]
+event = "conversation.message.created"
+capability = "workflow.conversation.message.created"
+
+[[subscriptions]]
+event = "permission.approval.resolved"
+capability = "workflow.permission.approval.resolved"

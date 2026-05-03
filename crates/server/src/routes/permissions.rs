@@ -1,10 +1,12 @@
-use ennoia_kernel::{PermissionApprovalRecord, PermissionEventRecord};
+use ennoia_kernel::{
+    PermissionApprovalRecord, PermissionEventRecord, HOOK_EVENT_PERMISSION_APPROVAL_RESOLVED,
+};
 
 use crate::agent_permissions::{
     ApprovalResolutionPayload, PermissionApprovalsQuery, PermissionEventsQuery,
     PermissionGrantRecord, PermissionGrantsQuery, PermissionPolicySummary,
 };
-use crate::pipeline::queue_permission_approval_resume;
+use crate::routes::actions::dispatch_hook_event;
 
 use super::*;
 
@@ -123,9 +125,14 @@ pub(super) async fn permission_approval_resolve(
                 &request,
             )
         })?;
-    if approval.status == "approved" {
-        queue_permission_approval_resume(state.clone(), request.clone(), approval.clone());
-    }
+    dispatch_hook_event(
+        &state,
+        &request,
+        HOOK_EVENT_PERMISSION_APPROVAL_RESOLVED,
+        "permission_approval",
+        &approval.approval_id,
+        serde_json::json!({ "approval": approval.clone() }),
+    );
     Ok(Json(approval))
 }
 

@@ -16,3 +16,13 @@ export async function listExtensionScheduleActions() {
 export async function listActionStatus() {
   return fetchJson<ActionStatus[]>("/api/actions");
 }
+
+export async function dispatchAction<T>(
+  action: string,
+  params?: Record<string, unknown> | null,
+) {
+  return fetchJson<T>(`/api/actions/${encodeURIComponent(action)}`, {
+    method: "POST",
+    body: JSON.stringify(params ?? {}),
+  });
+}

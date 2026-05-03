@@ -124,12 +124,12 @@ impl Default for AgentPermissionPolicy {
 
 impl Default for AgentPermissionProfile {
     fn default() -> Self {
-        Self::builtin_worker()
+        Self::default_profile()
     }
 }
 
 impl AgentPermissionProfile {
-    pub fn builtin_worker() -> Self {
+    pub fn default_profile() -> Self {
         Self {
             mode: default_permission_profile_mode(),
             command_rules: Vec::new(),
@@ -149,83 +149,69 @@ impl AgentPermissionProfile {
             .iter()
             .map(|pattern| GlobPattern::new(pattern.as_str().trim().replace('\\', "/")))
             .collect::<Vec<_>>();
-        let mut rules = vec![allow_rule(
-            "builtin-core-chat",
-            &[
-                "provider.generate",
-                "conversation.read",
-                "conversation.write",
-                "conversation.branch.create",
-                "conversation.branch.switch",
-                "memory.read",
-                "memory.write",
-                "memory.review",
-                "run.create",
-                "run.read",
-                "artifact.read",
-                "artifact.write",
-            ],
-        )];
+        let mut rules = Vec::new();
 
         if normalized_path_rules.is_empty() {
-            if mode == "blacklist" {
-                rules.push(allow_rule("builtin-files-allow", &["fs.read", "fs.write"]));
-            } else {
-                rules.push(ask_rule("builtin-path-ask-fs", &["fs.read", "fs.write"]));
-            }
+            rules.push(allow_rule(
+                "runtime-fs-default-allow",
+                &["fs.read", "fs.write"],
+            ));
         } else {
             rules.push(allow_path_rule(
-                "builtin-path-rules-fs",
+                "runtime-fs-path-allow",
                 &["fs.read", "fs.write"],
                 normalized_path_rules.clone(),
             ));
-            rules.push(ask_rule("builtin-path-ask-fs", &["fs.read", "fs.write"]));
+            rules.push(ask_rule("runtime-fs-path-ask", &["fs.read", "fs.write"]));
         }
 
         match mode.as_str() {
             "blacklist" => {
                 if !normalized_command_rules.is_empty() {
                     rules.push(ask_target_rule(
-                        "builtin-command-blacklist-ask",
+                        "runtime-command-blacklist-ask",
                         &["command.exec"],
                         normalized_command_rules,
                     ));
                 }
                 if !normalized_path_rules.is_empty() {
                     rules.push(allow_path_rule(
-                        "builtin-command-path-allow",
+                        "runtime-command-path-allow",
                         &["command.exec"],
                         normalized_path_rules,
                     ));
-                    rules.push(ask_rule("builtin-command-path-ask", &["command.exec"]));
-                }
-                AgentPermissionPolicy {
-                    mode: "default_allow".to_string(),
-                    rules,
+                    rules.push(ask_rule("runtime-command-path-ask", &["command.exec"]));
+                } else {
+                    rules.push(allow_rule(
+                        "runtime-command-default-allow",
+                        &["command.exec"],
+                    ));
                 }
             }
             _ => {
                 if !normalized_command_rules.is_empty() {
                     if normalized_path_rules.is_empty() {
                         rules.push(allow_target_rule(
-                            "builtin-command-whitelist-allow",
+                            "runtime-command-whitelist-allow",
                             &["command.exec"],
                             normalized_command_rules,
                         ));
                     } else {
                         rules.push(allow_target_path_rule(
-                            "builtin-command-whitelist-allow",
+                            "runtime-command-whitelist-allow",
                             &["command.exec"],
                             normalized_command_rules,
                             normalized_path_rules,
                         ));
                     }
                 }
-                AgentPermissionPolicy {
-                    mode: "default_ask".to_string(),
-                    rules,
-                }
+                rules.push(ask_rule("runtime-command-default-ask", &["command.exec"]));
             }
+        }
+        rules.push(allow_rule("runtime-default-allow", &["*"]));
+        AgentPermissionPolicy {
+            mode: "default_ask".to_string(),
+            rules,
         }
     }
 }
@@ -414,7 +400,7 @@ mod tests {
         assert!(policy
             .rules
             .iter()
-            .any(|rule| rule.id == "builtin-command-whitelist-allow"));
+            .any(|rule| rule.id == "runtime-command-whitelist-allow"));
     }
 
     #[test]
@@ -429,7 +415,7 @@ mod tests {
         assert!(policy
             .rules
             .iter()
-            .any(|rule| rule.id == "builtin-path-ask-fs" && rule.effect == "ask"));
+            .any(|rule| rule.id == "runtime-fs-default-allow" && rule.effect == "allow"));
     }
 
     #[test]
@@ -440,11 +426,11 @@ mod tests {
             path_rules: vec![GlobPattern::new("D:/data/code/**")],
         };
         let policy = profile.compile_policy("coder");
-        assert_eq!(policy.mode, "default_allow");
+        assert_eq!(policy.mode, "default_ask");
         assert!(policy
             .rules
             .iter()
-            .any(|rule| rule.id == "builtin-command-blacklist-ask"));
+            .any(|rule| rule.id == "runtime-command-blacklist-ask"));
     }
 
     #[test]

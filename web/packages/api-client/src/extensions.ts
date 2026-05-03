@@ -77,3 +77,45 @@ export function getExtensionThemeStylesheetUrl(extensionId: string, themeId: str
   return apiUrl(`/api/extensions/${extensionId}/themes/${encodeURIComponent(themeId)}/stylesheet`);
 }
 
+type ExtensionRpcEnvelope<T> = {
+  ok: boolean;
+  data: T;
+  error?: { code: string; message: string } | null;
+};
+
+export async function callExtensionRpc<T>(
+  extensionId: string,
+  method: string,
+  params?: Record<string, unknown> | null,
+) {
+  const response = await fetchJson<ExtensionRpcEnvelope<T>>(
+    `/api/extensions/${encodeURIComponent(extensionId)}/rpc/${method}`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        params: params ?? {},
+      }),
+    },
+  );
+  if (!response.ok) {
+    throw new Error(response.error?.message ?? "extension rpc failed");
+  }
+  return response.data;
+}
+
+export async function invokeProviderMethod<T>(
+  providerKind: string,
+  method: string,
+  params?: Record<string, unknown> | null,
+) {
+  return fetchJson<T>(
+    `/api/extensions/providers/${encodeURIComponent(providerKind)}/${method}`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        params: params ?? {},
+      }),
+    },
+  );
+}
+

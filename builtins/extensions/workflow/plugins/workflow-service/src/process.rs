@@ -17,6 +17,9 @@ use serde_json::Value as JsonValue;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::{Row, SqlitePool};
 
+use crate::conversation_hooks::{
+    handle_conversation_message_created, handle_permission_approval_resolved,
+};
 use crate::orchestrator::OrchestratorService;
 use crate::pipeline::{run_behavior, WorkflowRuntime};
 use crate::runtime::{
@@ -258,6 +261,32 @@ async fn handle_invocation(
             },
             Err(error) => error,
         },
+        "hooks/conversation-message-created" => {
+            match parse_json::<ennoia_kernel::HookEventEnvelope>(invocation.params) {
+                Ok(payload) => {
+                    match handle_conversation_message_created(&state.runtime, &state.store, payload)
+                        .await
+                    {
+                        Ok(response) => ExtensionRpcResponse::success(serde_json::json!(response)),
+                        Err(error) => ExtensionRpcResponse::failure("hook_failed", error),
+                    }
+                }
+                Err(error) => error,
+            }
+        }
+        "hooks/permission-approval-resolved" => {
+            match parse_json::<ennoia_kernel::HookEventEnvelope>(invocation.params) {
+                Ok(payload) => {
+                    match handle_permission_approval_resolved(&state.runtime, &state.store, payload)
+                        .await
+                    {
+                        Ok(response) => ExtensionRpcResponse::success(serde_json::json!(response)),
+                        Err(error) => ExtensionRpcResponse::failure("hook_failed", error),
+                    }
+                }
+                Err(error) => error,
+            }
+        }
         _ => ExtensionRpcResponse::failure(
             "method_not_found",
             format!("workflow worker method '{path}' not found"),

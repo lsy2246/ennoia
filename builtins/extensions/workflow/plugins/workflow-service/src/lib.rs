@@ -3,6 +3,7 @@
 //! The workflow extension owns planning, stage decisions, gate checks and
 //! artifact emission. Core only hosts and proxies the extension process.
 
+pub mod conversation_hooks;
 pub mod orchestrator;
 pub mod pipeline;
 pub mod process;

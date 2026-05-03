@@ -470,7 +470,7 @@ pub fn normalize_agent_document(
 pub fn write_agent_config(paths: &RuntimePaths, payload: &AgentConfig) -> Result<(), AppError> {
     let permission_profile = load_agent_document(paths, &payload.id)?
         .map(|document| document.permission_profile)
-        .unwrap_or_else(AgentPermissionProfile::builtin_worker);
+        .unwrap_or_else(AgentPermissionProfile::default_profile);
     write_agent_document(
         paths,
         &AgentDocument {
@@ -633,7 +633,7 @@ fn migrate_legacy_agent_layout(paths: &RuntimePaths) -> Result<(), AppError> {
                 paths,
                 &AgentDocument {
                     profile: agent,
-                    permission_profile: AgentPermissionProfile::builtin_worker(),
+                    permission_profile: AgentPermissionProfile::default_profile(),
                 },
             )?;
             fs::remove_file(entry.path())?;
@@ -699,7 +699,7 @@ mod tests {
             legacy_policies_dir.join("writer.toml"),
             toml::to_string_pretty(&AgentPermissionProfile {
                 mode: "blacklist".to_string(),
-                ..AgentPermissionProfile::builtin_worker()
+                ..AgentPermissionProfile::default_profile()
             })
             .expect("serialize profile"),
         )
@@ -729,7 +729,7 @@ mod tests {
                 profile: agent.clone(),
                 permission_profile: AgentPermissionProfile {
                     mode: "blacklist".to_string(),
-                    ..AgentPermissionProfile::builtin_worker()
+                    ..AgentPermissionProfile::default_profile()
                 },
             },
         )

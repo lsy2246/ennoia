@@ -55,7 +55,7 @@ Web
 
 ## 细粒度接口层
 
-- 系统用稳定 `/api/...` 表达产品动作，例如会话列表、创建会话、写消息、创建运行、读取任务。
+- 系统不再为 conversation、memory、workflow 暴露固定产品 REST；产品动作统一通过 `/api/actions/{action}` 进入运行时。
 - 每个产品动作映射为一个接口键，例如 `conversation.list`、`message.append`、`run.create`、`task.list`。
 - 扩展通过 manifest 的 `capabilities[].metadata.action` 声明动作规则，规则携带 `key`、`phase`、`priority`、`result_mode` 和可选 `when`。
 - 同一个动作键可以同时挂多条规则；宿主按阶段和优先级执行，并按 `result_mode` 收敛返回值。
@@ -66,20 +66,20 @@ Web
 ## 会话、记忆与组合层边界
 
 - 核心不再内置 `journal` 文件记录层。
-- `/api/conversations`、`/api/conversations/{id}/messages` 等稳定入口通过接口层路由，不直接绑定某个 memory 大能力。
+- 会话、记忆、运行等产品视图都通过通用 action runtime 和扩展 RPC 组合，不再保留核心包装 REST。
 - 内置 `conversation` 扩展当前声明会话、分支、检查点、线路和消息接口；内置 `memory` 扩展只负责记忆、上下文、审查和图谱侧车。
-- 动作管道是系统级中立执行层，用来承接 `message.append -> run.create`、`run.create -> message.append`、`run.create -> memory.ingest` 这类默认链路。
-- 会话展示层以 `/api/conversations/{id}/stream` 持续接收完整会话快照和审批状态；首屏拉取只负责建初始状态，不再靠前端定时轮询刷新会话消息。
-- `memory` 的系统入口固定为 `/api/memory/*`，底层通过 `memory.*` 接口键解析到扩展 Worker。
+- 动作管道是系统级中立执行层，只负责执行规则、收敛结果和发出事实事件；它不再承接 workflow、memory、provider 或 Agent tool 的产品编排。
+- 会话展示层首屏和后续刷新统一由前端通过 action runtime 组装 detail、run 和 approval 快照；核心不再维护会话专属 SSE 聚合面。
+- `memory` 只暴露 `memory.*` 动作键，不再保留 `/api/memory/*` 核心包装入口。
 - `conversation` 不直接调用 `memory` 或 `workflow`；它只维护会话事实并发出事实事件。
 - `memory` 不直接读取 `conversation.db`，也不再镜像保存整段会话消息或 shadow session state。
-- `workflow` 不假设自己一定挂在 conversation 上；会话事实是否进入 workflow，由系统动作管道与事件链决定，而不是由 builtin 互相依赖。
+- `workflow` 不假设自己一定挂在 conversation 上；会话事实是否进入 workflow、何时回写 conversation / memory，由 workflow 扩展自己订阅 `conversation.message.created`、`permission.approval.resolved` 等事件后决定。
 - Conversation、Message、Memory Graph、Review 等业务数据组织属于扩展私有责任，不属于日志主数据。
 
 ## 运行与定时边界
 
 - `workflow` 是一个内置扩展实现，声明 run/task/artifact 接口，并承接定时器里的 Agent 执行。
-- `/api/runs`、`/api/runs/{id}/tasks`、`/api/conversations/{id}/runs` 等稳定入口通过接口层路由到扩展。
+- `workflow` 相关读取与执行统一通过 `run.*`、`task.*`、`artifact.*` 动作键或扩展 RPC 暴露，不再保留 `/api/runs/*` 核心包装入口。
 - 系统 scheduler 只负责保存计划、计算到期、串行触发、失败重试和记录最近运行历史。
 - 定时器支持两类执行方式：
   - `command`：直接在本机 shell 中运行命令，用于脚本和本地自动化。
@@ -123,9 +123,9 @@ Web
 ## Hook 边界
 
 - Hook 保留为扩展订阅系统事件的方式，但事件先进入宿主持久化事件总线，不做同步强耦合调用。
-- 动作管道在完成会话创建、消息追加等动作后，把 `conversation.created`、`conversation.message.created` 等事件写入 `events.db`。
+- 动作管道在完成会话创建、消息追加、审批解析等动作后，把 `conversation.created`、`conversation.message.created`、`permission.approval.resolved` 等事件写入 `events.db`。
 - 事件总线异步把事件投递给已注册 Hook；扩展临时离线不会阻塞会话写入。
-- 系统不要求 memory / workflow 必须通过 Hook 互相耦合；内置跨域组合统一走动作管道与事件链。
+- 系统不要求 memory / workflow 必须通过 Hook 互相耦合；跨域组合统一走事件链和宿主中立 runtime bridge（action、provider、runtime operation、permission）。
 
 ## 扩展能力模型
 
@@ -137,6 +137,7 @@ Web
 - `settings` 表达扩展级配置字段；主壳按声明渲染表单，实际值保存在扩展私有数据目录，不上浮为系统级配置模型。
 - `workflow` 和 `memory` 都只是内置扩展实现；系统依赖接口键和动作 ID，不反向依赖具体扩展。
 - 扩展不自行开放端口；Provider、Behavior、Memory、Hook、Action 和 Schedule Action 的执行统一走宿主 Worker RPC，Worker 通过 Wasm ABI 或进程 stdio 协议接入。
+- Provider 模型发现也不再挂在 `/api/model-endpoints/*/models` 这类产品路由下，而是走宿主提供的通用 provider runtime 代理。
 - 扩展 UI、语言、主题和业务配置归扩展自身所有；Web 主壳只按 runtime snapshot 发现并挂载，不在系统前端包中静态注册某个扩展页面或文案。
 - 扩展 UI 通过独立 ESM bundle 动态加载；主壳只导入 `/api/extensions/{extension_id}/ui/module` 暴露的模块包装器，再按 mount id 调用扩展自己的 `mount/unmount`。
 - 扩展主题通过 `ennoia.theme` 与主壳对接；主壳只消费稳定语义 token 和 dockview token，不把内部 class 结构暴露给扩展。

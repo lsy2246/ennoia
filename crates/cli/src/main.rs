@@ -85,8 +85,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             let repo_root = env::current_dir()?;
             let paths = RuntimePaths::resolve(args.get(2).map(String::as_str));
             init_home_template(&paths)?;
-            ensure_builtin_process_workers(&repo_root)?;
-            auto_attach_dev_extensions(&paths)?;
             let mut server_config: ServerConfig =
                 read_toml_or_default(&paths.server_config_file())?;
             server_config = server_config.normalize();
@@ -97,6 +95,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 server_config.web_dev.port,
                 "Web",
             )?;
+            ensure_builtin_process_workers(&repo_root)?;
+            auto_attach_dev_extensions(&paths)?;
             run_dev_supervisor(paths, server_config).await?;
         }
         Some("start") | Some("serve") => {
@@ -258,6 +258,7 @@ const WATCH_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const API_READY_TIMEOUT: Duration = Duration::from_secs(15);
 const API_HEALTHCHECK_INTERVAL: Duration = Duration::from_secs(3);
 const API_HEALTHCHECK_GRACE: Duration = Duration::from_secs(6);
+const API_PORT_RELEASE_TIMEOUT: Duration = Duration::from_secs(5);
 const DEV_CHILD_STARTUP_GRACE: Duration = Duration::from_millis(1500);
 const DEV_CHILD_LOG_TAIL_LINES: usize = 20;
 
@@ -411,6 +412,7 @@ impl ApiDevProcess {
             child.stop();
         }
         self.current = None;
+        self.wait_for_api_port_release().await?;
 
         match self.launch_snapshot(snapshot.clone()).await {
             Ok(child) => {
@@ -487,6 +489,7 @@ impl ApiDevProcess {
             child.stop();
         }
         self.current = None;
+        self.wait_for_api_port_release().await?;
         self.current = Some(self.launch_snapshot(snapshot.clone()).await?);
         self.reset_health_watch();
         println!("restarted api from {}", snapshot.display());
@@ -504,6 +507,29 @@ impl ApiDevProcess {
     fn reset_health_watch(&mut self) {
         self.unhealthy_since = None;
         self.next_health_probe_at = Instant::now() + API_HEALTHCHECK_INTERVAL;
+    }
+
+    async fn wait_for_api_port_release(&self) -> io::Result<()> {
+        let started = Instant::now();
+        loop {
+            if ensure_port_available(&self.server_config.host, self.server_config.port, "API")
+                .is_ok()
+            {
+                return Ok(());
+            }
+            if started.elapsed() >= API_PORT_RELEASE_TIMEOUT {
+                return Err(io::Error::new(
+                    io::ErrorKind::AddrInUse,
+                    format!(
+                        "API address {}:{} was not released within {}s",
+                        self.server_config.host,
+                        self.server_config.port,
+                        API_PORT_RELEASE_TIMEOUT.as_secs()
+                    ),
+                ));
+            }
+            tokio::time::sleep(Duration::from_millis(120)).await;
+        }
     }
 
     fn build_api_binary(&self) -> io::Result<PathBuf> {
@@ -598,8 +624,7 @@ impl ApiDevProcess {
         )?;
 
         if let Err(error) = wait_for_api_ready(&self.server_config, API_READY_TIMEOUT).await {
-            let _ = child.kill();
-            let _ = child.wait();
+            stop_child_process(&mut child);
             return Err(error);
         }
 
@@ -620,10 +645,7 @@ impl ApiDevProcess {
 
 impl ApiChild {
     fn stop(&mut self) {
-        if self.child.try_wait().ok().flatten().is_none() {
-            let _ = self.child.kill();
-        }
-        let _ = self.child.wait();
+        stop_child_process(&mut self.child);
         println!("stopped api");
     }
 }
@@ -748,8 +770,7 @@ impl DevProcessGroup {
 impl Drop for DevProcessGroup {
     fn drop(&mut self) {
         for child in &mut self.children {
-            let _ = child.child.kill();
-            let _ = child.child.wait();
+            stop_child_process(&mut child.child);
             println!("stopped {}", child.label);
         }
     }
@@ -1126,6 +1147,58 @@ fn ensure_port_available(host: &str, port: u16, label: &str) -> io::Result<()> {
                 ),
             )
         })
+}
+
+fn stop_child_process(child: &mut Child) {
+    if child.try_wait().ok().flatten().is_some() {
+        let _ = child.wait();
+        return;
+    }
+
+    #[cfg(windows)]
+    {
+        let _ = terminate_windows_process_tree(child.id());
+    }
+
+    #[cfg(not(windows))]
+    {
+        let _ = child.kill();
+    }
+
+    let started = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => {
+                let _ = child.wait();
+                break;
+            }
+            Ok(None) if started.elapsed() < Duration::from_secs(5) => {
+                thread::sleep(Duration::from_millis(80));
+            }
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                break;
+            }
+            Err(_) => break,
+        }
+    }
+}
+
+#[cfg(windows)]
+fn terminate_windows_process_tree(pid: u32) -> io::Result<()> {
+    let status = Command::new("taskkill")
+        .args(["/PID", &pid.to_string(), "/T", "/F"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(io::Error::other(format!(
+            "taskkill failed for process tree {pid}"
+        )))
+    }
 }
 
 fn ensure_builtin_process_workers(repo_root: &Path) -> io::Result<()> {

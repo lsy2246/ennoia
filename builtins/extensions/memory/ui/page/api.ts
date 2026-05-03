@@ -1,4 +1,4 @@
-import { fetchJson } from "@ennoia/api-client";
+import { dispatchAction } from "@ennoia/api-client";
 
 export type MemorySource = {
   kind: string;
@@ -42,11 +42,11 @@ export type WorkspaceSummary = {
 };
 
 export async function listMemoryRecords() {
-  return fetchJson<MemoryRecord[]>("/api/memory/memories");
+  return dispatchAction<MemoryRecord[]>("memory.entry.list");
 }
 
 export async function getMemoryWorkspaceSummary() {
-  return fetchJson<WorkspaceSummary>("/api/memory/workspace");
+  return dispatchAction<WorkspaceSummary>("memory.workspace.get");
 }
 
 export async function recallMemoryRecords(payload: {
@@ -60,10 +60,7 @@ export async function recallMemoryRecords(payload: {
   conversation_id?: string;
   run_id?: string;
 }) {
-  return fetchJson<RecallResult>("/api/memory/recall", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
+  return dispatchAction<RecallResult>("memory.query", payload);
 }
 
 export async function reviewMemoryRecord(payload: {
@@ -72,8 +69,5 @@ export async function reviewMemoryRecord(payload: {
   action: string;
   notes?: string;
 }) {
-  return fetchJson("/api/memory/review", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
+  return dispatchAction("memory.review", payload);
 }

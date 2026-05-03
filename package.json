@@ -10,7 +10,7 @@
   ],
   "scripts": {
     "install": "node ./scripts/install-workspace.mjs",
-    "dev": "cargo run -p ennoia-cli -- dev",
+    "dev": "node ./scripts/dev-launcher.mjs",
     "build:extension-ui": "node ./scripts/build-extension-ui.mjs",
     "watch:extension-ui": "node ./scripts/build-extension-ui.mjs --watch",
     "build:workers": "node ./scripts/build-workers.mjs",

@@ -44,7 +44,8 @@ pub use extension::{
     ProviderModelDescriptor, ResolvedUiEntry, ResolvedWorkerEntry, ResourceTypeContribution,
     ScheduleActionContribution, SubscriptionContribution, SurfaceContribution, ThemeContribution,
     HOOK_EVENT_ARTIFACT_CREATED, HOOK_EVENT_CONVERSATION_CREATED,
-    HOOK_EVENT_CONVERSATION_MESSAGE_CREATED, HOOK_EVENT_JOB_DUE, HOOK_EVENT_RUN_REQUESTED,
+    HOOK_EVENT_CONVERSATION_MESSAGE_CREATED, HOOK_EVENT_JOB_DUE,
+    HOOK_EVENT_PERMISSION_APPROVAL_RESOLVED, HOOK_EVENT_RUN_REQUESTED,
     HOOK_EVENT_RUN_STAGE_CHANGED,
 };
 pub use gate::{GateRecord, GateSeverity, GateVerdict};

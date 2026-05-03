@@ -50,7 +50,7 @@ impl AgentPermissionStore {
     pub fn load_profile(&self, agent_id: &str) -> std::io::Result<AgentPermissionProfile> {
         let path = self.runtime_paths.agent_config_file(agent_id);
         if !path.exists() {
-            return Ok(AgentPermissionProfile::builtin_worker());
+            return Ok(AgentPermissionProfile::default_profile());
         }
         let contents = fs::read_to_string(path)?;
         let document = toml::from_str::<AgentDocument>(&contents).map_err(std::io::Error::other)?;

@@ -395,6 +395,7 @@ pub struct ExtensionSettingFieldSpec {
 
 pub const HOOK_EVENT_CONVERSATION_CREATED: &str = "conversation.created";
 pub const HOOK_EVENT_CONVERSATION_MESSAGE_CREATED: &str = "conversation.message.created";
+pub const HOOK_EVENT_PERMISSION_APPROVAL_RESOLVED: &str = "permission.approval.resolved";
 pub const HOOK_EVENT_RUN_REQUESTED: &str = "run.requested";
 pub const HOOK_EVENT_RUN_STAGE_CHANGED: &str = "run.stage.changed";
 pub const HOOK_EVENT_ARTIFACT_CREATED: &str = "artifact.created";

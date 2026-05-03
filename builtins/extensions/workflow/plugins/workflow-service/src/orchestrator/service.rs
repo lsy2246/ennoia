@@ -66,20 +66,27 @@ impl OrchestratorService {
             updated_at: now.clone(),
         };
 
-        let tasks: Vec<TaskSpec> = assigned_agents
-            .iter()
+        let task_titles = derive_plan_steps(&request);
+        let tasks: Vec<TaskSpec> = task_titles
+            .into_iter()
             .enumerate()
-            .map(|(index, agent_id)| TaskSpec {
-                id: format!("task-{run_id}-{}", index + 1),
-                run_id: run_id.clone(),
-                conversation_id: request.conversation_id.clone(),
-                lane_id: request.lane_id.clone(),
-                task_kind,
-                title: task_title(&request, agent_id),
-                assigned_agent_id: agent_id.clone(),
-                status: TaskStatus::Pending,
-                created_at: now.clone(),
-                updated_at: now.clone(),
+            .map(|(index, title)| {
+                let agent_id = assigned_agents
+                    .get(index % assigned_agents.len())
+                    .cloned()
+                    .unwrap_or_else(|| "system".to_string());
+                TaskSpec {
+                    id: format!("task-{run_id}-{}", index + 1),
+                    run_id: run_id.clone(),
+                    conversation_id: request.conversation_id.clone(),
+                    lane_id: request.lane_id.clone(),
+                    task_kind,
+                    title,
+                    assigned_agent_id: agent_id,
+                    status: TaskStatus::Pending,
+                    created_at: now.clone(),
+                    updated_at: now.clone(),
+                }
             })
             .collect();
 
@@ -213,19 +220,141 @@ fn build_signals(
     }
 }
 
-fn task_title(request: &RunRequest, agent_id: &str) -> String {
-    let mut title = format!("{} · {}", request.goal, agent_id);
-    if let Some(model_id) = request
-        .requested_model_id
-        .as_deref()
-        .filter(|item| !item.trim().is_empty())
-    {
-        title.push_str(&format!(" · model={model_id}"));
+fn derive_plan_steps(request: &RunRequest) -> Vec<String> {
+    let goal = request.goal.trim();
+    let subject = extract_goal_subject(goal);
+    let target_path = extract_target_path(goal);
+    if looks_like_build_task(goal) {
+        let mut steps = vec![
+            format!("梳理{}的功能范围、运行方式和交付约束", subject),
+            format!("搭建{}的基础结构和入口文件", subject),
+            format!("实现{}的核心逻辑与主要交互", subject),
+            "补齐边界处理、提示反馈和必要资源".to_string(),
+        ];
+        if let Some(path) = target_path {
+            steps.push(format!("把产物整理并写入 {}", path));
+        }
+        steps.push("完成一次自检，确认计划无误后进入实际执行".to_string());
+        return steps;
     }
-    if let Some(max_turns) = request.requested_max_turns {
-        title.push_str(&format!(" · max_turns={max_turns}"));
+
+    let mut steps = vec![
+        format!("梳理{}的目标、约束和交付形式", subject),
+        format!("拆分{}的关键处理步骤", subject),
+        "准备执行所需的输入、路径或上下文信息".to_string(),
+    ];
+    if let Some(path) = target_path {
+        steps.push(format!("确认结果最终落到 {}", path));
     }
-    title
+    steps.push("完成一次计划自检，确认后进入实际执行".to_string());
+    steps
+}
+
+fn looks_like_build_task(goal: &str) -> bool {
+    let normalized = goal.to_ascii_lowercase();
+    [
+        "写",
+        "实现",
+        "开发",
+        "做一个",
+        "做个",
+        "创建",
+        "搭建",
+        "游戏",
+        "页面",
+        "网站",
+        "脚本",
+        "程序",
+        "组件",
+        "app",
+        "api",
+        "game",
+        "build",
+        "code",
+    ]
+    .iter()
+    .any(|pattern| goal.contains(pattern) || normalized.contains(pattern))
+}
+
+fn extract_goal_subject(goal: &str) -> String {
+    let mut subject = goal.replace(['"', '\''], "");
+    for marker in [
+        "放在",
+        "保存到",
+        "写到",
+        "输出到",
+        "放到",
+        "存到",
+        "并放在",
+        "并写到",
+    ] {
+        if let Some((head, _)) = subject.split_once(marker) {
+            subject = head
+                .trim()
+                .trim_end_matches(['，', ',', '。', ';', '；'])
+                .to_string();
+        }
+    }
+    for prefix in [
+        "我想让你帮我",
+        "我想请你帮我",
+        "请你帮我",
+        "帮我",
+        "请你",
+        "我想",
+    ] {
+        if let Some(rest) = subject.strip_prefix(prefix) {
+            subject = rest.trim().to_string();
+            break;
+        }
+    }
+    for marker in [
+        "写一个",
+        "做一个",
+        "做个",
+        "实现一个",
+        "开发一个",
+        "创建一个",
+    ] {
+        if let Some((_, tail)) = subject.split_once(marker) {
+            subject = tail.trim().to_string();
+            break;
+        }
+    }
+    let subject = subject
+        .trim()
+        .trim_matches(['，', ',', '。', ';', '；', '：', ':'])
+        .trim();
+    if subject.is_empty() {
+        "当前任务".to_string()
+    } else {
+        subject.to_string()
+    }
+}
+
+fn extract_target_path(goal: &str) -> Option<String> {
+    let quoted = extract_quoted_segments(goal);
+    quoted
+        .into_iter()
+        .find(|segment| segment.contains('\\') || segment.contains('/'))
+}
+
+fn extract_quoted_segments(value: &str) -> Vec<String> {
+    let mut segments = Vec::new();
+    let mut start = None;
+    for (index, ch) in value.char_indices() {
+        if ch == '"' {
+            if let Some(open) = start.take() {
+                let segment = value[(open + 1)..index].trim();
+                if !segment.is_empty() {
+                    segments.push(segment.to_string());
+                }
+            } else {
+                start = Some(index);
+            }
+        }
+    }
+    segments
 }
 
 fn to_gate_record(run_id: &str, verdict: &GateVerdict, at: &str) -> GateRecord {
@@ -292,6 +421,7 @@ mod tests {
         assert_eq!(plan.stage_events[1].to_stage, RunStage::Dispatched);
         assert_eq!(plan.decision.reason, "plan-ready-agent-available");
         assert_eq!(plan.decision_snapshots.len(), 2);
+        assert!(plan.tasks.len() >= 4);
     }
 
     #[tokio::test]
@@ -314,5 +444,29 @@ mod tests {
         assert_eq!(plan.stage_events[0].to_stage, RunStage::Planning);
         assert_eq!(plan.decision.reason, "no-rule-matched");
         assert_eq!(plan.decision_snapshots.len(), 2);
+    }
+
+    #[test]
+    fn derive_plan_steps_generates_readable_build_plan() {
+        let request = RunRequest {
+            owner: OwnerRef::global("runtime"),
+            conversation_id: "conversation-1".to_string(),
+            lane_id: None,
+            source_message_id: Some("message-1".to_string()),
+            trigger: ennoia_contract::behavior::BehaviorTrigger::Message,
+            goal:
+                "我想让你帮我写一个贪吃蛇的游戏，写了放在\"C:\\Users\\Administrator\\Desktop\\ttt\""
+                    .to_string(),
+            requested_model_id: None,
+            requested_max_turns: None,
+            participants: vec!["agent-a".to_string()],
+            addressed_agents: vec!["agent-a".to_string()],
+        };
+        let steps = derive_plan_steps(&request);
+        assert!(steps.len() >= 5);
+        assert!(steps.iter().any(|step| step.contains("贪吃蛇")));
+        assert!(steps
+            .iter()
+            .any(|step| step.contains("C:\\Users\\Administrator\\Desktop\\ttt")));
     }
 }

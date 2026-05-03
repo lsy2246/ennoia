@@ -119,6 +119,14 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/extensions/panels", get(extension_panels))
         .route("/api/extensions/commands", get(extension_commands))
         .route("/api/extensions/providers", get(extension_providers))
+        .route(
+            "/api/extensions/providers/{provider_kind}/{*method}",
+            post(extension_provider_invoke),
+        )
+        .route(
+            "/api/runtime/operations/{*operation}",
+            post(runtime_operation_invoke),
+        )
         .route("/api/extensions/behaviors", get(extension_behaviors))
         .route("/api/extensions/memories", get(extension_memories))
         .route("/api/extensions/hooks", get(extension_hooks))
@@ -147,7 +155,7 @@ pub fn build_router(state: AppState) -> Router {
             get(extension_ui_asset),
         )
         .route(
-            "/api/extensions/{extension_id}/rpc/{method}",
+            "/api/extensions/{extension_id}/rpc/{*method}",
             post(extension_rpc),
         )
         .route(
@@ -163,16 +171,6 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/behaviors/active", get(active_behavior))
         .route("/api/behavior/status", get(behavior_status))
         .route("/api/behavior/{*path}", any(behavior_api_proxy))
-        .route("/api/memory/workspace", get(memory_workspace))
-        .route("/api/memory/memories", get(memory_list))
-        .route("/api/memory/episodes", get(memory_episodes_list))
-        .route("/api/memory/remember", post(memory_remember))
-        .route("/api/memory/recall", post(memory_recall))
-        .route("/api/memory/review", post(memory_review))
-        .route(
-            "/api/memory/assemble-context",
-            post(memory_assemble_context),
-        )
         .route(
             "/api/extensions/{extension_id}/restart",
             post(extension_restart),
@@ -181,46 +179,7 @@ pub fn build_router(state: AppState) -> Router {
             "/api/extensions/attach/{extension_id}",
             delete(extension_detach),
         )
-        .route(
-            "/api/conversations",
-            get(conversations_list).post(conversations_create),
-        )
-        .route(
-            "/api/conversations/{conversation_id}",
-            get(conversation_detail).delete(conversation_delete),
-        )
-        .route(
-            "/api/conversations/{conversation_id}/stream",
-            get(conversation_stream),
-        )
-        .route(
-            "/api/conversations/{conversation_id}/messages",
-            get(conversation_messages).post(conversation_messages_create),
-        )
-        .route(
-            "/api/conversations/{conversation_id}/branches",
-            get(conversation_branches).post(conversation_branches_create),
-        )
-        .route(
-            "/api/conversations/{conversation_id}/branches/{branch_id}/switch",
-            post(conversation_branch_switch),
-        )
-        .route(
-            "/api/conversations/{conversation_id}/branches/{branch_id}",
-            put(conversation_branch_update).delete(conversation_branch_delete),
-        )
-        .route(
-            "/api/conversations/{conversation_id}/lanes",
-            get(conversation_lanes),
-        )
-        .route("/api/runs", post(runs_create))
-        .route("/api/runs/{run_id}", get(run_detail))
-        .route(
-            "/api/conversations/{conversation_id}/runs",
-            get(conversation_runs),
-        )
-        .route("/api/runs/{run_id}/tasks", get(run_tasks))
-        .route("/api/runs/{run_id}/artifacts", get(run_artifacts))
+        .route("/api/actions/{*action}", post(action_dispatch))
         .route("/api/agents", get(agents).post(agent_create))
         .route(
             "/api/agents/{agent_id}",
@@ -236,18 +195,10 @@ pub fn build_router(state: AppState) -> Router {
             get(model_endpoints).post(model_endpoint_create),
         )
         .route(
-            "/api/model-endpoints/discover-models",
-            post(model_endpoint_discover_models),
-        )
-        .route(
             "/api/model-endpoints/{model_endpoint_id}",
             get(model_endpoint_detail)
                 .put(model_endpoint_update)
                 .delete(model_endpoint_delete),
-        )
-        .route(
-            "/api/model-endpoints/{model_endpoint_id}/models",
-            get(model_endpoint_models),
         )
         .route("/api/schedule-actions", get(schedule_actions))
         .route("/api/schedules", get(schedules_list).post(schedule_create))
@@ -489,15 +440,6 @@ struct ExtensionEventsQuery {
 #[derive(Debug, Deserialize)]
 struct ExtensionAttachPayload {
     path: String,
-}
-
-#[derive(Debug, Serialize)]
-struct ModelEndpointModelsResponse {
-    model_endpoint_id: String,
-    source: String,
-    models: Vec<ennoia_kernel::ProviderModelDescriptor>,
-    manual_allowed: bool,
-    generation_options: Vec<ennoia_kernel::ProviderGenerationOption>,
 }
 
 async fn health() -> Json<HealthResponse> {

@@ -39,7 +39,6 @@
 - `GET /api/model-endpoints`
 - `POST /api/model-endpoints`
 - `GET /api/model-endpoints/{model_endpoint_id}`
-- `GET /api/model-endpoints/{model_endpoint_id}/models`
 - `PUT /api/model-endpoints/{model_endpoint_id}`
 - `DELETE /api/model-endpoints/{model_endpoint_id}`
 
@@ -68,7 +67,8 @@
 - `GET /api/extensions/{extension_id}/ui/module`
 - `GET /api/extensions/{extension_id}/themes/{theme_id}/stylesheet`
 - `GET /api/extensions/{extension_id}/logs`
-- `POST /api/extensions/{extension_id}/rpc/{method}`
+- `POST /api/extensions/{extension_id}/rpc/{*method}`
+- `POST /api/extensions/providers/{provider_kind}/{method}`
 - `PUT /api/extensions/{extension_id}/enabled`
 - `POST /api/extensions/{extension_id}/reload`
 - `POST /api/extensions/{extension_id}/restart`
@@ -82,52 +82,23 @@
 ## Action Runtime
 
 - `GET /api/actions`
+- `POST /api/actions/{action}`
 
 动作运行时返回系统动作键下挂载的规则列表。每条规则包含扩展、能力、阶段、优先级、结果收敛方式和条件。
 
-## Conversation
-
-- `GET /api/conversations`
-- `POST /api/conversations`
-- `GET /api/conversations/{conversation_id}`
-- `DELETE /api/conversations/{conversation_id}`
-- `GET /api/conversations/{conversation_id}/stream`
-- `GET /api/conversations/{conversation_id}/messages`
-- `POST /api/conversations/{conversation_id}/messages`
-- `GET /api/conversations/{conversation_id}/branches`
-- `POST /api/conversations/{conversation_id}/branches`
-- `POST /api/conversations/{conversation_id}/branches/{branch_id}/switch`
-- `GET /api/conversations/{conversation_id}/checkpoints`
-- `POST /api/conversations/{conversation_id}/checkpoints`
-- `GET /api/conversations/{conversation_id}/lanes`
-
-Conversation API 是稳定产品入口，实际由以下接口键解析到扩展 Worker：
+`POST /api/actions/{action}` 是产品动作统一入口。请求体默认直接传动作参数；宿主内部 Worker 也可以传 `{ params, context }` 包装体，把 `permission_actor` 等运行时上下文一起送进动作管道。前端不再直接调用 `/api/conversations/*`、`/api/memory/*`、`/api/runs/*` 这类核心包装 REST，而是提交动作键与参数，例如：
 
 - `conversation.list`
 - `conversation.create`
 - `conversation.get`
 - `conversation.delete`
+- `message.append`
 - `lane.list`
 - `branch.list`
 - `branch.create`
 - `branch.switch`
-- `checkpoint.list`
-- `checkpoint.create`
-- `message.list`
-- `message.append`
-
-## Memory
-
-- `GET /api/memory/workspace`
-- `GET /api/memory/memories`
-- `GET /api/memory/episodes`
-- `POST /api/memory/remember`
-- `POST /api/memory/recall`
-- `POST /api/memory/review`
-- `POST /api/memory/assemble-context`
-
-Memory API 是稳定产品入口，实际由以下接口键解析到扩展 Worker：
-
+- `branch.update`
+- `branch.delete`
 - `memory.workspace.get`
 - `memory.entry.list`
 - `memory.episode.list`
@@ -135,8 +106,21 @@ Memory API 是稳定产品入口，实际由以下接口键解析到扩展 Worke
 - `memory.query`
 - `memory.review`
 - `memory.build_context`
+- `run.create`
+- `run.get`
+- `run.list`
+- `task.list`
+- `artifact.list`
 
-Memory 扩展只维护自己的私有数据库，不再暴露兼容代理式 `memory/active/*` 路径，也不再镜像保存原始 conversation message 流。
+## Runtime Bridge
+
+- `POST /api/runtime/operations/{operation}`
+- `POST /api/extensions/providers/{provider_kind}/{method}`
+
+宿主只保留中立 runtime bridge，不再把 workflow / memory / conversation 的产品编排写死在核心里。
+
+- `runtime/operations/{operation}`：供扩展或宿主内部 Agent 通过统一入口执行 `fs.read`、`fs.write`、`command.exec`、`net.fetch`，并在入口处统一走 permission + sandbox。
+- `extensions/providers/{provider_kind}/{method}`：供扩展按 provider kind 调用上游 runtime；当 `context.permission_actor` 存在且 `method == generate` 时，宿主会在真正发起上游请求前统一执行 `provider.generate` 权限裁决。
 
 ### Conversation 约定
 
@@ -146,30 +130,7 @@ Memory 扩展只维护自己的私有数据库，不再暴露兼容代理式 `me
 
 ### 会话流
 
-`GET /api/conversations/{conversation_id}/stream` 返回 SSE：
-
-- 事件 `conversation.snapshot`：返回完整会话快照和当前审批列表
-- 事件 `conversation.error`：流读取失败时的错误说明
-
-会话页首屏允许做一次主动加载；后续消息、分支状态和审批状态应以会话流为准，不再依赖前端定时轮询。
-
-## Run / Task / Artifact
-
-- `POST /api/runs`
-- `GET /api/runs/{run_id}`
-- `GET /api/conversations/{conversation_id}/runs`
-- `GET /api/runs/{run_id}/tasks`
-- `GET /api/runs/{run_id}/artifacts`
-
-运行相关 API 是稳定产品入口，实际由以下接口键解析到扩展 Worker：
-
-- `run.create`
-- `run.get`
-- `run.list`
-- `task.list`
-- `artifact.list`
-
-这些稳定入口是否和会话自动联动，不由 workflow builtin 自己决定，而由系统动作管道与事件链承接。
+核心不再提供 `/api/conversations/{conversation_id}/stream` 聚合流。会话页首屏、分支切换、运行状态和审批状态统一由前端调用通用动作接口与权限接口自行组装快照。
 
 ## Schedule
 

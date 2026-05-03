@@ -3,12 +3,6 @@ use crate::app::{
     delete_agent_config, load_agent_document, load_agent_documents, normalize_agent_document,
     write_agent_document,
 };
-use crate::logs_store::{LogEntryWrite, LOGS_COMPONENT_PROXY};
-use crate::pipeline::{
-    invoke_provider_method, model_endpoint_runtime_request_config, resolve_provider_entry_path,
-};
-use ennoia_logs::RequestContext;
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentRecord {
     #[serde(flatten)]
@@ -191,108 +185,6 @@ pub(super) async fn model_endpoint_detail(
         })
 }
 
-pub(super) async fn model_endpoint_models(
-    State(state): State<AppState>,
-    Extension(request): Extension<RequestContext>,
-    Path(model_endpoint_id): Path<String>,
-) -> Result<Json<ModelEndpointModelsResponse>, ApiError> {
-    let model_endpoints = load_model_endpoint_configs(&state.runtime_paths)
-        .map_err(|error| ApiError::internal(error.to_string()))?;
-    let model_endpoint = model_endpoints
-        .into_iter()
-        .find(|item| item.id == model_endpoint_id)
-        .ok_or_else(|| {
-            ApiError::not_found(format!("model endpoint '{model_endpoint_id}' not found"))
-        })?;
-
-    model_endpoint_models_response(&state, &model_endpoint, Some(&request)).map(Json)
-}
-
-pub(super) async fn model_endpoint_discover_models(
-    State(state): State<AppState>,
-    Extension(request): Extension<RequestContext>,
-    Json(payload): Json<ModelEndpointConfig>,
-) -> Result<Json<ModelEndpointModelsResponse>, ApiError> {
-    model_endpoint_models_response(&state, &payload, Some(&request)).map(Json)
-}
-
-fn model_endpoint_models_response(
-    state: &AppState,
-    model_endpoint: &ModelEndpointConfig,
-    request: Option<&RequestContext>,
-) -> Result<ModelEndpointModelsResponse, ApiError> {
-    let contribution = resolve_provider_contribution(&state, &model_endpoint.kind)?;
-    let mut models = model_endpoint.available_models.clone();
-    let mut source = if models.is_empty() {
-        "manual".to_string()
-    } else {
-        "configured".to_string()
-    };
-    let mut manual_allowed = model_endpoint.model_discovery.manual_allowed;
-    let mut generation_options = Vec::new();
-
-    if let Some(contribution) = contribution {
-        manual_allowed = contribution.provider.manual_model;
-        generation_options = contribution.provider.generation_options.clone();
-        if contribution.provider.model_discovery
-            && contribution
-                .provider
-                .interfaces
-                .iter()
-                .any(|name| name == "models")
-        {
-            let entry = resolve_provider_entry_path(&contribution)
-                .map_err(|error| ApiError::internal(error.to_string()))?;
-            let request_payload = serde_json::json!({
-                    "method": "list_models",
-                    "params": {
-                        "model_endpoint": model_endpoint_runtime_request_config(&model_endpoint),
-                }
-            });
-            let response = invoke_provider_method(&entry, &request_payload, &model_endpoint)
-                .map_err(|error| {
-                    let error_message = error.clone();
-                    let trace = request.map(RequestContext::trace_context);
-                    let _ = state.logs.append_log_scoped(
-                        LogEntryWrite {
-                            event: "runtime.model_endpoint.discovery_failed".to_string(),
-                            level: "error".to_string(),
-                            component: LOGS_COMPONENT_PROXY.to_string(),
-                            source_kind: "interface".to_string(),
-                            source_id: Some(model_endpoint.id.clone()),
-                            message: "获取上游模型失败".to_string(),
-                            attributes: serde_json::json!({
-                                "error": error_message,
-                                "operation": "list_models",
-                                "model_endpoint_id": model_endpoint.id,
-                                "display_name": model_endpoint.display_name,
-                                "provider_kind": model_endpoint.kind,
-                                "base_url": model_endpoint.base_url,
-                                "api_key_env": model_endpoint.api_key_env,
-                            }),
-                            created_at: None,
-                        },
-                        trace.as_ref(),
-                    );
-                    ApiError::internal(error)
-                })?;
-            let extension_models = parse_provider_models_from_response(&response)?;
-            if !extension_models.is_empty() {
-                models = extension_models;
-                source = "extension".to_string();
-            }
-        }
-    }
-
-    Ok(ModelEndpointModelsResponse {
-        model_endpoint_id: model_endpoint.id.clone(),
-        source,
-        models,
-        manual_allowed,
-        generation_options,
-    })
-}
-
 pub(super) async fn model_endpoint_create(
     State(state): State<AppState>,
     Json(payload): Json<ModelEndpointConfig>,
@@ -412,30 +304,4 @@ fn resolve_provider_contribution(
             "接口类型 '{normalized}' 对应多个实现扩展，当前不允许创建模型接入。"
         ))),
     }
-}
-
-fn parse_provider_models_from_response(
-    response: &JsonValue,
-) -> Result<Vec<ennoia_kernel::ProviderModelDescriptor>, ApiError> {
-    let Some(items) = response
-        .get("result")
-        .and_then(|item| item.get("models"))
-        .and_then(JsonValue::as_array)
-    else {
-        return Ok(Vec::new());
-    };
-
-    items.iter().map(parse_provider_model_descriptor).collect()
-}
-
-fn parse_provider_model_descriptor(
-    value: &JsonValue,
-) -> Result<ennoia_kernel::ProviderModelDescriptor, ApiError> {
-    serde_json::from_value::<ennoia_kernel::ProviderModelDescriptor>(value.clone()).map_err(
-        |error| {
-            ApiError::internal(format!(
-                "provider returned invalid model descriptor: {error}"
-            ))
-        },
-    )
 }

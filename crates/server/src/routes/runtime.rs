@@ -1,6 +1,19 @@
 use super::*;
 use ennoia_kernel::apply_server_log_env_overrides;
 
+use crate::runtime_bridge::{execute_runtime_operation, RuntimeOperationRequest};
+
+pub(super) async fn runtime_operation_invoke(
+    State(state): State<AppState>,
+    Extension(request): Extension<RequestContext>,
+    Path(operation): Path<String>,
+    Json(payload): Json<RuntimeOperationRequest>,
+) -> ApiResult<JsonValue> {
+    execute_runtime_operation(&state, &request, &operation, payload)
+        .await
+        .map(|result| Json(result.content))
+}
+
 pub(super) async fn bootstrap_status(State(state): State<AppState>) -> Json<BootstrapState> {
     Json(
         read_server_config_from_disk(&state)

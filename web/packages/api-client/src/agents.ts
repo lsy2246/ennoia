@@ -1,4 +1,5 @@
 import { fetchJson } from "./core";
+import { invokeProviderMethod } from "./extensions";
 import type {
   AgentProfile,
   ModelEndpointConfig,
@@ -89,18 +90,18 @@ export async function deleteModelEndpoint(modelEndpointId: string) {
 }
 
 export async function getModelEndpointModels(modelEndpointId: string) {
-  const response = await fetchJson<ModelEndpointModelsResponse>(
-    `${MODEL_ENDPOINTS_API}/${modelEndpointId}/models`,
+  const modelEndpoint = await fetchJson<ModelEndpointConfig>(
+    `${MODEL_ENDPOINTS_API}/${modelEndpointId}`,
   );
-  return normalizeModelEndpointModelsResponse(response, modelEndpointId);
+  return discoverModelEndpointModels(modelEndpoint);
 }
 
 export async function discoverModelEndpointModels(payload: ModelEndpointConfig) {
-  const response = await fetchJson<ModelEndpointModelsResponse>(
-    `${MODEL_ENDPOINTS_API}/discover-models`,
+  const response = await invokeProviderMethod<ModelEndpointModelsResponse>(
+    payload.kind,
+    "list_models",
     {
-      method: "POST",
-      body: JSON.stringify(payload),
+      model_endpoint: payload,
     },
   );
   return normalizeModelEndpointModelsResponse(response, payload.id);

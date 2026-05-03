@@ -1,4 +1,4 @@
-import { fetchJson } from "./core";
+import { dispatchAction } from "./actions";
 import type { ExecutionRun, ExecutionStep, RunOutput } from "./types";
 
 export type WorkflowStageEvent = {
@@ -50,5 +50,5 @@ export type WorkflowRunDetail = {
 };
 
 export async function getWorkflowRunDetail(runId: string) {
-  return fetchJson<WorkflowRunDetail>(`/api/runs/${runId}`);
+  return dispatchAction<WorkflowRunDetail>("run.get", { run_id: runId });
 }

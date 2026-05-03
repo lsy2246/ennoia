@@ -6,7 +6,6 @@ use ennoia_kernel::{
 use std::time::Instant;
 
 use super::*;
-use crate::agent_permissions::PermissionApprovalsQuery;
 use crate::app::record_trace_span;
 use crate::event_bus::HookEventWrite;
 use crate::logs_store::{
@@ -50,17 +49,6 @@ struct PermissionActorContext {
     message_id: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
-struct ConversationStreamSnapshotPayload {
-    detail: JsonValue,
-    approvals: Vec<ennoia_kernel::PermissionApprovalRecord>,
-}
-
-#[derive(Debug, Serialize)]
-struct ConversationStreamErrorPayload {
-    message: String,
-}
-
 pub(super) async fn extension_actions(
     State(state): State<AppState>,
 ) -> Json<Vec<RegisteredActionRuleContribution>> {
@@ -77,368 +65,24 @@ pub(super) async fn actions_status(State(state): State<AppState>) -> Json<Vec<Ac
     Json(list_action_status(&state))
 }
 
-pub(super) async fn conversations_list(
+pub(super) async fn action_dispatch(
     State(state): State<AppState>,
     Extension(request): Extension<RequestContext>,
-) -> ApiResult<JsonValue> {
-    dispatch_action_json(&state, &request, "conversation.list", JsonValue::Null).await
-}
-
-pub(super) async fn conversations_create(
-    State(state): State<AppState>,
-    Extension(request): Extension<RequestContext>,
+    Path(action): Path<String>,
     Json(payload): Json<JsonValue>,
 ) -> ApiResult<JsonValue> {
-    dispatch_action_json(&state, &request, "conversation.create", payload).await
+    let (params, context) = parse_action_dispatch_payload(payload);
+    dispatch_action_json_with_context(&state, &request, &action, params, context).await
 }
 
-pub(super) async fn conversation_detail(
-    State(state): State<AppState>,
-    Extension(request): Extension<RequestContext>,
-    Path(conversation_id): Path<String>,
-) -> ApiResult<JsonValue> {
-    dispatch_action_json(
-        &state,
-        &request,
-        "conversation.get",
-        serde_json::json!({ "conversation_id": conversation_id }),
-    )
-    .await
-}
-
-pub(super) async fn conversation_stream(
-    State(state): State<AppState>,
-    Extension(request): Extension<RequestContext>,
-    Path(conversation_id): Path<String>,
-) -> Result<Sse<impl futures_core::Stream<Item = Result<Event, std::convert::Infallible>>>, ApiError>
-{
-    let initial_snapshot =
-        load_conversation_stream_snapshot(&state, &request, &conversation_id).await?;
-    let initial_data = serde_json::to_string(&initial_snapshot)
-        .unwrap_or_else(|_| "{\"detail\":{},\"approvals\":[]}".to_string());
-    let stream_state = state.clone();
-    let stream_request = request.clone();
-    let stream_conversation_id = conversation_id.clone();
-
-    let stream = async_stream::stream! {
-        yield Ok(Event::default().event("conversation.snapshot").data(initial_data.clone()));
-
-        let mut last_event_seq = stream_state
-            .event_bus
-            .latest_conversation_seq(&stream_conversation_id)
-            .unwrap_or(0);
-        let mut last_approval_seq = stream_state
-            .agent_permissions
-            .latest_conversation_approval_seq(&stream_conversation_id)
-            .unwrap_or(0);
-        let mut interval = tokio::time::interval(Duration::from_millis(500));
-        loop {
-            interval.tick().await;
-
-            let next_event_seq = match stream_state
-                .event_bus
-                .latest_conversation_seq(&stream_conversation_id)
-            {
-                Ok(value) => value,
-                Err(error) => {
-                    yield Ok(conversation_stream_error_event(error.to_string()));
-                    continue;
-                }
-            };
-            let next_approval_seq = match stream_state
-                .agent_permissions
-                .latest_conversation_approval_seq(&stream_conversation_id)
-            {
-                Ok(value) => value,
-                Err(error) => {
-                    yield Ok(conversation_stream_error_event(error.to_string()));
-                    continue;
-                }
-            };
-
-            if next_event_seq <= last_event_seq && next_approval_seq <= last_approval_seq {
-                continue;
-            }
-
-            match load_conversation_stream_snapshot(
-                &stream_state,
-                &stream_request,
-                &stream_conversation_id,
-            )
-            .await
-            {
-                Ok(snapshot) => {
-                    last_event_seq = next_event_seq.max(last_event_seq);
-                    last_approval_seq = next_approval_seq.max(last_approval_seq);
-                    let data = serde_json::to_string(&snapshot).unwrap_or_else(|_| {
-                        "{\"detail\":{},\"approvals\":[]}".to_string()
-                    });
-                    yield Ok(Event::default().event("conversation.snapshot").data(data));
-                }
-                Err(error) => {
-                    yield Ok(conversation_stream_error_event(error.to_string()));
-                }
-            }
-        }
-    };
-
-    Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
-}
-
-pub(super) async fn conversation_delete(
-    State(state): State<AppState>,
-    Extension(request): Extension<RequestContext>,
-    Path(conversation_id): Path<String>,
-) -> ApiResult<JsonValue> {
-    dispatch_action_json(
-        &state,
-        &request,
-        "conversation.delete",
-        serde_json::json!({ "conversation_id": conversation_id }),
-    )
-    .await
-}
-
-pub(super) async fn conversation_messages(
-    State(state): State<AppState>,
-    Extension(request): Extension<RequestContext>,
-    Path(conversation_id): Path<String>,
-) -> ApiResult<JsonValue> {
-    dispatch_action_json(
-        &state,
-        &request,
-        "message.list",
-        serde_json::json!({ "conversation_id": conversation_id }),
-    )
-    .await
-}
-
-pub(super) async fn conversation_branches(
-    State(state): State<AppState>,
-    Extension(request): Extension<RequestContext>,
-    Path(conversation_id): Path<String>,
-) -> ApiResult<JsonValue> {
-    dispatch_action_json(
-        &state,
-        &request,
-        "branch.list",
-        serde_json::json!({ "conversation_id": conversation_id }),
-    )
-    .await
-}
-
-pub(super) async fn conversation_branches_create(
-    State(state): State<AppState>,
-    Extension(request): Extension<RequestContext>,
-    Path(conversation_id): Path<String>,
-    Json(payload): Json<JsonValue>,
-) -> ApiResult<JsonValue> {
-    dispatch_action_json(
-        &state,
-        &request,
-        "branch.create",
-        serde_json::json!({
-            "conversation_id": conversation_id,
-            "from_branch_id": payload.get("from_branch_id").cloned(),
-            "source_message_id": payload.get("source_message_id").cloned(),
-            "name": payload.get("name").cloned(),
-            "mode": payload.get("mode").cloned(),
-            "activate": payload.get("activate").cloned(),
-        }),
-    )
-    .await
-}
-
-pub(super) async fn conversation_branch_switch(
-    State(state): State<AppState>,
-    Extension(request): Extension<RequestContext>,
-    Path((conversation_id, branch_id)): Path<(String, String)>,
-) -> ApiResult<JsonValue> {
-    dispatch_action_json(
-        &state,
-        &request,
-        "branch.switch",
-        serde_json::json!({
-            "conversation_id": conversation_id,
-            "branch_id": branch_id,
-        }),
-    )
-    .await
-}
-
-pub(super) async fn conversation_branch_update(
-    State(state): State<AppState>,
-    Extension(request): Extension<RequestContext>,
-    Path((conversation_id, branch_id)): Path<(String, String)>,
-    Json(payload): Json<JsonValue>,
-) -> ApiResult<JsonValue> {
-    dispatch_action_json(
-        &state,
-        &request,
-        "branch.update",
-        serde_json::json!({
-            "conversation_id": conversation_id,
-            "branch_id": branch_id,
-            "name": payload.get("name").cloned(),
-        }),
-    )
-    .await
-}
-
-pub(super) async fn conversation_branch_delete(
-    State(state): State<AppState>,
-    Extension(request): Extension<RequestContext>,
-    Path((conversation_id, branch_id)): Path<(String, String)>,
-    Json(payload): Json<JsonValue>,
-) -> ApiResult<JsonValue> {
-    dispatch_action_json(
-        &state,
-        &request,
-        "branch.delete",
-        serde_json::json!({
-            "conversation_id": conversation_id,
-            "branch_id": branch_id,
-            "mode": payload.get("mode").cloned(),
-        }),
-    )
-    .await
-}
-
-pub(super) async fn conversation_messages_create(
-    State(state): State<AppState>,
-    Extension(request): Extension<RequestContext>,
-    Path(conversation_id): Path<String>,
-    Json(payload): Json<JsonValue>,
-) -> ApiResult<JsonValue> {
-    dispatch_action_json(
-        &state,
-        &request,
-        "message.append",
-        serde_json::json!({
-            "conversation_id": conversation_id,
-            "message": normalize_conversation_message_payload(payload, "operator", "operator")
-        }),
-    )
-    .await
-}
-
-pub(super) async fn conversation_lanes(
-    State(state): State<AppState>,
-    Extension(request): Extension<RequestContext>,
-    Path(conversation_id): Path<String>,
-) -> ApiResult<JsonValue> {
-    dispatch_action_json(
-        &state,
-        &request,
-        "lane.list",
-        serde_json::json!({ "conversation_id": conversation_id }),
-    )
-    .await
-}
-
-pub(super) async fn runs_create(
-    State(state): State<AppState>,
-    Extension(request): Extension<RequestContext>,
-    Json(payload): Json<JsonValue>,
-) -> ApiResult<JsonValue> {
-    dispatch_action_json(&state, &request, "run.create", payload).await
-}
-
-pub(super) async fn run_detail(
-    State(state): State<AppState>,
-    Extension(request): Extension<RequestContext>,
-    Path(run_id): Path<String>,
-) -> ApiResult<JsonValue> {
-    dispatch_action_json(
-        &state,
-        &request,
-        "run.get",
-        serde_json::json!({ "run_id": run_id }),
-    )
-    .await
-}
-
-pub(super) async fn conversation_runs(
-    State(state): State<AppState>,
-    Extension(request): Extension<RequestContext>,
-    Path(conversation_id): Path<String>,
-) -> ApiResult<JsonValue> {
-    dispatch_action_json(
-        &state,
-        &request,
-        "run.list",
-        serde_json::json!({ "conversation_id": conversation_id }),
-    )
-    .await
-}
-
-pub(super) async fn run_tasks(
-    State(state): State<AppState>,
-    Extension(request): Extension<RequestContext>,
-    Path(run_id): Path<String>,
-) -> ApiResult<JsonValue> {
-    dispatch_action_json(
-        &state,
-        &request,
-        "task.list",
-        serde_json::json!({ "run_id": run_id }),
-    )
-    .await
-}
-
-pub(super) async fn run_artifacts(
-    State(state): State<AppState>,
-    Extension(request): Extension<RequestContext>,
-    Path(run_id): Path<String>,
-) -> ApiResult<JsonValue> {
-    dispatch_action_json(
-        &state,
-        &request,
-        "artifact.list",
-        serde_json::json!({ "run_id": run_id }),
-    )
-    .await
-}
-
-fn normalize_conversation_message_payload(
-    payload: JsonValue,
-    default_role: &str,
-    default_sender: &str,
-) -> JsonValue {
-    let mut message = match payload {
-        JsonValue::Object(map) => map,
-        _ => serde_json::Map::new(),
-    };
-    let role_missing = message
-        .get("role")
-        .and_then(JsonValue::as_str)
-        .is_none_or(|item| item.trim().is_empty());
-    if role_missing {
-        message.insert(
-            "role".to_string(),
-            JsonValue::String(default_role.to_string()),
-        );
-    }
-    let sender_missing = message
-        .get("sender")
-        .and_then(JsonValue::as_str)
-        .is_none_or(|item| item.trim().is_empty());
-    if sender_missing {
-        message.insert(
-            "sender".to_string(),
-            JsonValue::String(default_sender.to_string()),
-        );
-    }
-    JsonValue::Object(message)
-}
-
-pub(super) async fn dispatch_action_json(
+pub(super) async fn dispatch_action_json_with_context(
     state: &AppState,
     request: &RequestContext,
     key: &str,
     params: JsonValue,
+    context: JsonValue,
 ) -> ApiResult<JsonValue> {
-    dispatch_action_value(state, request, key, params)
+    dispatch_action_value_with_context(state, request, key, params, context)
         .await
         .map(Json)
 }
@@ -452,114 +96,6 @@ pub(crate) async fn dispatch_action_value(
     dispatch_action_value_with_context(state, request, key, params, JsonValue::Null).await
 }
 
-async fn load_conversation_stream_snapshot(
-    state: &AppState,
-    request: &RequestContext,
-    conversation_id: &str,
-) -> Result<ConversationStreamSnapshotPayload, ApiError> {
-    let detail = load_conversation_detail_value(state, request, conversation_id).await?;
-    let approvals = state
-        .agent_permissions
-        .list_approvals(&PermissionApprovalsQuery {
-            agent_id: None,
-            conversation_id: Some(conversation_id.to_string()),
-            status: None,
-            limit: 80,
-        })
-        .map_err(|error| scoped(ApiError::internal(error.to_string()), request))?;
-
-    Ok(ConversationStreamSnapshotPayload { detail, approvals })
-}
-
-async fn load_conversation_detail_value(
-    state: &AppState,
-    request: &RequestContext,
-    conversation_id: &str,
-) -> Result<JsonValue, ApiError> {
-    let detail = dispatch_action_value(
-        state,
-        request,
-        "conversation.get",
-        serde_json::json!({ "conversation_id": conversation_id }),
-    )
-    .await?;
-    let conversation = detail
-        .get("conversation")
-        .cloned()
-        .unwrap_or_else(|| detail.clone());
-    let lanes = match json_array_field(&detail, "lanes") {
-        Some(value) => value,
-        None => {
-            dispatch_action_value(
-                state,
-                request,
-                "lane.list",
-                serde_json::json!({ "conversation_id": conversation_id }),
-            )
-            .await?
-        }
-    };
-    let branches = match json_array_field(&detail, "branches") {
-        Some(value) => value,
-        None => {
-            dispatch_action_value(
-                state,
-                request,
-                "branch.list",
-                serde_json::json!({ "conversation_id": conversation_id }),
-            )
-            .await?
-        }
-    };
-    let messages = match json_array_field(&detail, "messages") {
-        Some(value) => value,
-        None => {
-            dispatch_action_value(
-                state,
-                request,
-                "message.list",
-                serde_json::json!({ "conversation_id": conversation_id }),
-            )
-            .await?
-        }
-    };
-    let runs = match json_array_field(&detail, "runs") {
-        Some(value) => value,
-        None => dispatch_action_value(
-            state,
-            request,
-            "run.list",
-            serde_json::json!({
-                "conversation_id": conversation_id,
-                "limit": 24,
-            }),
-        )
-        .await
-        .unwrap_or_else(|_| JsonValue::Array(Vec::new())),
-    };
-
-    Ok(serde_json::json!({
-        "conversation": conversation,
-        "lanes": lanes,
-        "branches": branches,
-        "messages": messages,
-        "runs": runs,
-        "tasks": [],
-        "outputs": [],
-    }))
-}
-
-fn json_array_field(value: &JsonValue, key: &str) -> Option<JsonValue> {
-    value.get(key).filter(|item| item.is_array()).cloned()
-}
-
-fn conversation_stream_error_event(message: String) -> Event {
-    Event::default().event("conversation.error").data(
-        serde_json::to_string(&ConversationStreamErrorPayload { message })
-            .unwrap_or_else(|_| "{\"message\":\"conversation stream error\"}".to_string()),
-    )
-}
-
 pub(crate) async fn dispatch_action_value_with_context(
     state: &AppState,
     request: &RequestContext,
@@ -568,6 +104,14 @@ pub(crate) async fn dispatch_action_value_with_context(
     context: JsonValue,
 ) -> Result<JsonValue, ApiError> {
     dispatch_action_pipeline(state, request, key, params, context).await
+}
+
+fn parse_action_dispatch_payload(payload: JsonValue) -> (JsonValue, JsonValue) {
+    if let Some(params) = payload.get("params") {
+        let context = payload.get("context").cloned().unwrap_or(JsonValue::Null);
+        return (params.clone(), context);
+    }
+    (payload, JsonValue::Null)
 }
 
 pub(crate) async fn dispatch_action_rule_execute(

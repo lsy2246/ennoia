@@ -1,7 +1,7 @@
 use super::*;
 use ennoia_kernel::{
     ExtensionRpcRequest, ExtensionRpcResponse, ExtensionSettingFieldType, ExtensionSettingValue,
-    HookDispatchResponse,
+    HookDispatchResponse, ModelEndpointConfig,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -10,6 +10,9 @@ use std::time::Instant;
 
 use crate::app::record_trace_span;
 use crate::logs_store::{LogEntryWrite, LogTraceWrite, LOGS_COMPONENT_EXTENSION_HOST};
+use crate::runtime_bridge::{
+    authorize_provider_generate, invoke_provider_method, resolve_provider_entry_path,
+};
 
 #[allow(dead_code)]
 const HOOK_DISPATCH_ATTEMPTS: usize = 20;
@@ -27,6 +30,18 @@ pub(crate) struct HookDispatchOutcome {
 struct ExtensionSettingsFile {
     #[serde(default)]
     values: BTreeMap<String, ExtensionSettingValue>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct ProviderPermissionActorContext {
+    agent_id: String,
+    kind: String,
+    #[serde(default)]
+    conversation_id: Option<String>,
+    #[serde(default)]
+    run_id: Option<String>,
+    #[serde(default)]
+    message_id: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -533,6 +548,109 @@ pub(super) async fn extension_rpc(
             scoped(ApiError::internal(error.to_string()), &request)
         })
 }
+
+pub(super) async fn extension_provider_invoke(
+    State(state): State<AppState>,
+    Extension(request): Extension<RequestContext>,
+    Path((provider_kind, method)): Path<(String, String)>,
+    Json(payload): Json<ExtensionRpcRequest>,
+) -> ApiResult<JsonValue> {
+    let contribution = resolve_provider_contribution(&state, &provider_kind, &method).ok_or_else(
+        || {
+            scoped(
+                ApiError::not_found(format!(
+                    "provider kind '{provider_kind}' has no runtime implementation for method '{method}'",
+                )),
+                &request,
+            )
+        },
+    )?;
+    let model_endpoint: ModelEndpointConfig = serde_json::from_value(
+        payload
+            .params
+            .get("model_endpoint")
+            .cloned()
+            .unwrap_or(JsonValue::Null),
+    )
+    .map_err(|error| {
+        scoped(
+            ApiError::bad_request(format!(
+                "provider invoke requires params.model_endpoint: {error}"
+            )),
+            &request,
+        )
+    })?;
+    let permission_actor = provider_permission_actor_from_context(&payload.context);
+    let grant_id = if method == "generate" {
+        permission_actor
+            .as_ref()
+            .and_then(|actor| {
+                Some(authorize_provider_generate(
+                    &state,
+                    &request,
+                    &actor.agent_id,
+                    &contribution,
+                    &model_endpoint,
+                    actor.conversation_id.as_deref()?,
+                    actor.run_id.as_deref()?,
+                    actor.message_id.as_deref(),
+                    &actor.kind,
+                ))
+            })
+            .transpose()?
+            .flatten()
+    } else {
+        None
+    };
+    if let Some(grant_id) = grant_id.as_deref() {
+        state
+            .agent_permissions
+            .consume_grant(grant_id)
+            .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?;
+    }
+    let entry = resolve_provider_entry_path(&contribution)
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?;
+    let response = invoke_provider_method(
+        &entry,
+        &serde_json::json!({
+            "method": method,
+            "params": payload.params,
+        }),
+        &model_endpoint,
+    )
+    .await
+    .map_err(|error| {
+        let _ = state.logs.append_log_scoped(
+            LogEntryWrite {
+                event: "runtime.provider.invoke_failed".to_string(),
+                level: "error".to_string(),
+                component: LOGS_COMPONENT_EXTENSION_HOST.to_string(),
+                source_kind: "provider".to_string(),
+                source_id: Some(provider_kind.clone()),
+                message: "provider runtime invoke failed".to_string(),
+                attributes: serde_json::json!({
+                    "method": method,
+                    "error": error,
+                    "model_endpoint_id": model_endpoint.id,
+                }),
+                created_at: None,
+            },
+            Some(&request.trace_context()),
+        );
+        scoped(ApiError::internal(error), &request)
+    })?;
+
+    Ok(Json(response.get("result").cloned().unwrap_or(response)))
+}
+
+fn provider_permission_actor_from_context(
+    context: &JsonValue,
+) -> Option<ProviderPermissionActorContext> {
+    serde_json::from_value::<ProviderPermissionActorContext>(
+        context.get("permission_actor")?.clone(),
+    )
+    .ok()
+}
 pub(super) async fn extension_reload(
     State(state): State<AppState>,
     Extension(request): Extension<RequestContext>,
@@ -771,4 +889,36 @@ fn encode_url_query_component(value: &str) -> String {
             _ => format!("%{byte:02X}").chars().collect::<Vec<_>>(),
         })
         .collect()
+}
+
+fn resolve_provider_contribution(
+    state: &AppState,
+    provider_kind: &str,
+    method: &str,
+) -> Option<ennoia_extension_host::RegisteredProviderContribution> {
+    let required_interface = match method.trim() {
+        "list_models" => Some("models"),
+        "generate" => Some("generate"),
+        _ => None,
+    };
+    let normalized_kind = provider_kind.trim();
+    let mut matches = state
+        .extensions
+        .snapshot()
+        .providers
+        .into_iter()
+        .filter(|item| item.provider.kind == normalized_kind || item.provider.id == normalized_kind)
+        .filter(|item| {
+            required_interface.is_none_or(|required| {
+                item.provider
+                    .interfaces
+                    .iter()
+                    .any(|entry| entry == required)
+            })
+        })
+        .collect::<Vec<_>>();
+    if matches.len() == 1 {
+        return matches.pop();
+    }
+    None
 }

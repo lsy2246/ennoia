@@ -10,9 +10,9 @@
 - 技能：Agent 可引用的工具与用法定义，只保留最小目录元信息与文档入口，和扩展严格分离。
 - API 模型接入：Agent 绑定的具体模型访问实例。
 - 扩展：扩展包，manifest 统一声明 `resource_types`、`capabilities`、`surfaces`、`entrypoints`、`settings`、`locales`、`themes`、`commands`、`subscriptions`；如需进入会话目录，再额外声明 `conversation` 规则。宿主把扩展/技能目录整理成结构化 `context` 交给 model provider 渲染，不再把它们直接硬拼进自然语言 prompt，也不自动注入文档正文。
-- 会话：系统保留稳定 `/api/conversations` 入口，实际读写由 `conversation.*`、`message.*`、`lane.*` 等动作规则路由到内置 `conversation` 扩展。
+- 会话：前端通过通用 `/api/actions/{action}` 分发 `conversation.*`、`message.*`、`lane.*` 等动作，底层由内置 `conversation` 扩展实现。
 - 记忆：以内置 `memory` 扩展形式提供记忆、上下文、审查和图谱能力；不再镜像保存原始会话消息。
-- 编排：以内置 `workflow` 扩展承载 run、task、artifact；会话事实进入编排、编排结果回写会话与记忆，由系统动作管道与事件链承接。
+- 编排：以内置 `workflow` 扩展承载 run、task、artifact，以及会话触发、审批恢复、结果回写等产品编排；核心只保留动作、事件、provider 和 runtime operation 这些中立桥接能力。
 - 日志：聚合前端日志和扩展运行事件。
 - 设置：通过表单直接编辑 `config/server.toml`、`config/profile.toml` 和 `config/preferences/*.toml`。
 
@@ -68,7 +68,7 @@ bun install
 启动开发环境：
 
 ```bash
-cargo run -p ennoia-cli -- dev
+npm run dev
 ```
 
 初始化运行目录：
