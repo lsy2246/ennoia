@@ -36,6 +36,31 @@ type ChatGroup =
       timestamp: string;
     };
 
+type ChatMessageGroup = Extract<ChatGroup, { anchor: ConversationMessageEntry }>;
+type ChatStandaloneGroup = Extract<ChatGroup, { anchor: null }>;
+
+type ChatTurn = {
+  id: string;
+  operatorGroup: ChatMessageGroup;
+  processGroups: ChatGroup[];
+  finalReplyGroup?: ChatMessageGroup;
+  timestamp: string;
+};
+
+type ChatStreamBlock =
+  | {
+      kind: "turn";
+      id: string;
+      timestamp: string;
+      turn: ChatTurn;
+    }
+  | {
+      kind: "standalone";
+      id: string;
+      timestamp: string;
+      group: ChatStandaloneGroup;
+    };
+
 function resolveSenderLabel(params: {
   role: ChatEntryViewModel["role"];
   sender?: string;
@@ -103,7 +128,8 @@ function accessoryRelatedMessageId(entry: ChatAccessoryEntry) {
 
 function buildChatGroups(entries: ChatEntryViewModel[], _runs: ExecutionRun[]) {
   const groups: ChatGroup[] = [];
-  const groupsByMessageId = new Map<string, Extract<ChatGroup, { anchor: ConversationMessageEntry }>>();
+  const groupsByMessageId = new Map<string, ChatMessageGroup>();
+  const toolGroupsByOperationKey = new Map<string, ChatStandaloneGroup>();
   let order = 0;
 
   for (const entry of entries) {
@@ -112,7 +138,7 @@ function buildChatGroups(entries: ChatEntryViewModel[], _runs: ExecutionRun[]) {
     }
 
     if (entry.kind === "message") {
-      const current = {
+      const current: ChatMessageGroup = {
         id: `group:${entry.id}`,
         order: order++,
         anchor: entry,
@@ -125,7 +151,7 @@ function buildChatGroups(entries: ChatEntryViewModel[], _runs: ExecutionRun[]) {
       continue;
     }
 
-    if (entry.kind === "status" || entry.kind === "tool_result") {
+    if (entry.kind === "status") {
       groups.push({
         id: `group:standalone:${entry.id}`,
         order: order++,
@@ -134,6 +160,27 @@ function buildChatGroups(entries: ChatEntryViewModel[], _runs: ExecutionRun[]) {
         relatedRuns: [],
         timestamp: entry.createdAt,
       });
+      continue;
+    }
+
+    if (entry.kind === "tool_result") {
+      const operationKey = buildToolOperationKey(entry);
+      const existingGroup = toolGroupsByOperationKey.get(operationKey);
+      if (existingGroup) {
+        existingGroup.accessories.push(entry);
+        continue;
+      }
+
+      const current: ChatStandaloneGroup = {
+        id: `group:tool:${operationKey}`,
+        order: order++,
+        anchor: null,
+        accessories: [entry],
+        relatedRuns: [],
+        timestamp: entry.createdAt,
+      } satisfies Extract<ChatGroup, { anchor: null }>;
+      groups.push(current);
+      toolGroupsByOperationKey.set(operationKey, current);
       continue;
     }
 
@@ -160,6 +207,68 @@ function buildChatGroups(entries: ChatEntryViewModel[], _runs: ExecutionRun[]) {
     }
     return left.order - right.order;
   });
+}
+
+function buildChatTurns(groups: ChatGroup[]) {
+  const blocks: ChatStreamBlock[] = [];
+  let currentOperatorGroup: Extract<ChatGroup, { anchor: ConversationMessageEntry }> | null = null;
+  let trailingGroups: ChatGroup[] = [];
+
+  const pushCurrentTurn = () => {
+    if (!currentOperatorGroup) {
+      return;
+    }
+    let finalReplyGroup: Extract<ChatGroup, { anchor: ConversationMessageEntry }> | undefined;
+    for (let index = trailingGroups.length - 1; index >= 0; index -= 1) {
+      const candidate = trailingGroups[index];
+      if (candidate.anchor?.role === "agent") {
+        finalReplyGroup = candidate as ChatMessageGroup;
+        break;
+      }
+    }
+    const processGroups = finalReplyGroup
+      ? trailingGroups.filter((group) => group.id !== finalReplyGroup?.id)
+      : [...trailingGroups];
+    const turn: ChatTurn = {
+      id: `turn:${currentOperatorGroup.anchor.messageId}`,
+      operatorGroup: currentOperatorGroup,
+      processGroups,
+      finalReplyGroup,
+      timestamp: currentOperatorGroup.timestamp,
+    };
+    blocks.push({
+      kind: "turn",
+      id: turn.id,
+      timestamp: turn.timestamp,
+      turn,
+    });
+    currentOperatorGroup = null;
+    trailingGroups = [];
+  };
+
+  for (const group of groups) {
+    if (group.anchor?.role === "operator") {
+      pushCurrentTurn();
+      currentOperatorGroup = group as ChatMessageGroup;
+      trailingGroups = [];
+      continue;
+    }
+
+    if (currentOperatorGroup) {
+      trailingGroups.push(group);
+      continue;
+    }
+
+        blocks.push({
+          kind: "standalone",
+          id: `standalone:${group.id}`,
+          timestamp: group.timestamp,
+          group: group as ChatStandaloneGroup,
+        });
+  }
+
+  pushCurrentTurn();
+  return blocks;
 }
 
 function TypingGlyph() {
@@ -322,6 +431,76 @@ function collapseSupersededAccessories(accessories: ChatAccessoryEntry[]) {
   return next.reverse();
 }
 
+function collectGroupEntries(group: ChatGroup) {
+  const entries: ChatEntryViewModel[] = [];
+  if (group.anchor) {
+    entries.push(group.anchor);
+  }
+  entries.push(...group.accessories);
+  return entries;
+}
+
+function resolveTurnAgentSender(turn: ChatTurn) {
+  const finalReplySender = turn.finalReplyGroup?.anchor.sender?.trim();
+  if (finalReplySender) {
+    return finalReplySender;
+  }
+
+  for (let index = turn.processGroups.length - 1; index >= 0; index -= 1) {
+    const group = turn.processGroups[index];
+    const anchorSender = group.anchor?.sender?.trim();
+    if (group.anchor?.role === "agent" && anchorSender) {
+      return anchorSender;
+    }
+    for (let accessoryIndex = group.accessories.length - 1; accessoryIndex >= 0; accessoryIndex -= 1) {
+      const accessory = group.accessories[accessoryIndex];
+      if (accessory.kind === "tool_result" && accessory.actorSender?.trim()) {
+        return accessory.actorSender.trim();
+      }
+    }
+  }
+
+  return undefined;
+}
+
+function summarizeProcess(groups: ChatGroup[]) {
+  let stepCount = 0;
+  let toolCallCount = 0;
+  let approvalCount = 0;
+  let thinkingCount = 0;
+  let statusCount = 0;
+  const toolOperationKeys = new Set<string>();
+
+  for (const group of groups) {
+    for (const entry of collectGroupEntries(group)) {
+      stepCount += 1;
+      if (entry.kind === "tool_result") {
+        const operationKey = buildToolOperationKey(entry);
+        if (!toolOperationKeys.has(operationKey)) {
+          toolOperationKeys.add(operationKey);
+          toolCallCount += 1;
+        }
+        const approvalState = readToolApprovalState(entry);
+        if (approvalState.decision === "ask" || approvalState.approvalId) {
+          approvalCount += 1;
+        }
+      }
+      if (entry.kind === "status") {
+        statusCount += 1;
+        thinkingCount += 1;
+      }
+    }
+  }
+
+  return {
+    stepCount,
+    toolCallCount,
+    approvalCount,
+    thinkingCount,
+    statusCount,
+  };
+}
+
 function toolLabel(toolName: string | undefined, t: (key: string, fallback: string) => string) {
   switch (toolName) {
     case "fs.read":
@@ -446,6 +625,16 @@ function formatToolResultBody(result: unknown) {
   } catch {
     return String(result ?? "");
   }
+}
+
+function formatDurationLabel(startedAt: string, endedAt?: string) {
+  const start = Date.parse(startedAt);
+  const end = endedAt ? Date.parse(endedAt) : Number.NaN;
+  if (Number.isNaN(start) || Number.isNaN(end) || end <= start) {
+    return "";
+  }
+  const seconds = Math.max(1, Math.round((end - start) / 1000));
+  return `${seconds} 秒`;
 }
 
 function renderToolResultBody(
@@ -589,22 +778,12 @@ function ToolResultBubble({
   t: (key: string, fallback: string) => string;
 }) {
   const absoluteAt = formatAbsoluteDateTime(entry.createdAt);
-  const actorSender = entry.actorSender?.trim();
-  const actorLabel = actorSender
-    ? resolveSenderLabel({
-        role: "agent",
-        sender: actorSender,
-        agents,
-        t,
-      })
-    : "";
   const toolPresentation = resolveToolResultPresentation(entry, approvalsById, t);
 
   return (
     <article className="chat-unit chat-unit--agent chat-unit--tool-call">
       <div className="chat-unit__body">
         <div className="chat-unit__meta">
-          {actorLabel ? <strong className="chat-unit__sender">{actorLabel}</strong> : null}
           <span className="chat-unit__time">{absoluteAt}</span>
         </div>
         <details className="message-accessory message-accessory--tool">
@@ -739,6 +918,7 @@ function MessageGroup({
   onEditAndResend,
   onRetry,
   onRemove,
+  showActions = true,
 }: {
   group: Extract<ChatGroup, { anchor: ConversationMessageEntry }>;
   agents: AgentProfile[];
@@ -752,6 +932,7 @@ function MessageGroup({
   onEditAndResend: (messageId: string) => void;
   onRetry: (id: string) => void;
   onRemove: (id: string) => void;
+  showActions?: boolean;
 }) {
   const { anchor } = group;
   const isOperator = anchor.role === "operator";
@@ -882,7 +1063,7 @@ function MessageGroup({
         ) : null}
 
         <div className="chat-unit__footer">
-          {anchor.source === "remote" ? (
+          {anchor.source === "remote" && showActions ? (
             <div className="message-actions message-actions--inline">
               <button
                 type="button"
@@ -993,6 +1174,194 @@ function StandaloneGroup({
   );
 }
 
+function ProcessSummary({
+  turn,
+  agents,
+  t,
+}: {
+  turn: ChatTurn;
+  agents: AgentProfile[];
+  t: (key: string, fallback: string) => string;
+}) {
+  const summary = summarizeProcess(turn.processGroups);
+  const agentLabel = resolveSenderLabel({
+    role: "agent",
+    sender: resolveTurnAgentSender(turn),
+    agents,
+    t,
+  });
+  const endedAt =
+    turn.finalReplyGroup?.timestamp
+    ?? turn.processGroups[turn.processGroups.length - 1]?.timestamp;
+  const duration = formatDurationLabel(turn.operatorGroup.timestamp, endedAt);
+  const parts = [
+    t("web.conversations.process_steps", "过程 {count} 步").replace("{count}", String(summary.stepCount)),
+    summary.toolCallCount > 0
+      ? t("web.conversations.process_tool_calls", "{count} 次工具调用").replace("{count}", String(summary.toolCallCount))
+      : "",
+    summary.approvalCount > 0
+      ? t("web.conversations.process_approvals", "{count} 次审批").replace("{count}", String(summary.approvalCount))
+      : "",
+    duration,
+  ].filter(Boolean);
+
+  return <span>{[agentLabel, ...parts].filter(Boolean).join(" · ")}</span>;
+}
+
+function TurnProcessPanel({
+  turn,
+  agents,
+  skills,
+  approvalsById,
+  t,
+  showThinking,
+  showToolCalls,
+  onCopy,
+  onBranchFrom,
+  onEditAndResend,
+  onRetry,
+  onRemove,
+}: {
+  turn: ChatTurn;
+  agents: AgentProfile[];
+  skills: SkillConfig[];
+  approvalsById: Map<string, PermissionApprovalRecord>;
+  t: (key: string, fallback: string) => string;
+  showThinking: boolean;
+  showToolCalls: boolean;
+  onCopy: (entryId: string, body: string) => void;
+  onBranchFrom: (messageId: string) => void;
+  onEditAndResend: (messageId: string) => void;
+  onRetry: (id: string) => void;
+  onRemove: (id: string) => void;
+}) {
+  if (turn.processGroups.length === 0) {
+    return null;
+  }
+
+  return (
+    <details className="chat-turn-process">
+      <summary>
+        <span className="chat-turn-process__summary-main">
+          <strong>{t("web.conversations.process_title", "执行过程")}</strong>
+          <ProcessSummary turn={turn} agents={agents} t={t} />
+        </span>
+      </summary>
+      <div className="chat-turn-process__body">
+        {turn.processGroups.map((group) =>
+          group.anchor ? (
+            <MessageGroup
+              key={group.id}
+              group={group}
+              agents={agents}
+              skills={skills}
+              approvalsById={approvalsById}
+              t={t}
+              showThinking={showThinking}
+              showToolCalls={showToolCalls}
+              onCopy={onCopy}
+              onBranchFrom={onBranchFrom}
+              onEditAndResend={onEditAndResend}
+              onRetry={onRetry}
+              onRemove={onRemove}
+              showActions={false}
+            />
+          ) : (
+            <StandaloneGroup
+              key={group.id}
+              group={group}
+              agents={agents}
+              skills={skills}
+              approvalsById={approvalsById}
+              t={t}
+              showThinking={showThinking}
+              showToolCalls={showToolCalls}
+            />
+          ))}
+      </div>
+    </details>
+  );
+}
+
+function TurnBlock({
+  turn,
+  agents,
+  skills,
+  approvalsById,
+  t,
+  showThinking,
+  showToolCalls,
+  onCopy,
+  onBranchFrom,
+  onEditAndResend,
+  onRetry,
+  onRemove,
+}: {
+  turn: ChatTurn;
+  agents: AgentProfile[];
+  skills: SkillConfig[];
+  approvalsById: Map<string, PermissionApprovalRecord>;
+  t: (key: string, fallback: string) => string;
+  showThinking: boolean;
+  showToolCalls: boolean;
+  onCopy: (entryId: string, body: string) => void;
+  onBranchFrom: (messageId: string) => void;
+  onEditAndResend: (messageId: string) => void;
+  onRetry: (id: string) => void;
+  onRemove: (id: string) => void;
+}) {
+  return (
+    <section className="chat-turn">
+      <MessageGroup
+        group={turn.operatorGroup}
+        agents={agents}
+        skills={skills}
+        approvalsById={approvalsById}
+        t={t}
+        showThinking={false}
+        showToolCalls={false}
+        onCopy={onCopy}
+        onBranchFrom={onBranchFrom}
+        onEditAndResend={onEditAndResend}
+        onRetry={onRetry}
+        onRemove={onRemove}
+      />
+      <div className="chat-turn__agent-side">
+        <TurnProcessPanel
+          turn={turn}
+          agents={agents}
+          skills={skills}
+          approvalsById={approvalsById}
+          t={t}
+          showThinking={showThinking}
+          showToolCalls={showToolCalls}
+          onCopy={onCopy}
+          onBranchFrom={onBranchFrom}
+          onEditAndResend={onEditAndResend}
+          onRetry={onRetry}
+          onRemove={onRemove}
+        />
+        {turn.finalReplyGroup ? (
+          <MessageGroup
+            group={turn.finalReplyGroup}
+            agents={agents}
+            skills={skills}
+            approvalsById={approvalsById}
+            t={t}
+            showThinking={false}
+            showToolCalls={false}
+            onCopy={onCopy}
+            onBranchFrom={onBranchFrom}
+            onEditAndResend={onEditAndResend}
+            onRetry={onRetry}
+            onRemove={onRemove}
+          />
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
 export function ChatStream({
   entries,
   runs,
@@ -1035,24 +1404,25 @@ export function ChatStream({
     const hasOtherAccessories = group.accessories.some((entry) => entry.kind !== "status" && entry.kind !== "tool_result");
     return hasThinking || hasToolCalls || hasOtherAccessories;
   });
+  const blocks = buildChatTurns(groups);
   const approvalsById = new Map(approvals.map((approval) => [approval.approval_id, approval]));
   let previousDate = "";
 
-  return groups.map((group) => {
-    const currentDate = dateKey(group.timestamp);
+  return blocks.map((block) => {
+    const currentDate = dateKey(block.timestamp);
     const showSeparator = currentDate !== previousDate;
     previousDate = currentDate;
 
     return (
-      <Fragment key={group.id}>
+      <Fragment key={block.id}>
         {showSeparator ? (
           <div className="chat-date-separator">
             <span>{currentDate}</span>
           </div>
         ) : null}
-        {group.anchor ? (
-          <MessageGroup
-            group={group}
+        {block.kind === "turn" ? (
+          <TurnBlock
+            turn={block.turn}
             agents={agents}
             skills={skills}
             approvalsById={approvalsById}
@@ -1067,7 +1437,7 @@ export function ChatStream({
           />
         ) : (
           <StandaloneGroup
-            group={group}
+            group={block.group}
             agents={agents}
             skills={skills}
             approvalsById={approvalsById}

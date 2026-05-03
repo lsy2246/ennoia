@@ -1927,6 +1927,65 @@ label {
   gap: 10px;
 }
 
+.chat-turn {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+}
+
+.chat-turn__agent-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+}
+
+.chat-turn-process {
+  width: min(100%, var(--chat-bubble-max-width));
+  max-width: min(100%, var(--chat-bubble-max-width));
+  align-self: flex-start;
+  border: 1px solid color-mix(in srgb, var(--line) 76%, transparent);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--bg-soft) 94%, transparent);
+  overflow: hidden;
+}
+
+.chat-turn-process summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 12px 14px;
+}
+
+.chat-turn-process summary::-webkit-details-marker {
+  display: none;
+}
+
+.chat-turn-process__summary-main {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.chat-turn-process__summary-main strong {
+  font-size: 12px;
+}
+
+.chat-turn-process__summary-main span {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.chat-turn-process__body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 8px 14px 14px;
+}
+
 .message-bubble {
   align-self: stretch;
   width: min(100%, var(--chat-bubble-max-width));
