@@ -4,6 +4,7 @@ import type {
   ChatEntryRecipient,
   ChatEntryViewModel,
   LocalMessageDraft,
+  PendingReplyMarker,
 } from "./chat-types";
 
 type StatusTexts = {
@@ -310,29 +311,31 @@ export function buildChatEntries(params: {
 }
 
 export function buildStatusEntries(params: {
-  typingAgents: AgentProfile[];
-  pendingCreatedAt?: string;
+  pendingReplies: PendingReplyMarker[];
+  resolveAgent: (agentId: string) => AgentProfile | undefined;
   texts: StatusTexts;
 }): ChatEntryViewModel[] {
   const entries: ChatEntryViewModel[] = [];
 
-  if (params.typingAgents.length > 0) {
-    for (const agent of params.typingAgents) {
-      entries.push({
-        id: `typing:${agent.id}`,
-        role: "agent",
-        kind: "status",
-        format: "plain",
-        state: "streaming",
-        sender: agent.display_name,
-        title: params.texts.typingLabel,
-        label: params.texts.typingLabel,
-        detail: params.texts.typingDetail,
-        animation: "typing",
-        body: params.texts.typingDetail,
-        createdAt: params.pendingCreatedAt ?? "",
-      });
-    }
+  for (const marker of params.pendingReplies) {
+    const agent = params.resolveAgent(marker.agentId);
+    entries.push({
+      id: `typing:${marker.id}`,
+      role: "agent",
+      kind: "status",
+      format: "plain",
+      state: "streaming",
+      sender: agent?.display_name ?? marker.agentId,
+      title: params.texts.typingLabel,
+      label: params.texts.typingLabel,
+      detail: params.texts.typingDetail,
+      animation: "typing",
+      body: params.texts.typingDetail,
+      createdAt: marker.createdAt,
+      relatedMessageId: marker.sourceMessageId,
+      sourceMessageId: marker.sourceMessageId,
+      live: true,
+    });
   }
 
   return entries;

@@ -210,12 +210,60 @@ function MarkdownCodeNode({
   );
 }
 
+function normalizeMarkdownBody(body: string) {
+  const normalized = body
+    .replace(/\$\s*\\rightarrow\s*\$/g, "→")
+    .replace(/\\rightarrow/g, "→")
+    .replace(/\$\s*\\to\s*\$/g, "→")
+    .replace(/\\to/g, "→")
+    .replace(/\$\s*\\leftarrow\s*\$/g, "←")
+    .replace(/\\leftarrow/g, "←")
+    .replace(/\$\s*\\uparrow\s*\$/g, "↑")
+    .replace(/\\uparrow/g, "↑")
+    .replace(/\$\s*\\downarrow\s*\$/g, "↓")
+    .replace(/\\downarrow/g, "↓")
+    .replace(/\$([←→↑↓,\s()]+)\$/g, "$1");
+
+  const fencedCount = (normalized.match(/```/g) ?? []).length;
+  if (fencedCount % 2 === 1) {
+    return {
+      body: normalized,
+      fallbackToPlain: true,
+    };
+  }
+
+  const inlineTickCount = (normalized.match(/`/g) ?? []).length - fencedCount * 3;
+  if (inlineTickCount % 2 === 1) {
+    return {
+      body: normalized,
+      fallbackToPlain: true,
+    };
+  }
+
+  return {
+    body: normalized,
+    fallbackToPlain: false,
+  };
+}
+
 function MarkdownContent({ body, agents, skills, mentionAgentIds }: {
   body: string;
   agents: AgentProfile[];
   skills: SkillConfig[];
   mentionAgentIds: string[];
 }) {
+  const normalized = normalizeMarkdownBody(body);
+  if (normalized.fallbackToPlain) {
+    return (
+      <PlainTextContent
+        body={normalized.body}
+        agents={agents}
+        skills={skills}
+        mentionAgentIds={mentionAgentIds}
+      />
+    );
+  }
+
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
@@ -245,7 +293,7 @@ function MarkdownContent({ body, agents, skills, mentionAgentIds }: {
         ),
       }}
     >
-      {body}
+      {normalized.body}
     </ReactMarkdown>
   );
 }

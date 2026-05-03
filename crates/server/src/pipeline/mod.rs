@@ -71,6 +71,7 @@ struct AgentRuntimeContext {
     agent_display_name: String,
     run_id: String,
     sandbox_enabled: bool,
+    execution_mode: String,
     workspace_root: String,
     artifacts_root: String,
     temp_root: String,
@@ -883,19 +884,33 @@ async fn generate_conversation_agent_reply(
                 .iter()
                 .find(|agent| agent.id == *agent_id)
                 .map(|agent| {
+                    let (execution_mode, workspace_root, artifacts_root, temp_root) =
+                        build_agent_runtime_path_context(agent);
                     serde_json::json!({
                         "agent_id": agent.id,
                         "display_name": agent.display_name,
                         "sandbox_enabled": agent.execution_environment.sandbox_enabled,
-                        "workspace_root": "/workspace",
-                        "artifacts_root": "/artifacts",
-                        "temp_root": "/tmp",
+                        "execution_mode": execution_mode,
+                        "workspace_root": workspace_root,
+                        "artifacts_root": artifacts_root,
+                        "temp_root": temp_root,
                     })
                 })
         })
         .collect::<Vec<_>>();
 
     for agent_id in &addressed_agents {
+        let runtime_agent = agents.iter().find(|agent| agent.id == *agent_id);
+        let (execution_mode, workspace_root, artifacts_root, temp_root) = runtime_agent
+            .map(build_agent_runtime_path_context)
+            .unwrap_or_else(|| {
+                (
+                    "host".to_string(),
+                    "当前工作目录".to_string(),
+                    "当前产物目录".to_string(),
+                    "系统临时目录".to_string(),
+                )
+            });
         let actor_context = permission_actor_context(
             agent_id,
             "pipeline.conversation_to_workflow",
@@ -924,9 +939,13 @@ async fn generate_conversation_agent_reply(
         let mut metadata = serde_json::json!({
             "origin": "pipeline.conversation_to_workflow",
             "message_id": message_id,
-            "workspace_root": "/workspace",
-            "artifacts_root": "/artifacts",
-            "temp_root": "/tmp",
+            "sandbox_enabled": runtime_agent
+                .map(|agent| agent.execution_environment.sandbox_enabled)
+                .unwrap_or(false),
+            "execution_mode": execution_mode,
+            "workspace_root": workspace_root,
+            "artifacts_root": artifacts_root,
+            "temp_root": temp_root,
             "agent_paths": agent_runtime_paths,
         });
         if let Some(context) = memory_context.as_ref() {
@@ -1067,16 +1086,19 @@ async fn generate_real_conversation_agent_reply(
     let instructions = build_agent_provider_instructions(state, agent, &run_id);
     let context =
         build_agent_provider_context(state, agent, conversation_id, lane_id, message_id, &run_id);
-    let tools = build_agent_builtin_tool_specs();
+    let tools = build_agent_builtin_tool_specs(agent);
+    let (execution_mode, workspace_root, artifacts_root, temp_root) =
+        build_agent_runtime_path_context(agent);
     let metadata = serde_json::json!({
         "conversation_id": conversation_id,
         "lane_id": lane_id,
         "message_id": message_id,
         "run_id": run_id,
         "sandbox_enabled": agent.execution_environment.sandbox_enabled,
-        "workspace_root": "/workspace",
-        "artifacts_root": "/artifacts",
-        "temp_root": "/tmp",
+        "execution_mode": execution_mode,
+        "workspace_root": workspace_root,
+        "artifacts_root": artifacts_root,
+        "temp_root": temp_root,
         "agent_id": agent.id,
         "agent_display_name": agent.display_name,
     });
@@ -1088,7 +1110,7 @@ async fn generate_real_conversation_agent_reply(
                 "model_endpoint": model_endpoint_runtime_request_config(model_endpoint),
                 "model": model_id,
                 "instructions": instructions,
-                "system_prompt": build_agent_runtime_prompt(state, agent, &run_id),
+                "system_prompt": build_agent_runtime_prompt(agent, &run_id),
                 "context": context,
                 "messages": messages,
                 "generation_options": agent.generation_options,
@@ -2293,17 +2315,60 @@ fn looks_like_synthetic_agent_error(message: &JsonValue) -> bool {
         || body.contains("provider returned empty text")
 }
 
-fn build_agent_runtime_prompt(_state: &AppState, agent: &AgentConfig, run_id: &str) -> String {
+fn build_agent_runtime_path_context(agent: &AgentConfig) -> (String, String, String, String) {
+    if agent.execution_environment.sandbox_enabled {
+        (
+            "sandbox".to_string(),
+            "/workspace".to_string(),
+            "/artifacts".to_string(),
+            "/tmp".to_string(),
+        )
+    } else {
+        let workspace_root = if agent.working_dir.trim().is_empty() {
+            "当前工作目录".to_string()
+        } else {
+            agent.working_dir.trim().to_string()
+        };
+        let artifacts_root = if agent.artifacts_dir.trim().is_empty() {
+            "当前产物目录".to_string()
+        } else {
+            agent.artifacts_dir.trim().to_string()
+        };
+        (
+            "host".to_string(),
+            workspace_root,
+            artifacts_root,
+            "系统临时目录".to_string(),
+        )
+    }
+}
+
+fn build_agent_runtime_path_notes(agent: &AgentConfig) -> String {
+    if agent.execution_environment.sandbox_enabled {
+        "当前处于原生沙盒模式，只使用 /workspace、/artifacts、/tmp 这些虚拟路径。不要把宿主机绝对路径当作可直接访问的路径。".to_string()
+    } else {
+        "当前直接运行在宿主机环境。可以使用宿主机绝对路径；相对路径按当前工作目录解析。不要把普通的目录或命令错误解释成沙箱、容器或权限限制。".to_string()
+    }
+}
+
+fn build_agent_runtime_prompt(agent: &AgentConfig, run_id: &str) -> String {
+    let (execution_mode, workspace_root, artifacts_root, temp_root) =
+        build_agent_runtime_path_context(agent);
     let mut sections = Vec::new();
     if !agent.system_prompt.trim().is_empty() {
         sections.push(agent.system_prompt.trim().to_string());
     }
     sections.push(format!(
-        "你当前运行在 Ennoia 会话系统中。\nagent_id：{}\nagent_name：{}\nrun_id：{}\nsandbox_enabled：{}\nworkspace_root：/workspace\nartifacts_root：/artifacts\ntemp_root：/tmp\n除非用户明确需要，否则不要主动复述内部路径或实现细节。直接回答用户，不要伪装成“系统已接收”或“正在处理中”。",
+        "你当前运行在 Ennoia 会话系统中。\nagent_id：{}\nagent_name：{}\nrun_id：{}\nsandbox_enabled：{}\nexecution_mode：{}\nworkspace_root：{}\nartifacts_root：{}\ntemp_root：{}\n{}\n除非用户明确需要，否则不要主动复述内部路径或实现细节。直接回答用户，不要伪装成“系统已接收”或“正在处理中”。",
         agent.id,
         agent.display_name,
         if run_id.trim().is_empty() { "unknown" } else { run_id },
         agent.execution_environment.sandbox_enabled,
+        execution_mode,
+        workspace_root,
+        artifacts_root,
+        temp_root,
+        build_agent_runtime_path_notes(agent),
     ));
     sections.push(
         "系统会额外提供一份结构化 JSON 上下文，里面包含当前运行时、会话、已注入扩展目录和已启用技能目录。按字段理解并使用，不要向用户原样复述 JSON，也不要主动枚举内部路径、目录清单或所有可用能力，除非用户明确要求。"
@@ -2314,19 +2379,19 @@ fn build_agent_runtime_prompt(_state: &AppState, agent: &AgentConfig, run_id: &s
             .to_string(),
     );
     sections.push(
-        "当用户要求你读取文件、写入文件、执行命令或访问网页/API，并且这些能力已经出现在 tools 字段里时，优先直接调用相应工具完成任务；不要在未尝试工具前就回答“无法直接访问”或“没有权限”。只有在工具调用被权限系统拒绝或需要审批时，才向用户解释阻塞原因。"
+        "当用户要求你读取文件、写入文件、执行命令或访问网页/API，并且这些能力已经出现在 tools 字段里时，优先直接调用相应工具完成任务；不要在未尝试工具前就回答“无法直接访问”或“没有权限”。只有在工具调用被权限系统拒绝或需要审批时，才向用户解释阻塞原因。遇到普通的文件系统或命令执行错误时，按实际错误原因说明，不要擅自归因为沙箱、容器或权限隔离。"
             .to_string(),
     );
     sections.join("\n\n")
 }
 
 fn build_agent_provider_instructions(
-    state: &AppState,
+    _state: &AppState,
     agent: &AgentConfig,
     run_id: &str,
 ) -> AgentProviderInstructions {
     AgentProviderInstructions {
-        base: build_agent_runtime_prompt(state, agent, run_id),
+        base: build_agent_runtime_prompt(agent, run_id),
     }
 }
 
@@ -2338,6 +2403,8 @@ fn build_agent_provider_context(
     message_id: Option<&str>,
     run_id: &str,
 ) -> AgentProviderContext {
+    let (execution_mode, workspace_root, artifacts_root, temp_root) =
+        build_agent_runtime_path_context(agent);
     AgentProviderContext {
         kind: "ennoia.agent_context",
         runtime: AgentRuntimeContext {
@@ -2345,9 +2412,10 @@ fn build_agent_provider_context(
             agent_display_name: agent.display_name.clone(),
             run_id: normalize_unknown(run_id),
             sandbox_enabled: agent.execution_environment.sandbox_enabled,
-            workspace_root: "/workspace".to_string(),
-            artifacts_root: "/artifacts".to_string(),
-            temp_root: "/tmp".to_string(),
+            execution_mode,
+            workspace_root,
+            artifacts_root,
+            temp_root,
         },
         conversation: AgentConversationContext {
             conversation_id: conversation_id.to_string(),
@@ -2356,7 +2424,7 @@ fn build_agent_provider_context(
         },
         extensions: build_agent_extension_contexts(state),
         skills: build_agent_skill_contexts(state, agent),
-        tools: build_agent_tool_contexts(state),
+        tools: build_agent_tool_contexts(state, agent),
     }
 }
 
@@ -2453,7 +2521,7 @@ fn build_agent_skill_contexts(state: &AppState, agent: &AgentConfig) -> Vec<Agen
         .collect()
 }
 
-fn build_agent_tool_contexts(state: &AppState) -> Vec<AgentToolContext> {
+fn build_agent_tool_contexts(state: &AppState, agent: &AgentConfig) -> Vec<AgentToolContext> {
     let mut tools = state
         .extensions
         .snapshot()
@@ -2506,7 +2574,11 @@ fn build_agent_tool_contexts(state: &AppState) -> Vec<AgentToolContext> {
             extension_name: "Runtime".to_string(),
             capability_id: "fs.read".to_string(),
             label: "文件读取".to_string(),
-            summary: "读取文本文件；优先使用 /workspace、/artifacts、/tmp 这些路径。相对路径默认按 /workspace 解析。".to_string(),
+            summary: if agent.execution_environment.sandbox_enabled {
+                "读取文本文件；优先使用 /workspace、/artifacts、/tmp 这些路径。相对路径默认按 /workspace 解析。".to_string()
+            } else {
+                "读取文本文件；相对路径默认按当前工作目录解析，也可以直接使用宿主机绝对路径。".to_string()
+            },
             kind: "builtin".to_string(),
             contract: "fs.read".to_string(),
         },
@@ -2515,7 +2587,11 @@ fn build_agent_tool_contexts(state: &AppState) -> Vec<AgentToolContext> {
             extension_name: "Runtime".to_string(),
             capability_id: "fs.write".to_string(),
             label: "文件写入".to_string(),
-            summary: "把文本写入文件；优先使用 /workspace、/artifacts、/tmp 这些路径，可选择覆盖或追加。".to_string(),
+            summary: if agent.execution_environment.sandbox_enabled {
+                "把文本写入文件；优先使用 /workspace、/artifacts、/tmp 这些路径，可选择覆盖或追加。".to_string()
+            } else {
+                "把文本写入文件；相对路径默认按当前工作目录解析，也可以直接使用宿主机绝对路径。".to_string()
+            },
             kind: "builtin".to_string(),
             contract: "fs.write".to_string(),
         },
@@ -2524,7 +2600,11 @@ fn build_agent_tool_contexts(state: &AppState) -> Vec<AgentToolContext> {
             extension_name: "Runtime".to_string(),
             capability_id: "command.exec".to_string(),
             label: "命令执行".to_string(),
-            summary: "执行系统命令；未指定 cwd 时默认在 /workspace 中执行，并返回 stdout、stderr 和退出码。".to_string(),
+            summary: if agent.execution_environment.sandbox_enabled {
+                "执行系统命令；未指定 cwd 时默认在 /workspace 中执行，并返回 stdout、stderr 和退出码。".to_string()
+            } else {
+                "执行系统命令；未指定 cwd 时默认在当前工作目录中执行，并返回 stdout、stderr 和退出码。".to_string()
+            },
             kind: "builtin".to_string(),
             contract: "command.exec".to_string(),
         },
@@ -2580,11 +2660,16 @@ fn humanize_agent_tool_summary(id: &str, kind: &str, contract: &str) -> String {
     }
 }
 
-fn build_agent_builtin_tool_specs() -> Vec<AgentToolSpec> {
+fn build_agent_builtin_tool_specs(agent: &AgentConfig) -> Vec<AgentToolSpec> {
     vec![
         AgentToolSpec {
             name: "fs_read".to_string(),
-            description: "读取文本文件内容；优先使用 /workspace、/artifacts、/tmp 这些路径，相对路径默认按 /workspace 解析。".to_string(),
+            description: if agent.execution_environment.sandbox_enabled {
+                "读取文本文件内容；优先使用 /workspace、/artifacts、/tmp 这些路径，相对路径默认按 /workspace 解析。".to_string()
+            } else {
+                "读取文本文件内容；相对路径默认按当前工作目录解析，也可以直接使用宿主机绝对路径。"
+                    .to_string()
+            },
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -2597,7 +2682,12 @@ fn build_agent_builtin_tool_specs() -> Vec<AgentToolSpec> {
         },
         AgentToolSpec {
             name: "fs_write".to_string(),
-            description: "把文本写入文件；优先使用 /workspace、/artifacts、/tmp 这些路径，相对路径默认按 /workspace 解析。".to_string(),
+            description: if agent.execution_environment.sandbox_enabled {
+                "把文本写入文件；优先使用 /workspace、/artifacts、/tmp 这些路径，相对路径默认按 /workspace 解析。".to_string()
+            } else {
+                "把文本写入文件；相对路径默认按当前工作目录解析，也可以直接使用宿主机绝对路径。"
+                    .to_string()
+            },
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -2611,12 +2701,16 @@ fn build_agent_builtin_tool_specs() -> Vec<AgentToolSpec> {
         },
         AgentToolSpec {
             name: "command_exec".to_string(),
-            description: "执行系统命令；默认在 /workspace 中执行。".to_string(),
+            description: if agent.execution_environment.sandbox_enabled {
+                "执行系统命令；默认在 /workspace 中执行。command 只填可执行程序名，参数必须拆到 args 里，不要把整条 shell 命令塞进 command。".to_string()
+            } else {
+                "执行系统命令；默认在当前工作目录中执行。command 只填可执行程序名，参数必须拆到 args 里，不要把整条 shell 命令塞进 command。".to_string()
+            },
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
-                    "command": { "type": "string", "description": "命令名" },
-                    "args": { "type": "array", "items": { "type": "string" }, "description": "命令参数列表" },
+                    "command": { "type": "string", "description": "可执行程序名，不要包含参数，例如 cmd、powershell、git、python" },
+                    "args": { "type": "array", "items": { "type": "string" }, "description": "命令参数列表，每个参数单独一个元素，例如 [\"/c\", \"dir\", \"D:/data/code\"]" },
                     "cwd": { "type": "string", "description": "可选工作目录" },
                     "timeout_ms": { "type": "integer", "description": "超时时间，默认 30000" }
                 },
@@ -2879,4 +2973,55 @@ fn visible_recent_messages(conversation_messages: &JsonValue, agent_id: &str) ->
             }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    fn sample_agent(sandbox_enabled: bool) -> AgentConfig {
+        AgentConfig {
+            id: "tester".to_string(),
+            display_name: "Tester".to_string(),
+            description: String::new(),
+            system_prompt: String::new(),
+            model_endpoint_id: "default".to_string(),
+            model_id: "gpt-test".to_string(),
+            generation_options: BTreeMap::new(),
+            skills: Vec::new(),
+            enabled: true,
+            kind: "assistant".to_string(),
+            default_model: String::new(),
+            skills_dir: String::new(),
+            working_dir: "D:/data/code/ennoia".to_string(),
+            artifacts_dir: "D:/data/code/ennoia-artifacts".to_string(),
+            execution_environment: ennoia_kernel::AgentExecutionEnvironment { sandbox_enabled },
+        }
+    }
+
+    #[test]
+    fn host_mode_prompt_does_not_claim_virtual_roots() {
+        let prompt = build_agent_runtime_prompt(&sample_agent(false), "run-1");
+        assert!(prompt.contains("sandbox_enabled：false"));
+        assert!(prompt.contains("execution_mode：host"));
+        assert!(prompt.contains("当前直接运行在宿主机环境"));
+        assert!(!prompt.contains("workspace_root：/workspace"));
+    }
+
+    #[test]
+    fn host_mode_tool_specs_describe_host_paths() {
+        let tools = build_agent_builtin_tool_specs(&sample_agent(false));
+        let fs_read = tools
+            .iter()
+            .find(|tool| tool.name == "fs_read")
+            .expect("fs_read tool");
+        let command_exec = tools
+            .iter()
+            .find(|tool| tool.name == "command_exec")
+            .expect("command_exec tool");
+        assert!(fs_read.description.contains("宿主机绝对路径"));
+        assert!(!fs_read.description.contains("/workspace"));
+        assert!(command_exec.description.contains("当前工作目录"));
+    }
 }

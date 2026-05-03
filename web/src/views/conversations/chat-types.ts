@@ -37,6 +37,7 @@ export type PendingReplyMarker = {
   id: string;
   agentId: string;
   createdAt: string;
+  sourceMessageId: string;
 };
 
 export type ChatEntryFormat = "plain" | "markdown" | "code" | "json" | "diagram";
@@ -96,6 +97,9 @@ export type ChatStatusEntry = ChatEntryBase & {
   label: string;
   detail?: string;
   animation: "typing";
+  relatedMessageId?: string;
+  sourceMessageId?: string;
+  live?: boolean;
 };
 
 export type ChatToolResultEntry = ChatEntryBase & {

@@ -572,10 +572,40 @@ function loadPersistedPendingReplies(sessionId: string): PendingReplyMarker[] {
       return [];
     }
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed as PendingReplyMarker[] : [];
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed
+      .flatMap((item) => {
+        if (!item || typeof item !== "object") {
+          return [];
+        }
+        const record = item as Record<string, unknown>;
+        const id = typeof record.id === "string" ? record.id.trim() : "";
+        const agentId = typeof record.agentId === "string" ? record.agentId.trim() : "";
+        const createdAt = typeof record.createdAt === "string" ? record.createdAt.trim() : "";
+        const sourceMessageId = typeof record.sourceMessageId === "string"
+          ? record.sourceMessageId.trim()
+          : "";
+        if (!id || !agentId || !createdAt || !sourceMessageId) {
+          return [];
+        }
+        return [{ id, agentId, createdAt, sourceMessageId }];
+      });
   } catch {
     return [];
   }
+}
+
+function upsertPendingReplyMarkers(
+  current: PendingReplyMarker[],
+  next: PendingReplyMarker[],
+) {
+  const deduped = current.filter((marker) =>
+    !next.some((candidate) =>
+      candidate.agentId === marker.agentId
+      && candidate.sourceMessageId === marker.sourceMessageId));
+  return [...deduped, ...next];
 }
 
 function persistDrafts(sessionId: string, drafts: LocalMessageDraft[]) {
@@ -704,6 +734,7 @@ function reconcilePendingRepliesWithRemote(
     return pendingReplies.filter((marker) =>
       !approvals.some((approval) =>
         approval.agent_id === marker.agentId
+        && approval.scope.message_id === marker.sourceMessageId
         && approval.created_at >= marker.createdAt),
     );
   }
@@ -715,6 +746,7 @@ function reconcilePendingRepliesWithRemote(
       && message.created_at >= marker.createdAt)
     && !approvals.some((approval) =>
       approval.agent_id === marker.agentId
+      && approval.scope.message_id === marker.sourceMessageId
       && approval.created_at >= marker.createdAt),
   );
 }
@@ -1244,16 +1276,6 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
     [grants],
   );
 
-  const typingAgents = useMemo(() => {
-    const typingIds = new Set<string>();
-    for (const marker of pendingReplies) {
-      typingIds.add(marker.agentId);
-    }
-    return [...typingIds]
-      .map((agentId) => agentMap.get(agentId))
-      .filter((agent): agent is AgentProfile => Boolean(agent));
-  }, [agentMap, pendingReplies]);
-
   const chatEntries = useMemo(() => buildChatEntries({
     messages: detail?.messages ?? [],
     localDrafts,
@@ -1261,13 +1283,13 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
   }), [detail?.messages, localDrafts, resolveRecipients]);
 
   const statusEntries = useMemo(() => buildStatusEntries({
-    typingAgents,
-    pendingCreatedAt: pendingReplies[0]?.createdAt,
+    pendingReplies,
+    resolveAgent: (agentId) => agentMap.get(agentId),
     texts: {
       typingLabel: t("web.conversations.status_ai_thinking", "思考中"),
       typingDetail: t("web.conversations.status_ai_thinking_detail", "Agent 已接到消息，正在组织回复与处理工具步骤。"),
     },
-  }), [pendingReplies, t, typingAgents]);
+  }), [agentMap, pendingReplies, t]);
 
   const streamEntries = useMemo(
     () => [...chatEntries, ...statusEntries],
@@ -1447,14 +1469,15 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
           return;
         }
         setLocalDrafts((current) => current.filter((item) => item.clientId !== next.clientId));
-        setPendingReplies((current) => [
-          ...current,
-          ...next.addressedAgents.map((agentId) => ({
+        setPendingReplies((current) => upsertPendingReplyMarkers(
+          current,
+          next.addressedAgents.map((agentId) => ({
             id: `${response.message.id}:${agentId}`,
             agentId,
             createdAt: response.message.created_at,
+            sourceMessageId: response.message.id,
           })),
-        ]);
+        ));
         const switchedBranch = response.conversation.active_branch_id !== conversation.active_branch_id;
         if (switchedBranch) {
           conversationUpdatedAtRef.current = response.conversation.updated_at;
@@ -1531,15 +1554,14 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
     const approval = approvals.find((item) => item.approval_id === approvalId) ?? null;
     try {
       await resolvePermissionApproval(approvalId, resolution);
-      if (approval && resolution !== "deny") {
-        setPendingReplies((current) => [
-          ...current,
-          {
-            id: `approval:${approval.approval_id}`,
-            agentId: approval.agent_id,
-            createdAt: new Date().toISOString(),
-          },
-        ]);
+      const approvalMessageId = approval?.scope.message_id ?? null;
+      if (approval && resolution !== "deny" && approvalMessageId) {
+        setPendingReplies((current) => upsertPendingReplyMarkers(current, [{
+          id: `approval:${approval.approval_id}`,
+          agentId: approval.agent_id,
+          createdAt: new Date().toISOString(),
+          sourceMessageId: approvalMessageId,
+        }]));
       }
       await refreshThread();
       if (resolution !== "deny") {

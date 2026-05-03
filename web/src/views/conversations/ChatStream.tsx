@@ -1208,6 +1208,77 @@ function ProcessSummary({
   return <span>{[agentLabel, ...parts].filter(Boolean).join(" · ")}</span>;
 }
 
+function hasCollapsibleProcess(turn: ChatTurn) {
+  if (!turn.finalReplyGroup || turn.processGroups.length === 0) {
+    return false;
+  }
+  return turn.processGroups.some((group) =>
+    collectGroupEntries(group).some((entry) => entry.kind !== "status"));
+}
+
+function ProcessGroupList({
+  groups,
+  agents,
+  skills,
+  approvalsById,
+  t,
+  showThinking,
+  showToolCalls,
+  onCopy,
+  onBranchFrom,
+  onEditAndResend,
+  onRetry,
+  onRemove,
+}: {
+  groups: ChatGroup[];
+  agents: AgentProfile[];
+  skills: SkillConfig[];
+  approvalsById: Map<string, PermissionApprovalRecord>;
+  t: (key: string, fallback: string) => string;
+  showThinking: boolean;
+  showToolCalls: boolean;
+  onCopy: (entryId: string, body: string) => void;
+  onBranchFrom: (messageId: string) => void;
+  onEditAndResend: (messageId: string) => void;
+  onRetry: (id: string) => void;
+  onRemove: (id: string) => void;
+}) {
+  return (
+    <>
+      {groups.map((group) =>
+        group.anchor ? (
+          <MessageGroup
+            key={group.id}
+            group={group}
+            agents={agents}
+            skills={skills}
+            approvalsById={approvalsById}
+            t={t}
+            showThinking={showThinking}
+            showToolCalls={showToolCalls}
+            onCopy={onCopy}
+            onBranchFrom={onBranchFrom}
+            onEditAndResend={onEditAndResend}
+            onRetry={onRetry}
+            onRemove={onRemove}
+            showActions={false}
+          />
+        ) : (
+          <StandaloneGroup
+            key={group.id}
+            group={group}
+            agents={agents}
+            skills={skills}
+            approvalsById={approvalsById}
+            t={t}
+            showThinking={showThinking}
+            showToolCalls={showToolCalls}
+          />
+        ))}
+    </>
+  );
+}
+
 function TurnProcessPanel({
   turn,
   agents,
@@ -1235,7 +1306,7 @@ function TurnProcessPanel({
   onRetry: (id: string) => void;
   onRemove: (id: string) => void;
 }) {
-  if (turn.processGroups.length === 0) {
+  if (!hasCollapsibleProcess(turn)) {
     return null;
   }
 
@@ -1248,36 +1319,20 @@ function TurnProcessPanel({
         </span>
       </summary>
       <div className="chat-turn-process__body">
-        {turn.processGroups.map((group) =>
-          group.anchor ? (
-            <MessageGroup
-              key={group.id}
-              group={group}
-              agents={agents}
-              skills={skills}
-              approvalsById={approvalsById}
-              t={t}
-              showThinking={showThinking}
-              showToolCalls={showToolCalls}
-              onCopy={onCopy}
-              onBranchFrom={onBranchFrom}
-              onEditAndResend={onEditAndResend}
-              onRetry={onRetry}
-              onRemove={onRemove}
-              showActions={false}
-            />
-          ) : (
-            <StandaloneGroup
-              key={group.id}
-              group={group}
-              agents={agents}
-              skills={skills}
-              approvalsById={approvalsById}
-              t={t}
-              showThinking={showThinking}
-              showToolCalls={showToolCalls}
-            />
-          ))}
+        <ProcessGroupList
+          groups={turn.processGroups}
+          agents={agents}
+          skills={skills}
+          approvalsById={approvalsById}
+          t={t}
+          showThinking={showThinking}
+          showToolCalls={showToolCalls}
+          onCopy={onCopy}
+          onBranchFrom={onBranchFrom}
+          onEditAndResend={onEditAndResend}
+          onRetry={onRetry}
+          onRemove={onRemove}
+        />
       </div>
     </details>
   );
@@ -1327,20 +1382,37 @@ function TurnBlock({
         onRemove={onRemove}
       />
       <div className="chat-turn__agent-side">
-        <TurnProcessPanel
-          turn={turn}
-          agents={agents}
-          skills={skills}
-          approvalsById={approvalsById}
-          t={t}
-          showThinking={showThinking}
-          showToolCalls={showToolCalls}
-          onCopy={onCopy}
-          onBranchFrom={onBranchFrom}
-          onEditAndResend={onEditAndResend}
-          onRetry={onRetry}
-          onRemove={onRemove}
-        />
+        {turn.finalReplyGroup ? (
+          <TurnProcessPanel
+            turn={turn}
+            agents={agents}
+            skills={skills}
+            approvalsById={approvalsById}
+            t={t}
+            showThinking={showThinking}
+            showToolCalls={showToolCalls}
+            onCopy={onCopy}
+            onBranchFrom={onBranchFrom}
+            onEditAndResend={onEditAndResend}
+            onRetry={onRetry}
+            onRemove={onRemove}
+          />
+        ) : (
+          <ProcessGroupList
+            groups={turn.processGroups}
+            agents={agents}
+            skills={skills}
+            approvalsById={approvalsById}
+            t={t}
+            showThinking={showThinking}
+            showToolCalls={showToolCalls}
+            onCopy={onCopy}
+            onBranchFrom={onBranchFrom}
+            onEditAndResend={onEditAndResend}
+            onRetry={onRetry}
+            onRemove={onRemove}
+          />
+        )}
         {turn.finalReplyGroup ? (
           <MessageGroup
             group={turn.finalReplyGroup}
