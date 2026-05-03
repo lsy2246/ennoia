@@ -44,7 +44,10 @@ function isLikelyErrorMessage(role: ConversationMessage["role"], body: string) {
     || normalized.includes(" request failed:")
     || normalized.endsWith(" failed")
     || normalized.includes(" upstream call failed")
-    || normalized.includes(" provider returned empty");
+    || normalized.includes(" provider returned empty")
+    || normalized.includes("native sandbox only accepts")
+    || normalized.includes("path cannot escape the selected execution root")
+    || normalized.includes("path must stay inside the selected execution root");
 }
 
 function summarizeError(message: string) {
@@ -53,6 +56,19 @@ function summarizeError(message: string) {
     .map((line) => line.trim())
     .filter(Boolean);
   return lines[0] ?? message.trim();
+}
+
+function detectFailureCode(message: string) {
+  const normalized = message.trim().toLowerCase();
+  if (
+    normalized.includes("native sandbox only accepts /workspace, /artifacts and /tmp paths")
+    || normalized.includes("native sandbox only accepts")
+    || normalized.includes("path cannot escape the selected execution root")
+    || normalized.includes("path must stay inside the selected execution root")
+  ) {
+    return "sandbox_path_restricted";
+  }
+  return undefined;
 }
 
 function createErrorDetail(message: string) {
@@ -67,15 +83,85 @@ function createErrorDetail(message: string) {
   return trimmed;
 }
 
+function parseToolPayload(body: string) {
+  try {
+    const parsed = JSON.parse(body) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return null;
+    }
+    return parsed as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function readToolName(body: string) {
+  const payload = parseToolPayload(body);
+  const tool = payload?.tool;
+  return typeof tool === "string" && tool.trim().length > 0 ? tool.trim() : undefined;
+}
+
+function normalizeToolIdentifier(value: string | undefined) {
+  return value?.trim().toLowerCase().replace(/[_\s]+/g, ".").replace(/\.+/g, ".");
+}
+
+function looksLikeToolSender(sender: string | undefined, parsedToolName: string | undefined) {
+  const normalizedSender = normalizeToolIdentifier(sender);
+  const normalizedParsedToolName = normalizeToolIdentifier(parsedToolName);
+
+  if (!normalizedSender) {
+    return false;
+  }
+
+  if (normalizedParsedToolName && normalizedSender === normalizedParsedToolName) {
+    return true;
+  }
+
+  return ["fs.read", "fs.write", "command.exec", "net.fetch"].includes(normalizedSender);
+}
+
+function findLegacyToolActor(messages: ConversationMessage[], startIndex: number) {
+  for (let index = startIndex + 1; index < messages.length; index += 1) {
+    const candidate = messages[index];
+    if (candidate.role === "operator") {
+      break;
+    }
+    if (candidate.role === "agent" && candidate.sender.trim().length > 0) {
+      return candidate.sender;
+    }
+  }
+
+  for (let index = startIndex - 1; index >= 0; index -= 1) {
+    const candidate = messages[index];
+    if (candidate.role === "operator") {
+      break;
+    }
+    if (candidate.role === "agent" && candidate.sender.trim().length > 0) {
+      return candidate.sender;
+    }
+  }
+
+  return undefined;
+}
+
 export function buildChatEntries(params: {
   messages: ConversationMessage[];
   localDrafts: LocalMessageDraft[];
   resolveRecipients: (mentions: string[]) => AgentProfile[];
 }): ChatEntryViewModel[] {
   const entries: Array<{ order: number; entry: ChatEntryViewModel }> = [];
+  const messageContextById = new Map(
+    params.messages.map((message) => [
+      message.id,
+      {
+        role: message.role,
+        sender: message.sender,
+      },
+    ]),
+  );
   let order = 0;
 
-  for (const message of params.messages) {
+  for (const [messageIndex, message] of params.messages.entries()) {
     const recipients = params.resolveRecipients(message.mentions).map<ChatEntryRecipient>((agent) => ({
       id: agent.id,
       label: agent.display_name,
@@ -106,6 +192,9 @@ export function buildChatEntries(params: {
             recipients,
             mentions: message.mentions,
             source: "remote",
+            failureCode: detectFailureCode(message.body),
+            failureSummary: summarizeError(message.body),
+            failureDetail: message.body.trim(),
           },
         });
         continue;
@@ -140,14 +229,26 @@ export function buildChatEntries(params: {
     }
 
     if (message.role === "tool") {
+      const parsedToolName = readToolName(message.body);
+      const parentMessage = message.parent_message_id
+        ? messageContextById.get(message.parent_message_id)
+        : undefined;
+      const senderValue = message.sender?.trim();
+      const senderIsToolName = looksLikeToolSender(senderValue, parsedToolName);
+      const legacyActorSender = senderIsToolName
+        ? findLegacyToolActor(params.messages, messageIndex)
+        : undefined;
       entries.push({
         order: order++,
         entry: {
           ...base,
           kind: "tool_result",
           role: "tool",
-          title: message.sender,
+          title: parsedToolName ?? message.sender,
           relatedMessageId: message.parent_message_id ?? undefined,
+          actorSender: senderIsToolName
+            ? (parentMessage?.role === "agent" ? parentMessage.sender : legacyActorSender)
+            : message.sender,
         },
       });
       continue;

@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::extension::ProviderModelDescriptor;
-use crate::permission::AgentPermissionPolicy;
+use crate::permission::{AgentExecutionEnvironment, AgentPermissionProfile};
 use crate::server_settings::{
     default_local_dev_origins, BodyLimitConfig, BootstrapState, CorsConfig, LoggingConfig,
     RateLimitConfig, TimeoutConfig, WebDevConfig,
@@ -221,6 +221,8 @@ pub struct AgentConfig {
     pub working_dir: String,
     #[serde(default)]
     pub artifacts_dir: String,
+    #[serde(default)]
+    pub execution_environment: AgentExecutionEnvironment,
 }
 
 /// AgentDocument stores one complete Agent package under `agents/<id>/agent.toml`.
@@ -229,7 +231,7 @@ pub struct AgentDocument {
     #[serde(flatten)]
     pub profile: AgentConfig,
     #[serde(default)]
-    pub permission_policy: AgentPermissionPolicy,
+    pub permission_profile: AgentPermissionProfile,
 }
 
 /// SkillConfig represents one skill descriptor under a registered skill package.

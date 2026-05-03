@@ -170,27 +170,37 @@
 - `generation_options`
 - `skills`
 - `enabled`
+- `execution_environment`
 
-`AgentConfig` 与 `AgentPermissionPolicy` 统一持久化在 `agents/<agent_id>/agent.toml`。`kind`、`default_model`、`skills_dir`、`working_dir`、`artifacts_dir` 作为运行时派生/内部字段存在，前端产品模型以显式字段为主。`working_dir` / `artifacts_dir` 表示 Agent 自己的运行目录，不等同于用户项目工作区；默认分别按 `agents/<agent_id>/work` 与 `agents/<agent_id>/artifacts` 自动派生。
+`AgentConfig`、`AgentPermissionProfile` 与 `AgentExecutionEnvironment` 统一持久化在 `agents/<agent_id>/agent.toml`。`kind`、`default_model`、`skills_dir`、`working_dir`、`artifacts_dir` 作为运行时派生/内部字段存在，前端产品模型以显式字段为主。`working_dir` / `artifacts_dir` 表示 Agent 自己的运行目录，不等同于用户项目工作区；默认分别按 `agents/<agent_id>/work` 与 `agents/<agent_id>/artifacts` 自动派生。执行环境为 `native` 时，模型侧只看到 `/workspace`、`/artifacts`、`/tmp` 这些虚拟路径。
 
 ## Agent 权限域
 
-`AgentPermissionPolicy` 字段：
+`AgentPermissionProfile` 字段：
 
 - `mode`
-- `rules`
+- `path_whitelist`
+- `allow_command_exec`
+- `allow_external_network`
+- `allow_runtime_config_write`
+- `allow_extension_manage`
 
-`AgentPermissionRule` 字段：
+## Agent 执行环境域
 
-- `id`
-- `effect`
-- `actions`
-- `extension_scope`
-- `conversation_scope`
-- `run_scope`
-- `path_include`
-- `path_exclude`
-- `host_scope`
+`AgentExecutionEnvironment` 字段：
+
+- `mode`
+
+约定：
+
+- `mode` 当前固定为 `host` 或 `native`。
+- `host` 表示 Agent 直接在宿主机运行时上执行。
+- `native` 表示 Agent 使用原生沙盒语义；模型上下文和内置工具优先暴露 `/workspace`、`/artifacts`、`/tmp` 三个虚拟根，不再主动泄露宿主机绝对路径。
+
+运行时不再让用户直接维护底层规则。系统会把 `AgentPermissionProfile` 编译成内部 `AgentPermissionPolicy`：
+
+- `restricted`：少量 `allow`，其余 `ask`
+- `trusted`：少量 `ask`，其余 `allow`
 
 `PermissionApprovalRecord` 字段：
 
@@ -245,7 +255,7 @@
 ## 存储快照
 
 - 核心系统配置：`~/.ennoia/config/*.toml`。
-- Agent 基础配置与权限策略：`~/.ennoia/agents/{agent_id}/agent.toml`。
+- Agent 基础配置、权限配置与执行环境配置：`~/.ennoia/agents/{agent_id}/agent.toml`。
 - 定时计划：`~/.ennoia/data/system/schedules.json`。
 - Agent 权限事件与审批：`~/.ennoia/data/system/sqlite/permissions.db`。
 - 核心前端日志：`~/.ennoia/logs/frontend.jsonl`。

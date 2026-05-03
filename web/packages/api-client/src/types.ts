@@ -165,6 +165,12 @@ export type AgentProfile = {
   skills_dir?: string;
   working_dir?: string;
   artifacts_dir?: string;
+  permission_profile: AgentPermissionProfile;
+  execution_environment: AgentExecutionEnvironment;
+};
+
+export type AgentExecutionEnvironment = {
+  mode: string;
 };
 
 export type SkillConfig = {
@@ -232,21 +238,13 @@ export type PermissionTrigger = {
   user_initiated: boolean;
 };
 
-export type AgentPermissionRule = {
-  id: string;
-  effect: string;
-  actions: string[];
-  extension_scope: string[];
-  conversation_scope?: string | null;
-  run_scope?: string | null;
-  path_include: string[];
-  path_exclude: string[];
-  host_scope: string[];
-};
-
-export type AgentPermissionPolicy = {
+export type AgentPermissionProfile = {
   mode: string;
-  rules: AgentPermissionRule[];
+  path_whitelist: string[];
+  allow_command_exec: boolean;
+  allow_external_network: boolean;
+  allow_runtime_config_write: boolean;
+  allow_extension_manage: boolean;
 };
 
 export type PermissionPolicySummary = {

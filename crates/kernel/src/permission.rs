@@ -101,6 +101,22 @@ pub struct AgentPermissionPolicy {
     pub rules: Vec<AgentPermissionRule>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AgentPermissionProfile {
+    #[serde(default = "default_permission_profile_mode")]
+    pub mode: String,
+    #[serde(default)]
+    pub path_whitelist: Vec<GlobPattern>,
+    #[serde(default)]
+    pub allow_command_exec: bool,
+    #[serde(default)]
+    pub allow_external_network: bool,
+    #[serde(default)]
+    pub allow_runtime_config_write: bool,
+    #[serde(default)]
+    pub allow_extension_manage: bool,
+}
+
 impl Default for AgentPermissionPolicy {
     fn default() -> Self {
         Self {
@@ -110,84 +126,137 @@ impl Default for AgentPermissionPolicy {
     }
 }
 
-impl AgentPermissionPolicy {
-    pub fn builtin_worker(agent_id: &str) -> Self {
+impl Default for AgentPermissionProfile {
+    fn default() -> Self {
+        Self::builtin_worker()
+    }
+}
+
+impl AgentPermissionProfile {
+    pub fn builtin_worker() -> Self {
         Self {
-            mode: default_policy_mode(),
-            rules: vec![
-                AgentPermissionRule {
-                    id: "builtin-core-chat".to_string(),
-                    effect: "allow".to_string(),
-                    actions: vec![
-                        "provider.generate".to_string(),
-                        "conversation.read".to_string(),
-                        "conversation.write".to_string(),
-                        "conversation.branch.create".to_string(),
-                        "conversation.branch.switch".to_string(),
-                        "memory.read".to_string(),
-                        "memory.write".to_string(),
-                        "memory.review".to_string(),
-                        "run.create".to_string(),
-                        "run.read".to_string(),
-                        "artifact.read".to_string(),
-                        "artifact.write".to_string(),
-                    ],
-                    extension_scope: Vec::new(),
-                    conversation_scope: None,
-                    run_scope: None,
-                    path_include: Vec::new(),
-                    path_exclude: Vec::new(),
-                    host_scope: Vec::new(),
-                },
-                AgentPermissionRule {
-                    id: "builtin-agent-workdir".to_string(),
-                    effect: "allow".to_string(),
-                    actions: vec!["fs.read".to_string(), "fs.write".to_string()],
-                    extension_scope: Vec::new(),
-                    conversation_scope: None,
-                    run_scope: None,
-                    path_include: vec![GlobPattern::new(format!(
-                        "~/.ennoia/agents/{agent_id}/work/**"
-                    ))],
-                    path_exclude: Vec::new(),
-                    host_scope: Vec::new(),
-                },
-                AgentPermissionRule {
-                    id: "builtin-agent-artifacts".to_string(),
-                    effect: "allow".to_string(),
-                    actions: vec![
-                        "artifact.read".to_string(),
-                        "artifact.write".to_string(),
-                        "fs.read".to_string(),
-                    ],
-                    extension_scope: Vec::new(),
-                    conversation_scope: None,
-                    run_scope: None,
-                    path_include: vec![GlobPattern::new(format!(
-                        "~/.ennoia/agents/{agent_id}/artifacts/**"
-                    ))],
-                    path_exclude: Vec::new(),
-                    host_scope: Vec::new(),
-                },
-                AgentPermissionRule {
-                    id: "builtin-dangerous-ask".to_string(),
-                    effect: "ask".to_string(),
-                    actions: vec![
-                        "net.fetch".to_string(),
-                        "command.exec".to_string(),
-                        "runtime.config.write".to_string(),
-                        "extension.install".to_string(),
-                        "extension.enable".to_string(),
-                        "extension.disable".to_string(),
-                    ],
-                    extension_scope: Vec::new(),
-                    conversation_scope: None,
-                    run_scope: None,
-                    path_include: Vec::new(),
-                    path_exclude: Vec::new(),
-                    host_scope: vec![GlobPattern::new("**")],
-                },
-            ],
+            mode: default_permission_profile_mode(),
+            path_whitelist: Vec::new(),
+            allow_command_exec: false,
+            allow_external_network: false,
+            allow_runtime_config_write: false,
+            allow_extension_manage: false,
+        }
+    }
+
+    pub fn compile_policy(&self, agent_id: &str) -> AgentPermissionPolicy {
+        let mode = normalize_permission_profile_mode(&self.mode);
+        let mut rules = vec![
+            allow_rule(
+                "builtin-core-chat",
+                &[
+                    "provider.generate",
+                    "conversation.read",
+                    "conversation.write",
+                    "conversation.branch.create",
+                    "conversation.branch.switch",
+                    "memory.read",
+                    "memory.write",
+                    "memory.review",
+                    "run.create",
+                    "run.read",
+                    "artifact.read",
+                    "artifact.write",
+                ],
+            ),
+            allow_path_rule(
+                "builtin-agent-workdir",
+                &["fs.read", "fs.write"],
+                &[format!("**/.ennoia/agents/{agent_id}/work/**")],
+            ),
+            allow_path_rule(
+                "builtin-agent-artifacts",
+                &["artifact.read", "artifact.write", "fs.read", "fs.write"],
+                &[format!("**/.ennoia/agents/{agent_id}/artifacts/**")],
+            ),
+        ];
+
+        if self.path_whitelist.is_empty() {
+            rules.push(allow_rule("builtin-files-global", &["fs.read", "fs.write"]));
+        } else {
+            rules.push(AgentPermissionRule {
+                id: "builtin-path-whitelist".to_string(),
+                effect: "allow".to_string(),
+                actions: vec!["fs.read".to_string(), "fs.write".to_string()],
+                extension_scope: Vec::new(),
+                conversation_scope: None,
+                run_scope: None,
+                path_include: self
+                    .path_whitelist
+                    .iter()
+                    .map(|pattern| GlobPattern::new(pattern.as_str().replace('\\', "/")))
+                    .collect(),
+                path_exclude: Vec::new(),
+                host_scope: Vec::new(),
+            });
+        }
+
+        match mode.as_str() {
+            "trusted" => {
+                if !self.path_whitelist.is_empty() {
+                    rules.push(ask_rule("builtin-files-ask", &["fs.read", "fs.write"]));
+                }
+                if !self.allow_external_network {
+                    rules.push(ask_rule("builtin-network-ask", &["net.fetch"]));
+                }
+                if !self.allow_command_exec {
+                    rules.push(ask_rule("builtin-command-ask", &["command.exec"]));
+                }
+                if !self.allow_runtime_config_write {
+                    rules.push(ask_rule(
+                        "builtin-runtime-config-ask",
+                        &["runtime.config.write"],
+                    ));
+                }
+                if !self.allow_extension_manage {
+                    rules.push(ask_rule(
+                        "builtin-extension-manage-ask",
+                        &["extension.install", "extension.enable", "extension.disable"],
+                    ));
+                }
+                AgentPermissionPolicy {
+                    mode: "default_allow".to_string(),
+                    rules,
+                }
+            }
+            _ => {
+                rules.push(if self.allow_external_network {
+                    allow_rule("builtin-network-allow", &["net.fetch"])
+                } else {
+                    ask_rule("builtin-network-ask", &["net.fetch"])
+                });
+                rules.push(if self.allow_command_exec {
+                    allow_rule("builtin-command-allow", &["command.exec"])
+                } else {
+                    ask_rule("builtin-command-ask", &["command.exec"])
+                });
+                rules.push(if self.allow_runtime_config_write {
+                    allow_rule("builtin-runtime-config-allow", &["runtime.config.write"])
+                } else {
+                    ask_rule("builtin-runtime-config-ask", &["runtime.config.write"])
+                });
+                rules.push(if self.allow_extension_manage {
+                    allow_rule(
+                        "builtin-extension-manage-allow",
+                        &["extension.install", "extension.enable", "extension.disable"],
+                    )
+                } else {
+                    ask_rule(
+                        "builtin-extension-manage-ask",
+                        &["extension.install", "extension.enable", "extension.disable"],
+                    )
+                });
+                rules.push(ask_rule("builtin-catch-all-ask", &["*"]));
+                AgentPermissionPolicy {
+                    mode: "default_deny".to_string(),
+                    rules,
+                }
+            }
         }
     }
 }
@@ -234,4 +303,92 @@ pub struct PermissionEventRecord {
 
 fn default_policy_mode() -> String {
     "default_deny".to_string()
+}
+
+fn default_permission_profile_mode() -> String {
+    "restricted".to_string()
+}
+
+fn default_execution_environment_mode() -> String {
+    "host".to_string()
+}
+
+fn normalize_permission_profile_mode(value: &str) -> String {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "trusted" => "trusted".to_string(),
+        _ => "restricted".to_string(),
+    }
+}
+
+fn normalize_execution_environment_mode(value: &str) -> String {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "native" => "native".to_string(),
+        _ => "host".to_string(),
+    }
+}
+
+fn allow_rule(id: &str, actions: &[&str]) -> AgentPermissionRule {
+    AgentPermissionRule {
+        id: id.to_string(),
+        effect: "allow".to_string(),
+        actions: actions.iter().map(|item| (*item).to_string()).collect(),
+        extension_scope: Vec::new(),
+        conversation_scope: None,
+        run_scope: None,
+        path_include: Vec::new(),
+        path_exclude: Vec::new(),
+        host_scope: Vec::new(),
+    }
+}
+
+fn ask_rule(id: &str, actions: &[&str]) -> AgentPermissionRule {
+    AgentPermissionRule {
+        id: id.to_string(),
+        effect: "ask".to_string(),
+        actions: actions.iter().map(|item| (*item).to_string()).collect(),
+        extension_scope: Vec::new(),
+        conversation_scope: None,
+        run_scope: None,
+        path_include: Vec::new(),
+        path_exclude: Vec::new(),
+        host_scope: Vec::new(),
+    }
+}
+
+fn allow_path_rule(id: &str, actions: &[&str], paths: &[String]) -> AgentPermissionRule {
+    AgentPermissionRule {
+        id: id.to_string(),
+        effect: "allow".to_string(),
+        actions: actions.iter().map(|item| (*item).to_string()).collect(),
+        extension_scope: Vec::new(),
+        conversation_scope: None,
+        run_scope: None,
+        path_include: paths.iter().cloned().map(GlobPattern::new).collect(),
+        path_exclude: Vec::new(),
+        host_scope: Vec::new(),
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AgentExecutionEnvironment {
+    #[serde(default = "default_execution_environment_mode")]
+    pub mode: String,
+}
+
+impl Default for AgentExecutionEnvironment {
+    fn default() -> Self {
+        Self {
+            mode: default_execution_environment_mode(),
+        }
+    }
+}
+
+impl AgentExecutionEnvironment {
+    pub fn normalized_mode(&self) -> String {
+        normalize_execution_environment_mode(&self.mode)
+    }
+
+    pub fn is_native(&self) -> bool {
+        self.normalized_mode() == "native"
+    }
 }

@@ -1,6 +1,5 @@
 import { fetchJson } from "./core";
 import type {
-  AgentPermissionPolicy,
   PermissionApprovalRecord,
   PermissionEventRecord,
   PermissionPolicySummary,
@@ -8,20 +7,6 @@ import type {
 
 export async function listPermissionPolicySummaries() {
   return fetchJson<PermissionPolicySummary[]>("/api/permissions/policies");
-}
-
-export async function getAgentPermissionPolicy(agentId: string) {
-  return fetchJson<AgentPermissionPolicy>(`/api/agents/${agentId}/policy`);
-}
-
-export async function updateAgentPermissionPolicy(
-  agentId: string,
-  policy: AgentPermissionPolicy,
-) {
-  return fetchJson<AgentPermissionPolicy>(`/api/agents/${agentId}/policy`, {
-    method: "PUT",
-    body: JSON.stringify(policy),
-  });
 }
 
 export async function listPermissionEvents(query?: {

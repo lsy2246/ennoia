@@ -82,7 +82,18 @@ const EMPTY_PICKER_STATE: ComposerPickerState = {
 
 const OUTBOX_STORAGE_PREFIX = "ennoia.conversation.outbox.v1";
 const PENDING_REPLY_STORAGE_PREFIX = "ennoia.conversation.pending-replies.v1";
+const CHAT_VISIBILITY_STORAGE_PREFIX = "ennoia.conversation.chat-visibility.v1";
 const RECOVER_SENDING_AFTER_MS = 1500;
+
+type ChatVisibilityPreferences = {
+  showThinking: boolean;
+  showToolCalls: boolean;
+};
+
+const DEFAULT_CHAT_VISIBILITY: ChatVisibilityPreferences = {
+  showThinking: true,
+  showToolCalls: true,
+};
 
 function uniqueStrings(values: string[]) {
   return [...new Set(values.map((item) => item.trim()).filter(Boolean))];
@@ -564,6 +575,40 @@ function persistPendingReplies(sessionId: string, pendingReplies: PendingReplyMa
   }
 }
 
+function chatVisibilityStorageKey(sessionId: string) {
+  return `${CHAT_VISIBILITY_STORAGE_PREFIX}:${sessionId}`;
+}
+
+function loadChatVisibilityPreferences(sessionId: string): ChatVisibilityPreferences {
+  if (typeof window === "undefined") {
+    return DEFAULT_CHAT_VISIBILITY;
+  }
+  try {
+    const raw = window.localStorage.getItem(chatVisibilityStorageKey(sessionId));
+    if (!raw) {
+      return DEFAULT_CHAT_VISIBILITY;
+    }
+    const parsed = JSON.parse(raw) as Partial<ChatVisibilityPreferences>;
+    return {
+      showThinking: parsed.showThinking ?? DEFAULT_CHAT_VISIBILITY.showThinking,
+      showToolCalls: parsed.showToolCalls ?? DEFAULT_CHAT_VISIBILITY.showToolCalls,
+    };
+  } catch {
+    return DEFAULT_CHAT_VISIBILITY;
+  }
+}
+
+function persistChatVisibilityPreferences(sessionId: string, preferences: ChatVisibilityPreferences) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    window.localStorage.setItem(chatVisibilityStorageKey(sessionId), JSON.stringify(preferences));
+  } catch {
+    return;
+  }
+}
+
 function normalizeDraftBody(body: string) {
   return body.replace(/\s+/g, " ").trim();
 }
@@ -653,6 +698,7 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
   const [approvals, setApprovals] = useState<PermissionApprovalRecord[]>([]);
   const [localDrafts, setLocalDrafts] = useState<LocalMessageDraft[]>(() => loadPersistedDrafts(sessionId));
   const [pendingReplies, setPendingReplies] = useState<PendingReplyMarker[]>(() => loadPersistedPendingReplies(sessionId));
+  const [chatVisibility, setChatVisibility] = useState<ChatVisibilityPreferences>(() => loadChatVisibilityPreferences(sessionId));
   const [pickerState, setPickerState] = useState<ComposerPickerState>(EMPTY_PICKER_STATE);
   const [composerSnapshot, setComposerSnapshot] = useState<ComposerSnapshot>({ body: "", addressedAgents: [], segments: [] });
   const [composerMode, setComposerMode] = useState<ComposerModeState>({ kind: "normal" });
@@ -840,6 +886,7 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
   useEffect(() => {
     setLocalDrafts(loadPersistedDrafts(sessionId));
     setPendingReplies(loadPersistedPendingReplies(sessionId));
+    setChatVisibility(loadChatVisibilityPreferences(sessionId));
     setApprovals([]);
     setComposerMode({ kind: "normal" });
     setAgentManagerOpen(false);
@@ -876,6 +923,10 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
   useEffect(() => {
     persistPendingReplies(sessionId, pendingReplies);
   }, [pendingReplies, sessionId]);
+
+  useEffect(() => {
+    persistChatVisibilityPreferences(sessionId, chatVisibility);
+  }, [chatVisibility, sessionId]);
 
   useEffect(() => {
     if (!detail?.messages) {
@@ -1700,7 +1751,26 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
                 {detail.conversation.id}
               </p>
             </div>
-            <div className="button-row">
+            <div className="conversation-header__controls">
+              <div className="tag-row conversation-header__toggles" role="group" aria-label={t("web.conversations.visibility_group", "消息流显示选项")}>
+                <button
+                  type="button"
+                  className={chatVisibility.showThinking ? "chip chip--active conversation-visibility-chip" : "chip conversation-visibility-chip"}
+                  aria-pressed={chatVisibility.showThinking}
+                  onClick={() => setChatVisibility((current) => ({ ...current, showThinking: !current.showThinking }))}
+                >
+                  {t("web.conversations.thinking_toggle", "显示思考")}
+                </button>
+                <button
+                  type="button"
+                  className={chatVisibility.showToolCalls ? "chip chip--active conversation-visibility-chip" : "chip conversation-visibility-chip"}
+                  aria-pressed={chatVisibility.showToolCalls}
+                  onClick={() => setChatVisibility((current) => ({ ...current, showToolCalls: !current.showToolCalls }))}
+                >
+                  {t("web.conversations.tool_calls_toggle", "显示工具调用")}
+                </button>
+              </div>
+              <div className="button-row">
               {visibleApprovals.length > 0 ? (
                 <button
                   type="button"
@@ -1731,6 +1801,7 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
                   {t("web.conversations.resync", "重新同步")}
                 </button>
               ) : null}
+              </div>
             </div>
           </header>
 
@@ -1745,6 +1816,8 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
               agents={activeAgents}
               skills={skills}
               t={t}
+              showThinking={chatVisibility.showThinking}
+              showToolCalls={chatVisibility.showToolCalls}
               onCopy={copyMessageBody}
               onBranchFrom={startBranchFromMessage}
               onEditAndResend={startRewriteFromMessage}

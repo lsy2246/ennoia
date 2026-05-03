@@ -7,7 +7,7 @@ use std::time::Instant;
 use ennoia_assets::builtins;
 use ennoia_extension_host::{ExtensionRuntime, ExtensionRuntimeConfig};
 use ennoia_kernel::{
-    apply_server_log_env_overrides, AgentConfig, AgentDocument, AgentPermissionPolicy,
+    apply_server_log_env_overrides, AgentConfig, AgentDocument, AgentPermissionProfile,
     ModelEndpointConfig, PlatformOverview, ServerConfig, SkillConfig, SkillRegistryEntry,
     SkillRegistryFile, SpaceSpec, UiConfig,
 };
@@ -459,15 +459,23 @@ pub fn load_agent_document(
     Ok(Some(toml::from_str(&contents)?))
 }
 
+pub fn normalize_agent_document(
+    paths: &RuntimePaths,
+    mut document: AgentDocument,
+) -> AgentDocument {
+    normalize_agent_config(paths, &mut document.profile);
+    document
+}
+
 pub fn write_agent_config(paths: &RuntimePaths, payload: &AgentConfig) -> Result<(), AppError> {
-    let permission_policy = load_agent_document(paths, &payload.id)?
-        .map(|document| document.permission_policy)
-        .unwrap_or_else(|| AgentPermissionPolicy::builtin_worker(&payload.id));
+    let permission_profile = load_agent_document(paths, &payload.id)?
+        .map(|document| document.permission_profile)
+        .unwrap_or_else(AgentPermissionProfile::builtin_worker);
     write_agent_document(
         paths,
         &AgentDocument {
             profile: payload.clone(),
-            permission_policy,
+            permission_profile,
         },
     )
 }
@@ -484,31 +492,6 @@ pub fn delete_agent_config(paths: &RuntimePaths, agent_id: &str) -> Result<bool,
         fs::remove_dir(agent_dir)?;
     }
     Ok(true)
-}
-
-pub fn load_agent_permission_policy(
-    paths: &RuntimePaths,
-    agent_id: &str,
-) -> Result<AgentPermissionPolicy, AppError> {
-    Ok(load_agent_document(paths, agent_id)?
-        .map(|document| document.permission_policy)
-        .unwrap_or_else(|| AgentPermissionPolicy::builtin_worker(agent_id)))
-}
-
-pub fn write_agent_permission_policy(
-    paths: &RuntimePaths,
-    agent_id: &str,
-    policy: &AgentPermissionPolicy,
-) -> Result<(), AppError> {
-    let Some(mut document) = load_agent_document(paths, agent_id)? else {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            format!("agent '{agent_id}' not found"),
-        )
-        .into());
-    };
-    document.permission_policy = policy.clone();
-    write_agent_document(paths, &document)
 }
 
 pub fn load_skill_configs(paths: &RuntimePaths) -> Result<Vec<SkillConfig>, AppError> {
@@ -593,7 +576,7 @@ where
     Ok(items)
 }
 
-fn load_agent_documents(paths: &RuntimePaths) -> Result<Vec<AgentDocument>, AppError> {
+pub fn load_agent_documents(paths: &RuntimePaths) -> Result<Vec<AgentDocument>, AppError> {
     migrate_legacy_agent_layout(paths)?;
     if !paths.agents_dir().exists() {
         return Ok(Vec::new());
@@ -617,7 +600,10 @@ fn load_agent_documents(paths: &RuntimePaths) -> Result<Vec<AgentDocument>, AppE
     Ok(items)
 }
 
-fn write_agent_document(paths: &RuntimePaths, document: &AgentDocument) -> Result<(), AppError> {
+pub fn write_agent_document(
+    paths: &RuntimePaths,
+    document: &AgentDocument,
+) -> Result<(), AppError> {
     let agent_dir = paths.agent_dir(&document.profile.id);
     fs::create_dir_all(&agent_dir)?;
     fs::write(
@@ -643,16 +629,11 @@ fn migrate_legacy_agent_layout(paths: &RuntimePaths) -> Result<(), AppError> {
             let contents = fs::read_to_string(entry.path())?;
             let agent = toml::from_str::<AgentConfig>(&contents)?;
             let legacy_policy_file = legacy_policies_dir.join(format!("{}.toml", agent.id));
-            let permission_policy = if legacy_policy_file.exists() {
-                toml::from_str::<AgentPermissionPolicy>(&fs::read_to_string(&legacy_policy_file)?)?
-            } else {
-                AgentPermissionPolicy::builtin_worker(&agent.id)
-            };
             write_agent_document(
                 paths,
                 &AgentDocument {
                     profile: agent,
-                    permission_policy,
+                    permission_profile: AgentPermissionProfile::builtin_worker(),
                 },
             )?;
             fs::remove_file(entry.path())?;
@@ -695,6 +676,7 @@ mod tests {
             skills_dir: String::new(),
             working_dir: String::new(),
             artifacts_dir: String::new(),
+            execution_environment: ennoia_kernel::AgentExecutionEnvironment::default(),
         }
     }
 
@@ -715,11 +697,11 @@ mod tests {
         .expect("write legacy agent");
         fs::write(
             legacy_policies_dir.join("writer.toml"),
-            toml::to_string_pretty(&AgentPermissionPolicy {
-                mode: "default_allow".to_string(),
-                rules: Vec::new(),
+            toml::to_string_pretty(&AgentPermissionProfile {
+                mode: "trusted".to_string(),
+                ..AgentPermissionProfile::builtin_worker()
             })
-            .expect("serialize policy"),
+            .expect("serialize profile"),
         )
         .expect("write legacy policy");
 
@@ -730,14 +712,14 @@ mod tests {
         let document = load_agent_document(&paths, "writer")
             .expect("load agent document")
             .expect("agent document exists");
-        assert_eq!(document.permission_policy.mode, "default_allow");
+        assert_eq!(document.permission_profile.mode, "restricted");
         assert!(paths.agent_config_file("writer").exists());
         assert!(!legacy_agents_dir.join("writer.toml").exists());
         assert!(!legacy_policies_dir.join("writer.toml").exists());
     }
 
     #[test]
-    fn write_agent_config_preserves_existing_permission_policy() {
+    fn write_agent_config_preserves_existing_permission_profile() {
         let temp = tempdir().expect("temp dir");
         let paths = RuntimePaths::new(temp.path());
         let agent = sample_agent("planner");
@@ -745,9 +727,9 @@ mod tests {
             &paths,
             &AgentDocument {
                 profile: agent.clone(),
-                permission_policy: AgentPermissionPolicy {
-                    mode: "default_allow".to_string(),
-                    rules: Vec::new(),
+                permission_profile: AgentPermissionProfile {
+                    mode: "trusted".to_string(),
+                    ..AgentPermissionProfile::builtin_worker()
                 },
             },
         )
@@ -761,7 +743,7 @@ mod tests {
             .expect("load updated document")
             .expect("document exists");
         assert_eq!(document.profile.display_name, "Planner Prime");
-        assert_eq!(document.permission_policy.mode, "default_allow");
+        assert_eq!(document.permission_profile.mode, "trusted");
     }
 }
 
@@ -783,20 +765,27 @@ fn normalize_agent_config(paths: &RuntimePaths, agent: &mut AgentConfig) {
     if agent.default_model.is_empty() && !agent.model_id.is_empty() {
         agent.default_model = agent.model_id.clone();
     }
-    if !agent.working_dir.is_empty() {
-        agent.working_dir = paths.display_for_user(paths.expand_home_token(&agent.working_dir));
+    let execution_mode = agent.execution_environment.normalized_mode();
+    if execution_mode == "native" {
+        agent.working_dir = "/workspace".to_string();
+        agent.artifacts_dir = "/artifacts".to_string();
     } else {
-        agent.working_dir = paths.display_for_user(paths.agent_working_dir(&agent.id));
+        if !agent.working_dir.is_empty() {
+            agent.working_dir = paths.display_for_user(paths.expand_home_token(&agent.working_dir));
+        } else {
+            agent.working_dir = paths.display_for_user(paths.agent_working_dir(&agent.id));
+        }
+        if !agent.artifacts_dir.is_empty() {
+            agent.artifacts_dir =
+                paths.display_for_user(paths.expand_home_token(&agent.artifacts_dir));
+        } else {
+            agent.artifacts_dir = paths.display_for_user(paths.agent_artifacts_dir(&agent.id));
+        }
     }
     if !agent.skills_dir.is_empty() {
         agent.skills_dir = paths.display_for_user(paths.expand_home_token(&agent.skills_dir));
     } else {
         agent.skills_dir = paths.display_for_user(paths.agent_skills_dir(&agent.id));
-    }
-    if !agent.artifacts_dir.is_empty() {
-        agent.artifacts_dir = paths.display_for_user(paths.expand_home_token(&agent.artifacts_dir));
-    } else {
-        agent.artifacts_dir = paths.display_for_user(paths.agent_artifacts_dir(&agent.id));
     }
 }
 

@@ -1,4 +1,4 @@
-use ennoia_kernel::{AgentPermissionPolicy, PermissionApprovalRecord, PermissionEventRecord};
+use ennoia_kernel::{PermissionApprovalRecord, PermissionEventRecord};
 
 use crate::agent_permissions::{
     ApprovalResolutionPayload, PermissionApprovalsQuery, PermissionEventsQuery,
@@ -30,38 +30,6 @@ pub(super) struct PermissionApprovalsQueryPayload {
     status: Option<String>,
     #[serde(default)]
     limit: Option<usize>,
-}
-
-pub(super) async fn agent_policy_detail(
-    State(state): State<AppState>,
-    Extension(request): Extension<RequestContext>,
-    Path(agent_id): Path<String>,
-) -> ApiResult<AgentPermissionPolicy> {
-    state
-        .agent_permissions
-        .load_policy(&agent_id)
-        .map(Json)
-        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))
-}
-
-pub(super) async fn agent_policy_put(
-    State(state): State<AppState>,
-    Extension(request): Extension<RequestContext>,
-    Path(agent_id): Path<String>,
-    Json(payload): Json<AgentPermissionPolicy>,
-) -> ApiResult<AgentPermissionPolicy> {
-    state
-        .agent_permissions
-        .save_policy(&agent_id, &payload)
-        .map_err(|error| {
-            let api_error = if error.kind() == std::io::ErrorKind::NotFound {
-                ApiError::not_found(error.to_string())
-            } else {
-                ApiError::internal(error.to_string())
-            };
-            scoped(api_error, &request)
-        })?;
-    Ok(Json(payload))
 }
 
 pub(super) async fn permission_policy_summaries(

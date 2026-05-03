@@ -17,7 +17,7 @@ use ennoia_kernel::{
     SkillRegistryFile,
 };
 use ennoia_paths::RuntimePaths;
-use ennoia_server::{bootstrap_app_state, default_app_state, run_server};
+use ennoia_server::{bootstrap_app_state, default_app_state, execution, run_server};
 use notify::{Config as NotifyConfig, RecommendedWatcher, RecursiveMode, Watcher};
 
 const WEB_DIR: &str = "web";
@@ -70,6 +70,9 @@ impl ConsoleLogLevel {
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let args: Vec<String> = env::args().collect();
     match args.get(1).map(String::as_str) {
+        Some("internal") => {
+            internal_command(&args[2..]).await?;
+        }
         Some("init") => {
             let paths = RuntimePaths::resolve(args.get(2).map(String::as_str));
             init_home_template(&paths)?;
@@ -224,6 +227,29 @@ async fn extension_command(
         }
     }
 
+    Ok(())
+}
+
+async fn internal_command(args: &[String]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    match args.first().map(String::as_str) {
+        Some("sandbox-worker") => {
+            let request_path = args
+                .get(1)
+                .ok_or("usage: ennoia internal sandbox-worker <request.json> <response.json>")?;
+            let response_path = args
+                .get(2)
+                .ok_or("usage: ennoia internal sandbox-worker <request.json> <response.json>")?;
+            execution::run_sandbox_worker(request_path, response_path)
+                .await
+                .map_err(io::Error::other)?;
+        }
+        Some(other) => {
+            return Err(format!("unknown internal subcommand: {other}").into());
+        }
+        None => {
+            return Err("usage: ennoia internal <subcommand>".into());
+        }
+    }
     Ok(())
 }
 

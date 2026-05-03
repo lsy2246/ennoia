@@ -3,24 +3,20 @@ import {
   useEffect,
   useMemo,
   useState,
-  type Dispatch,
   type FormEvent,
-  type SetStateAction,
 } from "react";
 
 import {
   createAgent,
   deleteAgent,
-  getAgentPermissionPolicy,
   listAgents,
   listModelEndpoints,
   listPermissionApprovals,
   listPermissionEvents,
   listSkills,
   updateAgent,
-  updateAgentPermissionPolicy,
-  type AgentPermissionPolicy,
-  type AgentPermissionRule,
+  type AgentExecutionEnvironment,
+  type AgentPermissionProfile,
   type AgentProfile,
   type ModelEndpointConfig,
   type PermissionApprovalRecord,
@@ -45,11 +41,30 @@ const EMPTY_AGENT: AgentProfile = {
   generation_options: {},
   skills: [],
   enabled: true,
+  permission_profile: {
+    mode: "restricted",
+    path_whitelist: [],
+    allow_command_exec: false,
+    allow_external_network: false,
+    allow_runtime_config_write: false,
+    allow_extension_manage: false,
+  },
+  execution_environment: {
+    mode: "host",
+  },
 };
 
-const EMPTY_POLICY: AgentPermissionPolicy = {
-  mode: "default_deny",
-  rules: [],
+const EMPTY_PERMISSION_PROFILE: AgentPermissionProfile = {
+  mode: "restricted",
+  path_whitelist: [],
+  allow_command_exec: false,
+  allow_external_network: false,
+  allow_runtime_config_write: false,
+  allow_extension_manage: false,
+};
+
+const EMPTY_EXECUTION_ENVIRONMENT: AgentExecutionEnvironment = {
+  mode: "host",
 };
 
 export function AgentEditorView({
@@ -68,7 +83,7 @@ export function AgentEditorView({
   const [skills, setSkills] = useState<SkillConfig[]>([]);
   const [modelEndpoints, setModelEndpoints] = useState<ModelEndpointConfig[]>([]);
   const [form, setForm] = useState<AgentProfile>(EMPTY_AGENT);
-  const [policyForm, setPolicyForm] = useState<AgentPermissionPolicy>(EMPTY_POLICY);
+  const [policyForm, setPolicyForm] = useState<AgentPermissionProfile>(EMPTY_PERMISSION_PROFILE);
   const [permissionApprovals, setPermissionApprovals] = useState<PermissionApprovalRecord[]>([]);
   const [permissionEvents, setPermissionEvents] = useState<PermissionEventRecord[]>([]);
   const [busy, setBusy] = useState(false);
@@ -96,12 +111,10 @@ export function AgentEditorView({
   }, []);
 
   const hydratePermissions = useCallback(async (targetAgentId: string) => {
-    const [policy, approvals, events] = await Promise.all([
-      getAgentPermissionPolicy(targetAgentId),
+    const [approvals, events] = await Promise.all([
       listPermissionApprovals({ agent_id: targetAgentId, limit: 24 }),
       listPermissionEvents({ agent_id: targetAgentId, limit: 24 }),
     ]);
-    setPolicyForm(normalizePolicy(policy));
     setPermissionApprovals(approvals);
     setPermissionEvents(events);
   }, []);
@@ -127,7 +140,7 @@ export function AgentEditorView({
             findProviderContribution(providerContributions, nextModelEndpoints[0] ?? null),
           ),
         });
-        setPolicyForm(EMPTY_POLICY);
+        setPolicyForm(EMPTY_PERMISSION_PROFILE);
         setPermissionApprovals([]);
         setPermissionEvents([]);
         return;
@@ -139,11 +152,8 @@ export function AgentEditorView({
         return;
       }
 
-      setForm({
-        ...current,
-        skills: [...current.skills],
-        generation_options: { ...(current.generation_options ?? {}) },
-      });
+      setForm(normalizeAgentForm(current));
+      setPolicyForm(normalizePermissionProfile(current.permission_profile));
       await hydratePermissions(current.id);
     } catch (err) {
       setError(String(err));
@@ -175,7 +185,13 @@ export function AgentEditorView({
     setBusy(true);
     setError(null);
     try {
-      const payload = normalizeAgentPayload(form, generationOptions);
+      const payload = normalizeAgentPayload(
+        {
+          ...form,
+          permission_profile: normalizePermissionProfile(policyForm),
+        },
+        generationOptions,
+      );
       if (isNew) {
         await createAgent(payload);
       } else {
@@ -215,7 +231,20 @@ export function AgentEditorView({
     setPolicyBusy(true);
     setError(null);
     try {
-      await updateAgentPermissionPolicy(form.id, normalizePolicy(policyForm));
+      await updateAgent(
+        form.id,
+        normalizeAgentPayload(
+          {
+            ...form,
+            permission_profile: normalizePermissionProfile(policyForm),
+          },
+          generationOptions,
+        ),
+      );
+      setForm((current) => ({
+        ...current,
+        permission_profile: normalizePermissionProfile(policyForm),
+      }));
       await hydratePermissions(form.id);
     } catch (err) {
       setError(String(err));
@@ -411,20 +440,56 @@ export function AgentEditorView({
                   <strong>{formatRelativePath(form.skills_dir || "")}</strong>
                 </div>
                 <p className="helper-text">
-                  {t("web.agents.working_dir_help", "Agent 工作目录自动派生到 agents/{agent_id}/work，无需单独配置。")}
+                  {form.execution_environment.mode === "native"
+                    ? "原生沙盒模式下，Agent 看到的是 /workspace、/artifacts、/tmp 这些虚拟路径。"
+                    : t("web.agents.working_dir_help", "Agent 工作目录自动派生到 agents/{agent_id}/work，无需单独配置。")}
                 </p>
               </section>
 
               {!isNew && form.id ? (
                 <>
                   <section className="details-panel agent-editor__section">
-                    <div className="panel-title">{t("web.permissions.policy", "权限策略")}</div>
+                    <div className="panel-title">执行环境</div>
+                    <p className="helper-text">
+                      执行环境决定 Agent 的文件、命令和网络动作在哪一层运行；它和权限系统是两套独立控制。
+                    </p>
+                    <div className="agent-policy-editor">
+                      <label>
+                        运行模式
+                        <Select
+                          value={form.execution_environment.mode}
+                          onChange={(value) =>
+                            setForm((current) => ({
+                              ...current,
+                              execution_environment: normalizeExecutionEnvironment({ mode: value }),
+                            }))}
+                          options={[
+                            { value: "host", label: "宿主机模式" },
+                            { value: "native", label: "原生沙盒模式" },
+                          ]}
+                        />
+                      </label>
+                      <div className="resource-card agent-policy-rule">
+                        <div className="agent-policy-rule__header">
+                          <strong>当前说明</strong>
+                        </div>
+                        <p className="helper-text">
+                          {form.execution_environment.mode === "native"
+                            ? "Agent 优先使用 /workspace、/artifacts、/tmp 这些虚拟路径；白名单也按这些路径生效。"
+                            : "Agent 直接在宿主机环境里执行；相对路径默认按工作目录解析。"}
+                        </p>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section className="details-panel agent-editor__section">
+                    <div className="panel-title">{t("web.permissions.profile", "权限模式")}</div>
                     <p className="helper-text">
                       {t("web.permissions.agent_embedded_help", "长期权限配置属于 Agent 本身；即时审批仍应在会话里处理。")}
                     </p>
                     <div className="agent-policy-editor">
                       <label>
-                        {t("web.permissions.default_mode", "默认模式")}
+                        {t("web.permissions.mode", "权限模式")}
                         <Select
                           value={policyForm.mode}
                           onChange={(value) =>
@@ -433,150 +498,101 @@ export function AgentEditorView({
                               mode: value,
                             }))}
                           options={[
-                            { value: "default_deny", label: t("web.permissions.default_deny", "默认拒绝") },
-                            { value: "default_allow", label: t("web.permissions.default_allow", "默认允许") },
+                            { value: "restricted", label: t("web.permissions.mode_restricted", "受限模式") },
+                            { value: "trusted", label: t("web.permissions.mode_trusted", "信任模式") },
                           ]}
                         />
                       </label>
 
-                      <div className="agent-policy-editor__header">
-                        <div className="panel-title">{t("web.permissions.rules", "规则")}</div>
-                        <button
-                          type="button"
-                          className="secondary"
-                          onClick={() =>
-                            setPolicyForm((current) => ({
-                              ...current,
-                              rules: [...current.rules, createEmptyPermissionRule()],
-                            }))}
-                        >
-                          {t("web.permissions.add_rule", "新增规则")}
-                        </button>
-                      </div>
-
                       <div className="agent-policy-editor__rules">
-                        {policyForm.rules.length === 0 ? (
-                          <div className="empty-card agent-editor__empty-state">
-                            <strong>{t("web.agents.empty_rules_title", "当前没有规则")}</strong>
-                            <p>{t("web.agents.empty_rules_body", "你可以先新增一条规则，再为动作、路径或主机范围补充匹配条件。")}</p>
+                        <div className="resource-card agent-policy-rule">
+                          <div className="agent-policy-rule__header">
+                            <strong>{t("web.permissions.path_whitelist", "路径白名单")}</strong>
                           </div>
-                        ) : (
-                          policyForm.rules.map((rule, index) => (
-                            <article key={rule.id || `rule-${index}`} className="resource-card agent-policy-rule">
-                              <div className="agent-policy-rule__header">
-                                <strong>{rule.id || t("web.permissions.unnamed_rule", "未命名规则")}</strong>
-                                <button
-                                  type="button"
-                                  className="secondary"
-                                  onClick={() =>
-                                    setPolicyForm((current) => ({
-                                      ...current,
-                                      rules: current.rules.filter((_, ruleIndex) => ruleIndex !== index),
-                                    }))}
-                                >
-                                  {t("web.action.delete", "删除")}
-                                </button>
-                              </div>
+                          <p className="helper-text">
+                            {form.execution_environment.mode === "native"
+                              ? "留空表示不额外限制虚拟路径范围；填写后，白名单外的 /workspace、/artifacts、/tmp 路径会按当前模式进入审批。"
+                              : t("web.permissions.path_whitelist_help", "留空表示不额外限制路径范围；填写后，白名单外路径会按照当前模式进入审批。")}
+                          </p>
+                          <SimpleStringListEditor
+                            t={t}
+                            label={t("web.permissions.path_whitelist", "路径白名单")}
+                            placeholder={form.execution_environment.mode === "native" ? "/workspace/logs/output.txt" : t("web.permissions.path_whitelist_placeholder", "例如 C:/Users/Administrator/stdout.log")}
+                            values={policyForm.path_whitelist}
+                            onChange={(values) =>
+                              setPolicyForm((current) => ({
+                                ...current,
+                                path_whitelist: values,
+                              }))}
+                          />
+                        </div>
 
-                              <div className="form-grid agent-editor__form-grid">
-                                <label>
-                                  ID
-                                  <input
-                                    value={rule.id}
-                                    onChange={(event) =>
-                                      updatePermissionRule(setPolicyForm, index, { id: event.target.value })}
-                                  />
-                                </label>
-                                <label>
-                                  {t("web.permissions.effect", "效果")}
-                                  <Select
-                                    value={rule.effect}
-                                    onChange={(value) =>
-                                      updatePermissionRule(setPolicyForm, index, { effect: value })}
-                                    options={[
-                                      { value: "allow", label: t("web.permissions.allow", "允许") },
-                                      { value: "ask", label: t("web.permissions.ask", "询问") },
-                                      { value: "deny", label: t("web.permissions.deny", "拒绝") },
-                                    ]}
-                                  />
-                                </label>
-                                <label>
-                                  {t("web.permissions.conversation_scope", "会话范围")}
-                                  <Select
-                                    value={rule.conversation_scope ?? ""}
-                                    onChange={(value) =>
-                                      updatePermissionRule(setPolicyForm, index, {
-                                        conversation_scope: value || null,
-                                      })}
-                                    options={[
-                                      { value: "", label: t("web.permissions.scope_any", "任意") },
-                                      { value: "current", label: t("web.permissions.scope_current", "当前会话") },
-                                    ]}
-                                  />
-                                </label>
-                                <label>
-                                  {t("web.permissions.run_scope", "运行范围")}
-                                  <Select
-                                    value={rule.run_scope ?? ""}
-                                    onChange={(value) =>
-                                      updatePermissionRule(setPolicyForm, index, {
-                                        run_scope: value || null,
-                                      })}
-                                    options={[
-                                      { value: "", label: t("web.permissions.scope_any", "任意") },
-                                      { value: "current", label: t("web.permissions.scope_current_run", "当前运行") },
-                                    ]}
-                                  />
-                                </label>
-                              </div>
+                        <div className="resource-card agent-policy-rule">
+                          <div className="agent-policy-rule__header">
+                            <strong>{t("web.permissions.risk_switches", "高风险操作")}</strong>
+                          </div>
+                          <div className="stack">
+                            <label className="check-row agent-editor__check-row">
+                              <input
+                                type="checkbox"
+                                checked={policyForm.allow_command_exec}
+                                onChange={(event) =>
+                                  setPolicyForm((current) => ({
+                                    ...current,
+                                    allow_command_exec: event.target.checked,
+                                  }))}
+                              />
+                              {t("web.permissions.allow_command_exec", "允许执行系统命令")}
+                            </label>
+                            <label className="check-row agent-editor__check-row">
+                              <input
+                                type="checkbox"
+                                checked={policyForm.allow_external_network}
+                                onChange={(event) =>
+                                  setPolicyForm((current) => ({
+                                    ...current,
+                                    allow_external_network: event.target.checked,
+                                  }))}
+                              />
+                              {t("web.permissions.allow_external_network", "允许访问外部网络")}
+                            </label>
+                            <label className="check-row agent-editor__check-row">
+                              <input
+                                type="checkbox"
+                                checked={policyForm.allow_runtime_config_write}
+                                onChange={(event) =>
+                                  setPolicyForm((current) => ({
+                                    ...current,
+                                    allow_runtime_config_write: event.target.checked,
+                                  }))}
+                              />
+                              {t("web.permissions.allow_runtime_config_write", "允许修改运行时配置")}
+                            </label>
+                            <label className="check-row agent-editor__check-row">
+                              <input
+                                type="checkbox"
+                                checked={policyForm.allow_extension_manage}
+                                onChange={(event) =>
+                                  setPolicyForm((current) => ({
+                                    ...current,
+                                    allow_extension_manage: event.target.checked,
+                                  }))}
+                              />
+                              {t("web.permissions.allow_extension_manage", "允许管理扩展")}
+                            </label>
+                          </div>
+                        </div>
 
-                              <div className="agent-policy-rule__grid">
-                                <PermissionRuleListEditor
-                                  t={t}
-                                  label={t("web.permissions.actions", "动作")}
-                                  placeholder={t("web.permissions.actions_placeholder", "例如 provider.generate")}
-                                  values={rule.actions}
-                                  onChange={(values) =>
-                                    updatePermissionRule(setPolicyForm, index, { actions: values })}
-                                />
-                                <PermissionRuleListEditor
-                                  t={t}
-                                  label={t("web.permissions.extension_scope", "扩展范围")}
-                                  placeholder={t("web.permissions.extension_scope_placeholder", "例如 openai")}
-                                  values={rule.extension_scope}
-                                  onChange={(values) =>
-                                    updatePermissionRule(setPolicyForm, index, { extension_scope: values })}
-                                />
-                                <PermissionRuleListEditor
-                                  t={t}
-                                  label={t("web.permissions.path_include", "允许路径")}
-                                  placeholder={t("web.permissions.path_include_placeholder", "例如 ~/.ennoia/agents/**")}
-                                  values={rule.path_include}
-                                  onChange={(values) =>
-                                    updatePermissionRule(setPolicyForm, index, { path_include: values })}
-                                />
-                                <PermissionRuleListEditor
-                                  t={t}
-                                  label={t("web.permissions.path_exclude", "排除路径")}
-                                  placeholder={t("web.permissions.path_exclude_placeholder", "例如 ~/.ennoia/tmp/**")}
-                                  values={rule.path_exclude}
-                                  onChange={(values) =>
-                                    updatePermissionRule(setPolicyForm, index, { path_exclude: values })}
-                                />
-                                <div className="agent-policy-rule__wide">
-                                  <PermissionRuleListEditor
-                                    t={t}
-                                    label={t("web.permissions.host_scope", "主机范围")}
-                                    placeholder={t("web.permissions.host_scope_placeholder", "例如 api.openai.com")}
-                                    values={rule.host_scope}
-                                    onChange={(values) =>
-                                      updatePermissionRule(setPolicyForm, index, { host_scope: values })}
-                                  />
-                                </div>
-                              </div>
-                            </article>
-                          ))
-                        )}
+                        <div className="resource-card agent-policy-rule">
+                          <div className="agent-policy-rule__header">
+                            <strong>{t("web.permissions.mode_preview", "模式说明")}</strong>
+                          </div>
+                          <p className="helper-text">
+                            {policyForm.mode === "trusted"
+                              ? t("web.permissions.mode_trusted_help", "信任模式会直接允许大多数操作；只有少数高风险操作和白名单外路径会询问。")
+                              : t("web.permissions.mode_restricted_help", "受限模式只自动放行安全内置操作；其他操作会询问。")}
+                          </p>
+                        </div>
                       </div>
                     </div>
                     <div className="button-row button-row--wrap">
@@ -746,54 +762,41 @@ function normalizeAgentPayload(
   return {
     ...form,
     generation_options,
+    permission_profile: normalizePermissionProfile(form.permission_profile),
+    execution_environment: normalizeExecutionEnvironment(form.execution_environment),
   };
 }
 
-function createEmptyPermissionRule(): AgentPermissionRule {
+function normalizeAgentForm(form: AgentProfile): AgentProfile {
   return {
-    id: `rule-${Math.random().toString(36).slice(2, 10)}`,
-    effect: "ask",
-    actions: [],
-    extension_scope: [],
-    conversation_scope: null,
-    run_scope: null,
-    path_include: [],
-    path_exclude: [],
-    host_scope: [],
+    ...form,
+    skills: [...(form.skills ?? [])],
+    generation_options: { ...(form.generation_options ?? {}) },
+    permission_profile: normalizePermissionProfile(form.permission_profile),
+    execution_environment: normalizeExecutionEnvironment(form.execution_environment),
   };
 }
 
-function normalizePolicy(policy: AgentPermissionPolicy): AgentPermissionPolicy {
+function normalizePermissionProfile(profile: AgentPermissionProfile | undefined): AgentPermissionProfile {
   return {
-    mode: policy.mode || "default_deny",
-    rules: (policy.rules ?? []).map((rule) => ({
-      id: rule.id ?? "",
-      effect: rule.effect || "ask",
-      actions: [...(rule.actions ?? [])],
-      extension_scope: [...(rule.extension_scope ?? [])],
-      conversation_scope: rule.conversation_scope ?? null,
-      run_scope: rule.run_scope ?? null,
-      path_include: [...(rule.path_include ?? [])],
-      path_exclude: [...(rule.path_exclude ?? [])],
-      host_scope: [...(rule.host_scope ?? [])],
-    })),
+    mode: profile?.mode === "trusted" ? "trusted" : "restricted",
+    path_whitelist: [...(profile?.path_whitelist ?? [])],
+    allow_command_exec: Boolean(profile?.allow_command_exec),
+    allow_external_network: Boolean(profile?.allow_external_network),
+    allow_runtime_config_write: Boolean(profile?.allow_runtime_config_write),
+    allow_extension_manage: Boolean(profile?.allow_extension_manage),
   };
 }
 
-function updatePermissionRule(
-  setPolicyForm: Dispatch<SetStateAction<AgentPermissionPolicy>>,
-  index: number,
-  patch: Partial<AgentPermissionRule>,
-) {
-  setPolicyForm((current) => ({
-    ...current,
-    rules: current.rules.map((rule, ruleIndex) =>
-      ruleIndex === index ? { ...rule, ...patch } : rule,
-    ),
-  }));
+function normalizeExecutionEnvironment(
+  value: AgentExecutionEnvironment | undefined,
+): AgentExecutionEnvironment {
+  return {
+    mode: value?.mode === "native" ? "native" : EMPTY_EXECUTION_ENVIRONMENT.mode,
+  };
 }
 
-function PermissionRuleListEditor({
+function SimpleStringListEditor({
   t,
   label,
   placeholder,

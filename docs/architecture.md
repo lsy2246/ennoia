@@ -43,6 +43,15 @@ Web
 - 裁决结果固定为 `allow`、`deny`、`ask`。`ask` 会生成待审批记录，审批通过后可落成单次 grant、当前会话 grant、当前 run grant 或永久 policy。
 - 系统默认只管 Agent 身份，不拦截操作者直接发起的 HTTP 调用。
 
+## Agent 执行环境
+
+- Agent 执行环境与权限系统是两套独立机制。
+- 权限系统回答“允不允许”；执行环境回答“在哪里执行”。
+- 当前执行环境固定提供两种模式：
+  - `host`：直接在宿主机运行时执行。
+  - `native`：使用原生沙盒语义，模型与内置工具优先只看到 `/workspace`、`/artifacts`、`/tmp` 三个虚拟根。
+- 内置 `fs.read`、`fs.write`、`command.exec`、`net.fetch` 都应先经过权限裁决，再进入执行环境层，不直接把宿主机绝对路径暴露给模型。
+
 ## 细粒度接口层
 
 - 系统用稳定 `/api/...` 表达产品动作，例如会话列表、创建会话、写消息、创建运行、读取任务。
@@ -133,7 +142,7 @@ Web
 - 扩展默认不进入会话目录；只有显式声明 `conversation.inject` 时，宿主才会把该扩展作为会话可见目录项暴露给模型。进入会话时只注入扩展自身的 `description`、受限资源/能力目录与 `docs` 入口，不自动注入 `docs` 正文。
 - 如需参与 Agent 权限裁决，扩展应在 capability metadata 中额外声明 `permission`，例如 `action`、`target_kind`、`scope_kind`；没有声明 `permission` 的 capability 不会自动进入 Agent 权限系统。
 - Agent 调用上游模型时，宿主统一构造结构化 `context`，至少包含 `runtime`、`conversation`、`extensions`、`skills` 四块，再由 provider 适配层渲染成模型可见消息；`metadata` 只保留给链路追踪和调试，不承担模型上下文职责。
-- `runtime.agent_working_dir` 与 `runtime.agent_artifacts_dir` 表示 Agent 自己的内部运行目录，不等同于用户项目工作区；模型只应在路径相关任务里按需使用，不能默认向用户主动播报。
+- 当前模型侧应优先使用 `runtime.workspace_root`、`runtime.artifacts_root` 与 `runtime.temp_root` 这些虚拟根；它们表示 Agent 自己的内部执行视图，不等同于用户项目工作区，也不应默认向用户主动播报宿主机绝对路径。
 
 ## Skill 模型
 
@@ -149,7 +158,7 @@ Web
 - 系统级日志：`~/.ennoia/data/system/sqlite/logs.db`
 - 系统级事件总线：`~/.ennoia/data/system/sqlite/events.db`
 - Agent 权限事件与审批：`~/.ennoia/data/system/sqlite/permissions.db`
-- Agent 基础配置与权限策略：`~/.ennoia/agents/{agent_id}/agent.toml`
+- Agent 基础配置、权限配置与执行环境配置：`~/.ennoia/agents/{agent_id}/agent.toml`
 - 系统定时计划：`~/.ennoia/data/system/schedules.json`
 - 扩展私有数据：`~/.ennoia/data/extensions/{extension_id}/`
 - 扩展私有配置：`~/.ennoia/data/extensions/{extension_id}/` 下由扩展自行定义

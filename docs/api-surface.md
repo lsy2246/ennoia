@@ -25,8 +25,10 @@
 - `GET /api/agents/{agent_id}`
 - `PUT /api/agents/{agent_id}`
 - `DELETE /api/agents/{agent_id}`
-- `GET /api/agents/{agent_id}/policy`
-- `PUT /api/agents/{agent_id}/policy`
+
+约定：
+
+- `GET /api/agents`、`POST /api/agents`、`GET /api/agents/{agent_id}`、`PUT /api/agents/{agent_id}` 返回或接收的 Agent 主模型里同时包含 `permission_profile` 与 `execution_environment` 字段；Agent 基础信息、权限系统和执行环境统一走同一份文档。
 
 - `GET /api/skills`
 - `POST /api/skills`
@@ -295,8 +297,7 @@ Behavior 能力入口保留用于兼容和扩展自有 API。系统级运行入�
 
 权限 API 只服务系统级 Agent 裁决，不暴露给扩展自行放权。约定如下：
 
-- `GET /api/agents/{agent_id}/policy` / `PUT /api/agents/{agent_id}/policy`：读取或直接写入某个 Agent 在 `agents/{agent_id}/agent.toml` 中的权限策略段。
-- `GET /api/permissions/policies`：返回当前 Agent 列表对应的策略摘要，便于前端展示默认模式和 allow / ask / deny 规则数量。
+- `GET /api/permissions/policies`：返回当前 Agent 列表对应的策略摘要，便于前端展示模式和编译后 allow / ask / deny 规则数量。
 - `GET /api/permissions/events`：返回最近权限事件，支持 `agent_id`、`action`、`decision`、`limit`。
 - `GET /api/permissions/approvals`：返回审批记录，支持 `agent_id`、`status`、`limit`。
 - `POST /api/permissions/approvals/{approval_id}/resolve`：处理待审批请求，`resolution` 取值固定为 `allow_once`、`allow_conversation`、`allow_run`、`allow_policy`、`deny`。

@@ -16,6 +16,7 @@ type ChatAccessoryEntry = ChatErrorEntry | ChatStatusEntry | ChatSystemEntry | C
 type ChatGroup =
   | {
       id: string;
+      order: number;
       anchor: ConversationMessageEntry;
       accessories: ChatAccessoryEntry[];
       relatedRuns: ExecutionRun[];
@@ -23,6 +24,7 @@ type ChatGroup =
     }
   | {
       id: string;
+      order: number;
       anchor: null;
       accessories: ChatAccessoryEntry[];
       relatedRuns: ExecutionRun[];
@@ -94,9 +96,10 @@ function accessoryRelatedMessageId(entry: ChatAccessoryEntry) {
   return undefined;
 }
 
-function buildChatGroups(entries: ChatEntryViewModel[], runs: ExecutionRun[]) {
+function buildChatGroups(entries: ChatEntryViewModel[], _runs: ExecutionRun[]) {
   const groups: ChatGroup[] = [];
   const groupsByMessageId = new Map<string, Extract<ChatGroup, { anchor: ConversationMessageEntry }>>();
+  let order = 0;
 
   for (const entry of entries) {
     if (entry.kind === "approval") {
@@ -106,6 +109,7 @@ function buildChatGroups(entries: ChatEntryViewModel[], runs: ExecutionRun[]) {
     if (entry.kind === "message") {
       const current = {
         id: `group:${entry.id}`,
+        order: order++,
         anchor: entry,
         accessories: [],
         relatedRuns: [],
@@ -113,6 +117,18 @@ function buildChatGroups(entries: ChatEntryViewModel[], runs: ExecutionRun[]) {
       };
       groups.push(current);
       groupsByMessageId.set(entry.messageId, current);
+      continue;
+    }
+
+    if (entry.kind === "status" || entry.kind === "tool_result") {
+      groups.push({
+        id: `group:standalone:${entry.id}`,
+        order: order++,
+        anchor: null,
+        accessories: [entry],
+        relatedRuns: [],
+        timestamp: entry.createdAt,
+      });
       continue;
     }
 
@@ -124,6 +140,7 @@ function buildChatGroups(entries: ChatEntryViewModel[], runs: ExecutionRun[]) {
 
     groups.push({
       id: `group:standalone:${entry.id}`,
+      order: order++,
       anchor: null,
       accessories: [entry],
       relatedRuns: [],
@@ -131,22 +148,13 @@ function buildChatGroups(entries: ChatEntryViewModel[], runs: ExecutionRun[]) {
     });
   }
 
-  for (const run of runs) {
-    const sourceMessageId = run.source_message_id ?? undefined;
-    if (!sourceMessageId) {
-      continue;
+  return groups.sort((left, right) => {
+    const byTime = left.timestamp.localeCompare(right.timestamp);
+    if (byTime !== 0) {
+      return byTime;
     }
-    const target = groupsByMessageId.get(sourceMessageId);
-    if (target) {
-      target.relatedRuns.push(run);
-    }
-  }
-
-  for (const group of groups) {
-    group.relatedRuns.sort((left, right) => right.updated_at.localeCompare(left.updated_at));
-  }
-
-  return groups;
+    return left.order - right.order;
+  });
 }
 
 function TypingGlyph() {
@@ -159,72 +167,212 @@ function TypingGlyph() {
   );
 }
 
-function stageTone(stage: string) {
-  switch (stage) {
-    case "completed":
-      return "success";
-    case "failed":
-    case "blocked":
-    case "cancelled":
-      return "danger";
-    case "pending":
-    case "planning":
-    case "dispatched":
-    case "running":
-    case "reviewing":
-      return "warn";
+function safeToolPayload(body: string) {
+  try {
+    const parsed = JSON.parse(body) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return null;
+    }
+    return parsed as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function asNonEmptyString(value: unknown) {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function shortenInline(value: string, limit = 96) {
+  return value.length > limit ? `${value.slice(0, Math.max(0, limit - 1))}…` : value;
+}
+
+function toolLabel(toolName: string | undefined, t: (key: string, fallback: string) => string) {
+  switch (toolName) {
+    case "fs.read":
+      return t("web.conversations.tool_name_fs_read", "读取文件");
+    case "fs.write":
+      return t("web.conversations.tool_name_fs_write", "写入文件");
+    case "command.exec":
+      return t("web.conversations.tool_name_command_exec", "执行命令");
+    case "net.fetch":
+      return t("web.conversations.tool_name_net_fetch", "网络请求");
     default:
-      return "muted";
+      return t("web.conversations.tool_calls_title", "工具调用");
   }
 }
 
-function summarizeRunGoal(goal: string) {
-  const normalized = goal.trim().replace(/\s+/g, " ");
-  if (normalized.length <= 72) {
-    return normalized;
+function resolveToolResultPresentation(
+  entry: ChatToolResultEntry,
+  t: (key: string, fallback: string) => string,
+) {
+  const payload = safeToolPayload(entry.body);
+  const rawToolName = asNonEmptyString(payload?.tool) ?? entry.title?.trim() ?? entry.sender?.trim();
+  const title = toolLabel(rawToolName, t);
+
+  let descriptor: string | undefined;
+  if (rawToolName === "command.exec") {
+    const command = asNonEmptyString(payload?.command);
+    const rawArgs = Array.isArray(payload?.args) ? payload.args : [];
+    const args = rawArgs
+      .map((value) => asNonEmptyString(value))
+      .filter((value): value is string => Boolean(value));
+    descriptor = [command, ...args].filter(Boolean).join(" ").trim() || undefined;
+  } else {
+    descriptor =
+      asNonEmptyString(payload?.path) ??
+      asNonEmptyString(payload?.url) ??
+      asNonEmptyString(payload?.cwd) ??
+      asNonEmptyString(payload?.command);
   }
-  return `${normalized.slice(0, 72)}...`;
+
+  const summaryParts = [
+    rawToolName,
+    descriptor ? shortenInline(descriptor) : undefined,
+  ].filter((value): value is string => Boolean(value));
+
+  return {
+    title,
+    summary:
+      summaryParts.join(" · ") ||
+      t("web.conversations.tool_output_hint", "展开查看工具输出内容"),
+  };
 }
 
-function ProcessAccessoryBlock({
-  runs,
+function resolveFailurePresentation(
+  entry: ConversationMessageEntry,
+  t: (key: string, fallback: string) => string,
+) {
+  if (entry.failureCode === "sandbox_path_restricted") {
+    return {
+      kind: "sandbox" as const,
+      title: t("web.conversations.sandbox_path_error_title", "沙盒路径已拦截"),
+      summary: t(
+        "web.conversations.sandbox_path_error_summary",
+        "当前原生沙盒只允许访问 /workspace、/artifacts 和 /tmp，这次路径请求已被拦截。",
+      ),
+      detail: entry.failureDetail || entry.body,
+    };
+  }
+
+  const summary = entry.failureSummary?.trim() || entry.body.trim();
+  const detail = entry.failureDetail?.trim() || entry.body.trim();
+  return {
+    kind: "error" as const,
+    title: t("web.conversations.error_title", "错误"),
+    summary,
+    detail,
+  };
+}
+
+function SandboxBlockedBubble({
+  title,
   t,
 }: {
-  runs: ExecutionRun[];
+  title: string;
   t: (key: string, fallback: string) => string;
 }) {
-  const latest = runs[0];
-  const label = latest
-    ? `${runs.length} ${t("web.conversations.process_runs_suffix", "个运行")} · ${latest.stage}`
-    : t("web.conversations.process_empty", "没有过程信息");
-
   return (
-    <details className="message-accessory message-accessory--run">
-      <summary>
-        <span className="message-accessory__summary-main">
-          <strong>{t("web.conversations.process_title", "思考与执行过程")}</strong>
-          <span>{label}</span>
+    <div className="chat-sandbox-bubble">
+      <div className="chat-sandbox-bubble__header">
+        <strong>{title}</strong>
+      </div>
+      <div className="chat-sandbox-bubble__allowlist">
+        <span className="chat-sandbox-bubble__allowlist-label">
+          {t("web.conversations.sandbox_allowed_paths_label", "仅允许访问这些路径")}
         </span>
-        {latest ? <small>{formatAbsoluteDateTime(latest.updated_at)}</small> : null}
-      </summary>
-      <div className="message-accessory__body">
-        <div className="process-run-list">
-          {runs.map((run) => (
-            <article key={run.id} className="process-run-card">
-              <div className="process-run-card__header">
-                <strong>{summarizeRunGoal(run.goal)}</strong>
-                <span className={`badge badge--${stageTone(run.stage)}`}>{run.stage}</span>
-              </div>
-              <div className="process-run-card__meta">
-                <span>{run.id}</span>
-                <span>{run.trigger}</span>
-                <span>{formatAbsoluteDateTime(run.updated_at)}</span>
-              </div>
-            </article>
-          ))}
+        <div className="chat-sandbox-bubble__allowlist-items">
+          <code>/workspace</code>
+          <code>/artifacts</code>
+          <code>/tmp</code>
         </div>
       </div>
-    </details>
+    </div>
+  );
+}
+
+function StatusBubble({
+  entry,
+  agents,
+  t,
+}: {
+  entry: ChatStatusEntry;
+  agents: AgentProfile[];
+  t: (key: string, fallback: string) => string;
+}) {
+  const absoluteAt = formatAbsoluteDateTime(entry.createdAt);
+  const senderLabel = resolveSenderLabel({
+    role: entry.role,
+    sender: entry.sender,
+    agents,
+    t,
+  });
+
+  return (
+    <article className="chat-unit chat-unit--agent chat-unit--status">
+      <div className="chat-unit__body">
+        <div className="chat-unit__meta">
+          {senderLabel ? <strong className="chat-unit__sender">{senderLabel}</strong> : null}
+          <span className="chat-unit__time">{absoluteAt}</span>
+        </div>
+        <div className="message-bubble message-bubble--agent message-bubble--typing">
+          <div className="message-bubble__body">
+            <div className="message-status-bubble__headline">
+              <TypingGlyph />
+              <strong>{t("web.conversations.thinking_title", "思考")}</strong>
+              <span>{entry.label}</span>
+            </div>
+            {entry.detail ? <p className="typing-detail">{entry.detail}</p> : null}
+          </div>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function ToolResultBubble({
+  entry,
+  agents,
+  skills,
+  t,
+}: {
+  entry: ChatToolResultEntry;
+  agents: AgentProfile[];
+  skills: SkillConfig[];
+  t: (key: string, fallback: string) => string;
+}) {
+  const absoluteAt = formatAbsoluteDateTime(entry.createdAt);
+  const actorSender = entry.actorSender?.trim();
+  const actorLabel = actorSender
+    ? resolveSenderLabel({
+        role: "agent",
+        sender: actorSender,
+        agents,
+        t,
+      })
+    : "";
+  const toolPresentation = resolveToolResultPresentation(entry, t);
+
+  return (
+    <article className="chat-unit chat-unit--agent chat-unit--tool-call">
+      <div className="chat-unit__body">
+        <div className="chat-unit__meta">
+          {actorLabel ? <strong className="chat-unit__sender">{actorLabel}</strong> : null}
+          <span className="chat-unit__time">{absoluteAt}</span>
+        </div>
+        <details className="message-accessory message-accessory--tool">
+          <summary>
+            <span className="message-accessory__summary-main">
+              <strong>{toolPresentation.title}</strong>
+              <span>{toolPresentation.summary}</span>
+            </span>
+          </summary>
+          <div className="message-accessory__body">
+            <ChatContent body={entry.body} format={entry.format} agents={agents} skills={skills} />
+          </div>
+        </details>
+      </div>
+    </article>
   );
 }
 
@@ -242,7 +390,7 @@ function AccessoryBlock({
   const absoluteAt = formatAbsoluteDateTime(entry.createdAt);
   const senderLabel = resolveSenderLabel({
     role: entry.role,
-    sender: entry.title ?? entry.sender,
+    sender: entry.kind === "status" ? entry.sender : entry.title ?? entry.sender,
     agents,
     t,
   });
@@ -253,8 +401,8 @@ function AccessoryBlock({
         <summary>
           <span className="message-accessory__summary-main">
             <TypingGlyph />
-            <strong>{senderLabel}</strong>
-            <span>{entry.label}</span>
+            <strong>{t("web.conversations.thinking_title", "思考")}</strong>
+            <span>{senderLabel ? `${senderLabel} · ${entry.label}` : entry.label}</span>
           </span>
           <small>{absoluteAt}</small>
         </summary>
@@ -305,12 +453,14 @@ function AccessoryBlock({
     );
   }
 
+  const toolPresentation = resolveToolResultPresentation(entry, t);
+
   return (
     <details className="message-accessory message-accessory--tool">
       <summary>
         <span className="message-accessory__summary-main">
-          <strong>{senderLabel}</strong>
-          <span>{t("web.conversations.tool_output_hint", "展开查看工具输出内容")}</span>
+          <strong>{toolPresentation.title}</strong>
+          <span>{toolPresentation.summary}</span>
         </span>
         <small>{absoluteAt}</small>
       </summary>
@@ -326,6 +476,8 @@ function MessageGroup({
   agents,
   skills,
   t,
+  showThinking,
+  showToolCalls,
   onCopy,
   onBranchFrom,
   onEditAndResend,
@@ -336,6 +488,8 @@ function MessageGroup({
   agents: AgentProfile[];
   skills: SkillConfig[];
   t: (key: string, fallback: string) => string;
+  showThinking: boolean;
+  showToolCalls: boolean;
   onCopy: (entryId: string, body: string) => void;
   onBranchFrom: (messageId: string) => void;
   onEditAndResend: (messageId: string) => void;
@@ -360,6 +514,18 @@ function MessageGroup({
     .join(" ");
   const absoluteAt = formatAbsoluteDateTime(anchor.createdAt);
   const showSenderLabel = !isOperator && Boolean(senderLabel);
+  const visibleAccessories = group.accessories.filter((entry) => {
+    if (entry.kind === "status") {
+      return showThinking;
+    }
+    if (entry.kind === "tool_result") {
+      return showToolCalls;
+    }
+    return true;
+  });
+  const failurePresentation = !isOperator && anchor.state === "failed"
+    ? resolveFailurePresentation(anchor, t)
+    : null;
 
   return (
     <article className={isOperator ? "chat-unit chat-unit--operator" : "chat-unit chat-unit--agent"}>
@@ -397,17 +563,43 @@ function MessageGroup({
             : null}
         </div>
 
-        <div className={bubbleClassNames}>
-          <div className="message-bubble__body">
-            <ChatContent
-              body={anchor.body}
-              format={anchor.format}
-              agents={agents}
-              skills={skills}
-              mentionAgentIds={anchor.mentions}
+        {failurePresentation ? (
+          failurePresentation.kind === "sandbox" ? (
+            <SandboxBlockedBubble
+              title={failurePresentation.title}
+              t={t}
             />
+          ) : (
+            <div className="chat-error-bubble">
+              <div className="chat-error-bubble__header">
+                <div>
+                  <strong>{failurePresentation.title}</strong>
+                </div>
+              </div>
+              <p className="chat-error-bubble__summary">{failurePresentation.summary}</p>
+              {failurePresentation.detail && failurePresentation.detail !== failurePresentation.summary ? (
+                <details className="chat-error-bubble__detail">
+                  <summary>{t("web.conversations.error_detail_toggle", "查看详情")}</summary>
+                  <pre className="message-pre">
+                    <code>{failurePresentation.detail}</code>
+                  </pre>
+                </details>
+              ) : null}
+            </div>
+          )
+        ) : (
+          <div className={bubbleClassNames}>
+            <div className="message-bubble__body">
+              <ChatContent
+                body={anchor.body}
+                format={anchor.format}
+                agents={agents}
+                skills={skills}
+                mentionAgentIds={anchor.mentions}
+              />
+            </div>
           </div>
-        </div>
+        )}
 
         {anchor.localError ? (
           <div className="message-inline-error">
@@ -416,12 +608,9 @@ function MessageGroup({
           </div>
         ) : null}
 
-        {(group.relatedRuns.length > 0 || group.accessories.length > 0) ? (
+        {visibleAccessories.length > 0 ? (
           <div className="message-accessory-stack">
-            {group.relatedRuns.length > 0 ? (
-              <ProcessAccessoryBlock runs={group.relatedRuns} t={t} />
-            ) : null}
-            {group.accessories.map((entry) => (
+            {visibleAccessories.map((entry) => (
               <AccessoryBlock key={entry.id} entry={entry} agents={agents} skills={skills} t={t} />
             ))}
           </div>
@@ -485,17 +674,39 @@ function StandaloneGroup({
   agents,
   skills,
   t,
+  showThinking,
+  showToolCalls,
 }: {
   group: Extract<ChatGroup, { anchor: null }>;
   agents: AgentProfile[];
   skills: SkillConfig[];
   t: (key: string, fallback: string) => string;
+  showThinking: boolean;
+  showToolCalls: boolean;
 }) {
+  const visibleAccessories = group.accessories.filter((entry) => {
+    if (entry.kind === "status") {
+      return showThinking;
+    }
+    if (entry.kind === "tool_result") {
+      return showToolCalls;
+    }
+    return true;
+  });
+  if (visibleAccessories.length === 0) {
+    return null;
+  }
+
   return (
     <div className="chat-standalone-stack">
-      {group.accessories.map((entry) => (
-        <AccessoryBlock key={entry.id} entry={entry} agents={agents} skills={skills} t={t} />
-      ))}
+      {visibleAccessories.map((entry) =>
+        entry.kind === "status" ? (
+          <StatusBubble key={entry.id} entry={entry} agents={agents} t={t} />
+        ) : entry.kind === "tool_result" ? (
+          <ToolResultBubble key={entry.id} entry={entry} agents={agents} skills={skills} t={t} />
+        ) : (
+          <AccessoryBlock key={entry.id} entry={entry} agents={agents} skills={skills} t={t} />
+        ))}
     </div>
   );
 }
@@ -506,6 +717,8 @@ export function ChatStream({
   agents,
   skills,
   t,
+  showThinking,
+  showToolCalls,
   onCopy,
   onBranchFrom,
   onEditAndResend,
@@ -517,6 +730,8 @@ export function ChatStream({
   agents: AgentProfile[];
   skills: SkillConfig[];
   t: (key: string, fallback: string) => string;
+  showThinking: boolean;
+  showToolCalls: boolean;
   onCopy: (entryId: string, body: string) => void;
   onBranchFrom: (messageId: string) => void;
   onEditAndResend: (messageId: string) => void;
@@ -527,7 +742,15 @@ export function ChatStream({
     return null;
   }
 
-  const groups = buildChatGroups(entries, runs);
+  const groups = buildChatGroups(entries, runs).filter((group) => {
+    if (group.anchor) {
+      return true;
+    }
+    const hasThinking = showThinking && group.accessories.some((entry) => entry.kind === "status");
+    const hasToolCalls = showToolCalls && group.accessories.some((entry) => entry.kind === "tool_result");
+    const hasOtherAccessories = group.accessories.some((entry) => entry.kind !== "status" && entry.kind !== "tool_result");
+    return hasThinking || hasToolCalls || hasOtherAccessories;
+  });
   let previousDate = "";
 
   return groups.map((group) => {
@@ -548,6 +771,8 @@ export function ChatStream({
             agents={agents}
             skills={skills}
             t={t}
+            showThinking={showThinking}
+            showToolCalls={showToolCalls}
             onCopy={onCopy}
             onBranchFrom={onBranchFrom}
             onEditAndResend={onEditAndResend}
@@ -555,7 +780,14 @@ export function ChatStream({
             onRemove={onRemove}
           />
         ) : (
-          <StandaloneGroup group={group} agents={agents} skills={skills} t={t} />
+          <StandaloneGroup
+            group={group}
+            agents={agents}
+            skills={skills}
+            t={t}
+            showThinking={showThinking}
+            showToolCalls={showToolCalls}
+          />
         )}
       </Fragment>
     );

@@ -6,8 +6,8 @@ use std::path::PathBuf;
 
 use chrono::{Duration, Utc};
 use ennoia_kernel::{
-    AgentDocument, AgentPermissionPolicy, AgentPermissionRule, PermissionApprovalRecord,
-    PermissionDecision, PermissionEventRecord, PermissionRequest,
+    AgentDocument, AgentPermissionPolicy, AgentPermissionProfile, AgentPermissionRule,
+    PermissionApprovalRecord, PermissionDecision, PermissionEventRecord, PermissionRequest,
 };
 use ennoia_logs::RequestContext;
 use ennoia_paths::RuntimePaths;
@@ -47,20 +47,25 @@ impl AgentPermissionStore {
         Ok(store)
     }
 
-    pub fn load_policy(&self, agent_id: &str) -> std::io::Result<AgentPermissionPolicy> {
+    pub fn load_profile(&self, agent_id: &str) -> std::io::Result<AgentPermissionProfile> {
         let path = self.runtime_paths.agent_config_file(agent_id);
         if !path.exists() {
-            return Ok(AgentPermissionPolicy::builtin_worker(agent_id));
+            return Ok(AgentPermissionProfile::builtin_worker());
         }
         let contents = fs::read_to_string(path)?;
         let document = toml::from_str::<AgentDocument>(&contents).map_err(std::io::Error::other)?;
-        Ok(document.permission_policy)
+        Ok(document.permission_profile)
     }
 
-    pub fn save_policy(
+    pub fn load_policy(&self, agent_id: &str) -> std::io::Result<AgentPermissionPolicy> {
+        self.load_profile(agent_id)
+            .map(|profile| profile.compile_policy(agent_id))
+    }
+
+    pub fn save_profile(
         &self,
         agent_id: &str,
-        policy: &AgentPermissionPolicy,
+        profile: &AgentPermissionProfile,
     ) -> std::io::Result<()> {
         let path = self.runtime_paths.agent_config_file(agent_id);
         if !path.exists() {
@@ -71,7 +76,7 @@ impl AgentPermissionStore {
         }
         let mut document = toml::from_str::<AgentDocument>(&fs::read_to_string(&path)?)
             .map_err(std::io::Error::other)?;
-        document.permission_policy = policy.clone();
+        document.permission_profile = profile.clone();
         fs::write(
             path,
             toml::to_string_pretty(&document).map_err(std::io::Error::other)?,
@@ -79,7 +84,8 @@ impl AgentPermissionStore {
     }
 
     pub fn policy_summary(&self, agent_id: &str) -> std::io::Result<PermissionPolicySummary> {
-        let policy = self.load_policy(agent_id)?;
+        let profile = self.load_profile(agent_id)?;
+        let policy = profile.compile_policy(agent_id);
         let mut allow_count = 0;
         let mut ask_count = 0;
         let mut deny_count = 0;
@@ -93,7 +99,7 @@ impl AgentPermissionStore {
         }
         Ok(PermissionPolicySummary {
             agent_id: agent_id.to_string(),
-            mode: policy.mode,
+            mode: profile.mode,
             allow_count,
             ask_count,
             deny_count,
@@ -331,52 +337,42 @@ impl AgentPermissionStore {
         &self,
         approval: &PermissionApprovalRecord,
     ) -> std::io::Result<()> {
-        let mut policy = self.load_policy(&approval.agent_id)?;
-        let mut rule = AgentPermissionRule {
-            id: format!("approval-{}", Uuid::new_v4().simple()),
-            effect: "allow".to_string(),
-            actions: vec![approval.action.clone()],
-            extension_scope: approval
-                .scope
-                .extension_id
-                .clone()
-                .into_iter()
-                .collect::<Vec<_>>(),
-            conversation_scope: approval
-                .scope
-                .conversation_id
-                .as_ref()
-                .map(|_| "current".to_string()),
-            run_scope: approval
-                .scope
-                .run_id
-                .as_ref()
-                .map(|_| "current".to_string()),
-            path_include: Vec::new(),
-            path_exclude: Vec::new(),
-            host_scope: Vec::new(),
-        };
-
-        if let Some(path) = approval
-            .target
-            .path
-            .clone()
-            .or_else(|| approval.scope.path.clone())
-        {
-            rule.path_include
-                .push(ennoia_kernel::GlobPattern::new(path.replace('\\', "/")));
+        let mut profile = self.load_profile(&approval.agent_id)?;
+        match approval.action.as_str() {
+            "fs.read" | "fs.write" => {
+                if let Some(path) = approval
+                    .target
+                    .path
+                    .clone()
+                    .or_else(|| approval.scope.path.clone())
+                {
+                    let normalized = path.replace('\\', "/");
+                    if !profile
+                        .path_whitelist
+                        .iter()
+                        .any(|pattern| pattern.as_str() == normalized)
+                    {
+                        profile
+                            .path_whitelist
+                            .push(ennoia_kernel::GlobPattern::new(normalized));
+                    }
+                }
+            }
+            "command.exec" => {
+                profile.allow_command_exec = true;
+            }
+            "net.fetch" => {
+                profile.allow_external_network = true;
+            }
+            "runtime.config.write" => {
+                profile.allow_runtime_config_write = true;
+            }
+            "extension.install" | "extension.enable" | "extension.disable" => {
+                profile.allow_extension_manage = true;
+            }
+            _ => {}
         }
-        if let Some(host) = approval
-            .target
-            .host
-            .clone()
-            .or_else(|| approval.scope.host.clone())
-        {
-            rule.host_scope.push(ennoia_kernel::GlobPattern::new(host));
-        }
-
-        policy.rules.push(rule);
-        self.save_policy(&approval.agent_id, &policy)
+        self.save_profile(&approval.agent_id, &profile)
     }
 
     fn insert_grant(&self, approval: &PermissionApprovalRecord, mode: &str) -> std::io::Result<()> {

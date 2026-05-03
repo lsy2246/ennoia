@@ -72,6 +72,9 @@ export type ConversationMessageEntry = ChatEntryBase & {
   source: "remote" | "local";
   localStatus?: LocalMessageStatus;
   localError?: string;
+  failureCode?: string;
+  failureSummary?: string;
+  failureDetail?: string;
 };
 
 export type ChatErrorEntry = ChatEntryBase & {
@@ -98,6 +101,7 @@ export type ChatStatusEntry = ChatEntryBase & {
 export type ChatToolResultEntry = ChatEntryBase & {
   kind: "tool_result";
   relatedMessageId?: string;
+  actorSender?: string;
 };
 
 export type ChatApprovalEntry = ChatEntryBase & {

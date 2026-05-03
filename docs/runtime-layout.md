@@ -29,7 +29,7 @@
 │  └─ extensions.toml          # 扩展注册表
 ├─ agents/
 │  └─ <agent_id>/
-│     ├─ agent.toml            # Agent 基础配置 + 权限策略
+│     ├─ agent.toml            # Agent 基础配置 + 权限配置 + 执行环境配置
 │     ├─ work/                 # Agent 工作目录
 │     ├─ artifacts/            # Agent 产物目录
 │     └─ skills/               # Agent 私有技能目录
@@ -41,6 +41,8 @@
 │  │  └─ sqlite/
 │  │     ├─ logs.db            # 系统日志 SQLite（logs / spans / span_links）
 │  │     ├─ events.db          # 系统事件总线 SQLite
+│  ├─ cache/
+│  │  └─ sandboxes/            # native 执行环境可复用的沙盒缓存目录
 │  └─ extensions/              # 扩展私有运行数据，例如 memory / workflow 的 sqlite
 └─ logs/
    ├─ server/
@@ -70,7 +72,7 @@
 
 ## 目录职责
 
-- `agents/`：Agent 的统一目录根；每个 Agent 的基础配置、权限策略、工作目录、技能目录和产物目录都收敛在自己的子目录里。
+- `agents/`：Agent 的统一目录根；每个 Agent 的基础配置、权限配置、执行环境配置、工作目录、技能目录和产物目录都收敛在自己的子目录里。
 - `extensions/`：扩展真实内容目录。
 - `skills/`：技能真实内容目录。
 - `logs/`：文本日志与开发日志输出目录，不等同于系统日志数据库。

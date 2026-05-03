@@ -1,39 +1,73 @@
 use super::*;
-use crate::app::{delete_agent_config, write_agent_config};
+use crate::app::{
+    delete_agent_config, load_agent_document, load_agent_documents, normalize_agent_document,
+    write_agent_document,
+};
 use crate::logs_store::{LogEntryWrite, LOGS_COMPONENT_PROXY};
 use crate::pipeline::{
     invoke_provider_method, model_endpoint_runtime_request_config, resolve_provider_entry_path,
 };
 use ennoia_logs::RequestContext;
 
-pub(super) async fn agents(State(state): State<AppState>) -> Json<Vec<AgentConfig>> {
-    Json(load_agent_configs(&state.runtime_paths).unwrap_or_default())
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentRecord {
+    #[serde(flatten)]
+    pub profile: AgentConfig,
+    #[serde(default)]
+    pub permission_profile: ennoia_kernel::AgentPermissionProfile,
+}
+
+impl From<ennoia_kernel::AgentDocument> for AgentRecord {
+    fn from(value: ennoia_kernel::AgentDocument) -> Self {
+        Self {
+            profile: value.profile,
+            permission_profile: value.permission_profile,
+        }
+    }
+}
+
+pub(super) async fn agents(State(state): State<AppState>) -> Json<Vec<AgentRecord>> {
+    Json(
+        load_agent_documents(&state.runtime_paths)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|document| normalize_agent_document(&state.runtime_paths, document))
+            .map(AgentRecord::from)
+            .collect(),
+    )
 }
 
 pub(super) async fn agent_detail(
     State(state): State<AppState>,
     Path(agent_id): Path<String>,
-) -> Result<Json<AgentConfig>, ApiError> {
-    let agents = load_agent_configs(&state.runtime_paths)
+) -> Result<Json<AgentRecord>, ApiError> {
+    let document = load_agent_document(&state.runtime_paths, &agent_id)
         .map_err(|error| ApiError::internal(error.to_string()))?;
-    agents
-        .into_iter()
-        .find(|agent| agent.id == agent_id)
+    document
+        .map(|document| normalize_agent_document(&state.runtime_paths, document))
+        .map(AgentRecord::from)
         .map(Json)
         .ok_or_else(|| ApiError::not_found(format!("agent '{agent_id}' not found")))
 }
 
 pub(super) async fn agent_create(
     State(state): State<AppState>,
-    Json(payload): Json<AgentConfig>,
-) -> Result<Json<AgentConfig>, ApiError> {
-    write_agent_config(&state.runtime_paths, &payload)
+    Json(mut payload): Json<AgentRecord>,
+) -> Result<Json<AgentRecord>, ApiError> {
+    payload.profile.id = payload.profile.id.trim().to_string();
+    write_agent_document(
+        &state.runtime_paths,
+        &ennoia_kernel::AgentDocument {
+            profile: payload.profile.clone(),
+            permission_profile: payload.permission_profile.clone(),
+        },
+    )
+    .map_err(|error| ApiError::internal(error.to_string()))?;
+    let document = load_agent_document(&state.runtime_paths, &payload.profile.id)
         .map_err(|error| ApiError::internal(error.to_string()))?;
-    let agents = load_agent_configs(&state.runtime_paths)
-        .map_err(|error| ApiError::internal(error.to_string()))?;
-    agents
-        .into_iter()
-        .find(|agent| agent.id == payload.id)
+    document
+        .map(|document| normalize_agent_document(&state.runtime_paths, document))
+        .map(AgentRecord::from)
         .map(Json)
         .ok_or_else(|| ApiError::internal("failed to reload created agent"))
 }
@@ -41,16 +75,22 @@ pub(super) async fn agent_create(
 pub(super) async fn agent_update(
     State(state): State<AppState>,
     Path(agent_id): Path<String>,
-    Json(mut payload): Json<AgentConfig>,
-) -> Result<Json<AgentConfig>, ApiError> {
-    payload.id = agent_id.clone();
-    write_agent_config(&state.runtime_paths, &payload)
+    Json(mut payload): Json<AgentRecord>,
+) -> Result<Json<AgentRecord>, ApiError> {
+    payload.profile.id = agent_id.clone();
+    write_agent_document(
+        &state.runtime_paths,
+        &ennoia_kernel::AgentDocument {
+            profile: payload.profile.clone(),
+            permission_profile: payload.permission_profile.clone(),
+        },
+    )
+    .map_err(|error| ApiError::internal(error.to_string()))?;
+    let document = load_agent_document(&state.runtime_paths, &agent_id)
         .map_err(|error| ApiError::internal(error.to_string()))?;
-    let agents = load_agent_configs(&state.runtime_paths)
-        .map_err(|error| ApiError::internal(error.to_string()))?;
-    agents
-        .into_iter()
-        .find(|agent| agent.id == agent_id)
+    document
+        .map(|document| normalize_agent_document(&state.runtime_paths, document))
+        .map(AgentRecord::from)
         .map(Json)
         .ok_or_else(|| ApiError::internal("failed to reload updated agent"))
 }

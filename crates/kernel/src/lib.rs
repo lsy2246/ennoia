@@ -50,9 +50,9 @@ pub use extension::{
 pub use gate::{GateRecord, GateSeverity, GateVerdict};
 pub use overview::{core_modules, PlatformOverview};
 pub use permission::{
-    AgentPermissionPolicy, AgentPermissionRule, CapabilityPermissionMetadata,
-    PermissionApprovalRecord, PermissionDecision, PermissionEventRecord, PermissionRequest,
-    PermissionScope, PermissionTarget, PermissionTrigger,
+    AgentExecutionEnvironment, AgentPermissionPolicy, AgentPermissionProfile, AgentPermissionRule,
+    CapabilityPermissionMetadata, PermissionApprovalRecord, PermissionDecision,
+    PermissionEventRecord, PermissionRequest, PermissionScope, PermissionTarget, PermissionTrigger,
 };
 pub use policy::{
     GlobPattern, MemoryPolicy, RuntimeRule, RuntimeRuleCondition, RuntimeRuleTarget, StagePolicy,

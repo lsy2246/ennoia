@@ -1,3 +1,4 @@
+use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -13,10 +14,14 @@ use ennoia_kernel::{
     HOOK_EVENT_CONVERSATION_MESSAGE_CREATED,
 };
 use ennoia_logs::RequestContext;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
 use crate::app::{load_agent_configs, load_model_endpoint_configs, AppState};
+use crate::execution::{
+    execute_native_operation, resolve_agent_tool_path as resolve_execution_tool_path,
+    resolve_command_cwd as resolve_execution_cwd, AgentExecutionPaths, SandboxOperation,
+};
 use crate::logs_store::{LogEntryWrite, LOGS_COMPONENT_PROXY};
 use crate::routes::{
     actions::{
@@ -65,9 +70,10 @@ struct AgentRuntimeContext {
     agent_id: String,
     agent_display_name: String,
     run_id: String,
-    runtime_home: String,
-    agent_working_dir: String,
-    agent_artifacts_dir: String,
+    execution_mode: String,
+    workspace_root: String,
+    artifacts_root: String,
+    temp_root: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -129,6 +135,27 @@ struct AgentToolContext {
     summary: String,
     kind: String,
     contract: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AgentToolSpec {
+    name: String,
+    description: String,
+    parameters: JsonValue,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct AgentToolCall {
+    id: String,
+    name: String,
+    #[serde(default)]
+    arguments: JsonValue,
+}
+
+#[derive(Debug, Clone)]
+struct AgentToolExecutionResult {
+    tool_call_id: String,
+    content: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -710,7 +737,7 @@ pub(crate) fn queue_permission_approval_resume(
     request: RequestContext,
     approval: PermissionApprovalRecord,
 ) {
-    if approval.status != "approved" || approval.action != "provider.generate" {
+    if approval.status != "approved" {
         return;
     }
     let conversation_id = approval.scope.conversation_id.clone();
@@ -839,8 +866,10 @@ async fn generate_conversation_agent_reply(
                     serde_json::json!({
                         "agent_id": agent.id,
                         "display_name": agent.display_name,
-                        "working_dir": agent.working_dir,
-                        "artifacts_dir": agent.artifacts_dir,
+                        "execution_mode": agent.execution_environment.normalized_mode(),
+                        "workspace_root": "/workspace",
+                        "artifacts_root": "/artifacts",
+                        "temp_root": "/tmp",
                     })
                 })
         })
@@ -875,7 +904,9 @@ async fn generate_conversation_agent_reply(
         let mut metadata = serde_json::json!({
             "origin": "pipeline.conversation_to_workflow",
             "message_id": message_id,
-            "runtime_home": state.runtime_paths.display_for_user(state.runtime_paths.home()),
+            "workspace_root": "/workspace",
+            "artifacts_root": "/artifacts",
+            "temp_root": "/tmp",
             "agent_paths": agent_runtime_paths,
         });
         if let Some(context) = memory_context.as_ref() {
@@ -1011,60 +1042,131 @@ async fn generate_real_conversation_agent_reply(
         .and_then(JsonValue::as_str)
         .unwrap_or_default()
         .to_string();
-    let messages = normalize_conversation_messages_for_provider(conversation_messages, agent_id);
+    let mut messages =
+        normalize_conversation_messages_for_provider(conversation_messages, agent_id);
     let instructions = build_agent_provider_instructions(state, agent, &run_id);
     let context =
         build_agent_provider_context(state, agent, conversation_id, lane_id, message_id, &run_id);
-    let request_payload = serde_json::json!({
-        "method": "generate",
-        "params": {
-            "model_endpoint": model_endpoint_runtime_request_config(model_endpoint),
-            "model": model_id,
-            "instructions": instructions,
-            "system_prompt": build_agent_runtime_prompt(state, agent, &run_id),
-            "context": context,
-            "messages": messages,
-            "generation_options": agent.generation_options,
-            "metadata": {
-                "conversation_id": conversation_id,
-                "lane_id": lane_id,
-                "message_id": message_id,
-                "run_id": run_id,
-                "runtime_home": state.runtime_paths.display_for_user(state.runtime_paths.home()),
-                "working_dir": agent.working_dir,
-                "artifacts_dir": agent.artifacts_dir,
-                "agent_id": agent.id,
-                "agent_display_name": agent.display_name,
-            }
-        }
+    let tools = build_agent_builtin_tool_specs();
+    let metadata = serde_json::json!({
+        "conversation_id": conversation_id,
+        "lane_id": lane_id,
+        "message_id": message_id,
+        "run_id": run_id,
+        "execution_mode": agent.execution_environment.normalized_mode(),
+        "workspace_root": "/workspace",
+        "artifacts_root": "/artifacts",
+        "temp_root": "/tmp",
+        "agent_id": agent.id,
+        "agent_display_name": agent.display_name,
     });
-    let model_endpoint_grant_id = authorize_model_endpoint_generate(
-        state,
-        request,
-        agent,
-        model_endpoint,
-        &contribution,
-        conversation_id,
-        &run_id,
-        message_id,
-    )?;
-    let response = invoke_provider_method(&entry, &request_payload, model_endpoint)
-        .map_err(|error| scoped(ApiError::internal(error), request))?;
-    if let Some(grant_id) = model_endpoint_grant_id.as_deref() {
-        state
-            .agent_permissions
-            .consume_grant(grant_id)
-            .map_err(|error| scoped(ApiError::internal(error.to_string()), request))?;
+
+    for _ in 0..6 {
+        let request_payload = serde_json::json!({
+            "method": "generate",
+            "params": {
+                "model_endpoint": model_endpoint_runtime_request_config(model_endpoint),
+                "model": model_id,
+                "instructions": instructions,
+                "system_prompt": build_agent_runtime_prompt(state, agent, &run_id),
+                "context": context,
+                "messages": messages,
+                "generation_options": agent.generation_options,
+                "tools": tools,
+                "tool_choice": "auto",
+                "metadata": metadata,
+            }
+        });
+        let model_endpoint_grant_id = authorize_model_endpoint_generate(
+            state,
+            request,
+            agent,
+            model_endpoint,
+            &contribution,
+            conversation_id,
+            &run_id,
+            message_id,
+        )?;
+        let response = invoke_provider_method(&entry, &request_payload, model_endpoint)
+            .map_err(|error| scoped(ApiError::internal(error), request))?;
+        if let Some(grant_id) = model_endpoint_grant_id.as_deref() {
+            state
+                .agent_permissions
+                .consume_grant(grant_id)
+                .map_err(|error| scoped(ApiError::internal(error.to_string()), request))?;
+        }
+
+        let text = response
+            .get("result")
+            .and_then(|item| item.get("text"))
+            .and_then(JsonValue::as_str)
+            .map(str::trim)
+            .filter(|item| !item.is_empty())
+            .map(ToOwned::to_owned);
+        let tool_calls = response
+            .get("result")
+            .and_then(|item| item.get("tool_calls"))
+            .cloned()
+            .map(serde_json::from_value::<Vec<AgentToolCall>>)
+            .transpose()
+            .map_err(|error| {
+                scoped(
+                    ApiError::internal(format!("parse agent tool calls failed: {error}")),
+                    request,
+                )
+            })?
+            .unwrap_or_default();
+
+        if tool_calls.is_empty() {
+            return text.ok_or_else(|| {
+                scoped(ApiError::internal("provider returned empty text"), request)
+            });
+        }
+
+        messages.push(serde_json::json!({
+            "role": "assistant",
+            "content": text.unwrap_or_default(),
+            "tool_calls": tool_calls.iter().map(|call| serde_json::json!({
+                "id": call.id,
+                "name": call.name,
+                "arguments": call.arguments,
+            })).collect::<Vec<_>>(),
+        }));
+
+        for tool_call in tool_calls {
+            let tool_result = execute_builtin_agent_tool(
+                state,
+                request,
+                agent,
+                conversation_id,
+                lane_id,
+                message_id,
+                &run_id,
+                &tool_call,
+            )
+            .await?;
+            append_tool_result_message(
+                state,
+                request,
+                conversation_id,
+                lane_id,
+                message_id,
+                &tool_result,
+                agent_id,
+            )
+            .await?;
+            messages.push(serde_json::json!({
+                "role": "tool",
+                "tool_call_id": tool_result.tool_call_id,
+                "content": tool_result.content,
+            }));
+        }
     }
-    let text = response
-        .get("result")
-        .and_then(|item| item.get("text"))
-        .and_then(JsonValue::as_str)
-        .map(str::trim)
-        .filter(|item| !item.is_empty())
-        .map(ToOwned::to_owned)
-        .ok_or_else(|| scoped(ApiError::internal("provider returned empty text"), request))?;
-    Ok(text)
+
+    Err(scoped(
+        ApiError::internal("agent tool loop exceeded maximum iterations"),
+        request,
+    ))
 }
 
 async fn assemble_workflow_memory_context(
@@ -1289,6 +1391,584 @@ pub(crate) fn model_endpoint_runtime_request_config(
     })
 }
 
+async fn execute_builtin_agent_tool(
+    state: &AppState,
+    request: &RequestContext,
+    agent: &AgentConfig,
+    conversation_id: &str,
+    lane_id: Option<&str>,
+    message_id: Option<&str>,
+    run_id: &str,
+    tool_call: &AgentToolCall,
+) -> Result<AgentToolExecutionResult, ApiError> {
+    let content = match tool_call.name.as_str() {
+        "fs_read" => {
+            execute_agent_fs_read(
+                state,
+                request,
+                agent,
+                conversation_id,
+                message_id,
+                run_id,
+                &tool_call.arguments,
+            )
+            .await?
+        }
+        "fs_write" => {
+            execute_agent_fs_write(
+                state,
+                request,
+                agent,
+                conversation_id,
+                message_id,
+                run_id,
+                &tool_call.arguments,
+            )
+            .await?
+        }
+        "command_exec" => {
+            execute_agent_command_exec(
+                state,
+                request,
+                agent,
+                conversation_id,
+                message_id,
+                run_id,
+                &tool_call.arguments,
+            )
+            .await?
+        }
+        "net_fetch" => {
+            execute_agent_net_fetch(
+                state,
+                request,
+                agent,
+                conversation_id,
+                message_id,
+                run_id,
+                &tool_call.arguments,
+            )
+            .await?
+        }
+        other => {
+            return Err(scoped(
+                ApiError::bad_request(format!("unsupported agent tool '{other}'")),
+                request,
+            ))
+        }
+    };
+    let _ = lane_id;
+    Ok(AgentToolExecutionResult {
+        tool_call_id: tool_call.id.clone(),
+        content,
+    })
+}
+
+async fn execute_agent_fs_read(
+    state: &AppState,
+    request: &RequestContext,
+    agent: &AgentConfig,
+    conversation_id: &str,
+    message_id: Option<&str>,
+    run_id: &str,
+    arguments: &JsonValue,
+) -> Result<String, ApiError> {
+    let path = required_string_argument(arguments, "path", request)?;
+    let max_bytes = integer_argument(arguments, "max_bytes")
+        .unwrap_or(32_768)
+        .clamp(256, 262_144) as usize;
+    let execution_paths = AgentExecutionPaths::for_agent(state, agent, run_id);
+    let resolved_path =
+        resolve_execution_tool_path(&agent.execution_environment, &execution_paths, &path)
+            .map_err(|error| scoped(error, request))?;
+    let permission_grant = authorize_builtin_agent_action(
+        state,
+        request,
+        agent,
+        "fs.read",
+        "file",
+        &resolved_path.display_path,
+        conversation_id,
+        run_id,
+        message_id,
+        Some(&resolved_path.display_path),
+        None,
+    )?;
+    let content = if agent.execution_environment.is_native() {
+        execute_native_operation(
+            agent,
+            &execution_paths,
+            false,
+            SandboxOperation::FsRead {
+                host_path: resolved_path.host_path.to_string_lossy().to_string(),
+                display_path: resolved_path.display_path.clone(),
+                max_bytes,
+            },
+        )
+        .await
+        .map_err(|error| scoped(error, request))?
+    } else {
+        let bytes = fs::read(&resolved_path.host_path).map_err(|error| {
+            scoped(
+                ApiError::internal(format!("read file failed: {error}")),
+                request,
+            )
+        })?;
+        let truncated = bytes.len() > max_bytes;
+        let visible = if truncated {
+            &bytes[..max_bytes]
+        } else {
+            &bytes[..]
+        };
+        let text = String::from_utf8_lossy(visible).to_string();
+        serde_json::json!({
+            "ok": true,
+            "tool": "fs.read",
+            "path": resolved_path.display_path,
+            "bytes_read": visible.len(),
+            "truncated": truncated,
+            "content": text,
+        })
+        .to_string()
+    };
+    if let Some(grant_id) = permission_grant.as_deref() {
+        state
+            .agent_permissions
+            .consume_grant(grant_id)
+            .map_err(|error| scoped(ApiError::internal(error.to_string()), request))?;
+    }
+    Ok(content)
+}
+
+async fn execute_agent_fs_write(
+    state: &AppState,
+    request: &RequestContext,
+    agent: &AgentConfig,
+    conversation_id: &str,
+    message_id: Option<&str>,
+    run_id: &str,
+    arguments: &JsonValue,
+) -> Result<String, ApiError> {
+    let path = required_string_argument(arguments, "path", request)?;
+    let content = required_string_argument(arguments, "content", request)?;
+    let append = boolean_argument(arguments, "append").unwrap_or(false);
+    let execution_paths = AgentExecutionPaths::for_agent(state, agent, run_id);
+    let resolved_path =
+        resolve_execution_tool_path(&agent.execution_environment, &execution_paths, &path)
+            .map_err(|error| scoped(error, request))?;
+    let permission_grant = authorize_builtin_agent_action(
+        state,
+        request,
+        agent,
+        "fs.write",
+        "file",
+        &resolved_path.display_path,
+        conversation_id,
+        run_id,
+        message_id,
+        Some(&resolved_path.display_path),
+        None,
+    )?;
+    let content_response = if agent.execution_environment.is_native() {
+        execute_native_operation(
+            agent,
+            &execution_paths,
+            false,
+            SandboxOperation::FsWrite {
+                host_path: resolved_path.host_path.to_string_lossy().to_string(),
+                display_path: resolved_path.display_path.clone(),
+                content: content.clone(),
+                append,
+            },
+        )
+        .await
+        .map_err(|error| scoped(error, request))?
+    } else {
+        if let Some(parent) = resolved_path.host_path.parent() {
+            fs::create_dir_all(parent).map_err(|error| {
+                scoped(
+                    ApiError::internal(format!("create parent dir failed: {error}")),
+                    request,
+                )
+            })?;
+        }
+        if append {
+            use std::io::Write as _;
+            let mut file = fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&resolved_path.host_path)
+                .map_err(|error| {
+                    scoped(
+                        ApiError::internal(format!("open file for append failed: {error}")),
+                        request,
+                    )
+                })?;
+            file.write_all(content.as_bytes()).map_err(|error| {
+                scoped(
+                    ApiError::internal(format!("append file failed: {error}")),
+                    request,
+                )
+            })?;
+        } else {
+            fs::write(&resolved_path.host_path, content.as_bytes()).map_err(|error| {
+                scoped(
+                    ApiError::internal(format!("write file failed: {error}")),
+                    request,
+                )
+            })?;
+        }
+        serde_json::json!({
+            "ok": true,
+            "tool": "fs.write",
+            "path": resolved_path.display_path,
+            "bytes_written": content.len(),
+            "append": append,
+        })
+        .to_string()
+    };
+    if let Some(grant_id) = permission_grant.as_deref() {
+        state
+            .agent_permissions
+            .consume_grant(grant_id)
+            .map_err(|error| scoped(ApiError::internal(error.to_string()), request))?;
+    }
+    Ok(content_response)
+}
+
+async fn execute_agent_command_exec(
+    state: &AppState,
+    request: &RequestContext,
+    agent: &AgentConfig,
+    conversation_id: &str,
+    message_id: Option<&str>,
+    run_id: &str,
+    arguments: &JsonValue,
+) -> Result<String, ApiError> {
+    let command_name = required_string_argument(arguments, "command", request)?;
+    let args = string_array_argument(arguments, "args");
+    let cwd_value = string_argument(arguments, "cwd");
+    let execution_paths = AgentExecutionPaths::for_agent(state, agent, run_id);
+    let cwd = resolve_execution_cwd(
+        &agent.execution_environment,
+        &execution_paths,
+        cwd_value.as_deref(),
+    )
+    .map_err(|error| scoped(error, request))?;
+    let timeout_ms = integer_argument(arguments, "timeout_ms")
+        .unwrap_or(30_000)
+        .clamp(1_000, 120_000) as u64;
+    let permission_grant = authorize_builtin_agent_action(
+        state,
+        request,
+        agent,
+        "command.exec",
+        "command",
+        &command_name,
+        conversation_id,
+        run_id,
+        message_id,
+        Some(&cwd.display_path),
+        None,
+    )?;
+    let content = if agent.execution_environment.is_native() {
+        let permission_profile = state
+            .agent_permissions
+            .load_profile(&agent.id)
+            .map_err(|error| scoped(ApiError::internal(error.to_string()), request))?;
+        execute_native_operation(
+            agent,
+            &execution_paths,
+            permission_profile.allow_external_network,
+            SandboxOperation::CommandExec {
+                command: command_name.clone(),
+                args: args.clone(),
+                cwd_host_path: cwd.host_path.to_string_lossy().to_string(),
+                cwd_display_path: cwd.display_path.clone(),
+                timeout_ms,
+            },
+        )
+        .await
+        .map_err(|error| scoped(error, request))?
+    } else {
+        let mut command = tokio::process::Command::new(&command_name);
+        command.args(&args).current_dir(cwd.host_path.clone());
+        let output = tokio::time::timeout(Duration::from_millis(timeout_ms), command.output())
+            .await
+            .map_err(|_| scoped(ApiError::internal("command exec timed out"), request))?
+            .map_err(|error| {
+                scoped(
+                    ApiError::internal(format!("spawn command failed: {error}")),
+                    request,
+                )
+            })?;
+        serde_json::json!({
+            "ok": output.status.success(),
+            "tool": "command.exec",
+            "command": command_name,
+            "args": args,
+            "cwd": cwd.display_path,
+            "status": output.status.code(),
+            "stdout": String::from_utf8_lossy(&output.stdout),
+            "stderr": String::from_utf8_lossy(&output.stderr),
+        })
+        .to_string()
+    };
+    if let Some(grant_id) = permission_grant.as_deref() {
+        state
+            .agent_permissions
+            .consume_grant(grant_id)
+            .map_err(|error| scoped(ApiError::internal(error.to_string()), request))?;
+    }
+    Ok(content)
+}
+
+async fn execute_agent_net_fetch(
+    state: &AppState,
+    request: &RequestContext,
+    agent: &AgentConfig,
+    conversation_id: &str,
+    message_id: Option<&str>,
+    run_id: &str,
+    arguments: &JsonValue,
+) -> Result<String, ApiError> {
+    let url = required_string_argument(arguments, "url", request)?;
+    let method = string_argument(arguments, "method").unwrap_or_else(|| "GET".to_string());
+    let body = string_argument(arguments, "body");
+    let timeout_ms = integer_argument(arguments, "timeout_ms")
+        .unwrap_or(30_000)
+        .clamp(1_000, 120_000) as u64;
+    let host = reqwest::Url::parse(&url)
+        .ok()
+        .and_then(|parsed| parsed.host_str().map(str::to_string));
+    let permission_grant = authorize_builtin_agent_action(
+        state,
+        request,
+        agent,
+        "net.fetch",
+        "network",
+        &url,
+        conversation_id,
+        run_id,
+        message_id,
+        None,
+        host.as_deref(),
+    )?;
+    let execution_paths = AgentExecutionPaths::for_agent(state, agent, run_id);
+    let content = if agent.execution_environment.is_native() {
+        let mut headers = std::collections::BTreeMap::new();
+        if let Some(raw_headers) = arguments.get("headers").and_then(JsonValue::as_object) {
+            for (key, value) in raw_headers {
+                if let Some(value) = value.as_str() {
+                    headers.insert(key.clone(), value.to_string());
+                }
+            }
+        }
+        execute_native_operation(
+            agent,
+            &execution_paths,
+            true,
+            SandboxOperation::NetFetch {
+                url: url.clone(),
+                method: method.clone(),
+                headers,
+                body: body.clone(),
+                timeout_ms,
+            },
+        )
+        .await
+        .map_err(|error| scoped(error, request))?
+    } else {
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_millis(timeout_ms))
+            .build()
+            .map_err(|error| {
+                scoped(
+                    ApiError::internal(format!("build http client failed: {error}")),
+                    request,
+                )
+            })?;
+        let mut request_builder = client.request(
+            reqwest::Method::from_bytes(method.as_bytes()).map_err(|error| {
+                scoped(
+                    ApiError::bad_request(format!("invalid http method: {error}")),
+                    request,
+                )
+            })?,
+            &url,
+        );
+        if let Some(headers) = arguments.get("headers").and_then(JsonValue::as_object) {
+            for (key, value) in headers {
+                if let Some(value) = value.as_str() {
+                    request_builder = request_builder.header(key, value);
+                }
+            }
+        }
+        if let Some(body) = body {
+            request_builder = request_builder.body(body);
+        }
+        let response = request_builder.send().await.map_err(|error| {
+            scoped(
+                ApiError::internal(format!("http request failed: {error}")),
+                request,
+            )
+        })?;
+        let status = response.status().as_u16();
+        let headers = response
+            .headers()
+            .iter()
+            .map(|(key, value)| {
+                (
+                    key.as_str().to_string(),
+                    JsonValue::String(value.to_str().unwrap_or_default().to_string()),
+                )
+            })
+            .collect::<serde_json::Map<String, JsonValue>>();
+        let text = response.text().await.map_err(|error| {
+            scoped(
+                ApiError::internal(format!("read http response failed: {error}")),
+                request,
+            )
+        })?;
+        serde_json::json!({
+            "ok": true,
+            "tool": "net.fetch",
+            "url": url,
+            "status": status,
+            "headers": headers,
+            "body": text,
+        })
+        .to_string()
+    };
+    if let Some(grant_id) = permission_grant.as_deref() {
+        state
+            .agent_permissions
+            .consume_grant(grant_id)
+            .map_err(|error| scoped(ApiError::internal(error.to_string()), request))?;
+    }
+    Ok(content)
+}
+
+fn authorize_builtin_agent_action(
+    state: &AppState,
+    request: &RequestContext,
+    agent: &AgentConfig,
+    action: &str,
+    target_kind: &str,
+    target_id: &str,
+    conversation_id: &str,
+    run_id: &str,
+    message_id: Option<&str>,
+    path: Option<&str>,
+    host: Option<&str>,
+) -> Result<Option<String>, ApiError> {
+    let permission_request = PermissionRequest {
+        agent_id: agent.id.clone(),
+        action: action.to_string(),
+        target: PermissionTarget {
+            kind: target_kind.to_string(),
+            id: target_id.to_string(),
+            conversation_id: Some(conversation_id.to_string()),
+            run_id: Some(run_id.to_string()),
+            path: path.map(str::to_string),
+            host: host.map(str::to_string),
+        },
+        scope: PermissionScope {
+            conversation_id: Some(conversation_id.to_string()),
+            run_id: Some(run_id.to_string()),
+            message_id: message_id.map(str::to_string),
+            extension_id: Some("builtin".to_string()),
+            path: path.map(str::to_string),
+            host: host.map(str::to_string),
+        },
+        trigger: PermissionTrigger {
+            kind: "pipeline.workflow_to_conversation".to_string(),
+            user_initiated: true,
+        },
+    };
+    let decision = state
+        .agent_permissions
+        .evaluate_request(&permission_request, Some(request))
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), request))?;
+    match decision.decision.as_str() {
+        "allow" => Ok(decision.grant_id),
+        "ask" => Err(scoped(
+            ApiError::forbidden(format!(
+                "approval required: action={}, approval_id={}",
+                permission_request.action,
+                decision
+                    .approval_id
+                    .clone()
+                    .unwrap_or_else(|| "unknown".to_string())
+            ))
+            .with_details(serde_json::json!({
+                "decision": decision.decision,
+                "approval_id": decision.approval_id,
+                "agent_id": permission_request.agent_id,
+                "action": permission_request.action,
+                "target": permission_request.target,
+                "scope": permission_request.scope,
+                "reason": decision.reason,
+            })),
+            request,
+        )),
+        _ => Err(scoped(
+            ApiError::forbidden(format!(
+                "permission denied: action={}, reason={}",
+                permission_request.action, decision.reason
+            ))
+            .with_details(serde_json::json!({
+                "decision": decision.decision,
+                "agent_id": permission_request.agent_id,
+                "action": permission_request.action,
+                "target": permission_request.target,
+                "scope": permission_request.scope,
+                "reason": decision.reason,
+            })),
+            request,
+        )),
+    }
+}
+
+fn required_string_argument(
+    arguments: &JsonValue,
+    key: &str,
+    request: &RequestContext,
+) -> Result<String, ApiError> {
+    string_argument(arguments, key).ok_or_else(|| {
+        scoped(
+            ApiError::bad_request(format!("tool argument '{key}' is required")),
+            request,
+        )
+    })
+}
+
+fn string_argument(arguments: &JsonValue, key: &str) -> Option<String> {
+    arguments
+        .get(key)
+        .and_then(JsonValue::as_str)
+        .map(str::to_string)
+}
+
+fn integer_argument(arguments: &JsonValue, key: &str) -> Option<i64> {
+    arguments.get(key).and_then(JsonValue::as_i64)
+}
+
+fn boolean_argument(arguments: &JsonValue, key: &str) -> Option<bool> {
+    arguments.get(key).and_then(JsonValue::as_bool)
+}
+
+fn string_array_argument(arguments: &JsonValue, key: &str) -> Vec<String> {
+    arguments
+        .get(key)
+        .and_then(JsonValue::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(JsonValue::as_str)
+        .map(str::to_string)
+        .collect()
+}
+
 fn authorize_model_endpoint_generate(
     state: &AppState,
     request: &RequestContext,
@@ -1432,6 +2112,43 @@ fn normalize_conversation_messages_for_provider(
     messages
 }
 
+async fn append_tool_result_message(
+    state: &AppState,
+    request: &RequestContext,
+    conversation_id: &str,
+    lane_id: Option<&str>,
+    parent_message_id: Option<&str>,
+    result: &AgentToolExecutionResult,
+    agent_id: &str,
+) -> Result<(), ApiError> {
+    let _ = dispatch_action_value_with_context(
+        state,
+        request,
+        "message.append",
+        serde_json::json!({
+            "conversation_id": conversation_id,
+        "message": {
+            "body": result.content,
+            "lane_id": lane_id,
+            "sender": agent_id,
+            "role": "tool",
+            "parent_message_id": parent_message_id,
+            "addressed_agents": [agent_id],
+        }
+        }),
+        permission_actor_context(
+            agent_id,
+            "pipeline.workflow_tool_result",
+            true,
+            Some(conversation_id),
+            None,
+            parent_message_id,
+        ),
+    )
+    .await?;
+    Ok(())
+}
+
 fn message_visible_to_agent(message: &JsonValue, agent_id: &str) -> bool {
     let role = message
         .get("role")
@@ -1477,19 +2194,18 @@ fn looks_like_synthetic_agent_error(message: &JsonValue) -> bool {
         || body.contains("provider returned empty text")
 }
 
-fn build_agent_runtime_prompt(state: &AppState, agent: &AgentConfig, run_id: &str) -> String {
+fn build_agent_runtime_prompt(_state: &AppState, agent: &AgentConfig, run_id: &str) -> String {
     let mut sections = Vec::new();
     if !agent.system_prompt.trim().is_empty() {
         sections.push(agent.system_prompt.trim().to_string());
     }
+    let execution_mode = agent.execution_environment.normalized_mode();
     sections.push(format!(
-        "你当前运行在 Ennoia 会话系统中。\nagent_id：{}\nagent_name：{}\nrun_id：{}\nruntime_home：{}\nagent_working_dir：{}\nagent_artifacts_dir：{}\n`agent_working_dir` 和 `agent_artifacts_dir` 是当前 Agent 的内部运行目录，不等同于用户项目工作区。只有在用户明确询问路径、文件位置、产物位置，或者任务确实需要读写这些目录时才使用；否则不要主动向用户复述这些内部路径。直接回答用户，不要伪装成“系统已接收”或“正在处理中”。",
+        "你当前运行在 Ennoia 会话系统中。\nagent_id：{}\nagent_name：{}\nrun_id：{}\nexecution_mode：{}\nworkspace_root：/workspace\nartifacts_root：/artifacts\ntemp_root：/tmp\n除非用户明确需要，否则不要主动复述内部路径或实现细节。直接回答用户，不要伪装成“系统已接收”或“正在处理中”。",
         agent.id,
         agent.display_name,
         if run_id.trim().is_empty() { "unknown" } else { run_id },
-        state.runtime_paths.display_for_user(state.runtime_paths.home()),
-        agent.working_dir,
-        agent.artifacts_dir,
+        execution_mode,
     ));
     sections.push(
         "系统会额外提供一份结构化 JSON 上下文，里面包含当前运行时、会话、已注入扩展目录和已启用技能目录。按字段理解并使用，不要向用户原样复述 JSON，也不要主动枚举内部路径、目录清单或所有可用能力，除非用户明确要求。"
@@ -1497,6 +2213,10 @@ fn build_agent_runtime_prompt(state: &AppState, agent: &AgentConfig, run_id: &st
     );
     sections.push(
         "如果用户明确询问你有哪些工具、能力或可以做什么，优先依据上下文里的 tools 字段回答，使用 label 和 summary 做自然语言说明；不要把参数 schema、原始 JSON 对象或 `[object Object]` 直接输出给用户。"
+            .to_string(),
+    );
+    sections.push(
+        "当用户要求你读取文件、写入文件、执行命令或访问网页/API，并且这些能力已经出现在 tools 字段里时，优先直接调用相应工具完成任务；不要在未尝试工具前就回答“无法直接访问”或“没有权限”。只有在工具调用被权限系统拒绝或需要审批时，才向用户解释阻塞原因。"
             .to_string(),
     );
     sections.join("\n\n")
@@ -1526,11 +2246,10 @@ fn build_agent_provider_context(
             agent_id: agent.id.clone(),
             agent_display_name: agent.display_name.clone(),
             run_id: normalize_unknown(run_id),
-            runtime_home: state
-                .runtime_paths
-                .display_for_user(state.runtime_paths.home()),
-            agent_working_dir: agent.working_dir.clone(),
-            agent_artifacts_dir: agent.artifacts_dir.clone(),
+            execution_mode: agent.execution_environment.normalized_mode(),
+            workspace_root: "/workspace".to_string(),
+            artifacts_root: "/artifacts".to_string(),
+            temp_root: "/tmp".to_string(),
         },
         conversation: AgentConversationContext {
             conversation_id: conversation_id.to_string(),
@@ -1683,6 +2402,44 @@ fn build_agent_tool_contexts(state: &AppState) -> Vec<AgentToolContext> {
             .then(left.label.cmp(&right.label))
             .then(left.capability_id.cmp(&right.capability_id))
     });
+    tools.extend([
+        AgentToolContext {
+            extension_id: "builtin".to_string(),
+            extension_name: "Runtime".to_string(),
+            capability_id: "fs.read".to_string(),
+            label: "文件读取".to_string(),
+            summary: "读取文本文件；优先使用 /workspace、/artifacts、/tmp 这些路径。相对路径默认按 /workspace 解析。".to_string(),
+            kind: "builtin".to_string(),
+            contract: "fs.read".to_string(),
+        },
+        AgentToolContext {
+            extension_id: "builtin".to_string(),
+            extension_name: "Runtime".to_string(),
+            capability_id: "fs.write".to_string(),
+            label: "文件写入".to_string(),
+            summary: "把文本写入文件；优先使用 /workspace、/artifacts、/tmp 这些路径，可选择覆盖或追加。".to_string(),
+            kind: "builtin".to_string(),
+            contract: "fs.write".to_string(),
+        },
+        AgentToolContext {
+            extension_id: "builtin".to_string(),
+            extension_name: "Runtime".to_string(),
+            capability_id: "command.exec".to_string(),
+            label: "命令执行".to_string(),
+            summary: "执行系统命令；未指定 cwd 时默认在 /workspace 中执行，并返回 stdout、stderr 和退出码。".to_string(),
+            kind: "builtin".to_string(),
+            contract: "command.exec".to_string(),
+        },
+        AgentToolContext {
+            extension_id: "builtin".to_string(),
+            extension_name: "Runtime".to_string(),
+            capability_id: "net.fetch".to_string(),
+            label: "网络请求".to_string(),
+            summary: "向外部 URL 发起 HTTP 请求，并返回状态码、响应头和文本内容。".to_string(),
+            kind: "builtin".to_string(),
+            contract: "net.fetch".to_string(),
+        },
+    ]);
     tools
 }
 
@@ -1723,6 +2480,69 @@ fn humanize_agent_tool_summary(id: &str, kind: &str, contract: &str) -> String {
             _ => format!("能力入口，合同标识为 {contract}。"),
         },
     }
+}
+
+fn build_agent_builtin_tool_specs() -> Vec<AgentToolSpec> {
+    vec![
+        AgentToolSpec {
+            name: "fs_read".to_string(),
+            description: "读取文本文件内容；优先使用 /workspace、/artifacts、/tmp 这些路径，相对路径默认按 /workspace 解析。".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "要读取的文件路径" },
+                    "max_bytes": { "type": "integer", "description": "最多读取多少字节，默认 32768" }
+                },
+                "required": ["path"],
+                "additionalProperties": false
+            }),
+        },
+        AgentToolSpec {
+            name: "fs_write".to_string(),
+            description: "把文本写入文件；优先使用 /workspace、/artifacts、/tmp 这些路径，相对路径默认按 /workspace 解析。".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "目标文件路径" },
+                    "content": { "type": "string", "description": "要写入的文本内容" },
+                    "append": { "type": "boolean", "description": "是否追加写入，默认 false" }
+                },
+                "required": ["path", "content"],
+                "additionalProperties": false
+            }),
+        },
+        AgentToolSpec {
+            name: "command_exec".to_string(),
+            description: "执行系统命令；默认在 /workspace 中执行。".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "command": { "type": "string", "description": "命令名" },
+                    "args": { "type": "array", "items": { "type": "string" }, "description": "命令参数列表" },
+                    "cwd": { "type": "string", "description": "可选工作目录" },
+                    "timeout_ms": { "type": "integer", "description": "超时时间，默认 30000" }
+                },
+                "required": ["command"],
+                "additionalProperties": false
+            }),
+        },
+        AgentToolSpec {
+            name: "net_fetch".to_string(),
+            description: "发起 HTTP 请求并返回响应摘要；适合读取网页、API 或文本资源。".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "url": { "type": "string", "description": "目标 URL" },
+                    "method": { "type": "string", "description": "HTTP 方法，默认 GET" },
+                    "headers": { "type": "object", "additionalProperties": { "type": "string" }, "description": "可选请求头" },
+                    "body": { "type": "string", "description": "可选请求体" },
+                    "timeout_ms": { "type": "integer", "description": "超时时间，默认 30000" }
+                },
+                "required": ["url"],
+                "additionalProperties": false
+            }),
+        },
+    ]
 }
 
 fn resolve_catalog_path(base: &str, value: &str) -> String {

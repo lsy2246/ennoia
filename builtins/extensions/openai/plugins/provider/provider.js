@@ -340,10 +340,27 @@ function toChatCompletionMessages(input, instructions, visibleContext) {
 
   return [
     ...messages,
-    ...input.map((message) => ({
-      role: normalizeRole(message.role ?? message.sender),
-      content: normalizeMessageContent(message.content ?? message.body ?? message.text ?? ""),
-    })),
+    ...input.map((message) => {
+      const role = normalizeRole(message.role ?? message.sender);
+      const normalized = {
+        role,
+        content: normalizeMessageContent(message.content ?? message.body ?? message.text ?? ""),
+      };
+      if (role === "assistant" && Array.isArray(message.tool_calls) && message.tool_calls.length > 0) {
+        normalized.tool_calls = message.tool_calls.map((toolCall) => ({
+          id: toolCall.id,
+          type: "function",
+          function: {
+            name: toolCall.name,
+            arguments: JSON.stringify(toolCall.arguments ?? {}),
+          },
+        }));
+      }
+      if (role === "tool" && typeof message.tool_call_id === "string" && message.tool_call_id.trim()) {
+        normalized.tool_call_id = message.tool_call_id.trim();
+      }
+      return normalized;
+    }),
   ];
 }
 

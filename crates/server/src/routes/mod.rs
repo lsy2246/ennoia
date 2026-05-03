@@ -226,10 +226,6 @@ pub fn build_router(state: AppState) -> Router {
             "/api/agents/{agent_id}",
             get(agent_detail).put(agent_update).delete(agent_delete),
         )
-        .route(
-            "/api/agents/{agent_id}/policy",
-            get(agent_policy_detail).put(agent_policy_put),
-        )
         .route("/api/skills", get(skills).post(skill_create))
         .route(
             "/api/skills/{skill_id}",
