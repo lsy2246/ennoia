@@ -275,9 +275,14 @@ pub fn build_router(state: AppState) -> Router {
         )
         .route("/api/permissions/events", get(permission_events))
         .route("/api/permissions/approvals", get(permission_approvals))
+        .route("/api/permissions/grants", get(permission_grants))
         .route(
             "/api/permissions/approvals/{approval_id}/resolve",
             post(permission_approval_resolve),
+        )
+        .route(
+            "/api/permissions/grants/{grant_id}/revoke",
+            post(permission_grant_revoke),
         )
         .merge(bootstrap)
         .merge(runtime)

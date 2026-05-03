@@ -170,7 +170,7 @@ export type AgentProfile = {
 };
 
 export type AgentExecutionEnvironment = {
-  mode: string;
+  sandbox_enabled: boolean;
 };
 
 export type SkillConfig = {
@@ -240,11 +240,8 @@ export type PermissionTrigger = {
 
 export type AgentPermissionProfile = {
   mode: string;
-  path_whitelist: string[];
-  allow_command_exec: boolean;
-  allow_external_network: boolean;
-  allow_runtime_config_write: boolean;
-  allow_extension_manage: boolean;
+  command_rules: string[];
+  path_rules: string[];
 };
 
 export type PermissionPolicySummary = {
@@ -283,6 +280,25 @@ export type PermissionApprovalRecord = {
   expires_at?: string | null;
   resolved_at?: string | null;
   resolution?: string | null;
+};
+
+export type PermissionRequest = {
+  agent_id: string;
+  action: string;
+  target: PermissionTarget;
+  scope: PermissionScope;
+  trigger: PermissionTrigger;
+};
+
+export type PermissionGrantRecord = {
+  grant_id: string;
+  approval_id: string;
+  agent_id: string;
+  mode: string;
+  request: PermissionRequest;
+  consumed_at?: string | null;
+  expires_at?: string | null;
+  revoked_at?: string | null;
 };
 
 export type ConversationSummary = {

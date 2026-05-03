@@ -127,6 +127,14 @@ impl ApiError {
     pub fn message(&self) -> &str {
         &self.body.message
     }
+
+    pub fn code(&self) -> ErrorCode {
+        self.body.code
+    }
+
+    pub fn details(&self) -> &serde_json::Value {
+        &self.body.details
+    }
 }
 
 impl fmt::Display for ApiError {

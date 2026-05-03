@@ -42,29 +42,19 @@ const EMPTY_AGENT: AgentProfile = {
   skills: [],
   enabled: true,
   permission_profile: {
-    mode: "restricted",
-    path_whitelist: [],
-    allow_command_exec: false,
-    allow_external_network: false,
-    allow_runtime_config_write: false,
-    allow_extension_manage: false,
+    mode: "whitelist",
+    command_rules: [],
+    path_rules: [],
   },
   execution_environment: {
-    mode: "host",
+    sandbox_enabled: false,
   },
 };
 
 const EMPTY_PERMISSION_PROFILE: AgentPermissionProfile = {
-  mode: "restricted",
-  path_whitelist: [],
-  allow_command_exec: false,
-  allow_external_network: false,
-  allow_runtime_config_write: false,
-  allow_extension_manage: false,
-};
-
-const EMPTY_EXECUTION_ENVIRONMENT: AgentExecutionEnvironment = {
-  mode: "host",
+  mode: "whitelist",
+  command_rules: [],
+  path_rules: [],
 };
 
 export function AgentEditorView({
@@ -440,7 +430,7 @@ export function AgentEditorView({
                   <strong>{formatRelativePath(form.skills_dir || "")}</strong>
                 </div>
                 <p className="helper-text">
-                  {form.execution_environment.mode === "native"
+                  {form.execution_environment.sandbox_enabled
                     ? "原生沙盒模式下，Agent 看到的是 /workspace、/artifacts、/tmp 这些虚拟路径。"
                     : t("web.agents.working_dir_help", "Agent 工作目录自动派生到 agents/{agent_id}/work，无需单独配置。")}
                 </p>
@@ -451,21 +441,23 @@ export function AgentEditorView({
                   <section className="details-panel agent-editor__section">
                     <div className="panel-title">执行环境</div>
                     <p className="helper-text">
-                      执行环境决定 Agent 的文件、命令和网络动作在哪一层运行；它和权限系统是两套独立控制。
+                      这里只决定命令是在沙盒里运行还是直接在宿主机运行。
                     </p>
                     <div className="agent-policy-editor">
                       <label>
-                        运行模式
+                        沙盒模式
                         <Select
-                          value={form.execution_environment.mode}
+                          value={form.execution_environment.sandbox_enabled ? "enabled" : "disabled"}
                           onChange={(value) =>
                             setForm((current) => ({
                               ...current,
-                              execution_environment: normalizeExecutionEnvironment({ mode: value }),
+                              execution_environment: normalizeExecutionEnvironment({
+                                sandbox_enabled: value === "enabled",
+                              }),
                             }))}
                           options={[
-                            { value: "host", label: "宿主机模式" },
-                            { value: "native", label: "原生沙盒模式" },
+                            { value: "disabled", label: "关闭，直接在宿主机运行" },
+                            { value: "enabled", label: "开启，在原生沙盒中运行" },
                           ]}
                         />
                       </label>
@@ -474,9 +466,9 @@ export function AgentEditorView({
                           <strong>当前说明</strong>
                         </div>
                         <p className="helper-text">
-                          {form.execution_environment.mode === "native"
-                            ? "Agent 优先使用 /workspace、/artifacts、/tmp 这些虚拟路径；白名单也按这些路径生效。"
-                            : "Agent 直接在宿主机环境里执行；相对路径默认按工作目录解析。"}
+                          {form.execution_environment.sandbox_enabled
+                            ? "命令会在原生沙盒中执行，文件路径使用 /workspace、/artifacts、/tmp 这些虚拟根。"
+                            : "命令会直接在宿主机环境里执行；相对路径按当前工作目录解析。"}
                         </p>
                       </div>
                     </div>
@@ -485,11 +477,11 @@ export function AgentEditorView({
                   <section className="details-panel agent-editor__section">
                     <div className="panel-title">{t("web.permissions.profile", "权限模式")}</div>
                     <p className="helper-text">
-                      {t("web.permissions.agent_embedded_help", "长期权限配置属于 Agent 本身；即时审批仍应在会话里处理。")}
+                      长期权限配置属于 Agent 本身；会话里的审批只处理这套规则命中的 ask。
                     </p>
                     <div className="agent-policy-editor">
                       <label>
-                        {t("web.permissions.mode", "权限模式")}
+                        命令默认策略
                         <Select
                           value={policyForm.mode}
                           onChange={(value) =>
@@ -498,8 +490,8 @@ export function AgentEditorView({
                               mode: value,
                             }))}
                           options={[
-                            { value: "restricted", label: t("web.permissions.mode_restricted", "受限模式") },
-                            { value: "trusted", label: t("web.permissions.mode_trusted", "信任模式") },
+                            { value: "whitelist", label: "白名单模式：默认询问，命中规则直接允许" },
+                            { value: "blacklist", label: "黑名单模式：默认允许，命中规则改为询问" },
                           ]}
                         />
                       </label>
@@ -507,90 +499,60 @@ export function AgentEditorView({
                       <div className="agent-policy-editor__rules">
                         <div className="resource-card agent-policy-rule">
                           <div className="agent-policy-rule__header">
-                            <strong>{t("web.permissions.path_whitelist", "路径白名单")}</strong>
+                            <strong>命令规则</strong>
                           </div>
                           <p className="helper-text">
-                            {form.execution_environment.mode === "native"
-                              ? "留空表示不额外限制虚拟路径范围；填写后，白名单外的 /workspace、/artifacts、/tmp 路径会按当前模式进入审批。"
-                              : t("web.permissions.path_whitelist_help", "留空表示不额外限制路径范围；填写后，白名单外路径会按照当前模式进入审批。")}
+                            {policyForm.mode === "blacklist"
+                              ? "这里填写需要改成询问的命令。未命中的命令默认直接运行。"
+                              : "这里填写可以直接运行的命令。未命中的命令默认进入询问。"}
                           </p>
                           <SimpleStringListEditor
                             t={t}
-                            label={t("web.permissions.path_whitelist", "路径白名单")}
-                            placeholder={form.execution_environment.mode === "native" ? "/workspace/logs/output.txt" : t("web.permissions.path_whitelist_placeholder", "例如 C:/Users/Administrator/stdout.log")}
-                            values={policyForm.path_whitelist}
+                            label="命令规则"
+                            placeholder={policyForm.mode === "blacklist" ? "例如 powershell" : "例如 git"}
+                            values={policyForm.command_rules}
                             onChange={(values) =>
                               setPolicyForm((current) => ({
                                 ...current,
-                                path_whitelist: values,
+                                command_rules: values,
                               }))}
                           />
                         </div>
 
                         <div className="resource-card agent-policy-rule">
                           <div className="agent-policy-rule__header">
-                            <strong>{t("web.permissions.risk_switches", "高风险操作")}</strong>
+                            <strong>路径规则</strong>
                           </div>
-                          <div className="stack">
-                            <label className="check-row agent-editor__check-row">
-                              <input
-                                type="checkbox"
-                                checked={policyForm.allow_command_exec}
-                                onChange={(event) =>
-                                  setPolicyForm((current) => ({
-                                    ...current,
-                                    allow_command_exec: event.target.checked,
-                                  }))}
-                              />
-                              {t("web.permissions.allow_command_exec", "允许执行系统命令")}
-                            </label>
-                            <label className="check-row agent-editor__check-row">
-                              <input
-                                type="checkbox"
-                                checked={policyForm.allow_external_network}
-                                onChange={(event) =>
-                                  setPolicyForm((current) => ({
-                                    ...current,
-                                    allow_external_network: event.target.checked,
-                                  }))}
-                              />
-                              {t("web.permissions.allow_external_network", "允许访问外部网络")}
-                            </label>
-                            <label className="check-row agent-editor__check-row">
-                              <input
-                                type="checkbox"
-                                checked={policyForm.allow_runtime_config_write}
-                                onChange={(event) =>
-                                  setPolicyForm((current) => ({
-                                    ...current,
-                                    allow_runtime_config_write: event.target.checked,
-                                  }))}
-                              />
-                              {t("web.permissions.allow_runtime_config_write", "允许修改运行时配置")}
-                            </label>
-                            <label className="check-row agent-editor__check-row">
-                              <input
-                                type="checkbox"
-                                checked={policyForm.allow_extension_manage}
-                                onChange={(event) =>
-                                  setPolicyForm((current) => ({
-                                    ...current,
-                                    allow_extension_manage: event.target.checked,
-                                  }))}
-                              />
-                              {t("web.permissions.allow_extension_manage", "允许管理扩展")}
-                            </label>
-                          </div>
+                          <p className="helper-text">
+                            {policyForm.mode === "blacklist"
+                              ? form.execution_environment.sandbox_enabled
+                                ? "留空表示沙盒路径默认直接访问；填写后，命中的 /workspace、/artifacts、/tmp 路径直接允许，其他路径进入询问。"
+                                : "留空表示所有路径默认直接访问；填写后，命中的路径直接允许，其他路径进入询问。"
+                              : form.execution_environment.sandbox_enabled
+                                ? "留空表示沙盒路径默认进入询问；填写后，命中的 /workspace、/artifacts、/tmp 路径直接允许，其他路径进入询问。"
+                                : "留空表示所有路径默认进入询问；填写后，命中的路径直接允许，其他路径进入询问。"}
+                          </p>
+                          <SimpleStringListEditor
+                            t={t}
+                            label="路径规则"
+                            placeholder={form.execution_environment.sandbox_enabled ? "/workspace/project/**" : "例如 D:/data/code/ennoia/**"}
+                            values={policyForm.path_rules}
+                            onChange={(values) =>
+                              setPolicyForm((current) => ({
+                                ...current,
+                                path_rules: values,
+                              }))}
+                          />
                         </div>
 
                         <div className="resource-card agent-policy-rule">
                           <div className="agent-policy-rule__header">
-                            <strong>{t("web.permissions.mode_preview", "模式说明")}</strong>
+                            <strong>当前行为</strong>
                           </div>
                           <p className="helper-text">
-                            {policyForm.mode === "trusted"
-                              ? t("web.permissions.mode_trusted_help", "信任模式会直接允许大多数操作；只有少数高风险操作和白名单外路径会询问。")
-                              : t("web.permissions.mode_restricted_help", "受限模式只自动放行安全内置操作；其他操作会询问。")}
+                            {policyForm.mode === "blacklist"
+                              ? "命令默认直接运行，命中命令规则的命令会先询问。路径规则始终代表可直接访问的路径，未命中路径会询问。"
+                              : "命令默认先询问，只有命中命令规则的命令才会直接运行。路径也默认先询问，只有命中路径规则的路径才会直接访问。"}
                           </p>
                         </div>
                       </div>
@@ -779,12 +741,13 @@ function normalizeAgentForm(form: AgentProfile): AgentProfile {
 
 function normalizePermissionProfile(profile: AgentPermissionProfile | undefined): AgentPermissionProfile {
   return {
-    mode: profile?.mode === "trusted" ? "trusted" : "restricted",
-    path_whitelist: [...(profile?.path_whitelist ?? [])],
-    allow_command_exec: Boolean(profile?.allow_command_exec),
-    allow_external_network: Boolean(profile?.allow_external_network),
-    allow_runtime_config_write: Boolean(profile?.allow_runtime_config_write),
-    allow_extension_manage: Boolean(profile?.allow_extension_manage),
+    mode: profile?.mode === "blacklist" ? "blacklist" : "whitelist",
+    command_rules: [...(profile?.command_rules ?? [])]
+      .map((value) => value.trim())
+      .filter(Boolean),
+    path_rules: [...(profile?.path_rules ?? [])]
+      .map((value) => value.trim())
+      .filter(Boolean),
   };
 }
 
@@ -792,7 +755,7 @@ function normalizeExecutionEnvironment(
   value: AgentExecutionEnvironment | undefined,
 ): AgentExecutionEnvironment {
   return {
-    mode: value?.mode === "native" ? "native" : EMPTY_EXECUTION_ENVIRONMENT.mode,
+    sandbox_enabled: Boolean(value?.sandbox_enabled),
   };
 }
 

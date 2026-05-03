@@ -22,6 +22,13 @@ pub struct PermissionApprovalsQuery {
     pub limit: usize,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct PermissionGrantsQuery {
+    pub agent_id: Option<String>,
+    pub conversation_id: Option<String>,
+    pub limit: usize,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PermissionPolicySummary {
     pub agent_id: String,
@@ -36,8 +43,8 @@ pub struct ApprovalResolutionPayload {
     pub resolution: String,
 }
 
-#[derive(Debug, Clone)]
-pub(super) struct PermissionGrantRecord {
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PermissionGrantRecord {
     pub grant_id: String,
     pub approval_id: String,
     pub agent_id: String,
@@ -45,6 +52,7 @@ pub(super) struct PermissionGrantRecord {
     pub request: PermissionRequest,
     pub consumed_at: Option<String>,
     pub expires_at: Option<String>,
+    pub revoked_at: Option<String>,
 }
 
 pub(super) fn rule_matches(rule: &AgentPermissionRule, request: &PermissionRequest) -> bool {
@@ -65,6 +73,9 @@ pub(super) fn rule_matches(rule: &AgentPermissionRule, request: &PermissionReque
             return false;
         }
     }
+    if !matches_target_scope(rule, request) {
+        return false;
+    }
     if !matches_conversation_scope(rule.conversation_scope.as_deref(), request) {
         return false;
     }
@@ -78,6 +89,15 @@ pub(super) fn rule_matches(rule: &AgentPermissionRule, request: &PermissionReque
         return false;
     }
     true
+}
+
+fn matches_target_scope(rule: &AgentPermissionRule, request: &PermissionRequest) -> bool {
+    if rule.target_scope.is_empty() {
+        return true;
+    }
+    rule.target_scope
+        .iter()
+        .any(|pattern| pattern.matches(request.target.id.as_str()))
 }
 
 fn matches_conversation_scope(scope: Option<&str>, request: &PermissionRequest) -> bool {
@@ -168,25 +188,56 @@ fn matches_host_scope(rule: &AgentPermissionRule, request: &PermissionRequest) -
 }
 
 pub(super) fn grant_matches(grant: &PermissionGrantRecord, request: &PermissionRequest) -> bool {
-    if grant.agent_id != request.agent_id || grant.request.action != request.action {
+    if grant.agent_id != request.agent_id {
         return false;
     }
     match grant.mode.as_str() {
         "once" => {
-            grant.request.target == request.target
-                && grant.request.scope == request.scope
-                && grant.request.trigger == request.trigger
+            if grant.request.action != request.action {
+                return false;
+            }
+            same_target_without_run(&grant.request.target, &request.target)
+                && same_scope_without_run(&grant.request.scope, &request.scope)
         }
-        "conversation" => {
+        "reply_action" => {
+            if grant.request.action != request.action {
+                return false;
+            }
+            grant.request.scope.conversation_id.is_some()
+                && grant.request.scope.conversation_id == request.scope.conversation_id
+                && grant.request.scope.message_id.is_some()
+                && grant.request.scope.message_id == request.scope.message_id
+                && grant.request.target.kind == request.target.kind
+                && grant.request.target.id == request.target.id
+        }
+        "conversation_all" => {
             grant.request.scope.conversation_id.is_some()
                 && grant.request.scope.conversation_id == request.scope.conversation_id
         }
-        "run" => {
-            grant.request.scope.run_id.is_some()
-                && grant.request.scope.run_id == request.scope.run_id
-        }
         _ => false,
     }
+}
+
+fn same_target_without_run(
+    left: &ennoia_kernel::PermissionTarget,
+    right: &ennoia_kernel::PermissionTarget,
+) -> bool {
+    left.kind == right.kind
+        && left.id == right.id
+        && left.conversation_id == right.conversation_id
+        && left.path == right.path
+        && left.host == right.host
+}
+
+fn same_scope_without_run(
+    left: &ennoia_kernel::PermissionScope,
+    right: &ennoia_kernel::PermissionScope,
+) -> bool {
+    left.conversation_id == right.conversation_id
+        && left.message_id == right.message_id
+        && left.extension_id == right.extension_id
+        && left.path == right.path
+        && left.host == right.host
 }
 
 pub(super) fn namespace(action: &str) -> &str {
@@ -205,4 +256,67 @@ pub(super) fn is_expired_iso(value: &str) -> bool {
     chrono::DateTime::parse_from_rfc3339(value)
         .map(|timestamp| timestamp.with_timezone(&Utc) <= Utc::now())
         .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{grant_matches, PermissionGrantRecord};
+    use ennoia_kernel::{PermissionRequest, PermissionScope, PermissionTarget, PermissionTrigger};
+
+    fn request(run_id: &str) -> PermissionRequest {
+        PermissionRequest {
+            agent_id: "a".to_string(),
+            action: "fs.read".to_string(),
+            target: PermissionTarget {
+                kind: "file".to_string(),
+                id: "/workspace/missing.txt".to_string(),
+                conversation_id: Some("conv-1".to_string()),
+                run_id: Some(run_id.to_string()),
+                path: Some("/workspace/missing.txt".to_string()),
+                host: None,
+            },
+            scope: PermissionScope {
+                conversation_id: Some("conv-1".to_string()),
+                run_id: Some(run_id.to_string()),
+                message_id: Some("msg-1".to_string()),
+                extension_id: Some("builtin".to_string()),
+                path: Some("/workspace/missing.txt".to_string()),
+                host: None,
+            },
+            trigger: PermissionTrigger {
+                kind: "pipeline.workflow_to_conversation".to_string(),
+                user_initiated: true,
+            },
+        }
+    }
+
+    fn grant(mode: &str, request: PermissionRequest) -> PermissionGrantRecord {
+        PermissionGrantRecord {
+            grant_id: "grant-1".to_string(),
+            approval_id: "apr-1".to_string(),
+            agent_id: "a".to_string(),
+            mode: mode.to_string(),
+            request,
+            consumed_at: None,
+            expires_at: None,
+            revoked_at: None,
+        }
+    }
+
+    #[test]
+    fn once_grant_matches_resumed_request_with_new_run_id() {
+        let original = request("run-1");
+        let resumed = request("run-2");
+        let approval_grant = grant("once", original);
+        assert!(grant_matches(&approval_grant, &resumed));
+    }
+
+    #[test]
+    fn once_grant_does_not_match_different_message() {
+        let original = request("run-1");
+        let mut resumed = request("run-2");
+        resumed.scope.message_id = Some("msg-2".to_string());
+        let approval_grant = grant("once", original);
+        assert!(!grant_matches(&approval_grant, &resumed));
+    }
 }

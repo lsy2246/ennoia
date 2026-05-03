@@ -172,35 +172,34 @@
 - `enabled`
 - `execution_environment`
 
-`AgentConfig`、`AgentPermissionProfile` 与 `AgentExecutionEnvironment` 统一持久化在 `agents/<agent_id>/agent.toml`。`kind`、`default_model`、`skills_dir`、`working_dir`、`artifacts_dir` 作为运行时派生/内部字段存在，前端产品模型以显式字段为主。`working_dir` / `artifacts_dir` 表示 Agent 自己的运行目录，不等同于用户项目工作区；默认分别按 `agents/<agent_id>/work` 与 `agents/<agent_id>/artifacts` 自动派生。执行环境为 `native` 时，模型侧只看到 `/workspace`、`/artifacts`、`/tmp` 这些虚拟路径。
+`AgentConfig`、`AgentPermissionProfile` 与 `AgentExecutionEnvironment` 统一持久化在 `agents/<agent_id>/agent.toml`。`kind`、`default_model`、`skills_dir`、`working_dir`、`artifacts_dir` 作为运行时派生/内部字段存在，前端产品模型以显式字段为主。`working_dir` / `artifacts_dir` 表示 Agent 自己的运行目录，不等同于用户项目工作区；默认分别按 `agents/<agent_id>/work` 与 `agents/<agent_id>/artifacts` 自动派生。沙盒执行开启时，模型侧只看到 `/workspace`、`/artifacts`、`/tmp` 这些虚拟路径。
 
 ## Agent 权限域
 
 `AgentPermissionProfile` 字段：
 
 - `mode`
-- `path_whitelist`
-- `allow_command_exec`
-- `allow_external_network`
-- `allow_runtime_config_write`
-- `allow_extension_manage`
+- `command_rules`
+- `path_rules`
 
 ## Agent 执行环境域
 
 `AgentExecutionEnvironment` 字段：
 
-- `mode`
+- `sandbox_enabled`
 
 约定：
 
-- `mode` 当前固定为 `host` 或 `native`。
-- `host` 表示 Agent 直接在宿主机运行时上执行。
-- `native` 表示 Agent 使用原生沙盒语义；模型上下文和内置工具优先暴露 `/workspace`、`/artifacts`、`/tmp` 三个虚拟根，不再主动泄露宿主机绝对路径。
+- `sandbox_enabled = false` 表示 Agent 直接在宿主机运行时上执行。
+- `sandbox_enabled = true` 表示 Agent 使用原生沙盒语义；模型上下文和内置工具优先暴露 `/workspace`、`/artifacts`、`/tmp` 三个虚拟根，不再主动泄露宿主机绝对路径。
 
 运行时不再让用户直接维护底层规则。系统会把 `AgentPermissionProfile` 编译成内部 `AgentPermissionPolicy`：
 
-- `restricted`：少量 `allow`，其余 `ask`
-- `trusted`：少量 `ask`，其余 `allow`
+- `whitelist`：命令默认 `ask`，命中 `command_rules` 后直接 `allow`
+- `blacklist`：命令默认 `allow`，命中 `command_rules` 后改为 `ask`
+- `path_rules` 始终表示可直接访问的路径
+- `whitelist` 下，`path_rules` 为空时路径默认 `ask`；命中路径 `allow`
+- `blacklist` 下，`path_rules` 为空时路径默认 `allow`；非空时命中路径 `allow`，其他路径 `ask`
 
 `PermissionApprovalRecord` 字段：
 
@@ -235,7 +234,7 @@
 
 - Policy 是系统级主模型，扩展只声明 `capabilities[].metadata.permission`，不保存最终授权结果。
 - `effect` 固定使用 `allow`、`deny`、`ask`。
-- 审批通过后可以产生临时 grant，也可以直接写回 policy。
+- 审批通过后只会产生临时 grant，不再写回 policy。
 - 事件记录只表达“谁、在什么作用域、请求了什么、系统如何裁决”，不复写业务结果。
 
 ## Skill 域

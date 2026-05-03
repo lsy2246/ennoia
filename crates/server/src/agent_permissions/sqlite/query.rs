@@ -3,6 +3,7 @@ use rusqlite::{types::Value, Connection};
 #[derive(Debug, Clone, Copy)]
 pub enum FilterOperator {
     Eq,
+    Like,
     Lte,
     IsNull,
 }
@@ -64,6 +65,14 @@ impl SelectQuery {
             column,
             operator,
             value: Some(value),
+        });
+    }
+
+    pub fn push_null_filter(&mut self, column: &'static str) {
+        self.filters.push(Filter {
+            column,
+            operator: FilterOperator::IsNull,
+            value: None,
         });
     }
 
@@ -168,6 +177,10 @@ fn append_filters(sql: &mut String, params: &mut Vec<Value>, filters: Vec<Filter
             FilterOperator::Eq => {
                 sql.push_str(filter.column);
                 sql.push_str(" = ?");
+            }
+            FilterOperator::Like => {
+                sql.push_str(filter.column);
+                sql.push_str(" LIKE ?");
             }
             FilterOperator::Lte => {
                 sql.push_str(filter.column);

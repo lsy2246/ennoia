@@ -2141,6 +2141,22 @@ label {
   color: color-mix(in srgb, var(--danger) 84%, var(--text));
 }
 
+.tool-result-error {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tool-result-error p {
+  margin: 0;
+  line-height: 1.7;
+}
+
+.tool-result-error__detail summary {
+  cursor: pointer;
+  color: var(--text-muted);
+}
+
 .chat-error-bubble__detail {
   margin-top: 10px;
 }

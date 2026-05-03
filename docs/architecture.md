@@ -40,16 +40,17 @@ Web
 - 当前宿主会在两类入口做权限判断：
   - Action Router：当内部 Agent 以 `permission_actor` 身份调用 `conversation.*`、`memory.*`、`run.*` 等稳定动作时。
   - Provider 调用：Agent 真正发起 `provider.generate` 上游请求前。
-- 裁决结果固定为 `allow`、`deny`、`ask`。`ask` 会生成待审批记录，审批通过后可落成单次 grant、当前会话 grant、当前 run grant 或永久 policy。
+- 裁决结果固定为 `allow`、`deny`、`ask`。`ask` 会生成待审批记录；审批通过后只会生成临时 grant，当前支持单次放行、本次回复同类操作放行和当前会话放行。
+- 当前产品层权限模型不再区分“网络 / 配置 / 扩展管理”等高风险分类，只保留三件事：命令默认模式、命令规则、路径规则。命令规则决定 `command.exec` 是默认允许还是默认询问；路径规则决定 `fs.read` / `fs.write` 对哪些路径可以直接访问。
 - 系统默认只管 Agent 身份，不拦截操作者直接发起的 HTTP 调用。
 
 ## Agent 执行环境
 
 - Agent 执行环境与权限系统是两套独立机制。
 - 权限系统回答“允不允许”；执行环境回答“在哪里执行”。
-- 当前执行环境固定提供两种模式：
-  - `host`：直接在宿主机运行时执行。
-  - `native`：使用原生沙盒语义，模型与内置工具优先只看到 `/workspace`、`/artifacts`、`/tmp` 三个虚拟根。
+- 当前执行环境只保留一个布尔开关：
+  - `sandbox_enabled = false`：直接在宿主机运行时执行。
+  - `sandbox_enabled = true`：使用原生沙盒语义，模型与内置工具优先只看到 `/workspace`、`/artifacts`、`/tmp` 三个虚拟根。
 - 内置 `fs.read`、`fs.write`、`command.exec`、`net.fetch` 都应先经过权限裁决，再进入执行环境层，不直接把宿主机绝对路径暴露给模型。
 
 ## 细粒度接口层

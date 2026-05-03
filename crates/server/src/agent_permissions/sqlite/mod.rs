@@ -21,7 +21,7 @@ use self::schema::{
 };
 use super::{
     grant_matches, is_expired_iso, now_iso, rule_matches, PermissionApprovalsQuery,
-    PermissionEventsQuery, PermissionGrantRecord, PermissionPolicySummary,
+    PermissionEventsQuery, PermissionGrantRecord, PermissionGrantsQuery, PermissionPolicySummary,
 };
 
 const APPROVAL_TTL_MINUTES: i64 = 15;
@@ -143,6 +143,18 @@ impl AgentPermissionStore {
                 self.append_event(request, &decision, trace)?;
                 Ok(decision)
             }
+            "default_ask" => {
+                let approval = self.create_approval(request, None, trace)?;
+                let decision = PermissionDecision {
+                    decision: "ask".to_string(),
+                    matched_rule_id: None,
+                    reason: "policy mode default_ask".to_string(),
+                    approval_id: Some(approval.approval_id.clone()),
+                    grant_id: None,
+                };
+                self.append_event(request, &decision, trace)?;
+                Ok(decision)
+            }
             _ => {
                 let decision = PermissionDecision {
                     decision: "deny".to_string(),
@@ -166,8 +178,57 @@ impl AgentPermissionStore {
             FilterOperator::Eq,
             grant_id.to_string().into(),
         );
+        builder.push_filter(
+            PermissionGrantsSchema::MODE,
+            FilterOperator::Eq,
+            "once".to_string().into(),
+        );
         builder.push_null_filter(PermissionGrantsSchema::CONSUMED_AT);
         builder.build().execute(&connection).map(|_| ())
+    }
+
+    pub fn list_grants(
+        &self,
+        query: &PermissionGrantsQuery,
+    ) -> std::io::Result<Vec<PermissionGrantRecord>> {
+        let connection = self.open()?;
+        let prepared = build_permission_grants_list_query(query).build();
+        let mut statement = prepared.prepare(&connection)?;
+        let rows = statement
+            .query_map(
+                rusqlite::params_from_iter(prepared.params),
+                map_permission_grant,
+            )
+            .map_err(std::io::Error::other)?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(std::io::Error::other)
+    }
+
+    pub fn revoke_grant(&self, grant_id: &str) -> std::io::Result<Option<PermissionGrantRecord>> {
+        let Some(mut grant) = self.get_grant(grant_id)? else {
+            return Ok(None);
+        };
+        if grant.revoked_at.is_some() || grant.consumed_at.is_some() {
+            return Ok(Some(grant));
+        }
+
+        let connection = self.open()?;
+        let mut builder = UpdateQuery::new(PermissionGrantsSchema::NAME);
+        let revoked_at = now_iso();
+        builder.push_assignment(
+            PermissionGrantsSchema::REVOKED_AT,
+            revoked_at.clone().into(),
+        );
+        builder.push_filter(
+            PermissionGrantsSchema::GRANT_ID,
+            FilterOperator::Eq,
+            grant_id.to_string().into(),
+        );
+        builder.push_null_filter(PermissionGrantsSchema::REVOKED_AT);
+        builder.push_null_filter(PermissionGrantsSchema::CONSUMED_AT);
+        builder.build().execute(&connection)?;
+        grant.revoked_at = Some(revoked_at);
+        Ok(Some(grant))
     }
 
     pub fn list_events(
@@ -324,55 +385,12 @@ impl AgentPermissionStore {
         resolution: &str,
     ) -> std::io::Result<()> {
         match resolution {
-            "allow_once" | "allow_conversation" | "allow_run" => {
+            "allow_once" | "allow_reply_action" | "allow_conversation_all" => {
                 let mode = resolution.trim_start_matches("allow_");
                 self.insert_grant(approval, mode)
             }
-            "allow_policy" => self.append_policy_rule_from_approval(approval),
             _ => Ok(()),
         }
-    }
-
-    fn append_policy_rule_from_approval(
-        &self,
-        approval: &PermissionApprovalRecord,
-    ) -> std::io::Result<()> {
-        let mut profile = self.load_profile(&approval.agent_id)?;
-        match approval.action.as_str() {
-            "fs.read" | "fs.write" => {
-                if let Some(path) = approval
-                    .target
-                    .path
-                    .clone()
-                    .or_else(|| approval.scope.path.clone())
-                {
-                    let normalized = path.replace('\\', "/");
-                    if !profile
-                        .path_whitelist
-                        .iter()
-                        .any(|pattern| pattern.as_str() == normalized)
-                    {
-                        profile
-                            .path_whitelist
-                            .push(ennoia_kernel::GlobPattern::new(normalized));
-                    }
-                }
-            }
-            "command.exec" => {
-                profile.allow_command_exec = true;
-            }
-            "net.fetch" => {
-                profile.allow_external_network = true;
-            }
-            "runtime.config.write" => {
-                profile.allow_runtime_config_write = true;
-            }
-            "extension.install" | "extension.enable" | "extension.disable" => {
-                profile.allow_extension_manage = true;
-            }
-            _ => {}
-        }
-        self.save_profile(&approval.agent_id, &profile)
     }
 
     fn insert_grant(&self, approval: &PermissionApprovalRecord, mode: &str) -> std::io::Result<()> {
@@ -399,6 +417,7 @@ impl AgentPermissionStore {
                     } else {
                         None
                     },
+                    Option::<String>::None,
                     now_iso(),
                 ],
             )
@@ -517,6 +536,9 @@ impl AgentPermissionStore {
             if grant.consumed_at.is_some() {
                 continue;
             }
+            if grant.revoked_at.is_some() {
+                continue;
+            }
             if let Some(expires_at) = &grant.expires_at {
                 if is_expired_iso(expires_at) {
                     continue;
@@ -598,6 +620,11 @@ impl AgentPermissionStore {
             &connection,
             PermissionApprovalsSchema::NAME,
             PermissionApprovalsSchema::LEGACY_COLUMNS,
+        )?;
+        ensure_columns(
+            &connection,
+            PermissionGrantsSchema::NAME,
+            PermissionGrantsSchema::LEGACY_COLUMNS,
         )?;
         for statement in schema::index_statements() {
             connection
@@ -683,6 +710,32 @@ fn build_permission_grants_query(request: &PermissionRequest) -> SelectQuery {
     builder.order_by(PermissionGrantsSchema::SEQ, true)
 }
 
+fn build_permission_grants_list_query(query: &PermissionGrantsQuery) -> SelectQuery {
+    let mut builder = SelectQuery::new(
+        PermissionGrantsSchema::NAME,
+        PermissionGrantsSchema::SELECT_COLUMNS,
+    );
+    if let Some(agent_id) = &query.agent_id {
+        builder.push_filter(
+            PermissionGrantsSchema::AGENT_ID,
+            FilterOperator::Eq,
+            agent_id.clone().into(),
+        );
+    }
+    if let Some(conversation_id) = &query.conversation_id {
+        builder.push_filter(
+            PermissionGrantsSchema::REQUEST_JSON,
+            FilterOperator::Like,
+            format!("%\"conversation_id\":\"{}\"%", conversation_id).into(),
+        );
+    }
+    builder.push_null_filter(PermissionGrantsSchema::CONSUMED_AT);
+    builder.push_null_filter(PermissionGrantsSchema::REVOKED_AT);
+    builder
+        .order_by(PermissionGrantsSchema::SEQ, true)
+        .limit(query.limit.max(1) as i64)
+}
+
 fn map_permission_event(row: &rusqlite::Row<'_>) -> rusqlite::Result<PermissionEventRecord> {
     let target_json: String = row.get(PermissionEventsSchema::TARGET_JSON)?;
     let scope_json: String = row.get(PermissionEventsSchema::SCOPE_JSON)?;
@@ -727,6 +780,7 @@ fn map_permission_grant(row: &rusqlite::Row<'_>) -> rusqlite::Result<PermissionG
         request,
         consumed_at: row.get(PermissionGrantsSchema::CONSUMED_AT)?,
         expires_at: row.get(PermissionGrantsSchema::EXPIRES_AT)?,
+        revoked_at: row.get(PermissionGrantsSchema::REVOKED_AT)?,
     })
 }
 
@@ -791,4 +845,28 @@ fn ensure_columns(
             .map_err(std::io::Error::other)?;
     }
     Ok(())
+}
+
+impl AgentPermissionStore {
+    fn get_grant(&self, grant_id: &str) -> std::io::Result<Option<PermissionGrantRecord>> {
+        let connection = self.open()?;
+        let mut builder = SelectQuery::new(
+            PermissionGrantsSchema::NAME,
+            PermissionGrantsSchema::SELECT_COLUMNS,
+        );
+        builder.push_filter(
+            PermissionGrantsSchema::GRANT_ID,
+            FilterOperator::Eq,
+            grant_id.to_string().into(),
+        );
+        let prepared = builder.build();
+        let mut statement = prepared.prepare(&connection)?;
+        statement
+            .query_row(
+                rusqlite::params_from_iter(prepared.params),
+                map_permission_grant,
+            )
+            .optional()
+            .map_err(std::io::Error::other)
+    }
 }

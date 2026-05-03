@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
-use ennoia_contract::ApiError;
+use ennoia_contract::{ApiError, ErrorCode};
 use ennoia_error_utils::normalize_error_message;
 use ennoia_extension_host::RegisteredProviderContribution;
 use ennoia_kernel::{
@@ -70,7 +70,7 @@ struct AgentRuntimeContext {
     agent_id: String,
     agent_display_name: String,
     run_id: String,
-    execution_mode: String,
+    sandbox_enabled: bool,
     workspace_root: String,
     artifacts_root: String,
     temp_root: String,
@@ -156,6 +156,26 @@ struct AgentToolCall {
 struct AgentToolExecutionResult {
     tool_call_id: String,
     content: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ConversationToolMessageEnvelope {
+    kind: &'static str,
+    tool_call_id: String,
+    tool_name: String,
+    status: String,
+    arguments: JsonValue,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    result: Option<JsonValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<ConversationToolMessageError>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ConversationToolMessageError {
+    code: String,
+    message: String,
+    details: JsonValue,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -866,7 +886,7 @@ async fn generate_conversation_agent_reply(
                     serde_json::json!({
                         "agent_id": agent.id,
                         "display_name": agent.display_name,
-                        "execution_mode": agent.execution_environment.normalized_mode(),
+                        "sandbox_enabled": agent.execution_environment.sandbox_enabled,
                         "workspace_root": "/workspace",
                         "artifacts_root": "/artifacts",
                         "temp_root": "/tmp",
@@ -1053,7 +1073,7 @@ async fn generate_real_conversation_agent_reply(
         "lane_id": lane_id,
         "message_id": message_id,
         "run_id": run_id,
-        "execution_mode": agent.execution_environment.normalized_mode(),
+        "sandbox_enabled": agent.execution_environment.sandbox_enabled,
         "workspace_root": "/workspace",
         "artifacts_root": "/artifacts",
         "temp_root": "/tmp",
@@ -1087,14 +1107,14 @@ async fn generate_real_conversation_agent_reply(
             &run_id,
             message_id,
         )?;
-        let response = invoke_provider_method(&entry, &request_payload, model_endpoint)
-            .map_err(|error| scoped(ApiError::internal(error), request))?;
         if let Some(grant_id) = model_endpoint_grant_id.as_deref() {
             state
                 .agent_permissions
                 .consume_grant(grant_id)
                 .map_err(|error| scoped(ApiError::internal(error.to_string()), request))?;
         }
+        let response = invoke_provider_method(&entry, &request_payload, model_endpoint)
+            .map_err(|error| scoped(ApiError::internal(error), request))?;
 
         let text = response
             .get("result")
@@ -1134,7 +1154,7 @@ async fn generate_real_conversation_agent_reply(
         }));
 
         for tool_call in tool_calls {
-            let tool_result = execute_builtin_agent_tool(
+            match execute_builtin_agent_tool(
                 state,
                 request,
                 agent,
@@ -1144,22 +1164,48 @@ async fn generate_real_conversation_agent_reply(
                 &run_id,
                 &tool_call,
             )
-            .await?;
-            append_tool_result_message(
-                state,
-                request,
-                conversation_id,
-                lane_id,
-                message_id,
-                &tool_result,
-                agent_id,
-            )
-            .await?;
-            messages.push(serde_json::json!({
-                "role": "tool",
-                "tool_call_id": tool_result.tool_call_id,
-                "content": tool_result.content,
-            }));
+            .await
+            {
+                Ok(tool_result) => {
+                    let body = append_tool_result_message(
+                        state,
+                        request,
+                        conversation_id,
+                        lane_id,
+                        message_id,
+                        &tool_call,
+                        Ok(&tool_result),
+                        agent_id,
+                    )
+                    .await?;
+                    messages.push(serde_json::json!({
+                        "role": "tool",
+                        "tool_call_id": tool_result.tool_call_id,
+                        "content": body,
+                    }));
+                }
+                Err(error) => {
+                    let body = append_tool_result_message(
+                        state,
+                        request,
+                        conversation_id,
+                        lane_id,
+                        message_id,
+                        &tool_call,
+                        Err(&error),
+                        agent_id,
+                    )
+                    .await?;
+                    if is_permission_approval_error(&error) {
+                        return Err(error);
+                    }
+                    messages.push(serde_json::json!({
+                        "role": "tool",
+                        "tool_call_id": tool_call.id,
+                        "content": body,
+                    }));
+                }
+            }
         }
     }
 
@@ -1494,7 +1540,13 @@ async fn execute_agent_fs_read(
         Some(&resolved_path.display_path),
         None,
     )?;
-    let content = if agent.execution_environment.is_native() {
+    if let Some(grant_id) = permission_grant.as_deref() {
+        state
+            .agent_permissions
+            .consume_grant(grant_id)
+            .map_err(|error| scoped(ApiError::internal(error.to_string()), request))?;
+    }
+    let content = if agent.execution_environment.sandbox_enabled {
         execute_native_operation(
             agent,
             &execution_paths,
@@ -1531,12 +1583,6 @@ async fn execute_agent_fs_read(
         })
         .to_string()
     };
-    if let Some(grant_id) = permission_grant.as_deref() {
-        state
-            .agent_permissions
-            .consume_grant(grant_id)
-            .map_err(|error| scoped(ApiError::internal(error.to_string()), request))?;
-    }
     Ok(content)
 }
 
@@ -1569,7 +1615,13 @@ async fn execute_agent_fs_write(
         Some(&resolved_path.display_path),
         None,
     )?;
-    let content_response = if agent.execution_environment.is_native() {
+    if let Some(grant_id) = permission_grant.as_deref() {
+        state
+            .agent_permissions
+            .consume_grant(grant_id)
+            .map_err(|error| scoped(ApiError::internal(error.to_string()), request))?;
+    }
+    let content_response = if agent.execution_environment.sandbox_enabled {
         execute_native_operation(
             agent,
             &execution_paths,
@@ -1627,12 +1679,6 @@ async fn execute_agent_fs_write(
         })
         .to_string()
     };
-    if let Some(grant_id) = permission_grant.as_deref() {
-        state
-            .agent_permissions
-            .consume_grant(grant_id)
-            .map_err(|error| scoped(ApiError::internal(error.to_string()), request))?;
-    }
     Ok(content_response)
 }
 
@@ -1671,15 +1717,17 @@ async fn execute_agent_command_exec(
         Some(&cwd.display_path),
         None,
     )?;
-    let content = if agent.execution_environment.is_native() {
-        let permission_profile = state
+    if let Some(grant_id) = permission_grant.as_deref() {
+        state
             .agent_permissions
-            .load_profile(&agent.id)
+            .consume_grant(grant_id)
             .map_err(|error| scoped(ApiError::internal(error.to_string()), request))?;
+    }
+    let content = if agent.execution_environment.sandbox_enabled {
         execute_native_operation(
             agent,
             &execution_paths,
-            permission_profile.allow_external_network,
+            true,
             SandboxOperation::CommandExec {
                 command: command_name.clone(),
                 args: args.clone(),
@@ -1714,12 +1762,6 @@ async fn execute_agent_command_exec(
         })
         .to_string()
     };
-    if let Some(grant_id) = permission_grant.as_deref() {
-        state
-            .agent_permissions
-            .consume_grant(grant_id)
-            .map_err(|error| scoped(ApiError::internal(error.to_string()), request))?;
-    }
     Ok(content)
 }
 
@@ -1754,8 +1796,14 @@ async fn execute_agent_net_fetch(
         None,
         host.as_deref(),
     )?;
+    if let Some(grant_id) = permission_grant.as_deref() {
+        state
+            .agent_permissions
+            .consume_grant(grant_id)
+            .map_err(|error| scoped(ApiError::internal(error.to_string()), request))?;
+    }
     let execution_paths = AgentExecutionPaths::for_agent(state, agent, run_id);
-    let content = if agent.execution_environment.is_native() {
+    let content = if agent.execution_environment.sandbox_enabled {
         let mut headers = std::collections::BTreeMap::new();
         if let Some(raw_headers) = arguments.get("headers").and_then(JsonValue::as_object) {
             for (key, value) in raw_headers {
@@ -1840,12 +1888,6 @@ async fn execute_agent_net_fetch(
         })
         .to_string()
     };
-    if let Some(grant_id) = permission_grant.as_deref() {
-        state
-            .agent_permissions
-            .consume_grant(grant_id)
-            .map_err(|error| scoped(ApiError::internal(error.to_string()), request))?;
-    }
     Ok(content)
 }
 
@@ -2118,9 +2160,12 @@ async fn append_tool_result_message(
     conversation_id: &str,
     lane_id: Option<&str>,
     parent_message_id: Option<&str>,
-    result: &AgentToolExecutionResult,
+    tool_call: &AgentToolCall,
+    outcome: Result<&AgentToolExecutionResult, &ApiError>,
     agent_id: &str,
-) -> Result<(), ApiError> {
+) -> Result<String, ApiError> {
+    let body = serialize_tool_message_envelope(tool_call, outcome)
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), request))?;
     let _ = dispatch_action_value_with_context(
         state,
         request,
@@ -2128,7 +2173,7 @@ async fn append_tool_result_message(
         serde_json::json!({
             "conversation_id": conversation_id,
         "message": {
-            "body": result.content,
+            "body": body,
             "lane_id": lane_id,
             "sender": agent_id,
             "role": "tool",
@@ -2146,7 +2191,61 @@ async fn append_tool_result_message(
         ),
     )
     .await?;
-    Ok(())
+    Ok(body)
+}
+
+fn serialize_tool_message_envelope(
+    tool_call: &AgentToolCall,
+    outcome: Result<&AgentToolExecutionResult, &ApiError>,
+) -> Result<String, serde_json::Error> {
+    let envelope = match outcome {
+        Ok(result) => ConversationToolMessageEnvelope {
+            kind: "ennoia.tool_call",
+            tool_call_id: result.tool_call_id.clone(),
+            tool_name: normalize_tool_call_name(&tool_call.name),
+            status: "succeeded".to_string(),
+            arguments: tool_call.arguments.clone(),
+            result: Some(parse_tool_result_content(&result.content)),
+            error: None,
+        },
+        Err(error) => ConversationToolMessageEnvelope {
+            kind: "ennoia.tool_call",
+            tool_call_id: tool_call.id.clone(),
+            tool_name: normalize_tool_call_name(&tool_call.name),
+            status: "failed".to_string(),
+            arguments: tool_call.arguments.clone(),
+            result: None,
+            error: Some(ConversationToolMessageError {
+                code: error_code_string(error.code()),
+                message: error.message().to_string(),
+                details: error.details().clone(),
+            }),
+        },
+    };
+    serde_json::to_string(&envelope)
+}
+
+fn parse_tool_result_content(content: &str) -> JsonValue {
+    serde_json::from_str(content).unwrap_or_else(|_| JsonValue::String(content.to_string()))
+}
+
+fn normalize_tool_call_name(name: &str) -> String {
+    name.trim().replace('_', ".")
+}
+
+fn error_code_string(code: ErrorCode) -> String {
+    match code {
+        ErrorCode::BadRequest => "bad_request",
+        ErrorCode::Unauthorized => "unauthorized",
+        ErrorCode::Forbidden => "forbidden",
+        ErrorCode::NotFound => "not_found",
+        ErrorCode::Conflict => "conflict",
+        ErrorCode::RateLimited => "rate_limited",
+        ErrorCode::Timeout => "timeout",
+        ErrorCode::PayloadTooLarge => "payload_too_large",
+        ErrorCode::Internal => "internal",
+    }
+    .to_string()
 }
 
 fn message_visible_to_agent(message: &JsonValue, agent_id: &str) -> bool {
@@ -2199,13 +2298,12 @@ fn build_agent_runtime_prompt(_state: &AppState, agent: &AgentConfig, run_id: &s
     if !agent.system_prompt.trim().is_empty() {
         sections.push(agent.system_prompt.trim().to_string());
     }
-    let execution_mode = agent.execution_environment.normalized_mode();
     sections.push(format!(
-        "你当前运行在 Ennoia 会话系统中。\nagent_id：{}\nagent_name：{}\nrun_id：{}\nexecution_mode：{}\nworkspace_root：/workspace\nartifacts_root：/artifacts\ntemp_root：/tmp\n除非用户明确需要，否则不要主动复述内部路径或实现细节。直接回答用户，不要伪装成“系统已接收”或“正在处理中”。",
+        "你当前运行在 Ennoia 会话系统中。\nagent_id：{}\nagent_name：{}\nrun_id：{}\nsandbox_enabled：{}\nworkspace_root：/workspace\nartifacts_root：/artifacts\ntemp_root：/tmp\n除非用户明确需要，否则不要主动复述内部路径或实现细节。直接回答用户，不要伪装成“系统已接收”或“正在处理中”。",
         agent.id,
         agent.display_name,
         if run_id.trim().is_empty() { "unknown" } else { run_id },
-        execution_mode,
+        agent.execution_environment.sandbox_enabled,
     ));
     sections.push(
         "系统会额外提供一份结构化 JSON 上下文，里面包含当前运行时、会话、已注入扩展目录和已启用技能目录。按字段理解并使用，不要向用户原样复述 JSON，也不要主动枚举内部路径、目录清单或所有可用能力，除非用户明确要求。"
@@ -2246,7 +2344,7 @@ fn build_agent_provider_context(
             agent_id: agent.id.clone(),
             agent_display_name: agent.display_name.clone(),
             run_id: normalize_unknown(run_id),
-            execution_mode: agent.execution_environment.normalized_mode(),
+            sandbox_enabled: agent.execution_environment.sandbox_enabled,
             workspace_root: "/workspace".to_string(),
             artifacts_root: "/artifacts".to_string(),
             temp_root: "/tmp".to_string(),

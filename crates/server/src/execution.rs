@@ -110,7 +110,6 @@ pub(crate) fn resolve_agent_tool_path(
 ) -> Result<ResolvedExecutionPath, ApiError> {
     let normalized = normalize_tool_path(input);
     let raw = normalized.as_str();
-    let mode = environment.normalized_mode();
 
     if let Some(rest) = raw.strip_prefix("/workspace") {
         return resolve_virtual_root(&paths.workspace, "/workspace", rest);
@@ -122,7 +121,7 @@ pub(crate) fn resolve_agent_tool_path(
         return resolve_virtual_root(&paths.temp, "/tmp", rest);
     }
 
-    if mode == "native" && is_probably_host_absolute_path(raw) {
+    if environment.sandbox_enabled && is_probably_host_absolute_path(raw) {
         return Err(ApiError::bad_request(
             "native sandbox only accepts /workspace, /artifacts and /tmp paths".to_string(),
         ));

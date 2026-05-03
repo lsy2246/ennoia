@@ -593,6 +593,27 @@ pub(crate) async fn dispatch_action_rule_execute(
 
     let permission_grant_id =
         authorize_action_dispatch(state, request, key, rule, &params, &context)?;
+    if let Some(grant_id) = permission_grant_id.as_deref() {
+        if let Err(error) = state.agent_permissions.consume_grant(grant_id) {
+            let _ = state.logs.append_log_scoped(
+                LogEntryWrite {
+                    event: "runtime.permission.consume_grant_failed".to_string(),
+                    level: "warn".to_string(),
+                    component: LOGS_COMPONENT_PROXY.to_string(),
+                    source_kind: "permission".to_string(),
+                    source_id: Some(grant_id.to_string()),
+                    message: "permission grant consume failed".to_string(),
+                    attributes: serde_json::json!({
+                        "action": key,
+                        "extension_id": rule.extension_id,
+                        "error": error.to_string(),
+                    }),
+                    created_at: None,
+                },
+                Some(&request.trace_context()),
+            );
+        }
+    }
 
     let span_trace = request.child_trace("action_rpc");
     let started = Instant::now();
@@ -624,27 +645,6 @@ pub(crate) async fn dispatch_action_rule_execute(
         .map_err(|error| scoped(ApiError::internal(error.to_string()), request))?;
 
     if response.ok {
-        if let Some(grant_id) = permission_grant_id.as_deref() {
-            if let Err(error) = state.agent_permissions.consume_grant(grant_id) {
-                let _ = state.logs.append_log_scoped(
-                    LogEntryWrite {
-                        event: "runtime.permission.consume_grant_failed".to_string(),
-                        level: "warn".to_string(),
-                        component: LOGS_COMPONENT_PROXY.to_string(),
-                        source_kind: "permission".to_string(),
-                        source_id: Some(grant_id.to_string()),
-                        message: "permission grant consume failed".to_string(),
-                        attributes: serde_json::json!({
-                            "action": key,
-                            "extension_id": rule.extension_id,
-                            "error": error.to_string(),
-                        }),
-                        created_at: None,
-                    },
-                    Some(&span_trace),
-                );
-            }
-        }
         record_trace_span(
             state,
             LogTraceWrite {

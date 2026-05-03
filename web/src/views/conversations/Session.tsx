@@ -8,8 +8,10 @@ import {
   getConversation,
   listAgents,
   listConversationPermissionApprovals,
+  listConversationPermissionGrants,
   listSkills,
   parseConversationStreamPayload,
+  revokePermissionGrant,
   resolvePermissionApproval,
   switchConversationBranch,
   updateConversationBranch,
@@ -18,6 +20,7 @@ import {
   type ConversationDetail,
   type ConversationMessage,
   type PermissionApprovalRecord,
+  type PermissionGrantRecord,
   type SkillConfig,
 } from "@ennoia/api-client";
 import { StatusNotice } from "@/components/StatusNotice";
@@ -502,6 +505,39 @@ function branchDepthLabel(
   );
 }
 
+function isGrantActive(grant: PermissionGrantRecord) {
+  if (grant.revoked_at || grant.consumed_at) {
+    return false;
+  }
+  if (!grant.expires_at) {
+    return true;
+  }
+  return Date.parse(grant.expires_at) > Date.now();
+}
+
+function grantModeLabel(
+  grant: PermissionGrantRecord,
+  t: (key: string, fallback: string) => string,
+) {
+  switch (grant.mode) {
+    case "reply_action":
+      if (grant.request.action === "command.exec") {
+        return t("web.permissions.grant_mode_reply_command", "本次回复允许该命令");
+      }
+      return t("web.permissions.grant_mode_reply_action", "本次回复允许同类操作");
+    case "conversation_all":
+      return t("web.permissions.grant_mode_conversation_all", "本会话允许全部操作");
+    case "once":
+      return t("web.permissions.grant_mode_once", "允许一次");
+    default:
+      return grant.mode;
+  }
+}
+
+function grantTargetLabel(grant: PermissionGrantRecord) {
+  return `${grant.request.target.kind}:${grant.request.target.id}`;
+}
+
 function outboxStorageKey(sessionId: string) {
   return `${OUTBOX_STORAGE_PREFIX}:${sessionId}`;
 }
@@ -696,6 +732,7 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
   const [skills, setSkills] = useState<SkillConfig[]>([]);
   const [detail, setDetail] = useState<ConversationDetail | null>(null);
   const [approvals, setApprovals] = useState<PermissionApprovalRecord[]>([]);
+  const [grants, setGrants] = useState<PermissionGrantRecord[]>([]);
   const [localDrafts, setLocalDrafts] = useState<LocalMessageDraft[]>(() => loadPersistedDrafts(sessionId));
   const [pendingReplies, setPendingReplies] = useState<PendingReplyMarker[]>(() => loadPersistedPendingReplies(sessionId));
   const [chatVisibility, setChatVisibility] = useState<ChatVisibilityPreferences>(() => loadChatVisibilityPreferences(sessionId));
@@ -706,6 +743,7 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
   const [success, setSuccess] = useState<string | null>(null);
   const [streamNeedsResync, setStreamNeedsResync] = useState(false);
   const [approvalManagerOpen, setApprovalManagerOpen] = useState(false);
+  const [grantManagerOpen, setGrantManagerOpen] = useState(false);
   const [agentManagerOpen, setAgentManagerOpen] = useState(false);
   const [branchManagerOpen, setBranchManagerOpen] = useState(false);
   const [editingBranchId, setEditingBranchId] = useState<string | null>(null);
@@ -715,6 +753,7 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
   const isMountedRef = useRef(true);
   const inFlightDraftIdRef = useRef<string | null>(null);
   const conversationUpdatedAtRef = useRef<string | null>(null);
+  const seenPendingApprovalIdsRef = useRef<Set<string>>(new Set());
   const streamDisconnectedMessage = t(
     "web.conversations.stream_disconnected",
     "会话流连接中断，正在等待自动重连。",
@@ -815,15 +854,17 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
 
   const refreshThread = useCallback(async () => {
     try {
-      const [nextDetail, nextApprovals] = await Promise.all([
+      const [nextDetail, nextApprovals, nextGrants] = await Promise.all([
         getConversation(sessionId),
         listConversationPermissionApprovals(sessionId, { limit: 80 }),
+        listConversationPermissionGrants(sessionId, { limit: 120 }),
       ]);
       if (!isMountedRef.current) {
         return;
       }
       setDetail(nextDetail);
       setApprovals(nextApprovals);
+      setGrants(nextGrants);
       conversationUpdatedAtRef.current = nextDetail.conversation.updated_at;
     } catch (err) {
       if (err instanceof ApiError && err.status === 404 && panelId) {
@@ -840,11 +881,12 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
     setError(null);
     setDetail(null);
     try {
-      const [nextAgents, nextSkills, nextDetail, nextApprovals] = await Promise.all([
+      const [nextAgents, nextSkills, nextDetail, nextApprovals, nextGrants] = await Promise.all([
         listAgents(),
         listSkills(),
         getConversation(sessionId),
         listConversationPermissionApprovals(sessionId, { limit: 80 }),
+        listConversationPermissionGrants(sessionId, { limit: 120 }),
       ]);
       if (!isMountedRef.current) {
         return;
@@ -853,6 +895,7 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
       setSkills(nextSkills);
       setDetail(nextDetail);
       setApprovals(nextApprovals);
+      setGrants(nextGrants);
       setStreamNeedsResync(false);
       conversationUpdatedAtRef.current = nextDetail.conversation.updated_at;
     } catch (err) {
@@ -888,7 +931,9 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
     setPendingReplies(loadPersistedPendingReplies(sessionId));
     setChatVisibility(loadChatVisibilityPreferences(sessionId));
     setApprovals([]);
+    setGrants([]);
     setComposerMode({ kind: "normal" });
+    setGrantManagerOpen(false);
     setAgentManagerOpen(false);
     setBranchManagerOpen(false);
     setEditingBranchId(null);
@@ -896,16 +941,18 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
     setBranchBusyId(null);
     setApprovalManagerOpen(false);
     setStreamNeedsResync(false);
+    seenPendingApprovalIdsRef.current = new Set();
     conversationUpdatedAtRef.current = null;
   }, [sessionId]);
 
   useEffect(() => {
-    if (!approvalManagerOpen && !agentManagerOpen && !branchManagerOpen) {
+    if (!approvalManagerOpen && !grantManagerOpen && !agentManagerOpen && !branchManagerOpen) {
       return;
     }
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.key === "Escape") {
         setApprovalManagerOpen(false);
+        setGrantManagerOpen(false);
         setAgentManagerOpen(false);
         setBranchManagerOpen(false);
         setEditingBranchId(null);
@@ -914,7 +961,7 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [agentManagerOpen, approvalManagerOpen, branchManagerOpen]);
+  }, [agentManagerOpen, approvalManagerOpen, branchManagerOpen, grantManagerOpen]);
 
   useEffect(() => {
     persistDrafts(sessionId, localDrafts);
@@ -1188,6 +1235,14 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
       !approval.scope.message_id || visibleMessageIds.has(approval.scope.message_id)),
     [approvals, visibleMessageIds],
   );
+  const activeGrants = useMemo(
+    () => grants
+      .filter((grant) => grant.mode !== "once" && isGrantActive(grant))
+      .sort((left, right) =>
+        right.approval_id.localeCompare(left.approval_id)
+        || (right.expires_at ?? "").localeCompare(left.expires_at ?? "")),
+    [grants],
+  );
 
   const typingAgents = useMemo(() => {
     const typingIds = new Set<string>();
@@ -1222,6 +1277,17 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
     () => visibleApprovals.filter((approval) => approval.status === "pending"),
     [visibleApprovals],
   );
+
+  useEffect(() => {
+    const nextIds = new Set(pendingApprovals.map((approval) => approval.approval_id));
+    const hasNewPendingApproval = pendingApprovals.some(
+      (approval) => !seenPendingApprovalIdsRef.current.has(approval.approval_id),
+    );
+    seenPendingApprovalIdsRef.current = nextIds;
+    if (hasNewPendingApproval) {
+      setApprovalManagerOpen(true);
+    }
+  }, [pendingApprovals]);
 
   const composerModeStatus = useMemo(() => {
     if (composerMode.kind === "branch") {
@@ -1459,7 +1525,7 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
 
   const resolveApproval = useCallback(async (
     approvalId: string,
-    resolution: "allow_once" | "allow_conversation" | "allow_run" | "allow_policy" | "deny",
+    resolution: "allow_once" | "allow_reply_action" | "allow_conversation_all" | "deny",
   ) => {
     setError(null);
     const approval = approvals.find((item) => item.approval_id === approvalId) ?? null;
@@ -1476,12 +1542,40 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
         ]);
       }
       await refreshThread();
+      if (resolution !== "deny") {
+        setApprovalManagerOpen(false);
+      }
+      setSuccess(
+        resolution === "deny"
+          ? t("web.permissions.approval_denied", "审批已拒绝。")
+          : t("web.permissions.approval_granted", "审批已通过。"),
+      );
     } catch (err) {
       if (isMountedRef.current) {
         setError(String(err));
       }
     }
-  }, [approvals, refreshThread]);
+  }, [approvals, refreshThread, t]);
+
+  const approvalReplyActionLabel = useCallback((approval: PermissionApprovalRecord) => {
+    if (approval.action === "command.exec") {
+      return "本次回复允许该命令";
+    }
+    return "本次回复允许该操作";
+  }, []);
+
+  const revokeGrant = useCallback(async (grantId: string) => {
+    setError(null);
+    try {
+      await revokePermissionGrant(grantId);
+      await refreshThread();
+      setSuccess(t("web.permissions.grant_revoked", "已撤销该授权。"));
+    } catch (err) {
+      if (isMountedRef.current) {
+        setError(String(err));
+      }
+    }
+  }, [refreshThread, t]);
 
   const editQueuedMessage = useCallback((clientId: string) => {
     const target = localDrafts.find((item) => item.clientId === clientId && item.status === "queued");
@@ -1782,6 +1876,15 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
                     : t("web.conversations.approval_manager_show", "查看审批")}
                 </button>
               ) : null}
+              {activeGrants.length > 0 ? (
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={() => setGrantManagerOpen(true)}
+                >
+                  {t("web.permissions.grant_manager_show", "已授权 {count}").replace("{count}", String(activeGrants.length))}
+                </button>
+              ) : null}
               <button
                 type="button"
                 className="secondary"
@@ -1815,6 +1918,7 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
               runs={detail?.runs ?? []}
               agents={activeAgents}
               skills={skills}
+              approvals={visibleApprovals}
               t={t}
               showThinking={chatVisibility.showThinking}
               showToolCalls={chatVisibility.showToolCalls}
@@ -1984,14 +2088,11 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
                               <button type="button" onClick={() => void resolveApproval(approval.approval_id, "allow_once")}>
                                 {t("web.permissions.allow_once", "允许一次")}
                               </button>
-                              <button type="button" className="secondary" onClick={() => void resolveApproval(approval.approval_id, "allow_conversation")}>
-                                {t("web.permissions.allow_conversation", "允许本会话")}
+                              <button type="button" className="secondary" onClick={() => void resolveApproval(approval.approval_id, "allow_reply_action")}>
+                                {approvalReplyActionLabel(approval)}
                               </button>
-                              <button type="button" className="secondary" onClick={() => void resolveApproval(approval.approval_id, "allow_run")}>
-                                {t("web.permissions.allow_run", "允许本次 run")}
-                              </button>
-                              <button type="button" className="secondary" onClick={() => void resolveApproval(approval.approval_id, "allow_policy")}>
-                                {t("web.permissions.allow_policy", "写入策略")}
+                              <button type="button" className="secondary" onClick={() => void resolveApproval(approval.approval_id, "allow_conversation_all")}>
+                                本会话允许全部操作
                               </button>
                               <button type="button" className="secondary" onClick={() => void resolveApproval(approval.approval_id, "deny")}>
                                 {t("web.action.reject", "拒绝")}
@@ -2005,6 +2106,61 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
                 ) : (
                   <div className="empty-card">
                     {t("web.conversations.approval_manager_empty", "当前没有待查看的审批。")}
+                  </div>
+                )}
+              </section>
+            </div>
+          ) : null}
+
+          {grantManagerOpen ? (
+            <div className="session-manager-modal-root">
+              <button
+                type="button"
+                className="session-manager-modal__backdrop"
+                aria-label={t("web.action.close", "关闭")}
+                onClick={() => setGrantManagerOpen(false)}
+              />
+              <section className="session-manager-modal" role="dialog" aria-modal="true" aria-label={t("web.permissions.grant_manager_title", "已授权操作")}>
+                <div className="session-manager-modal__header">
+                  <div>
+                    <span>{t("web.permissions.grant_manager_eyebrow", "Active Grants")}</span>
+                    <h2>{t("web.permissions.grant_manager_title", "已授权操作")}</h2>
+                    <p>{t("web.permissions.grant_manager_help", "这里展示当前会话里仍然生效的临时授权，你可以随时撤销。")}</p>
+                  </div>
+                  <button type="button" className="secondary" onClick={() => setGrantManagerOpen(false)}>
+                    {t("web.action.close", "关闭")}
+                  </button>
+                </div>
+                {activeGrants.length > 0 ? (
+                  <div className="session-manager-modal__list">
+                    {activeGrants.map((grant) => (
+                      <article key={grant.grant_id} className="session-manager-modal__item">
+                        <div className="session-manager-modal__main">
+                          <strong>{resolveAgentLabel(grant.agent_id)}</strong>
+                          <div className="session-manager-modal__meta">
+                            <span className="badge badge--accent">{grantModeLabel(grant, t)}</span>
+                            <span>{grant.request.action}</span>
+                            <span>{grantTargetLabel(grant)}</span>
+                          </div>
+                          <p>{t("web.permissions.grant_scope_hint", "该授权来自一次审批通过，当前仍处于生效状态。")}</p>
+                          <div className="session-manager-modal__meta">
+                            <span>{t("web.permissions.approval_id", "审批")} {grant.approval_id}</span>
+                            {grant.expires_at ? (
+                              <span>{t("web.permissions.expires_at", "截止")} {formatDateTime(grant.expires_at)}</span>
+                            ) : null}
+                          </div>
+                        </div>
+                        <div className="session-manager-modal__actions">
+                          <button type="button" className="secondary" onClick={() => void revokeGrant(grant.grant_id)}>
+                            {t("web.permissions.grant_revoke", "撤销授权")}
+                          </button>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="empty-card">
+                    {t("web.permissions.grant_manager_empty", "当前没有仍在生效的临时授权。")}
                   </div>
                 )}
               </section>

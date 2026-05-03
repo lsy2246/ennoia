@@ -1,4 +1,9 @@
-import type { AgentProfile, ExecutionRun, SkillConfig } from "@ennoia/api-client";
+import type {
+  AgentProfile,
+  ExecutionRun,
+  PermissionApprovalRecord,
+  SkillConfig,
+} from "@ennoia/api-client";
 import { Fragment } from "react";
 
 import { ChatContent } from "./ChatContent";
@@ -187,6 +192,136 @@ function shortenInline(value: string, limit = 96) {
   return value.length > limit ? `${value.slice(0, Math.max(0, limit - 1))}…` : value;
 }
 
+type StructuredToolEnvelope = {
+  kind?: unknown;
+  tool_call_id?: unknown;
+  tool_name?: unknown;
+  status?: unknown;
+  arguments?: unknown;
+  result?: unknown;
+  error?: unknown;
+};
+
+type StructuredToolError = {
+  code?: unknown;
+  message?: unknown;
+  details?: unknown;
+};
+
+function asRecord(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+  return value as Record<string, unknown>;
+}
+
+function readStructuredToolEnvelope(body: string) {
+  const payload = safeToolPayload(body) as StructuredToolEnvelope | null;
+  if (!payload || payload.kind !== "ennoia.tool_call") {
+    return null;
+  }
+  return payload;
+}
+
+function readToolApprovalState(entry: ChatToolResultEntry) {
+  const envelope = readStructuredToolEnvelope(entry.body);
+  const error = asRecord(envelope?.error) as StructuredToolError | null;
+  const errorDetails = asRecord(error?.details);
+  return {
+    envelope,
+    decision: asNonEmptyString(errorDetails?.decision),
+    approvalId: asNonEmptyString(errorDetails?.approval_id),
+  };
+}
+
+function detectContentFormat(body: string) {
+  const trimmed = body.trim();
+  if (trimmed.startsWith("```mermaid") && trimmed.endsWith("```")) {
+    return "diagram" as const;
+  }
+  if (trimmed.startsWith("```") && trimmed.endsWith("```")) {
+    return "code" as const;
+  }
+  if ((trimmed.startsWith("{") && trimmed.endsWith("}")) || (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
+    try {
+      JSON.parse(trimmed);
+      return "json" as const;
+    } catch {
+      return "markdown" as const;
+    }
+  }
+  return "markdown" as const;
+}
+
+function summarizeToolDescriptor(toolName: string | undefined, value: unknown) {
+  const record = asRecord(value);
+  if (!record) {
+    return undefined;
+  }
+
+  if (toolName === "command.exec") {
+    const command = asNonEmptyString(record.command);
+    const rawArgs = Array.isArray(record.args) ? record.args : [];
+    const args = rawArgs
+      .map((item) => asNonEmptyString(item))
+      .filter((item): item is string => Boolean(item));
+    return [command, ...args].filter(Boolean).join(" ").trim() || undefined;
+  }
+
+  return (
+    asNonEmptyString(record.path)
+    ?? asNonEmptyString(record.url)
+    ?? asNonEmptyString(record.cwd)
+    ?? asNonEmptyString(record.command)
+  );
+}
+
+function buildToolOperationKey(entry: ChatToolResultEntry) {
+  const envelope = readStructuredToolEnvelope(entry.body);
+  const payload = safeToolPayload(entry.body);
+  const rawToolName =
+    asNonEmptyString(envelope?.tool_name)
+    ?? asNonEmptyString(payload?.tool)
+    ?? entry.title?.trim()
+    ?? entry.sender?.trim()
+    ?? "tool";
+  const descriptor = envelope
+    ? summarizeToolDescriptor(rawToolName, envelope.arguments)
+    : summarizeToolDescriptor(rawToolName, payload);
+  return [
+    entry.relatedMessageId ?? "standalone",
+    entry.actorSender?.trim() ?? entry.sender?.trim() ?? "",
+    rawToolName,
+    descriptor ?? "",
+  ].join("::");
+}
+
+function collapseSupersededAccessories(accessories: ChatAccessoryEntry[]) {
+  const next: ChatAccessoryEntry[] = [];
+  const seenToolKeys = new Set<string>();
+
+  for (let index = accessories.length - 1; index >= 0; index -= 1) {
+    const entry = accessories[index];
+    if (entry.kind !== "tool_result") {
+      next.push(entry);
+      continue;
+    }
+
+    const toolKey = buildToolOperationKey(entry);
+    const approvalState = readToolApprovalState(entry);
+    const isApprovalRequest = approvalState.decision === "ask";
+
+    if (isApprovalRequest && seenToolKeys.has(toolKey)) {
+      continue;
+    }
+
+    seenToolKeys.add(toolKey);
+    next.push(entry);
+  }
+
+  return next.reverse();
+}
+
 function toolLabel(toolName: string | undefined, t: (key: string, fallback: string) => string) {
   switch (toolName) {
     case "fs.read":
@@ -204,38 +339,75 @@ function toolLabel(toolName: string | undefined, t: (key: string, fallback: stri
 
 function resolveToolResultPresentation(
   entry: ChatToolResultEntry,
+  approvalsById: Map<string, PermissionApprovalRecord>,
   t: (key: string, fallback: string) => string,
 ) {
+  const envelope = readStructuredToolEnvelope(entry.body);
   const payload = safeToolPayload(entry.body);
-  const rawToolName = asNonEmptyString(payload?.tool) ?? entry.title?.trim() ?? entry.sender?.trim();
+  const rawToolName =
+    asNonEmptyString(envelope?.tool_name)
+    ?? asNonEmptyString(payload?.tool)
+    ?? entry.title?.trim()
+    ?? entry.sender?.trim();
   const title = toolLabel(rawToolName, t);
+  const descriptor = envelope
+    ? summarizeToolDescriptor(rawToolName, envelope.arguments)
+    : summarizeToolDescriptor(rawToolName, payload);
 
-  let descriptor: string | undefined;
-  if (rawToolName === "command.exec") {
-    const command = asNonEmptyString(payload?.command);
-    const rawArgs = Array.isArray(payload?.args) ? payload.args : [];
-    const args = rawArgs
-      .map((value) => asNonEmptyString(value))
-      .filter((value): value is string => Boolean(value));
-    descriptor = [command, ...args].filter(Boolean).join(" ").trim() || undefined;
+  let summary = t("web.conversations.tool_output_hint", "展开查看工具输出内容");
+  let badgeLabel: string | undefined;
+  let badgeClassName = "badge--muted";
+  let approvalStatus: string | undefined;
+  let approvalRecord: PermissionApprovalRecord | undefined;
+
+  if (envelope) {
+    const error = asRecord(envelope.error) as StructuredToolError | null;
+    const errorDetails = asRecord(error?.details);
+    const decision = asNonEmptyString(errorDetails?.decision);
+    const approvalId = asNonEmptyString(errorDetails?.approval_id);
+    approvalRecord = approvalId ? approvalsById.get(approvalId) : undefined;
+    approvalStatus = approvalRecord?.status;
+    if (envelope.status === "succeeded") {
+      badgeLabel = t("web.common.success", "成功");
+      badgeClassName = "badge--accent";
+    } else if (approvalStatus === "approved") {
+      badgeLabel = t("web.permissions.status_approved", "已批准");
+      badgeClassName = "badge--accent";
+    } else if (approvalStatus === "rejected") {
+      badgeLabel = t("web.permissions.status_denied", "已拒绝");
+      badgeClassName = "badge--danger";
+    } else if (approvalStatus === "expired") {
+      badgeLabel = t("web.permissions.status_expired", "已过期");
+      badgeClassName = "badge--warn";
+    } else if (decision === "ask") {
+      badgeLabel = t("web.conversations.permission_approval_title", "等待审批");
+      badgeClassName = "badge--warn";
+    } else if (decision === "deny") {
+      badgeLabel = t("web.conversations.permission_denied_title", "权限已拒绝");
+      badgeClassName = "badge--danger";
+    } else {
+      badgeLabel = t("web.action.failed", "失败");
+      badgeClassName = "badge--danger";
+    }
+
+    summary = [badgeLabel, descriptor ? shortenInline(descriptor) : undefined]
+      .filter((value): value is string => Boolean(value))
+      .join(" · ");
   } else {
-    descriptor =
-      asNonEmptyString(payload?.path) ??
-      asNonEmptyString(payload?.url) ??
-      asNonEmptyString(payload?.cwd) ??
-      asNonEmptyString(payload?.command);
+    const summaryParts = [
+      rawToolName,
+      descriptor ? shortenInline(descriptor) : undefined,
+    ].filter((value): value is string => Boolean(value));
+    summary = summaryParts.join(" · ") || summary;
   }
-
-  const summaryParts = [
-    rawToolName,
-    descriptor ? shortenInline(descriptor) : undefined,
-  ].filter((value): value is string => Boolean(value));
 
   return {
     title,
-    summary:
-      summaryParts.join(" · ") ||
-      t("web.conversations.tool_output_hint", "展开查看工具输出内容"),
+    summary,
+    badgeLabel,
+    badgeClassName,
+    envelope,
+    approvalRecord,
   };
 }
 
@@ -263,6 +435,79 @@ function resolveFailurePresentation(
     summary,
     detail,
   };
+}
+
+function formatToolResultBody(result: unknown) {
+  if (typeof result === "string") {
+    return result;
+  }
+  try {
+    return JSON.stringify(result ?? null, null, 2);
+  } catch {
+    return String(result ?? "");
+  }
+}
+
+function renderToolResultBody(
+  entry: ChatToolResultEntry,
+  agents: AgentProfile[],
+  skills: SkillConfig[],
+  approvalsById: Map<string, PermissionApprovalRecord>,
+  t: (key: string, fallback: string) => string,
+) {
+  const envelope = readStructuredToolEnvelope(entry.body);
+  if (!envelope) {
+    return <ChatContent body={entry.body} format={entry.format} agents={agents} skills={skills} />;
+  }
+
+  if (envelope.status === "succeeded") {
+    const body = formatToolResultBody(envelope.result);
+    return (
+      <ChatContent
+        body={body}
+        format={detectContentFormat(body)}
+        agents={agents}
+        skills={skills}
+      />
+    );
+  }
+
+  const error = asRecord(envelope.error) as StructuredToolError | null;
+  const errorMessage = asNonEmptyString(error?.message) ?? t("web.action.failed", "失败");
+  const errorDetails = error?.details;
+  const errorDetailsRecord = asRecord(errorDetails);
+  const decision = asNonEmptyString(errorDetailsRecord?.decision);
+  const approvalId = asNonEmptyString(errorDetailsRecord?.approval_id);
+  const approval = approvalId ? approvalsById.get(approvalId) : undefined;
+  const headline = approval?.status === "approved"
+    ? t("web.permissions.status_approved", "已批准")
+    : approval?.status === "rejected"
+      ? t("web.permissions.status_denied", "已拒绝")
+      : approval?.status === "expired"
+        ? t("web.permissions.status_expired", "已过期")
+        : decision === "ask"
+          ? t("web.conversations.permission_approval_title", "等待审批")
+          : decision === "deny"
+            ? t("web.conversations.permission_denied_title", "权限已拒绝")
+            : t("web.action.failed", "失败");
+  const detailsJson = errorDetails && JSON.stringify(errorDetails, null, 2) !== "{}"
+    ? JSON.stringify(errorDetails, null, 2)
+    : "";
+
+  return (
+    <div className="tool-result-error">
+      <strong>{headline}</strong>
+      <p>{errorMessage}</p>
+      {detailsJson ? (
+        <details className="tool-result-error__detail">
+          <summary>{t("web.conversations.error_detail_toggle", "查看详情")}</summary>
+          <pre className="message-pre">
+            <code>{detailsJson}</code>
+          </pre>
+        </details>
+      ) : null}
+    </div>
+  );
 }
 
 function SandboxBlockedBubble({
@@ -334,11 +579,13 @@ function ToolResultBubble({
   entry,
   agents,
   skills,
+  approvalsById,
   t,
 }: {
   entry: ChatToolResultEntry;
   agents: AgentProfile[];
   skills: SkillConfig[];
+  approvalsById: Map<string, PermissionApprovalRecord>;
   t: (key: string, fallback: string) => string;
 }) {
   const absoluteAt = formatAbsoluteDateTime(entry.createdAt);
@@ -351,7 +598,7 @@ function ToolResultBubble({
         t,
       })
     : "";
-  const toolPresentation = resolveToolResultPresentation(entry, t);
+  const toolPresentation = resolveToolResultPresentation(entry, approvalsById, t);
 
   return (
     <article className="chat-unit chat-unit--agent chat-unit--tool-call">
@@ -364,11 +611,14 @@ function ToolResultBubble({
           <summary>
             <span className="message-accessory__summary-main">
               <strong>{toolPresentation.title}</strong>
+              {toolPresentation.badgeLabel ? (
+                <span className={`badge ${toolPresentation.badgeClassName}`}>{toolPresentation.badgeLabel}</span>
+              ) : null}
               <span>{toolPresentation.summary}</span>
             </span>
           </summary>
           <div className="message-accessory__body">
-            <ChatContent body={entry.body} format={entry.format} agents={agents} skills={skills} />
+            {renderToolResultBody(entry, agents, skills, approvalsById, t)}
           </div>
         </details>
       </div>
@@ -380,11 +630,13 @@ function AccessoryBlock({
   entry,
   agents,
   skills,
+  approvalsById,
   t,
 }: {
   entry: ChatAccessoryEntry;
   agents: AgentProfile[];
   skills: SkillConfig[];
+  approvalsById: Map<string, PermissionApprovalRecord>;
   t: (key: string, fallback: string) => string;
 }) {
   const absoluteAt = formatAbsoluteDateTime(entry.createdAt);
@@ -453,19 +705,22 @@ function AccessoryBlock({
     );
   }
 
-  const toolPresentation = resolveToolResultPresentation(entry, t);
+  const toolPresentation = resolveToolResultPresentation(entry, approvalsById, t);
 
   return (
     <details className="message-accessory message-accessory--tool">
       <summary>
         <span className="message-accessory__summary-main">
           <strong>{toolPresentation.title}</strong>
+          {toolPresentation.badgeLabel ? (
+            <span className={`badge ${toolPresentation.badgeClassName}`}>{toolPresentation.badgeLabel}</span>
+          ) : null}
           <span>{toolPresentation.summary}</span>
         </span>
         <small>{absoluteAt}</small>
       </summary>
       <div className="message-accessory__body">
-        <ChatContent body={entry.body} format={entry.format} agents={agents} skills={skills} />
+        {renderToolResultBody(entry, agents, skills, approvalsById, t)}
       </div>
     </details>
   );
@@ -475,6 +730,7 @@ function MessageGroup({
   group,
   agents,
   skills,
+  approvalsById,
   t,
   showThinking,
   showToolCalls,
@@ -487,6 +743,7 @@ function MessageGroup({
   group: Extract<ChatGroup, { anchor: ConversationMessageEntry }>;
   agents: AgentProfile[];
   skills: SkillConfig[];
+  approvalsById: Map<string, PermissionApprovalRecord>;
   t: (key: string, fallback: string) => string;
   showThinking: boolean;
   showToolCalls: boolean;
@@ -523,6 +780,7 @@ function MessageGroup({
     }
     return true;
   });
+  const mergedAccessories = collapseSupersededAccessories(visibleAccessories);
   const failurePresentation = !isOperator && anchor.state === "failed"
     ? resolveFailurePresentation(anchor, t)
     : null;
@@ -608,10 +866,17 @@ function MessageGroup({
           </div>
         ) : null}
 
-        {visibleAccessories.length > 0 ? (
+        {mergedAccessories.length > 0 ? (
           <div className="message-accessory-stack">
-            {visibleAccessories.map((entry) => (
-              <AccessoryBlock key={entry.id} entry={entry} agents={agents} skills={skills} t={t} />
+            {mergedAccessories.map((entry) => (
+              <AccessoryBlock
+                key={entry.id}
+                entry={entry}
+                agents={agents}
+                skills={skills}
+                approvalsById={approvalsById}
+                t={t}
+              />
             ))}
           </div>
         ) : null}
@@ -673,6 +938,7 @@ function StandaloneGroup({
   group,
   agents,
   skills,
+  approvalsById,
   t,
   showThinking,
   showToolCalls,
@@ -680,6 +946,7 @@ function StandaloneGroup({
   group: Extract<ChatGroup, { anchor: null }>;
   agents: AgentProfile[];
   skills: SkillConfig[];
+  approvalsById: Map<string, PermissionApprovalRecord>;
   t: (key: string, fallback: string) => string;
   showThinking: boolean;
   showToolCalls: boolean;
@@ -693,19 +960,34 @@ function StandaloneGroup({
     }
     return true;
   });
-  if (visibleAccessories.length === 0) {
+  const mergedAccessories = collapseSupersededAccessories(visibleAccessories);
+  if (mergedAccessories.length === 0) {
     return null;
   }
 
   return (
     <div className="chat-standalone-stack">
-      {visibleAccessories.map((entry) =>
+      {mergedAccessories.map((entry) =>
         entry.kind === "status" ? (
           <StatusBubble key={entry.id} entry={entry} agents={agents} t={t} />
         ) : entry.kind === "tool_result" ? (
-          <ToolResultBubble key={entry.id} entry={entry} agents={agents} skills={skills} t={t} />
+          <ToolResultBubble
+            key={entry.id}
+            entry={entry}
+            agents={agents}
+            skills={skills}
+            approvalsById={approvalsById}
+            t={t}
+          />
         ) : (
-          <AccessoryBlock key={entry.id} entry={entry} agents={agents} skills={skills} t={t} />
+          <AccessoryBlock
+            key={entry.id}
+            entry={entry}
+            agents={agents}
+            skills={skills}
+            approvalsById={approvalsById}
+            t={t}
+          />
         ))}
     </div>
   );
@@ -716,6 +998,7 @@ export function ChatStream({
   runs,
   agents,
   skills,
+  approvals,
   t,
   showThinking,
   showToolCalls,
@@ -729,6 +1012,7 @@ export function ChatStream({
   runs: ExecutionRun[];
   agents: AgentProfile[];
   skills: SkillConfig[];
+  approvals: PermissionApprovalRecord[];
   t: (key: string, fallback: string) => string;
   showThinking: boolean;
   showToolCalls: boolean;
@@ -751,6 +1035,7 @@ export function ChatStream({
     const hasOtherAccessories = group.accessories.some((entry) => entry.kind !== "status" && entry.kind !== "tool_result");
     return hasThinking || hasToolCalls || hasOtherAccessories;
   });
+  const approvalsById = new Map(approvals.map((approval) => [approval.approval_id, approval]));
   let previousDate = "";
 
   return groups.map((group) => {
@@ -770,6 +1055,7 @@ export function ChatStream({
             group={group}
             agents={agents}
             skills={skills}
+            approvalsById={approvalsById}
             t={t}
             showThinking={showThinking}
             showToolCalls={showToolCalls}
@@ -784,6 +1070,7 @@ export function ChatStream({
             group={group}
             agents={agents}
             skills={skills}
+            approvalsById={approvalsById}
             t={t}
             showThinking={showThinking}
             showToolCalls={showToolCalls}

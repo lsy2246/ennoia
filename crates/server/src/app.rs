@@ -698,7 +698,7 @@ mod tests {
         fs::write(
             legacy_policies_dir.join("writer.toml"),
             toml::to_string_pretty(&AgentPermissionProfile {
-                mode: "trusted".to_string(),
+                mode: "blacklist".to_string(),
                 ..AgentPermissionProfile::builtin_worker()
             })
             .expect("serialize profile"),
@@ -712,7 +712,7 @@ mod tests {
         let document = load_agent_document(&paths, "writer")
             .expect("load agent document")
             .expect("agent document exists");
-        assert_eq!(document.permission_profile.mode, "restricted");
+        assert_eq!(document.permission_profile.mode, "whitelist");
         assert!(paths.agent_config_file("writer").exists());
         assert!(!legacy_agents_dir.join("writer.toml").exists());
         assert!(!legacy_policies_dir.join("writer.toml").exists());
@@ -728,7 +728,7 @@ mod tests {
             &AgentDocument {
                 profile: agent.clone(),
                 permission_profile: AgentPermissionProfile {
-                    mode: "trusted".to_string(),
+                    mode: "blacklist".to_string(),
                     ..AgentPermissionProfile::builtin_worker()
                 },
             },
@@ -743,7 +743,7 @@ mod tests {
             .expect("load updated document")
             .expect("document exists");
         assert_eq!(document.profile.display_name, "Planner Prime");
-        assert_eq!(document.permission_profile.mode, "trusted");
+        assert_eq!(document.permission_profile.mode, "blacklist");
     }
 }
 
@@ -765,8 +765,7 @@ fn normalize_agent_config(paths: &RuntimePaths, agent: &mut AgentConfig) {
     if agent.default_model.is_empty() && !agent.model_id.is_empty() {
         agent.default_model = agent.model_id.clone();
     }
-    let execution_mode = agent.execution_environment.normalized_mode();
-    if execution_mode == "native" {
+    if agent.execution_environment.sandbox_enabled {
         agent.working_dir = "/workspace".to_string();
         agent.artifacts_dir = "/artifacts".to_string();
     } else {

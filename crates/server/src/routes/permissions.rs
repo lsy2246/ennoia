@@ -2,7 +2,7 @@ use ennoia_kernel::{PermissionApprovalRecord, PermissionEventRecord};
 
 use crate::agent_permissions::{
     ApprovalResolutionPayload, PermissionApprovalsQuery, PermissionEventsQuery,
-    PermissionPolicySummary,
+    PermissionGrantRecord, PermissionGrantsQuery, PermissionPolicySummary,
 };
 use crate::pipeline::queue_permission_approval_resume;
 
@@ -28,6 +28,16 @@ pub(super) struct PermissionApprovalsQueryPayload {
     conversation_id: Option<String>,
     #[serde(default)]
     status: Option<String>,
+    #[serde(default)]
+    limit: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct PermissionGrantsQueryPayload {
+    #[serde(default)]
+    agent_id: Option<String>,
+    #[serde(default)]
+    conversation_id: Option<String>,
     #[serde(default)]
     limit: Option<usize>,
 }
@@ -81,6 +91,22 @@ pub(super) async fn permission_approvals(
         .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))
 }
 
+pub(super) async fn permission_grants(
+    State(state): State<AppState>,
+    Extension(request): Extension<RequestContext>,
+    Query(query): Query<PermissionGrantsQueryPayload>,
+) -> ApiResult<Vec<PermissionGrantRecord>> {
+    state
+        .agent_permissions
+        .list_grants(&PermissionGrantsQuery {
+            agent_id: query.agent_id,
+            conversation_id: query.conversation_id,
+            limit: query.limit.unwrap_or(100),
+        })
+        .map(Json)
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))
+}
+
 pub(super) async fn permission_approval_resolve(
     State(state): State<AppState>,
     Extension(request): Extension<RequestContext>,
@@ -101,4 +127,17 @@ pub(super) async fn permission_approval_resolve(
         queue_permission_approval_resume(state.clone(), request.clone(), approval.clone());
     }
     Ok(Json(approval))
+}
+
+pub(super) async fn permission_grant_revoke(
+    State(state): State<AppState>,
+    Extension(request): Extension<RequestContext>,
+    Path(grant_id): Path<String>,
+) -> ApiResult<PermissionGrantRecord> {
+    state
+        .agent_permissions
+        .revoke_grant(&grant_id)
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?
+        .map(Json)
+        .ok_or_else(|| scoped(ApiError::not_found("permission grant not found"), &request))
 }

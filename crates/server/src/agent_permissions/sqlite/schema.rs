@@ -461,7 +461,14 @@ impl PermissionGrantsSchema {
     pub const REQUEST_JSON: &'static str = "request_json";
     pub const CONSUMED_AT: &'static str = "consumed_at";
     pub const EXPIRES_AT: &'static str = "expires_at";
+    pub const REVOKED_AT: &'static str = "revoked_at";
     pub const CREATED_AT: &'static str = "created_at";
+
+    pub const LEGACY_COLUMNS: &'static [ColumnDef] = &[ColumnDef {
+        name: Self::REVOKED_AT,
+        sql_type: SqlType::Text,
+        constraints: &[],
+    }];
 }
 
 impl TableSchema for PermissionGrantsSchema {
@@ -508,6 +515,11 @@ impl TableSchema for PermissionGrantsSchema {
             constraints: &[],
         },
         ColumnDef {
+            name: Self::REVOKED_AT,
+            sql_type: SqlType::Text,
+            constraints: &[],
+        },
+        ColumnDef {
             name: Self::CREATED_AT,
             sql_type: SqlType::Text,
             constraints: &["NOT NULL"],
@@ -534,6 +546,7 @@ impl TableSchema for PermissionGrantsSchema {
         Self::REQUEST_JSON,
         Self::CONSUMED_AT,
         Self::EXPIRES_AT,
+        Self::REVOKED_AT,
         Self::CREATED_AT,
     ];
     const SELECT_COLUMNS: &'static [&'static str] = &[
@@ -544,6 +557,7 @@ impl TableSchema for PermissionGrantsSchema {
         Self::REQUEST_JSON,
         Self::CONSUMED_AT,
         Self::EXPIRES_AT,
+        Self::REVOKED_AT,
         Self::CREATED_AT,
     ];
 }

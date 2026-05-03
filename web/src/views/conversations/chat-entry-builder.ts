@@ -97,7 +97,7 @@ function parseToolPayload(body: string) {
 
 function readToolName(body: string) {
   const payload = parseToolPayload(body);
-  const tool = payload?.tool;
+  const tool = payload?.tool_name ?? payload?.tool;
   return typeof tool === "string" && tool.trim().length > 0 ? tool.trim() : undefined;
 }
 
