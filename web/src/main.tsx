@@ -68,9 +68,11 @@ window.addEventListener("unhandledrejection", (event) => {
 function App() {
   const runtimeHydrate = useRuntimeStore((state) => state.hydrate);
   const runtimeStatus = useRuntimeStore((state) => state.status);
+  const runtimeError = useRuntimeStore((state) => state.error);
   const uiHydrate = useUiStore((state) => state.hydrate);
   const connectExtensionEvents = useUiStore((state) => state.connectExtensionEvents);
   const uiStatus = useUiStore((state) => state.status);
+  const uiError = useUiStore((state) => state.error);
   const { t } = useUiHelpers();
 
   useEffect(() => {
@@ -89,6 +91,28 @@ function App() {
     return (
       <div className="page page--centered">
         <p>{t("web.loading.connecting", "Connecting to Ennoia…")}</p>
+      </div>
+    );
+  }
+
+  if (runtimeStatus === "error" || uiStatus === "error") {
+    const errorMessage = runtimeError ?? uiError ?? t("web.common.unknown", "未知错误");
+    return (
+      <div className="page page--centered" style={{ gap: 12, textAlign: "center" }}>
+        <p>{t("web.loading.connect_failed", "连接 Ennoia 失败")}</p>
+        <small style={{ maxWidth: 720, opacity: 0.75 }}>{errorMessage}</small>
+        <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
+          <button
+            type="button"
+            className="btn"
+            onClick={() => {
+              void runtimeHydrate();
+              void uiHydrate();
+            }}
+          >
+            {t("web.common.retry", "重试")}
+          </button>
+        </div>
       </div>
     );
   }

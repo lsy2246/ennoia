@@ -2,6 +2,7 @@ import type { ApiErrorBody } from "@ennoia/contract";
 import { createLogger } from "@ennoia/logs";
 
 const logger = createLogger("api-client");
+const DEFAULT_REQUEST_TIMEOUT_MS = 8000;
 
 export function getApiBaseUrl() {
   const runtimeBaseUrl = (globalThis as { __ENNOIA_API_BASE_URL__?: string }).__ENNOIA_API_BASE_URL__;
@@ -36,10 +37,23 @@ export async function fetchJson<T>(path: string, init?: RequestInit): Promise<T>
     headers.set("content-type", "application/json");
   }
 
-  const response = await fetch(apiUrl(path), {
-    ...init,
-    headers,
-  });
+  const { signal, cleanup } = withRequestTimeout(init?.signal, DEFAULT_REQUEST_TIMEOUT_MS);
+
+  let response: Response;
+  try {
+    response = await fetch(apiUrl(path), {
+      ...init,
+      headers,
+      signal,
+    });
+  } catch (error) {
+    cleanup();
+    if (isAbortError(error)) {
+      throw new ApiError(408, "TIMEOUT", `request timeout after ${DEFAULT_REQUEST_TIMEOUT_MS}ms`);
+    }
+    throw error;
+  }
+  cleanup();
 
   if (!response.ok) {
     const body = await response.text().catch(() => "");
@@ -73,6 +87,34 @@ export async function fetchJson<T>(path: string, init?: RequestInit): Promise<T>
   }
 
   return (await response.json()) as T;
+}
+
+function withRequestTimeout(sourceSignal: AbortSignal | null | undefined, timeoutMs: number) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(new DOMException("Request timed out", "TimeoutError")), timeoutMs);
+  const abortFromSource = () => controller.abort(sourceSignal?.reason);
+
+  if (sourceSignal?.aborted) {
+    abortFromSource();
+  } else if (sourceSignal) {
+    sourceSignal.addEventListener("abort", abortFromSource, { once: true });
+  }
+
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      clearTimeout(timeout);
+      if (sourceSignal) {
+        sourceSignal.removeEventListener("abort", abortFromSource);
+      }
+    },
+  };
+}
+
+function isAbortError(error: unknown) {
+  return error instanceof DOMException
+    ? error.name === "AbortError" || error.name === "TimeoutError"
+    : error instanceof Error && error.name === "AbortError";
 }
 
 function shouldAttachJsonContentType(

@@ -256,6 +256,8 @@ async fn internal_command(args: &[String]) -> Result<(), Box<dyn std::error::Err
 const HOST_RELOAD_DEBOUNCE: Duration = Duration::from_millis(800);
 const WATCH_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const API_READY_TIMEOUT: Duration = Duration::from_secs(15);
+const API_HEALTHCHECK_INTERVAL: Duration = Duration::from_secs(3);
+const API_HEALTHCHECK_GRACE: Duration = Duration::from_secs(6);
 const DEV_CHILD_STARTUP_GRACE: Duration = Duration::from_millis(1500);
 const DEV_CHILD_LOG_TAIL_LINES: usize = 20;
 
@@ -313,6 +315,9 @@ async fn run_dev_supervisor(
             }
             _ = ticker.tick() => {
                 dev_processes.ensure_children_alive()?;
+                if let Err(error) = api.ensure_healthy().await {
+                    eprintln!("api health recovery failed: {error}");
+                }
                 let mut saw_change = false;
                 while watch_rx.try_recv().is_ok() {
                     saw_change = true;
@@ -345,6 +350,8 @@ struct ApiDevProcess {
     console_config: DevConsoleMirrorConfig,
     target_dir: PathBuf,
     current: Option<ApiChild>,
+    next_health_probe_at: Instant,
+    unhealthy_since: Option<Instant>,
 }
 
 struct ApiChild {
@@ -367,6 +374,8 @@ impl ApiDevProcess {
             console_config,
             target_dir,
             current: None,
+            next_health_probe_at: Instant::now() + API_HEALTHCHECK_INTERVAL,
+            unhealthy_since: None,
         }
     }
 
@@ -375,6 +384,7 @@ impl ApiDevProcess {
         let built = self.build_api_binary()?;
         let snapshot = self.stage_api_binary(&built)?;
         self.current = Some(self.launch_snapshot(snapshot).await?);
+        self.reset_health_watch();
         println!("started api; log={}", self.api_log_path().display());
         Ok(())
     }
@@ -405,6 +415,7 @@ impl ApiDevProcess {
         match self.launch_snapshot(snapshot.clone()).await {
             Ok(child) => {
                 self.current = Some(child);
+                self.reset_health_watch();
                 println!("restarted api from {}", snapshot.display());
                 Ok(())
             }
@@ -412,6 +423,7 @@ impl ApiDevProcess {
                 eprintln!("new API process failed; attempting rollback: {error}");
                 if let Some(previous_snapshot) = previous_snapshot {
                     self.current = Some(self.launch_snapshot(previous_snapshot).await?);
+                    self.reset_health_watch();
                     eprintln!("rolled back to previous API binary");
                 }
                 Err(error)
@@ -419,11 +431,79 @@ impl ApiDevProcess {
         }
     }
 
+    async fn ensure_healthy(&mut self) -> io::Result<()> {
+        let now = Instant::now();
+        if now < self.next_health_probe_at {
+            return Ok(());
+        }
+        self.next_health_probe_at = now + API_HEALTHCHECK_INTERVAL;
+
+        let exited_snapshot = {
+            let Some(child) = self.current.as_mut() else {
+                return Ok(());
+            };
+            child.child.try_wait()?.map(|status| {
+                eprintln!("api exited unexpectedly: {status}; restarting current snapshot");
+                child.snapshot_path.clone()
+            })
+        };
+        if let Some(snapshot) = exited_snapshot {
+            self.current = Some(self.launch_snapshot(snapshot).await?);
+            self.reset_health_watch();
+            return Ok(());
+        }
+
+        let host = self.server_config.host.clone();
+        let port = self.server_config.port;
+        let healthy = tokio::task::spawn_blocking(move || probe_api_health(&host, port))
+            .await
+            .unwrap_or(false);
+        if healthy {
+            self.unhealthy_since = None;
+            return Ok(());
+        }
+
+        let first_failed_at = *self.unhealthy_since.get_or_insert(now);
+        if now.duration_since(first_failed_at) < API_HEALTHCHECK_GRACE {
+            return Ok(());
+        }
+
+        eprintln!(
+            "api health probe timed out for more than {}s; restarting current snapshot",
+            API_HEALTHCHECK_GRACE.as_secs()
+        );
+        self.restart_current_snapshot().await
+    }
+
+    async fn restart_current_snapshot(&mut self) -> io::Result<()> {
+        let Some(snapshot) = self
+            .current
+            .as_ref()
+            .map(|child| child.snapshot_path.clone())
+        else {
+            return Ok(());
+        };
+        if let Some(child) = self.current.as_mut() {
+            child.stop();
+        }
+        self.current = None;
+        self.current = Some(self.launch_snapshot(snapshot.clone()).await?);
+        self.reset_health_watch();
+        println!("restarted api from {}", snapshot.display());
+        Ok(())
+    }
+
     fn stop(&mut self) {
         if let Some(child) = self.current.as_mut() {
             child.stop();
         }
         self.current = None;
+        self.unhealthy_since = None;
+    }
+
+    fn reset_health_watch(&mut self) {
+        self.unhealthy_since = None;
+        self.next_health_probe_at = Instant::now() + API_HEALTHCHECK_INTERVAL;
     }
 
     fn build_api_binary(&self) -> io::Result<PathBuf> {
