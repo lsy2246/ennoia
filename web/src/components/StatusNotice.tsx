@@ -1,5 +1,10 @@
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
+import {
+  resolveErrorAutoDismissMs,
+  resolvePauseNotificationsOnHover,
+  resolveSuccessAutoDismissMs,
+} from "@/lib/uiDefaults";
 
 type StatusNoticeTone = "error" | "success";
 
@@ -36,8 +41,14 @@ export function StatusNotice({
   const [target, setTarget] = useState<HTMLElement | null>(null);
   const [isHovering, setIsHovering] = useState(false);
   const [timerCycle, setTimerCycle] = useState(0);
+  const pauseOnHover = resolvePauseNotificationsOnHover(undefined);
   const autoDismissDelay = useMemo(
-    () => durationMs ?? (tone === "error" ? 6000 : 3200),
+    () =>
+      durationMs
+      ?? (tone === "error"
+        ? resolveErrorAutoDismissMs(undefined)
+        : resolveSuccessAutoDismissMs(undefined))
+      ?? null,
     [durationMs, tone],
   );
 
@@ -51,14 +62,14 @@ export function StatusNotice({
   }, [message]);
 
   useEffect(() => {
-    if (!message || !onDismiss || isHovering || autoDismissDelay <= 0) {
+    if (!message || !onDismiss || autoDismissDelay == null || (pauseOnHover && isHovering)) {
       return;
     }
     const timer = window.setTimeout(() => {
       onDismiss();
     }, autoDismissDelay);
     return () => window.clearTimeout(timer);
-  }, [autoDismissDelay, isHovering, message, onDismiss]);
+  }, [autoDismissDelay, isHovering, message, onDismiss, pauseOnHover]);
 
   if (!message || !target) {
     return null;
@@ -75,13 +86,19 @@ export function StatusNotice({
         setIsHovering(false);
         setTimerCycle((current) => current + 1);
       }}
-      style={{ "--status-toast-duration": `${autoDismissDelay}ms` } as CSSProperties}
+      style={
+        autoDismissDelay == null
+          ? undefined
+          : ({ "--status-toast-duration": `${autoDismissDelay}ms` } as CSSProperties)
+      }
     >
-      <div
-        key={`${tone}:${message}:${timerCycle}`}
-        className={`status-toast__progress ${isHovering ? "status-toast__progress--paused" : ""}`}
-        aria-hidden="true"
-      />
+      {autoDismissDelay != null ? (
+        <div
+          key={`${tone}:${message}:${timerCycle}`}
+          className={`status-toast__progress ${pauseOnHover && isHovering ? "status-toast__progress--paused" : ""}`}
+          aria-hidden="true"
+        />
+      ) : null}
       <div className="status-toast__copy">{message}</div>
       {onDismiss ? (
         <button

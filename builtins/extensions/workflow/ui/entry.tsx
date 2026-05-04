@@ -2,7 +2,7 @@ import React from "react";
 import { createRoot, type Root } from "react-dom/client";
 import type { ExtensionUiModule } from "@ennoia/ui-sdk";
 
-import WorkflowConversationCard from "./conversation/ConversationCard";
+import WorkflowConversationRecord from "./conversation/RecordCard";
 import WorkflowPage from "./page/Page";
 
 const roots = new WeakMap<HTMLElement, Root>();
@@ -34,12 +34,12 @@ const extensionUi: ExtensionUiModule = {
         <WorkflowPage helpers={context.helpers} />,
       ),
   },
-  conversationCards: {
-    "workflow.conversation.card": (container, context) =>
+  conversationRecords: {
+    default: (container, context) =>
       renderIntoContainer(
         container,
-        <WorkflowConversationCard
-          conversationId={context.conversationId}
+        <WorkflowConversationRecord
+          record={context.record}
           helpers={context.helpers}
         />,
       ),

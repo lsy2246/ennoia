@@ -1,9 +1,10 @@
 import { create } from "zustand";
 
 import {
-  apiUrl,
+  createExtensionEventsStream,
   fetchUiMessages,
   fetchUiRuntime,
+  setApiClientRequestTimeout,
   saveInstanceUiPreferences,
   type UiRuntime,
 } from "@ennoia/api-client";
@@ -16,7 +17,11 @@ import {
 } from "@/lib/uiCapabilities";
 import {
   FRONTEND_UI_DEFAULTS,
+  resolveDefaultRequestTimeoutMs,
   resolveDefaultLocale,
+  resolveErrorAutoDismissMs,
+  resolvePauseNotificationsOnHover,
+  resolveSuccessAutoDismissMs,
 } from "@/lib/uiDefaults";
 import {
   builtinI18nRegistry,
@@ -112,6 +117,7 @@ export const useUiStore = create<UiState>((set, get) => ({
       bootstrapTheme();
       const cached = readUiBootstrapCache();
       const runtime = await fetchUiRuntime();
+      setApiClientRequestTimeout(resolveDefaultRequestTimeoutMs(runtime));
       syncThemeDefinitions(runtime);
       const locale = pickEffectiveLocale(runtime, cached.locale);
       const themeId = pickEffectiveTheme(runtime, cached.theme_id);
@@ -133,6 +139,9 @@ export const useUiStore = create<UiState>((set, get) => ({
         theme_id: themeId,
         time_zone: timeZone,
         date_style: dateStyle,
+        success_auto_dismiss_ms: resolveSuccessAutoDismissMs(runtime),
+        error_auto_dismiss_ms: resolveErrorAutoDismissMs(runtime),
+        pause_notifications_on_hover: resolvePauseNotificationsOnHover(runtime),
         version: runtime.versions.preferences,
         updated_at: runtime.instance_preference?.preference.updated_at ?? cached.updated_at,
       });
@@ -155,6 +164,7 @@ export const useUiStore = create<UiState>((set, get) => ({
     const current = get();
     try {
       const runtime = await fetchUiRuntime();
+      setApiClientRequestTimeout(resolveDefaultRequestTimeoutMs(runtime));
       if (current.runtime && sameUiRuntime(current.runtime, runtime)) {
         return;
       }
@@ -173,6 +183,9 @@ export const useUiStore = create<UiState>((set, get) => ({
         theme_id: themeId,
         time_zone: current.timeZone,
         date_style: current.dateStyle,
+        success_auto_dismiss_ms: resolveSuccessAutoDismissMs(runtime),
+        error_auto_dismiss_ms: resolveErrorAutoDismissMs(runtime),
+        pause_notifications_on_hover: resolvePauseNotificationsOnHover(runtime),
         version: runtime.versions.preferences,
         updated_at: runtime.instance_preference?.preference.updated_at,
       });
@@ -191,7 +204,7 @@ export const useUiStore = create<UiState>((set, get) => ({
     if (typeof EventSource === "undefined") {
       return () => undefined;
     }
-    const source = new EventSource(apiUrl("/api/extensions/events/stream"));
+    const source = createExtensionEventsStream();
     const refresh = () => {
       void get().refreshRuntime();
     };
@@ -238,6 +251,7 @@ export const useUiStore = create<UiState>((set, get) => ({
     applyTheme(nextTheme);
     document.documentElement.lang = nextLocale;
     writeUiBootstrapCache({
+      ...readUiBootstrapCache(),
       locale: nextLocale,
       theme_id: nextTheme,
       time_zone: nextTimeZone,
@@ -267,6 +281,7 @@ export const useUiStore = create<UiState>((set, get) => ({
     applyTheme(savedTheme);
     document.documentElement.lang = savedLocale;
     writeUiBootstrapCache({
+      ...readUiBootstrapCache(),
       locale: savedLocale,
       theme_id: savedTheme,
       time_zone: saved.preference.time_zone ?? nextTimeZone,

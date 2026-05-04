@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 
 import {
   createSchedule,
+  createSchedulesStream,
   deleteSchedule,
+  fetchServerConfig,
   listAgents,
   listConversationLanes,
   listConversations,
@@ -18,6 +20,7 @@ import {
   type SchedulePayload,
   type ScheduleRecord,
   type ScheduleTrigger,
+  type ServerConfig,
 } from "@ennoia/api-client";
 import { Select } from "@/components/Select";
 import { StatusNotice } from "@/components/StatusNotice";
@@ -144,8 +147,18 @@ function describeDeliveryMode(value?: string | null) {
   }
 }
 
-function createDefaultForm(agents: AgentProfile[]): ScheduleFormState {
+function requireScheduleDefaults(serverConfig: ServerConfig | null): ServerConfig["schedules"] {
+  if (!serverConfig) {
+    throw new Error("调度运行时配置尚未加载完成，请稍后再试。");
+  }
+  return serverConfig.schedules;
+}
+
+function createDefaultForm(agents: AgentProfile[], serverConfig?: ServerConfig | null): ScheduleFormState {
   const defaultAgentId = agents.find((item) => item.enabled)?.id ?? agents[0]?.id ?? "";
+  const defaultCommandTimeout = serverConfig?.schedules.command.default_timeout_ms;
+  const defaultRetryAttempts = serverConfig?.schedules.retry.default_max_attempts;
+  const defaultRetryBackoff = serverConfig?.schedules.retry.default_backoff_seconds;
   return {
     name: "",
     description: "",
@@ -157,7 +170,7 @@ function createDefaultForm(agents: AgentProfile[]): ScheduleFormState {
     executorKind: "command",
     commandText: "",
     commandCwd: "",
-    commandTimeoutMs: "120000",
+    commandTimeoutMs: defaultCommandTimeout == null ? "" : String(defaultCommandTimeout),
     agentId: defaultAgentId,
     agentPrompt: "",
     modelId: "",
@@ -167,14 +180,15 @@ function createDefaultForm(agents: AgentProfile[]): ScheduleFormState {
     deliveryConversationId: "",
     deliveryLaneId: "",
     contentMode: "full",
-    retryAttempts: "1",
-    retryBackoffSeconds: "0",
+    retryAttempts: defaultRetryAttempts == null ? "" : String(defaultRetryAttempts),
+    retryBackoffSeconds: defaultRetryBackoff == null ? "" : String(defaultRetryBackoff),
     enabled: true,
   };
 }
 
 export function Schedules() {
   const { t } = useUiHelpers();
+  const [serverConfig, setServerConfig] = useState<ServerConfig | null>(null);
   const [schedules, setSchedules] = useState<ScheduleRecord[]>([]);
   const [agents, setAgents] = useState<AgentProfile[]>([]);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
@@ -184,10 +198,6 @@ export function Schedules() {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    void hydrate();
-  }, []);
 
   const agentOptions = useMemo(() => {
     const options = agents.map((agent) => ({
@@ -268,30 +278,49 @@ export function Schedules() {
   const totalCommand = schedules.filter((schedule) => schedule.executor.kind === "command").length;
   const totalAgent = schedules.filter((schedule) => schedule.executor.kind === "agent").length;
 
-  async function hydrate() {
+  const hydrate = useCallback(async () => {
     setError(null);
     try {
-      const [nextSchedules, nextAgents, nextConversations] = await Promise.all([
+      const [nextSchedules, nextAgents, nextConversations, nextServerConfig] = await Promise.all([
         listSchedules(),
         listAgents(),
         listConversations(),
+        fetchServerConfig(),
       ]);
       setSchedules(nextSchedules);
       setAgents(nextAgents);
       setConversations(nextConversations);
+      setServerConfig(nextServerConfig);
       setForm((current) => {
         if (current.agentId) {
           return current;
         }
-        return {
-          ...current,
-          agentId: nextAgents.find((item) => item.enabled)?.id ?? nextAgents[0]?.id ?? "",
-        };
+        return createDefaultForm(nextAgents, nextServerConfig);
       });
     } catch (err) {
       setError(String(err));
     }
-  }
+  }, []);
+
+  useEffect(() => {
+    void hydrate();
+  }, [hydrate]);
+
+  useEffect(() => {
+    if (typeof EventSource === "undefined") {
+      return;
+    }
+    const stream = createSchedulesStream();
+    const handleChanged = () => {
+      void hydrate();
+    };
+    stream.addEventListener("schedules.changed", handleChanged);
+    stream.onerror = () => undefined;
+    return () => {
+      stream.removeEventListener("schedules.changed", handleChanged);
+      stream.close();
+    };
+  }, [hydrate]);
 
   async function ensureConversationLanes(conversationId: string) {
     if (!conversationId.trim() || lanesByConversation[conversationId]) {
@@ -310,19 +339,24 @@ export function Schedules() {
 
   function resetForm(nextAgents = agents) {
     setEditingId(null);
-    setForm(createDefaultForm(nextAgents));
+    setForm(createDefaultForm(nextAgents, serverConfig));
   }
 
   async function loadSchedule(schedule: ScheduleRecord) {
-    const nextForm = createDefaultForm(agents);
+    const scheduleDefaults = requireScheduleDefaults(serverConfig);
+    const nextForm = createDefaultForm(agents, serverConfig);
     nextForm.name = schedule.name ?? "";
     nextForm.description = schedule.description ?? "";
     nextForm.enabled = schedule.enabled;
     nextForm.deliveryConversationId = schedule.delivery?.conversation_id ?? "";
     nextForm.deliveryLaneId = schedule.delivery?.lane_id ?? "";
     nextForm.contentMode = schedule.delivery?.content_mode ?? "full";
-    nextForm.retryAttempts = String(schedule.retry?.max_attempts ?? 1);
-    nextForm.retryBackoffSeconds = String(schedule.retry?.backoff_seconds ?? 0);
+    nextForm.retryAttempts = String(
+      schedule.retry?.max_attempts ?? scheduleDefaults.retry.default_max_attempts,
+    );
+    nextForm.retryBackoffSeconds = String(
+      schedule.retry?.backoff_seconds ?? scheduleDefaults.retry.default_backoff_seconds,
+    );
 
     switch (schedule.trigger.kind) {
       case "once":
@@ -344,7 +378,9 @@ export function Schedules() {
       nextForm.executorKind = "command";
       nextForm.commandText = schedule.executor.command.command;
       nextForm.commandCwd = schedule.executor.command.cwd ?? "";
-      nextForm.commandTimeoutMs = String(schedule.executor.command.timeout_ms ?? 120000);
+      nextForm.commandTimeoutMs = String(
+        schedule.executor.command.timeout_ms ?? scheduleDefaults.command.default_timeout_ms,
+      );
     } else {
       nextForm.executorKind = "agent";
       nextForm.agentId = schedule.executor.agent.agent_id;
@@ -406,12 +442,19 @@ export function Schedules() {
       if (!form.commandText.trim()) {
         throw new Error(t("web.schedules.command_required", "请输入要运行的命令。"));
       }
+      const timeoutDefaults = requireScheduleDefaults(serverConfig).command;
       return {
         kind: "command",
         command: {
           command: form.commandText.trim(),
           cwd: form.commandCwd.trim() || null,
-          timeout_ms: Math.max(1000, Number(form.commandTimeoutMs) || 120000),
+          timeout_ms: Math.min(
+            timeoutDefaults.max_timeout_ms,
+            Math.max(
+              timeoutDefaults.min_timeout_ms,
+              Number(form.commandTimeoutMs) || timeoutDefaults.default_timeout_ms,
+            ),
+          ),
         },
       };
     }
@@ -441,6 +484,7 @@ export function Schedules() {
   }
 
   function buildPayload(): SchedulePayload {
+    const retryDefaults = requireScheduleDefaults(serverConfig).retry;
     return {
       name: form.name.trim() || null,
       description: form.description.trim() || null,
@@ -452,8 +496,20 @@ export function Schedules() {
         content_mode: form.deliveryConversationId.trim() ? form.contentMode : null,
       },
       retry: {
-        max_attempts: Math.max(1, Number(form.retryAttempts) || 1),
-        backoff_seconds: Math.max(0, Number(form.retryBackoffSeconds) || 0),
+        max_attempts: Math.min(
+          retryDefaults.max_attempts_cap,
+          Math.max(
+            1,
+            Number(form.retryAttempts) || retryDefaults.default_max_attempts,
+          ),
+        ),
+        backoff_seconds: Math.min(
+          retryDefaults.max_backoff_seconds,
+          Math.max(
+            0,
+            Number(form.retryBackoffSeconds) || retryDefaults.default_backoff_seconds,
+          ),
+        ),
       },
       owner: { kind: "operator", id: "local" },
       enabled: form.enabled,

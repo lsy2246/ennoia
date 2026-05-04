@@ -13,6 +13,11 @@
 
 核心模型表达系统配置、扩展运行态、动作规则、scheduler 计划和宿主协议。Conversation、Message、Memory、Run、Task、Artifact 等业务数据由对应扩展在私有边界内管理。
 
+补充约定：
+
+- 系统核心额外提供 `ExtensionStateEntry` 与 `ExtensionRecordEntry` 两个宿主级通用原语，供扩展保存轻量运行态和会话可视记录。
+- 这两个模型不是 workflow、memory、conversation 的替代主数据，只用于跨刷新状态同步、前端挂载和运行事实投影。
+
 ## ServerConfig 域
 
 `ServerConfig` 当前包含：
@@ -30,6 +35,7 @@
 
 - 动作管道是系统内部实现边界，不暴露为运行时配置。
 - conversation、memory、workflow 各自仍是自己的原生数据边界；系统只在动作管道与事件链里把事实拼接成业务流程。
+- workflow 运行数据以结构化 `plan` 为真相源；`task` 是从 `plan.steps` 派生的执行与展示投影视图，不再作为系统硬编码拆解步骤的来源。
 
 ## Action Rule 域
 
@@ -237,6 +243,45 @@
 - 审批通过后只会产生临时 grant，不再写回 policy。
 - 事件记录只表达“谁、在什么作用域、请求了什么、系统如何裁决”，不复写业务结果。
 
+## Extension Runtime 域
+
+`ExtensionStateEntry` 字段：
+
+- `extension_id`
+- `namespace`
+- `scope_type`
+- `scope_id`
+- `key`
+- `value`
+- `version`
+- `updated_at`
+- `expires_at`
+
+`ExtensionRecordEntry` 字段：
+
+- `id`
+- `extension_id`
+- `namespace`
+- `scope_type`
+- `scope_id`
+- `kind`
+- `status`
+- `title`
+- `summary`
+- `payload`
+- `related_message_id`
+- `parent_id`
+- `created_at`
+- `updated_at`
+- `closed_at`
+
+约定：
+
+- `ExtensionStateEntry` 适合保存“当前草案”“会话活跃 route”“上次同步游标”这类小型宿主状态。
+- `ExtensionRecordEntry` 适合保存“执行过程块”“规划块”“审批块”这类需要被前端时间线渲染的扩展记录。
+- 宿主只按 `extension_id + namespace + scope` 做通用存储与查询，不解释 `payload` 的业务结构。
+- 扩展自己的 run、draft、plan、memory graph、conversation message 等主数据仍然保留在扩展私有数据库中。
+
 ## Skill 域
 
 `SkillConfig` 字段：`id`、`display_name`、`description`、`source`、`entry`、`docs`、`keywords`、`enabled`。
@@ -257,6 +302,7 @@
 - Agent 基础配置、权限配置与执行环境配置：`~/.ennoia/agents/{agent_id}/agent.toml`。
 - 定时计划：`~/.ennoia/data/system/schedules.json`。
 - Agent 权限事件与审批：`~/.ennoia/data/system/sqlite/permissions.db`。
+- 扩展通用运行态 state/record：`~/.ennoia/data/system/sqlite/extensions.db`。
 - 核心前端日志：`~/.ennoia/logs/frontend.jsonl`。
 - 扩展私有数据：`~/.ennoia/data/extensions/{extension_id}/`。
 - 核心不维护主业务数据库快照。

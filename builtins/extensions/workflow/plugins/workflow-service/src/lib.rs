@@ -6,6 +6,7 @@
 pub mod conversation_hooks;
 pub mod orchestrator;
 pub mod pipeline;
+pub mod planning;
 pub mod process;
 pub mod runtime;
 

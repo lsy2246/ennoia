@@ -17,11 +17,14 @@ export type WorkbenchViewDescriptor = {
 
 type DockviewApiLike = {
   addPanel: (options: Record<string, unknown>) => unknown;
+  addGroup?: (options?: Record<string, unknown>) => unknown;
+  clear?: () => void;
   removePanel: (panel: unknown) => void;
   getPanel?: (id: string) => any;
   setActivePanel?: (panel: unknown) => void;
   activePanel?: { id: string } | null;
   panels?: unknown[];
+  groups?: unknown[];
   toJSON?: () => unknown;
   fromJSON?: (data: unknown, options?: { reuseExistingPanels: boolean }) => void;
   onDidLayoutChange?: (listener: () => void) => { dispose: () => void };
@@ -92,7 +95,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
       panelId,
       openedAt: Date.now(),
     };
-    state.api.addPanel({
+    const panelDefinition = {
       id: panelId,
       title: descriptor.title,
       component: "resource",
@@ -100,11 +103,28 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
         panelKind: "resource",
         descriptor: view,
       },
-      position: {
-        referencePanel: state.api.activePanel?.id ?? "main",
-        direction: options?.placement ?? "right",
-      },
-    });
+    } as const;
+
+    try {
+      state.api.addPanel({
+        ...panelDefinition,
+        position: state.api.activePanel?.id
+          ? {
+              referencePanel: state.api.activePanel.id,
+              direction: options?.placement ?? "right",
+            }
+          : undefined,
+      });
+    } catch {
+      try {
+        if ((state.api.groups?.length ?? 0) === 0) {
+          state.api.addGroup?.();
+        }
+        state.api.addPanel(panelDefinition);
+      } catch {
+        return;
+      }
+    }
 
     const openedPanel = state.api.getPanel?.(panelId);
     if (openedPanel) {

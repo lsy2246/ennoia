@@ -1,4 +1,4 @@
-import { fetchJson } from "@ennoia/api-client";
+import { apiUrl, fetchJson } from "@ennoia/api-client";
 
 export type WorkflowWorkspaceSummary = {
   runs_total: number;
@@ -93,14 +93,53 @@ export type WorkflowDecisionSnapshot = {
   at: string;
 };
 
+export type WorkflowPlanStep = {
+  id: string;
+  type: string;
+  goal: string;
+  tool?: string;
+  allowed_tools?: string[];
+  expected_outputs?: string[];
+  pass_if?: string[];
+  next_pass?: string;
+  next_fail?: string;
+  assigned_agent_id?: string;
+};
+
+export type WorkflowPlan = {
+  schema_version: string;
+  objective: string;
+  intent: string;
+  steps: WorkflowPlanStep[];
+  tool_plan?: Array<Record<string, unknown>>;
+  verify_contract?: Record<string, unknown> | null;
+  delegation?: Record<string, unknown> | null;
+  watchdog?: Record<string, unknown> | null;
+  model_strategy?: Record<string, unknown> | null;
+  meta?: {
+    plan_status?: string;
+    source?: string;
+    auto_generated?: boolean;
+    created_at?: string;
+    updated_at?: string;
+  };
+};
+
 export type WorkflowRunDetail = {
   run: WorkflowRun;
+  plan?: WorkflowPlan | null;
   tasks: WorkflowTask[];
   artifacts: WorkflowArtifact[];
   handoffs: WorkflowHandoff[];
   stage_events: WorkflowStageEvent[];
   gate_verdicts: WorkflowGateVerdict[];
   decisions?: WorkflowDecisionSnapshot[];
+};
+
+export type WorkflowStreamSnapshot = {
+  workspace: WorkflowWorkspaceSummary;
+  runs: WorkflowRun[];
+  detail?: WorkflowRunDetail | null;
 };
 
 type ExtensionRpcEnvelope<T> = {
@@ -144,4 +183,35 @@ export async function listWorkflowRuns(params?: {
 
 export async function getWorkflowRunDetail(runId: string) {
   return callWorkflowRpc<WorkflowRunDetail>("workflow/runs/get", { run_id: runId });
+}
+
+export function createWorkflowStream(query?: {
+  conversation_id?: string;
+  run_id?: string;
+  stage?: string;
+  q?: string;
+  limit?: number;
+}) {
+  const params = new URLSearchParams();
+  if (query?.conversation_id) {
+    params.set("conversation_id", query.conversation_id);
+  }
+  if (query?.run_id) {
+    params.set("run_id", query.run_id);
+  }
+  if (query?.stage) {
+    params.set("stage", query.stage);
+  }
+  if (query?.q) {
+    params.set("q", query.q);
+  }
+  if (typeof query?.limit === "number") {
+    params.set("limit", String(query.limit));
+  }
+  const suffix = params.toString();
+  return new EventSource(apiUrl(`/api/workflow/stream${suffix ? `?${suffix}` : ""}`));
+}
+
+export function parseWorkflowStreamPayload(value: string) {
+  return JSON.parse(value) as WorkflowStreamSnapshot;
 }

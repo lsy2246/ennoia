@@ -19,7 +19,7 @@ pub mod ui;
 pub use config::{
     AgentConfig, AgentDocument, ExtensionRegistryEntry, ExtensionRegistryFile, ModelEndpointConfig,
     ModelEndpointModelDiscoveryConfig, ServerConfig, SkillConfig, SkillRegistryEntry,
-    SkillRegistryFile, UiConfig,
+    SkillRegistryFile, UiApiConfig, UiConfig, UiNotificationConfig,
 };
 pub use context::{ContextFrame, ContextLayer, RunContext};
 pub use decision::{Decision, DecisionSnapshot, NextAction};
@@ -34,17 +34,17 @@ pub use extension::{
     ActionPhase, ActionResultMode, ActionRule, BehaviorContribution, CapabilityContribution,
     CommandContribution, ExtensionAssetsSpec, ExtensionCapabilities, ExtensionConversationSpec,
     ExtensionDiagnostic, ExtensionEntrypointKind, ExtensionEntrypointSpec, ExtensionHealth,
-    ExtensionKind, ExtensionManifest, ExtensionPermissionSpec, ExtensionRpcError,
-    ExtensionRpcRequest, ExtensionRpcResponse, ExtensionRuntimeEvent, ExtensionRuntimeSpec,
-    ExtensionSettingFieldSpec, ExtensionSettingFieldType, ExtensionSettingOptionSpec,
-    ExtensionSettingValue, ExtensionSourceMode, ExtensionSourceSpec, ExtensionUiSpec,
-    ExtensionWatchSpec, ExtensionWorkerSpec, HookContribution, HookDispatchResponse,
-    HookEventEnvelope, HookResourceRef, LocaleContribution, MemoryContribution, PageContribution,
-    PageNavContribution, PanelContribution, ProviderContribution, ProviderGenerationOption,
-    ProviderModelDescriptor, ResolvedUiEntry, ResolvedWorkerEntry, ResourceTypeContribution,
-    ScheduleActionContribution, SubscriptionContribution, SurfaceContribution, ThemeContribution,
-    HOOK_EVENT_ARTIFACT_CREATED, HOOK_EVENT_CONVERSATION_CREATED,
-    HOOK_EVENT_CONVERSATION_MESSAGE_CREATED, HOOK_EVENT_JOB_DUE,
+    ExtensionKind, ExtensionManifest, ExtensionPermissionSpec, ExtensionRecordEntry,
+    ExtensionRpcError, ExtensionRpcRequest, ExtensionRpcResponse, ExtensionRuntimeEvent,
+    ExtensionRuntimeSpec, ExtensionSettingFieldSpec, ExtensionSettingFieldType,
+    ExtensionSettingOptionSpec, ExtensionSettingValue, ExtensionSourceMode, ExtensionSourceSpec,
+    ExtensionStateEntry, ExtensionStateSelector, ExtensionUiSpec, ExtensionWatchSpec,
+    ExtensionWorkerSpec, HookContribution, HookDispatchResponse, HookEventEnvelope,
+    HookResourceRef, LocaleContribution, MemoryContribution, PageContribution, PageNavContribution,
+    PanelContribution, ProviderContribution, ProviderGenerationOption, ProviderModelDescriptor,
+    ResolvedUiEntry, ResolvedWorkerEntry, ResourceTypeContribution, ScheduleActionContribution,
+    SubscriptionContribution, SurfaceContribution, ThemeContribution, HOOK_EVENT_ARTIFACT_CREATED,
+    HOOK_EVENT_CONVERSATION_CREATED, HOOK_EVENT_CONVERSATION_MESSAGE_CREATED, HOOK_EVENT_JOB_DUE,
     HOOK_EVENT_PERMISSION_APPROVAL_RESOLVED, HOOK_EVENT_RUN_REQUESTED,
     HOOK_EVENT_RUN_STAGE_CHANGED,
 };
@@ -59,8 +59,11 @@ pub use policy::{
     GlobPattern, MemoryPolicy, RuntimeRule, RuntimeRuleCondition, RuntimeRuleTarget, StagePolicy,
 };
 pub use server_settings::{
-    apply_server_log_env_overrides, default_local_dev_origins, BodyLimitConfig, BootstrapState,
-    CorsConfig, DevConsoleLogConfig, LoggingConfig, RateLimitConfig, TimeoutConfig, WebDevConfig,
+    apply_server_log_env_overrides, default_local_dev_origins, BackgroundRuntimeConfig,
+    BodyLimitConfig, BootstrapState, CorsConfig, DevConsoleLogConfig, DevSupervisorConfig,
+    ExtensionRuntimeDefaultsConfig, LoggingConfig, ProviderRuntimeConfig, RateLimitConfig,
+    RuntimeOperationTimeoutConfig, RuntimeOperationsConfig, ScheduleCommandConfig,
+    ScheduleRetryConfig, ScheduleRuntimeConfig, StreamRuntimeConfig, TimeoutConfig, WebDevConfig,
 };
 pub use signals::{EvidenceSignals, ExecutionSignals, IntentSignals, Signals};
 pub use stage::{RunStage, RunStageEvent, StageTransition};

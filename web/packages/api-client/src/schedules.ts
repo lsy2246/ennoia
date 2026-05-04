@@ -1,4 +1,4 @@
-import { fetchJson } from "./core";
+import { apiUrl, fetchJson } from "./core";
 import type { ExtensionScheduleActionContribution } from "@ennoia/ui-sdk";
 import type { SchedulePayload, ScheduleRecord } from "./types";
 
@@ -53,4 +53,8 @@ export async function resumeSchedule(scheduleId: string) {
     method: "POST",
     body: JSON.stringify({}),
   });
+}
+
+export function createSchedulesStream() {
+  return new EventSource(apiUrl("/api/schedules/stream"));
 }

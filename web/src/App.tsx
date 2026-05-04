@@ -502,22 +502,26 @@ export function App() {
     if (!options?.panelPosition) {
       const activePanel = workbenchApi.activePanel as IDockviewPanel | undefined;
       if (activePanel && isRoutePanelParams(activePanel.params)) {
-        activePanel.api.setTitle(payload.label);
-        activePanel.update({
-          params: {
-            panelKind: "route",
-            routeId: payload.id,
-            href: payload.href,
-            label: payload.label,
-            source: payload.source,
-          } satisfies RoutePanelParams,
-        });
-        setActiveNavId(payload.id);
-        return;
+        try {
+          activePanel.api.setTitle(payload.label);
+          activePanel.update({
+            params: {
+              panelKind: "route",
+              routeId: payload.id,
+              href: payload.href,
+              label: payload.label,
+              source: payload.source,
+            } satisfies RoutePanelParams,
+          });
+          setActiveNavId(payload.id);
+          return;
+        } catch {
+          // Fall through to a fresh panel open when the current group state is stale.
+        }
       }
     }
 
-    workbenchApi.addPanel({
+    const panelDefinition = {
       id: `route:${payload.source}:${payload.id}:${Date.now().toString(36)}`,
       title: payload.label,
       component: "route",
@@ -528,8 +532,30 @@ export function App() {
         label: payload.label,
         source: payload.source,
       } satisfies RoutePanelParams,
-      position: options?.panelPosition,
-    });
+    } as const;
+
+    try {
+      if ((workbenchApi.groups?.length ?? 0) === 0) {
+        workbenchApi.addGroup?.();
+      }
+      workbenchApi.addPanel({
+        ...panelDefinition,
+        position: options?.panelPosition,
+      });
+    } catch {
+      try {
+        workbenchApi.clear?.();
+        writeWorkbenchPreferences({
+          dockPosition: dockPositionRef.current,
+          dockExpanded: dockExpandedRef.current,
+          mobileActiveNavId: readWorkbenchPreferences().mobileActiveNavId,
+        });
+        workbenchApi.addGroup?.();
+        workbenchApi.addPanel(panelDefinition);
+      } catch {
+        return;
+      }
+    }
     setHasDesktopViews(true);
     setActiveNavId(payload.id);
   }, [isMobileViewport, workbenchApi]);
@@ -880,6 +906,14 @@ export function App() {
                   api.fromJSON(storedLayout, { reuseExistingPanels: false });
                   window.setTimeout(() => {
                     restoringLayoutRef.current = false;
+                    if ((api.groups as { length?: number } | undefined)?.length === 0) {
+                      api.clear();
+                      writeWorkbenchPreferences({
+                        dockPosition: initialWorkbenchPreferences.dockPosition,
+                        dockExpanded: initialWorkbenchPreferences.dockExpanded,
+                        mobileActiveNavId: initialWorkbenchPreferences.mobileActiveNavId,
+                      });
+                    }
                     syncOpenPanelTitles(api);
                     syncDesktopViewState();
                     scheduleLayoutPersistence(api);

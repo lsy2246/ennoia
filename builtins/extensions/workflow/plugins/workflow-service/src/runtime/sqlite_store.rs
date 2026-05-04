@@ -2,11 +2,13 @@ use super::{RuntimeError, RuntimeStore};
 use async_trait::async_trait;
 use ennoia_kernel::{
     ArtifactSpec, DecisionSnapshot, GateRecord, HandoffSpec, RunSpec, RunStage, RunStageEvent,
-    TaskSpec,
+    TaskKind, TaskSpec,
 };
 use sea_query::{Expr, Iden, Query, SqliteQueryBuilder};
 use sea_query_binder::SqlxBinder;
 use sqlx::{Row, SqlitePool};
+
+use crate::planning::{derive_tasks_from_plan, PlanSpec};
 
 pub const WORKFLOW_SCHEMA_SQL: &str = include_str!("../../../../data/schema.sql");
 
@@ -75,28 +77,11 @@ impl SqliteRuntimeStore {
     pub fn pool(&self) -> &SqlitePool {
         &self.pool
     }
-}
 
-trait IntoRuntimeError<T> {
-    fn rt_err(self) -> Result<T, RuntimeError>;
-}
-
-impl<T> IntoRuntimeError<T> for Result<T, sqlx::Error> {
-    fn rt_err(self) -> Result<T, RuntimeError> {
-        self.map_err(|e| RuntimeError::Backend(e.to_string()))
-    }
-}
-
-#[async_trait]
-impl RuntimeStore for SqliteRuntimeStore {
-    async fn save_run_bundle(
-        &self,
+    async fn upsert_run(
+        transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
         run: &RunSpec,
-        tasks: &[TaskSpec],
-        artifacts: &[ArtifactSpec],
-        handoffs: &[HandoffSpec],
     ) -> Result<(), RuntimeError> {
-        let mut transaction = self.pool.begin().await.rt_err()?;
         let run_json =
             serde_json::to_string(run).map_err(|error| RuntimeError::Serde(error.to_string()))?;
         sqlx::query(
@@ -112,9 +97,41 @@ impl RuntimeStore for SqliteRuntimeStore {
         .bind(run.stage.as_str())
         .bind(&run.created_at)
         .bind(&run.updated_at)
-        .execute(&mut *transaction)
+        .execute(&mut **transaction)
         .await
         .rt_err()?;
+        Ok(())
+    }
+}
+
+trait IntoRuntimeError<T> {
+    fn rt_err(self) -> Result<T, RuntimeError>;
+}
+
+impl<T> IntoRuntimeError<T> for Result<T, sqlx::Error> {
+    fn rt_err(self) -> Result<T, RuntimeError> {
+        self.map_err(|e| RuntimeError::Backend(e.to_string()))
+    }
+}
+
+#[async_trait]
+impl RuntimeStore for SqliteRuntimeStore {
+    async fn save_run(&self, run: &RunSpec) -> Result<(), RuntimeError> {
+        let mut transaction = self.pool.begin().await.rt_err()?;
+        Self::upsert_run(&mut transaction, run).await?;
+        transaction.commit().await.rt_err()?;
+        Ok(())
+    }
+
+    async fn save_run_bundle(
+        &self,
+        run: &RunSpec,
+        tasks: &[TaskSpec],
+        artifacts: &[ArtifactSpec],
+        handoffs: &[HandoffSpec],
+    ) -> Result<(), RuntimeError> {
+        let mut transaction = self.pool.begin().await.rt_err()?;
+        Self::upsert_run(&mut transaction, run).await?;
 
         sqlx::query("DELETE FROM tasks WHERE run_id = ?1")
             .bind(&run.id)
@@ -182,6 +199,71 @@ impl RuntimeStore for SqliteRuntimeStore {
 
         transaction.commit().await.rt_err()?;
         Ok(())
+    }
+
+    async fn save_plan(
+        &self,
+        run: &RunSpec,
+        plan: &PlanSpec,
+        default_agent_id: &str,
+    ) -> Result<Vec<TaskSpec>, RuntimeError> {
+        let mut transaction = self.pool.begin().await.rt_err()?;
+        let plan_json =
+            serde_json::to_string(plan).map_err(|error| RuntimeError::Serde(error.to_string()))?;
+        sqlx::query(
+            "INSERT INTO plans (run_id, payload_json, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(run_id) DO UPDATE SET
+               payload_json = excluded.payload_json,
+               updated_at = excluded.updated_at",
+        )
+        .bind(&run.id)
+        .bind(plan_json)
+        .bind(&plan.meta.created_at)
+        .bind(&plan.meta.updated_at)
+        .execute(&mut *transaction)
+        .await
+        .rt_err()?;
+
+        let task_kind = if plan
+            .steps
+            .iter()
+            .filter(|step| !step.assigned_agent_id.trim().is_empty())
+            .map(|step| step.assigned_agent_id.trim())
+            .collect::<std::collections::BTreeSet<_>>()
+            .len()
+            > 1
+        {
+            TaskKind::Collaboration
+        } else {
+            TaskKind::Response
+        };
+        let tasks = derive_tasks_from_plan(run, plan, default_agent_id, task_kind);
+
+        sqlx::query("DELETE FROM tasks WHERE run_id = ?1")
+            .bind(&run.id)
+            .execute(&mut *transaction)
+            .await
+            .rt_err()?;
+        for task in &tasks {
+            let payload_json = serde_json::to_string(task)
+                .map_err(|error| RuntimeError::Serde(error.to_string()))?;
+            sqlx::query(
+                "INSERT INTO tasks (id, run_id, payload_json, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+            )
+            .bind(&task.id)
+            .bind(&task.run_id)
+            .bind(payload_json)
+            .bind(&task.created_at)
+            .bind(&task.updated_at)
+            .execute(&mut *transaction)
+            .await
+            .rt_err()?;
+        }
+
+        transaction.commit().await.rt_err()?;
+        Ok(tasks)
     }
 
     async fn log_stage_event(&self, event: &RunStageEvent) -> Result<(), RuntimeError> {
@@ -287,6 +369,20 @@ impl RuntimeStore for SqliteRuntimeStore {
         row.map(|row| row.get::<String, _>("payload_json"))
             .map(|payload| {
                 serde_json::from_str::<RunSpec>(&payload)
+                    .map_err(|error| RuntimeError::Serde(error.to_string()))
+            })
+            .transpose()
+    }
+
+    async fn get_plan(&self, run_id: &str) -> Result<Option<PlanSpec>, RuntimeError> {
+        let row = sqlx::query("SELECT payload_json FROM plans WHERE run_id = ?1")
+            .bind(run_id)
+            .fetch_optional(&self.pool)
+            .await
+            .rt_err()?;
+        row.map(|row| row.get::<String, _>("payload_json"))
+            .map(|payload| {
+                serde_json::from_str::<PlanSpec>(&payload)
                     .map_err(|error| RuntimeError::Serde(error.to_string()))
             })
             .transpose()

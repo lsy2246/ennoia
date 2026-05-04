@@ -200,6 +200,30 @@ export type ExtensionConversationCardMountContext = ExtensionViewMountContext & 
   conversationId: string;
 };
 
+export type ExtensionConversationRecord = {
+  id: string;
+  extension_id: string;
+  namespace: string;
+  scope_type: string;
+  scope_id: string;
+  kind: string;
+  status?: string | null;
+  title?: string | null;
+  summary?: string | null;
+  payload: unknown;
+  related_message_id?: string | null;
+  parent_id?: string | null;
+  created_at: string;
+  updated_at: string;
+  closed_at?: string | null;
+};
+
+export type ExtensionConversationRecordMountContext = ExtensionViewMountContext & {
+  kind: "conversation_record";
+  conversationId: string;
+  record: ExtensionConversationRecord;
+};
+
 export type ExtensionViewHandle = {
   unmount?: () => void | Promise<void>;
 };
@@ -219,10 +243,16 @@ export type ExtensionConversationCardMount = (
   context: ExtensionConversationCardMountContext,
 ) => void | ExtensionViewHandle | Promise<void | ExtensionViewHandle>;
 
+export type ExtensionConversationRecordMount = (
+  container: HTMLElement,
+  context: ExtensionConversationRecordMountContext,
+) => void | ExtensionViewHandle | Promise<void | ExtensionViewHandle>;
+
 export type ExtensionUiModule = {
   pages?: Record<string, ExtensionPageMount>;
   panels?: Record<string, ExtensionPanelMount>;
   conversationCards?: Record<string, ExtensionConversationCardMount>;
+  conversationRecords?: Record<string, ExtensionConversationRecordMount>;
 };
 
 export type ExtensionCommandContribution = RegisteredContributionBase & {

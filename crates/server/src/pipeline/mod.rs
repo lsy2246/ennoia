@@ -8,6 +8,7 @@ use serde_json::Value as JsonValue;
 
 use crate::app::AppState;
 use crate::logs_store::{LogEntryWrite, LOGS_COMPONENT_PROXY};
+use crate::realtime::RealtimeEvent;
 use crate::routes::{
     actions::{
         action_rules_for_key, dispatch_action_rule_execute, dispatch_hook_event,
@@ -294,6 +295,10 @@ fn emit_conversation_created(state: &AppState, request: &RequestContext, payload
         resource_id,
         payload.clone(),
     );
+    state.realtime.publish(RealtimeEvent::ConversationsChanged);
+    state.realtime.publish(RealtimeEvent::ConversationChanged {
+        conversation_id: resource_id.to_string(),
+    });
 }
 
 fn emit_conversation_deleted(
@@ -323,6 +328,7 @@ fn emit_conversation_deleted(
         resource_id,
         payload.clone(),
     );
+    state.realtime.publish(RealtimeEvent::ConversationsChanged);
 }
 
 fn emit_conversation_message_created(
@@ -330,6 +336,16 @@ fn emit_conversation_message_created(
     request: &RequestContext,
     payload: &JsonValue,
 ) {
+    let conversation_id = payload
+        .get("conversation")
+        .and_then(|item| item.get("id"))
+        .or_else(|| {
+            payload
+                .get("message")
+                .and_then(|item| item.get("conversation_id"))
+        })
+        .and_then(JsonValue::as_str)
+        .unwrap_or("unknown");
     let resource_id = payload
         .get("message")
         .and_then(|item| item.get("id"))
@@ -344,4 +360,8 @@ fn emit_conversation_message_created(
         resource_id,
         payload.clone(),
     );
+    state.realtime.publish(RealtimeEvent::ConversationsChanged);
+    state.realtime.publish(RealtimeEvent::ConversationChanged {
+        conversation_id: conversation_id.to_string(),
+    });
 }

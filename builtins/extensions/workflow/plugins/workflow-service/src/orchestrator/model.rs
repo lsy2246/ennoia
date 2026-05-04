@@ -5,6 +5,8 @@ use ennoia_kernel::{
 };
 use serde::{Deserialize, Serialize};
 
+use crate::planning::PlanSpec;
+
 /// RunRequest is the input shape used to build a planned run.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RunRequest {
@@ -29,6 +31,8 @@ pub struct RunRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PlannedRun {
     pub run: RunSpec,
+    #[serde(default)]
+    pub plan: Option<PlanSpec>,
     pub tasks: Vec<TaskSpec>,
     pub context: RunContext,
     pub signals: Signals,

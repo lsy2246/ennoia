@@ -6,6 +6,7 @@ use crate::agent_permissions::{
     ApprovalResolutionPayload, PermissionApprovalsQuery, PermissionEventsQuery,
     PermissionGrantRecord, PermissionGrantsQuery, PermissionPolicySummary,
 };
+use crate::realtime::RealtimeEvent;
 use crate::routes::actions::dispatch_hook_event;
 
 use super::*;
@@ -133,6 +134,16 @@ pub(super) async fn permission_approval_resolve(
         &approval.approval_id,
         serde_json::json!({ "approval": approval.clone() }),
     );
+    state
+        .realtime
+        .publish(RealtimeEvent::PermissionAgentChanged {
+            agent_id: approval.agent_id.clone(),
+        });
+    if let Some(conversation_id) = approval.scope.conversation_id.clone() {
+        state
+            .realtime
+            .publish(RealtimeEvent::PermissionConversationChanged { conversation_id });
+    }
     Ok(Json(approval))
 }
 
@@ -141,10 +152,20 @@ pub(super) async fn permission_grant_revoke(
     Extension(request): Extension<RequestContext>,
     Path(grant_id): Path<String>,
 ) -> ApiResult<PermissionGrantRecord> {
-    state
+    let grant = state
         .agent_permissions
         .revoke_grant(&grant_id)
         .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?
-        .map(Json)
-        .ok_or_else(|| scoped(ApiError::not_found("permission grant not found"), &request))
+        .ok_or_else(|| scoped(ApiError::not_found("permission grant not found"), &request))?;
+    state
+        .realtime
+        .publish(RealtimeEvent::PermissionAgentChanged {
+            agent_id: grant.agent_id.clone(),
+        });
+    if let Some(conversation_id) = grant.request.scope.conversation_id.clone() {
+        state
+            .realtime
+            .publish(RealtimeEvent::PermissionConversationChanged { conversation_id });
+    }
+    Ok(Json(grant))
 }

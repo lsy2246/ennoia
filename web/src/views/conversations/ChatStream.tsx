@@ -1,22 +1,28 @@
 import type {
   AgentProfile,
+  ExtensionRecordEntry,
   ExecutionRun,
   PermissionApprovalRecord,
   SkillConfig,
 } from "@ennoia/api-client";
-import { Fragment } from "react";
+import { apiUrl } from "@ennoia/api-client";
+import { Fragment, useEffect, useRef, useState } from "react";
+import { useUiHelpers, useUiStore } from "@/stores/ui";
+import { loadExtensionConversationRecordMount } from "@/views/extensions/registry";
 
 import { ChatContent } from "./ChatContent";
+import { classifyConversationFailure } from "./error-classification";
 import type {
   ChatEntryViewModel,
   ChatErrorEntry,
+  ChatRecordEntry,
   ChatStatusEntry,
   ChatSystemEntry,
   ChatToolResultEntry,
   ConversationMessageEntry,
 } from "./chat-types";
 
-type ChatAccessoryEntry = ChatErrorEntry | ChatStatusEntry | ChatSystemEntry | ChatToolResultEntry;
+type ChatAccessoryEntry = ChatErrorEntry | ChatStatusEntry | ChatSystemEntry | ChatToolResultEntry | ChatRecordEntry;
 
 type ChatGroup =
   | {
@@ -594,7 +600,14 @@ function resolveFailurePresentation(
   entry: ConversationMessageEntry,
   t: (key: string, fallback: string) => string,
 ) {
-  if (entry.failureCode === "sandbox_path_restricted") {
+  const failure = classifyConversationFailure(
+    entry.failureDetail?.trim() || entry.failureSummary?.trim() || entry.body,
+  );
+  const source = failure?.source ?? entry.failureSource;
+  const summary = failure?.summary ?? entry.failureSummary?.trim() ?? entry.body.trim();
+  const detail = failure?.detail ?? entry.failureDetail?.trim() ?? entry.body.trim();
+
+  if (source === "sandbox" || entry.failureCode === "sandbox_path_restricted") {
     return {
       kind: "sandbox" as const,
       title: t("web.conversations.sandbox_path_error_title", "沙盒路径已拦截"),
@@ -606,10 +619,76 @@ function resolveFailurePresentation(
     };
   }
 
-  const summary = entry.failureSummary?.trim() || entry.body.trim();
-  const detail = entry.failureDetail?.trim() || entry.body.trim();
+  if (source === "provider") {
+    return {
+      kind: "error" as const,
+      variant: "provider" as const,
+      eyebrow: t("web.conversations.upstream_error_title", "上游模型错误"),
+      title: t("web.conversations.upstream_error_title", "上游模型错误"),
+      summary,
+      detail,
+    };
+  }
+
+  if (source === "timeout") {
+    return {
+      kind: "error" as const,
+      variant: "system" as const,
+      eyebrow: t("web.conversations.timeout_error_title", "请求超时"),
+      title: t("web.conversations.timeout_error_title", "请求超时"),
+      summary,
+      detail,
+    };
+  }
+
+  if (source === "configuration") {
+    return {
+      kind: "error" as const,
+      variant: "system" as const,
+      eyebrow: t("web.conversations.configuration_error_title", "配置错误"),
+      title: t("web.conversations.configuration_error_title", "配置错误"),
+      summary,
+      detail,
+    };
+  }
+
+  if (source === "extension") {
+    return {
+      kind: "error" as const,
+      variant: "system" as const,
+      eyebrow: t("web.conversations.extension_error_title", "扩展运行错误"),
+      title: t("web.conversations.extension_error_title", "扩展运行错误"),
+      summary,
+      detail,
+    };
+  }
+
+  if (source === "system") {
+    return {
+      kind: "error" as const,
+      variant: "system" as const,
+      eyebrow: t("web.conversations.system_error_title", "系统错误"),
+      title: t("web.conversations.system_error_title", "系统错误"),
+      summary,
+      detail,
+    };
+  }
+
+  if (source === "permission") {
+    return {
+      kind: "error" as const,
+      variant: "permission" as const,
+      eyebrow: t("web.conversations.permission_error_title", "权限已拒绝"),
+      title: t("web.conversations.permission_error_title", "权限已拒绝"),
+      summary,
+      detail,
+    };
+  }
+
   return {
     kind: "error" as const,
+    variant: "default" as const,
+    eyebrow: t("web.conversations.error_title", "错误"),
     title: t("web.conversations.error_title", "错误"),
     summary,
     detail,
@@ -667,18 +746,34 @@ function renderToolResultBody(
   const errorDetailsRecord = asRecord(errorDetails);
   const decision = asNonEmptyString(errorDetailsRecord?.decision);
   const approvalId = asNonEmptyString(errorDetailsRecord?.approval_id);
+  const classifiedFailure = classifyConversationFailure(errorMessage);
   const approval = approvalId ? approvalsById.get(approvalId) : undefined;
-  const headline = approval?.status === "approved"
-    ? t("web.permissions.status_approved", "已批准")
-    : approval?.status === "rejected"
-      ? t("web.permissions.status_denied", "已拒绝")
-      : approval?.status === "expired"
-        ? t("web.permissions.status_expired", "已过期")
-        : decision === "ask"
-          ? t("web.conversations.permission_approval_title", "等待审批")
-          : decision === "deny"
-            ? t("web.conversations.permission_denied_title", "权限已拒绝")
-            : t("web.action.failed", "失败");
+  let headline = t("web.action.failed", "失败");
+  if (approval?.status === "approved") {
+    headline = t("web.permissions.status_approved", "已批准");
+  } else if (approval?.status === "rejected") {
+    headline = t("web.permissions.status_denied", "已拒绝");
+  } else if (approval?.status === "expired") {
+    headline = t("web.permissions.status_expired", "已过期");
+  } else if (classifiedFailure?.source === "provider") {
+    headline = t("web.conversations.upstream_error_title", "上游模型错误");
+  } else if (classifiedFailure?.source === "timeout") {
+    headline = t("web.conversations.timeout_error_title", "请求超时");
+  } else if (classifiedFailure?.source === "configuration") {
+    headline = t("web.conversations.configuration_error_title", "配置错误");
+  } else if (classifiedFailure?.source === "extension") {
+    headline = t("web.conversations.extension_error_title", "扩展运行错误");
+  } else if (classifiedFailure?.source === "system") {
+    headline = t("web.conversations.system_error_title", "系统错误");
+  } else if (classifiedFailure?.source === "sandbox") {
+    headline = t("web.conversations.sandbox_path_error_title", "沙盒路径已拦截");
+  } else if (classifiedFailure?.source === "permission") {
+    headline = t("web.conversations.permission_error_title", "权限已拒绝");
+  } else if (decision === "ask") {
+    headline = t("web.conversations.permission_approval_title", "等待审批");
+  } else if (decision === "deny") {
+    headline = t("web.conversations.permission_denied_title", "权限已拒绝");
+  }
   const detailsJson = errorDetails && JSON.stringify(errorDetails, null, 2) !== "{}"
     ? JSON.stringify(errorDetails, null, 2)
     : "";
@@ -721,6 +816,117 @@ function SandboxBlockedBubble({
           <code>/tmp</code>
         </div>
       </div>
+    </div>
+  );
+}
+
+function DefaultRecordBody({
+  record,
+  agents,
+  skills,
+}: {
+  record: ExtensionRecordEntry;
+  agents: AgentProfile[];
+  skills: SkillConfig[];
+}) {
+  const payload = (() => {
+    try {
+      return JSON.stringify(record.payload ?? null, null, 2);
+    } catch {
+      return String(record.payload ?? "");
+    }
+  })();
+  const body = record.summary?.trim() || record.title?.trim() || record.kind;
+
+  return (
+    <div className="message-record-fallback">
+      <ChatContent body={body} format="markdown" agents={agents} skills={skills} />
+      {payload && payload !== "null" ? (
+        <details className="message-accessory__detail">
+          <summary>Payload</summary>
+          <pre className="message-pre">
+            <code>{payload}</code>
+          </pre>
+        </details>
+      ) : null}
+    </div>
+  );
+}
+
+function ConversationRecordMount({
+  conversationId,
+  record,
+  agents,
+  skills,
+}: {
+  conversationId: string;
+  record: ExtensionRecordEntry;
+  agents: AgentProfile[];
+  skills: SkillConfig[];
+}) {
+  const helpers = useUiHelpers();
+  const themeId = useUiStore((state) => state.themeId);
+  const runtime = useUiStore((state) => state.runtime);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [mounted, setMounted] = useState(false);
+  const { formatDate, formatDateTime, formatTime, locale, t } = helpers;
+  const generation = runtime?.versions.registry ?? 0;
+
+  useEffect(() => {
+    let cancelled = false;
+    let cleanup: (() => void | Promise<void>) | undefined;
+    const container = containerRef.current;
+    if (!container) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    container.replaceChildren();
+    setMounted(false);
+    void loadExtensionConversationRecordMount(record.extension_id, generation, record.kind)
+      .then(async (mount) => {
+        if (cancelled || !container) {
+          return;
+        }
+        if (!mount) {
+          return;
+        }
+        const handle = await mount(container, {
+          kind: "conversation_record",
+          extensionId: record.extension_id,
+          mount: record.kind,
+          conversationId,
+          record,
+          helpers: {
+            locale,
+            themeId,
+            apiBaseUrl: apiUrl(""),
+            t,
+            formatDateTime,
+            formatDate,
+            formatTime,
+          },
+        });
+        if (!cancelled) {
+          setMounted(true);
+          cleanup = handle?.unmount;
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+      void cleanup?.();
+    };
+  }, [conversationId, formatDate, formatDateTime, formatTime, generation, locale, record, t, themeId]);
+
+  return (
+    <div className="message-record-shell">
+      <div ref={containerRef} className="message-record-shell__mount" />
+      {!mounted ? (
+        <DefaultRecordBody record={record} agents={agents} skills={skills} />
+      ) : null}
     </div>
   );
 }
@@ -811,12 +1017,14 @@ function AccessoryBlock({
   skills,
   approvalsById,
   t,
+  conversationId,
 }: {
   entry: ChatAccessoryEntry;
   agents: AgentProfile[];
   skills: SkillConfig[];
   approvalsById: Map<string, PermissionApprovalRecord>;
   t: (key: string, fallback: string) => string;
+  conversationId: string;
 }) {
   const absoluteAt = formatAbsoluteDateTime(entry.createdAt);
   const senderLabel = resolveSenderLabel({
@@ -884,6 +1092,28 @@ function AccessoryBlock({
     );
   }
 
+  if (entry.kind === "record") {
+    return (
+      <details className="message-accessory message-accessory--record" open>
+        <summary>
+          <span className="message-accessory__summary-main">
+            <strong>{entry.record.title?.trim() || entry.record.kind}</strong>
+            <span>{entry.record.summary?.trim() || entry.body}</span>
+          </span>
+          <small>{absoluteAt}</small>
+        </summary>
+        <div className="message-accessory__body">
+          <ConversationRecordMount
+            conversationId={conversationId}
+            record={entry.record}
+            agents={agents}
+            skills={skills}
+          />
+        </div>
+      </details>
+    );
+  }
+
   const toolPresentation = resolveToolResultPresentation(entry, approvalsById, t);
 
   return (
@@ -919,6 +1149,7 @@ function MessageGroup({
   onRetry,
   onRemove,
   showActions = true,
+  conversationId,
 }: {
   group: Extract<ChatGroup, { anchor: ConversationMessageEntry }>;
   agents: AgentProfile[];
@@ -933,6 +1164,7 @@ function MessageGroup({
   onRetry: (id: string) => void;
   onRemove: (id: string) => void;
   showActions?: boolean;
+  conversationId: string;
 }) {
   const { anchor } = group;
   const isOperator = anchor.role === "operator";
@@ -1009,9 +1241,10 @@ function MessageGroup({
               t={t}
             />
           ) : (
-            <div className="chat-error-bubble">
+            <div className={`chat-error-bubble chat-error-bubble--${failurePresentation.variant}`}>
               <div className="chat-error-bubble__header">
                 <div>
+                  <span className="chat-error-bubble__eyebrow">{failurePresentation.eyebrow}</span>
                   <strong>{failurePresentation.title}</strong>
                 </div>
               </div>
@@ -1057,6 +1290,7 @@ function MessageGroup({
                 skills={skills}
                 approvalsById={approvalsById}
                 t={t}
+                conversationId={conversationId}
               />
             ))}
           </div>
@@ -1123,6 +1357,7 @@ function StandaloneGroup({
   t,
   showThinking,
   showToolCalls,
+  conversationId,
 }: {
   group: Extract<ChatGroup, { anchor: null }>;
   agents: AgentProfile[];
@@ -1131,6 +1366,7 @@ function StandaloneGroup({
   t: (key: string, fallback: string) => string;
   showThinking: boolean;
   showToolCalls: boolean;
+  conversationId: string;
 }) {
   const visibleAccessories = group.accessories.filter((entry) => {
     if (entry.kind === "status") {
@@ -1168,6 +1404,7 @@ function StandaloneGroup({
             skills={skills}
             approvalsById={approvalsById}
             t={t}
+            conversationId={conversationId}
           />
         ))}
     </div>
@@ -1229,6 +1466,7 @@ function ProcessGroupList({
   onEditAndResend,
   onRetry,
   onRemove,
+  conversationId,
 }: {
   groups: ChatGroup[];
   agents: AgentProfile[];
@@ -1242,6 +1480,7 @@ function ProcessGroupList({
   onEditAndResend: (messageId: string) => void;
   onRetry: (id: string) => void;
   onRemove: (id: string) => void;
+  conversationId: string;
 }) {
   return (
     <>
@@ -1262,6 +1501,7 @@ function ProcessGroupList({
             onRetry={onRetry}
             onRemove={onRemove}
             showActions={false}
+            conversationId={conversationId}
           />
         ) : (
           <StandaloneGroup
@@ -1273,6 +1513,7 @@ function ProcessGroupList({
             t={t}
             showThinking={showThinking}
             showToolCalls={showToolCalls}
+            conversationId={conversationId}
           />
         ))}
     </>
@@ -1292,6 +1533,7 @@ function TurnProcessPanel({
   onEditAndResend,
   onRetry,
   onRemove,
+  conversationId,
 }: {
   turn: ChatTurn;
   agents: AgentProfile[];
@@ -1305,6 +1547,7 @@ function TurnProcessPanel({
   onEditAndResend: (messageId: string) => void;
   onRetry: (id: string) => void;
   onRemove: (id: string) => void;
+  conversationId: string;
 }) {
   if (!hasCollapsibleProcess(turn)) {
     return null;
@@ -1332,6 +1575,7 @@ function TurnProcessPanel({
           onEditAndResend={onEditAndResend}
           onRetry={onRetry}
           onRemove={onRemove}
+          conversationId={conversationId}
         />
       </div>
     </details>
@@ -1351,6 +1595,7 @@ function TurnBlock({
   onEditAndResend,
   onRetry,
   onRemove,
+  conversationId,
 }: {
   turn: ChatTurn;
   agents: AgentProfile[];
@@ -1364,6 +1609,7 @@ function TurnBlock({
   onEditAndResend: (messageId: string) => void;
   onRetry: (id: string) => void;
   onRemove: (id: string) => void;
+  conversationId: string;
 }) {
   return (
     <section className="chat-turn">
@@ -1380,6 +1626,7 @@ function TurnBlock({
         onEditAndResend={onEditAndResend}
         onRetry={onRetry}
         onRemove={onRemove}
+        conversationId={conversationId}
       />
       <div className="chat-turn__agent-side">
         {turn.finalReplyGroup ? (
@@ -1396,6 +1643,7 @@ function TurnBlock({
             onEditAndResend={onEditAndResend}
             onRetry={onRetry}
             onRemove={onRemove}
+            conversationId={conversationId}
           />
         ) : (
           <ProcessGroupList
@@ -1411,6 +1659,7 @@ function TurnBlock({
             onEditAndResend={onEditAndResend}
             onRetry={onRetry}
             onRemove={onRemove}
+            conversationId={conversationId}
           />
         )}
         {turn.finalReplyGroup ? (
@@ -1427,6 +1676,7 @@ function TurnBlock({
             onEditAndResend={onEditAndResend}
             onRetry={onRetry}
             onRemove={onRemove}
+            conversationId={conversationId}
           />
         ) : null}
       </div>
@@ -1448,6 +1698,7 @@ export function ChatStream({
   onEditAndResend,
   onRetry,
   onRemove,
+  conversationId,
 }: {
   entries: ChatEntryViewModel[];
   runs: ExecutionRun[];
@@ -1462,6 +1713,7 @@ export function ChatStream({
   onEditAndResend: (messageId: string) => void;
   onRetry: (id: string) => void;
   onRemove: (id: string) => void;
+  conversationId: string;
 }) {
   if (entries.length === 0) {
     return null;
@@ -1506,6 +1758,7 @@ export function ChatStream({
             onEditAndResend={onEditAndResend}
             onRetry={onRetry}
             onRemove={onRemove}
+            conversationId={conversationId}
           />
         ) : (
           <StandaloneGroup
@@ -1516,6 +1769,7 @@ export function ChatStream({
             t={t}
             showThinking={showThinking}
             showToolCalls={showToolCalls}
+            conversationId={conversationId}
           />
         )}
       </Fragment>

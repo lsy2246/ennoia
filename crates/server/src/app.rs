@@ -1,4 +1,5 @@
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -18,11 +19,13 @@ use tracing::info;
 
 use crate::agent_permissions::AgentPermissionStore;
 use crate::event_bus::EventBusStore;
+use crate::extension_runtime::ExtensionRuntimeStore;
 use crate::logs_store::{
     LogEntryWrite, LogTraceLinkWrite, LogTraceWrite, LogsStore, LOGS_COMPONENT_EVENT_BUS,
     LOGS_COMPONENT_EXTENSION_HOST, LOGS_COMPONENT_HOST,
 };
 use crate::middleware::RateLimitState;
+use crate::realtime::RealtimeHub;
 use crate::routes::{build_router, run_due_schedules_once};
 
 type AppError = Box<dyn std::error::Error + Send + Sync>;
@@ -48,6 +51,8 @@ pub struct AppState {
     pub logs: Arc<LogsStore>,
     pub event_bus: Arc<EventBusStore>,
     pub agent_permissions: Arc<AgentPermissionStore>,
+    pub extension_runtime_store: Arc<ExtensionRuntimeStore>,
+    pub realtime: Arc<RealtimeHub>,
     pub logs_guard: Option<Arc<LogsGuard>>,
 }
 
@@ -55,12 +60,18 @@ pub fn default_app_state() -> AppState {
     let bootstrap_paths = RuntimePaths::new(default_home_dir());
     let runtime_paths = Arc::new(bootstrap_paths.clone());
     runtime_paths.ensure_layout().expect("runtime layout");
-    let extensions =
-        ExtensionRuntime::bootstrap(extension_runtime_config(&runtime_paths)).expect("runtime");
+    let extensions = ExtensionRuntime::bootstrap(extension_runtime_config(
+        &runtime_paths,
+        &ServerConfig::default(),
+    ))
+    .expect("runtime");
     let logs = Arc::new(LogsStore::new(&runtime_paths).expect("logs"));
     let event_bus = Arc::new(EventBusStore::new(&runtime_paths).expect("event bus"));
     let agent_permissions =
         Arc::new(AgentPermissionStore::new(&runtime_paths).expect("agent permissions"));
+    let extension_runtime_store =
+        Arc::new(ExtensionRuntimeStore::new(&runtime_paths).expect("extension runtime store"));
+    let realtime = Arc::new(RealtimeHub::new());
 
     AppState {
         server_config: ServerConfig::default(),
@@ -77,6 +88,8 @@ pub fn default_app_state() -> AppState {
         logs,
         event_bus,
         agent_permissions,
+        extension_runtime_store,
+        realtime,
         logs_guard: None,
     }
 }
@@ -91,6 +104,7 @@ pub async fn bootstrap_app_state(home_dir: impl AsRef<Path>) -> Result<AppState,
     server_config = server_config.normalize();
     apply_server_log_env_overrides(&mut server_config.logging);
     let ui_config: UiConfig = read_toml_or_default(runtime_paths.ui_config_file())?;
+    let ui_config = ui_config.normalize();
     let logs_guard = Some(Arc::new(ennoia_logs::init(
         LOGS_TARGET,
         &server_config.logging.level,
@@ -102,10 +116,13 @@ pub async fn bootstrap_app_state(home_dir: impl AsRef<Path>) -> Result<AppState,
     let skills = load_skill_configs(&runtime_paths)?;
     let model_endpoints = load_model_endpoint_configs(&runtime_paths)?;
     let spaces = default_spaces();
-    let extensions = ExtensionRuntime::bootstrap(extension_runtime_config(&runtime_paths))?;
+    let extensions =
+        ExtensionRuntime::bootstrap(extension_runtime_config(&runtime_paths, &server_config))?;
     let logs = Arc::new(LogsStore::new(&runtime_paths)?);
     let event_bus = Arc::new(EventBusStore::new(&runtime_paths)?);
     let agent_permissions = Arc::new(AgentPermissionStore::new(&runtime_paths)?);
+    let extension_runtime_store = Arc::new(ExtensionRuntimeStore::new(&runtime_paths)?);
+    let realtime = Arc::new(RealtimeHub::new());
 
     Ok(AppState {
         server_config,
@@ -122,6 +139,8 @@ pub async fn bootstrap_app_state(home_dir: impl AsRef<Path>) -> Result<AppState,
         logs,
         event_bus,
         agent_permissions,
+        extension_runtime_store,
+        realtime,
         logs_guard,
     })
 }
@@ -144,31 +163,41 @@ pub async fn run_server(home_dir: impl AsRef<Path>) -> Result<(), AppError> {
     });
 
     let (cancel_tx, cancel_rx) = tokio::sync::watch::channel(false);
+    let extension_state = state.clone();
     let extensions = state.extensions.clone();
+    let realtime = state.realtime.clone();
     let refresh_log = state.logs.clone();
     let mut extension_cancel = cancel_rx.clone();
     tokio::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_secs(2));
+        let mut first_cycle = true;
         loop {
-            tokio::select! {
-                _ = interval.tick() => {
-                    if extensions.refresh_from_disk(EXTENSION_REFRESH_SUMMARY).is_err() {
-                        let _ = refresh_log.append_log(LogEntryWrite {
-                            event: "runtime.extension.refresh_failed".to_string(),
-                            level: "warn".to_string(),
-                            component: LOGS_COMPONENT_EXTENSION_HOST.to_string(),
-                            source_kind: "system".to_string(),
-                            source_id: None,
-                            message: "extension refresh failed".to_string(),
-                            attributes: serde_json::json!({}),
-                            created_at: None,
-                        });
-                    }
+            if !first_cycle
+                && !wait_for_background_tick(
+                    &extension_state,
+                    &mut extension_cancel,
+                    |background| background.extension_refresh_ms,
+                )
+                .await
+            {
+                break;
+            }
+            first_cycle = false;
+            match extensions.refresh_from_disk(EXTENSION_REFRESH_SUMMARY) {
+                Ok(Some(_)) => {
+                    realtime.publish(crate::realtime::RealtimeEvent::ExtensionsChanged);
                 }
-                changed = extension_cancel.changed() => {
-                    if changed.is_err() || *extension_cancel.borrow() {
-                        break;
-                    }
+                Ok(None) => {}
+                Err(_) => {
+                    let _ = refresh_log.append_log(LogEntryWrite {
+                        event: "runtime.extension.refresh_failed".to_string(),
+                        level: "warn".to_string(),
+                        component: LOGS_COMPONENT_EXTENSION_HOST.to_string(),
+                        source_kind: "system".to_string(),
+                        source_id: None,
+                        message: "extension refresh failed".to_string(),
+                        attributes: serde_json::json!({}),
+                        created_at: None,
+                    });
                 }
             }
         }
@@ -177,36 +206,36 @@ pub async fn run_server(home_dir: impl AsRef<Path>) -> Result<(), AppError> {
     let schedule_state = state.clone();
     let mut schedule_cancel = cancel_rx.clone();
     tokio::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_secs(1));
+        let mut first_cycle = true;
         loop {
-            tokio::select! {
-                _ = interval.tick() => {
-                    run_due_schedules_once(&schedule_state).await;
-                }
-                changed = schedule_cancel.changed() => {
-                    if changed.is_err() || *schedule_cancel.borrow() {
-                        break;
-                    }
-                }
+            if !first_cycle
+                && !wait_for_background_tick(&schedule_state, &mut schedule_cancel, |background| {
+                    background.schedule_tick_ms
+                })
+                .await
+            {
+                break;
             }
+            first_cycle = false;
+            run_due_schedules_once(&schedule_state).await;
         }
     });
 
     let event_state = state.clone();
     let mut event_cancel = cancel_rx.clone();
     tokio::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_secs(1));
+        let mut first_cycle = true;
         loop {
-            tokio::select! {
-                _ = interval.tick() => {
-                    drain_hook_deliveries_once(&event_state);
-                }
-                changed = event_cancel.changed() => {
-                    if changed.is_err() || *event_cancel.borrow() {
-                        break;
-                    }
-                }
+            if !first_cycle
+                && !wait_for_background_tick(&event_state, &mut event_cancel, |background| {
+                    background.event_delivery_tick_ms
+                })
+                .await
+            {
+                break;
             }
+            first_cycle = false;
+            drain_hook_deliveries_once(&event_state).await;
         }
     });
 
@@ -228,7 +257,22 @@ pub async fn run_server(home_dir: impl AsRef<Path>) -> Result<(), AppError> {
     Ok(())
 }
 
-fn drain_hook_deliveries_once(state: &AppState) {
+async fn wait_for_background_tick<F>(
+    state: &AppState,
+    cancel: &mut tokio::sync::watch::Receiver<bool>,
+    resolve_delay_ms: F,
+) -> bool
+where
+    F: Fn(&ennoia_kernel::BackgroundRuntimeConfig) -> u64,
+{
+    let delay_ms = resolve_delay_ms(&live_server_config(state).background);
+    tokio::select! {
+        _ = tokio::time::sleep(Duration::from_millis(delay_ms)) => true,
+        changed = cancel.changed() => !(changed.is_err() || *cancel.borrow()),
+    }
+}
+
+async fn drain_hook_deliveries_once(state: &AppState) {
     let pending = match state.event_bus.list_pending_deliveries(32) {
         Ok(items) => items,
         Err(error) => {
@@ -275,9 +319,7 @@ fn drain_hook_deliveries_once(state: &AppState) {
             }),
         };
         let response =
-            state
-                .extensions
-                .dispatch_rpc(&delivery.extension_id, &delivery.handler, request);
+            dispatch_extension_rpc(state, &delivery.extension_id, &delivery.handler, request).await;
 
         match response {
             Ok(response) if response.ok => {
@@ -350,6 +392,45 @@ fn drain_hook_deliveries_once(state: &AppState) {
                     &error.to_string(),
                 );
             }
+        }
+    }
+}
+
+pub async fn dispatch_extension_rpc(
+    state: &AppState,
+    extension_id: &str,
+    method: &str,
+    request: ennoia_kernel::ExtensionRpcRequest,
+) -> io::Result<ennoia_kernel::ExtensionRpcResponse> {
+    let timeout_ms = state
+        .extensions
+        .get(extension_id)
+        .map(|extension| extension.runtime.timeout_ms)
+        .unwrap_or_else(|| live_server_config(state).extension_runtime.timeout_ms);
+    let extensions = state.extensions.clone();
+    let extension_id_owned = extension_id.to_string();
+    let method_owned = method.to_string();
+    let response = tokio::time::timeout(
+        Duration::from_millis(timeout_ms),
+        tokio::task::spawn_blocking(move || {
+            extensions.dispatch_rpc(&extension_id_owned, &method_owned, request)
+        }),
+    )
+    .await;
+
+    match response {
+        Ok(Ok(result)) => result,
+        Ok(Err(join_error)) => Err(io::Error::other(format!(
+            "extension rpc task failed: {join_error}"
+        ))),
+        Err(_) => {
+            state.extensions.terminate_worker(extension_id);
+            Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                format!(
+                    "extension rpc timed out: extension={extension_id}, method={method}, timeout_ms={timeout_ms}"
+                ),
+            ))
         }
     }
 }
@@ -432,6 +513,20 @@ where
     }
     let contents = fs::read_to_string(path)?;
     Ok(toml::from_str(&contents)?)
+}
+
+pub fn live_server_config(state: &AppState) -> ServerConfig {
+    let mut config = read_toml_or_default(state.runtime_paths.server_config_file())
+        .unwrap_or_else(|_| state.server_config.clone())
+        .normalize();
+    apply_server_log_env_overrides(&mut config.logging);
+    config
+}
+
+pub fn live_ui_config(state: &AppState) -> UiConfig {
+    read_toml_or_default(state.runtime_paths.ui_config_file())
+        .unwrap_or_else(|_| state.ui_config.clone())
+        .normalize()
 }
 
 pub fn load_agent_configs(paths: &RuntimePaths) -> Result<Vec<AgentConfig>, AppError> {
@@ -788,11 +883,19 @@ fn normalize_agent_config(paths: &RuntimePaths, agent: &mut AgentConfig) {
     }
 }
 
-fn extension_runtime_config(paths: &RuntimePaths) -> ExtensionRuntimeConfig {
+fn extension_runtime_config(
+    paths: &RuntimePaths,
+    server_config: &ServerConfig,
+) -> ExtensionRuntimeConfig {
     ExtensionRuntimeConfig {
         registry_file: paths.extensions_registry_file(),
         logs_dir: paths.extensions_logs_dir(),
         home_dir: paths.home().to_path_buf(),
+        runtime_defaults: ennoia_kernel::ExtensionRuntimeSpec {
+            timeout_ms: server_config.extension_runtime.timeout_ms,
+            memory_limit_mb: server_config.extension_runtime.memory_limit_mb,
+            ..ennoia_kernel::ExtensionRuntimeSpec::default()
+        },
     }
 }
 

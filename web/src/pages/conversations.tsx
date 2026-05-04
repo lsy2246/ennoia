@@ -1,7 +1,8 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
 
 import {
   createConversation,
+  createConversationsStream,
   deleteConversation,
   listAgents,
   listConversations,
@@ -9,7 +10,6 @@ import {
   type ConversationSummary,
 } from "@ennoia/api-client";
 import { StatusNotice } from "@/components/StatusNotice";
-import { useConversationsStore } from "@/stores/conversations";
 import { useUiHelpers } from "@/stores/ui";
 import { useWorkbenchStore } from "@/stores/workbench";
 
@@ -23,9 +23,6 @@ export function Conversations() {
   const openView = useWorkbenchStore((state) => state.openView);
   const openViews = useWorkbenchStore((state) => state.openViews);
   const closeView = useWorkbenchStore((state) => state.closeView);
-  const conversationRevision = useConversationsStore((state) => state.revision);
-  const notifyChanged = useConversationsStore((state) => state.notifyChanged);
-  const notifyDeleted = useConversationsStore((state) => state.notifyDeleted);
   const [agents, setAgents] = useState<AgentProfile[]>([]);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [selectedAgentIds, setSelectedAgentIds] = useState<string[]>([]);
@@ -33,11 +30,7 @@ export function Conversations() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
-    void refresh();
-  }, [conversationRevision]);
-
-  async function refresh() {
+  const refresh = useCallback(async () => {
     setError(null);
     try {
       const [nextAgents, nextConversations] = await Promise.all([listAgents(), listConversations()]);
@@ -49,7 +42,27 @@ export function Conversations() {
     } catch (err) {
       setError(String(err));
     }
-  }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  useEffect(() => {
+    if (typeof EventSource === "undefined") {
+      return;
+    }
+    const stream = createConversationsStream();
+    const handleChanged = () => {
+      void refresh();
+    };
+    stream.addEventListener("conversations.changed", handleChanged);
+    stream.onerror = () => undefined;
+    return () => {
+      stream.removeEventListener("conversations.changed", handleChanged);
+      stream.close();
+    };
+  }, [refresh]);
 
   function toggleAgent(agentId: string) {
     setSelectedAgentIds((current) =>
@@ -74,14 +87,12 @@ export function Conversations() {
         agent_ids: selectedAgentIds,
       });
       setTitle("");
-      await refresh();
       openView({
         kind: "session",
         entityId: created.conversation.id,
         title: created.conversation.title,
         subtitle: created.conversation.topology,
       });
-      notifyChanged();
     } catch (err) {
       setError(String(err));
     } finally {
@@ -106,8 +117,6 @@ export function Conversations() {
           closeView(view.panelId);
         }
       }
-      notifyDeleted(id);
-      await refresh();
     } catch (err) {
       setError(String(err));
     } finally {

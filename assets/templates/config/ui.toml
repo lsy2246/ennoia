@@ -6,3 +6,8 @@ available_locales = ["zh-CN", "en-US"]
 default_display_name = "Operator"
 default_time_zone = "Asia/Shanghai"
 show_command_palette = true
+
+[notifications]
+success_auto_dismiss_ms = 3200
+error_auto_dismiss_ms = 6000
+pause_on_hover = true

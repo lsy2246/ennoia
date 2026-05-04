@@ -51,7 +51,7 @@ function extensionBuildConfig(extensionRoot, entry) {
     build: {
       target: "es2022",
       sourcemap: true,
-      emptyOutDir: true,
+      emptyOutDir: !watch,
       outDir: resolve(extensionRoot, "ui", "dist"),
       lib: {
         entry,

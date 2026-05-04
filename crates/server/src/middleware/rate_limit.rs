@@ -11,7 +11,7 @@ use axum::{
 use ennoia_contract::ApiError;
 use ennoia_logs::RequestContext;
 
-use crate::app::AppState;
+use crate::app::{live_server_config, AppState};
 use crate::middleware::path_matches;
 
 /// RateLimitState is a per-process, per-IP fixed-window counter.
@@ -54,7 +54,8 @@ pub async fn rate_limit_middleware(
     req: Request,
     next: Next,
 ) -> Response {
-    let cfg = &state.server_config.rate_limit;
+    let server_config = live_server_config(&state);
+    let cfg = &server_config.rate_limit;
     if !cfg.enabled {
         return next.run(req).await;
     }

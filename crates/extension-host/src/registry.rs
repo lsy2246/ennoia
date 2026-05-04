@@ -219,6 +219,7 @@ pub struct ExtensionRuntimeConfig {
     pub registry_file: PathBuf,
     pub logs_dir: PathBuf,
     pub home_dir: PathBuf,
+    pub runtime_defaults: ExtensionRuntimeSpec,
 }
 
 #[derive(Debug, Clone)]
@@ -303,6 +304,10 @@ impl ExtensionRuntime {
             )
         })?;
         self.worker_runtime.dispatch(&extension, method, request)
+    }
+
+    pub fn terminate_worker(&self, extension_id: &str) {
+        self.worker_runtime.terminate_extension(extension_id);
     }
 
     pub fn hooks_for_event(&self, event: &str) -> Vec<RegisteredHookContribution> {
@@ -674,7 +679,7 @@ fn build_snapshot(
 ) -> io::Result<ExtensionRuntimeSnapshot> {
     let mut resolved_by_id = BTreeMap::<String, ResolvedExtensionSnapshot>::new();
     for source in discover_sources(config)? {
-        let resolved = resolve_source(source, generation);
+        let resolved = resolve_source(source, generation, config);
         match resolved_by_id.get(&resolved.id) {
             Some(existing) if source_priority(existing) >= source_priority(&resolved) => {}
             _ => {
@@ -770,9 +775,13 @@ fn discover_sources(config: &ExtensionRuntimeConfig) -> io::Result<Vec<RuntimeSo
     Ok(ordered.into_values().collect())
 }
 
-fn resolve_source(source: RuntimeSource, generation: u64) -> ResolvedExtensionSnapshot {
+fn resolve_source(
+    source: RuntimeSource,
+    generation: u64,
+    config: &ExtensionRuntimeConfig,
+) -> ResolvedExtensionSnapshot {
     match read_manifest_from_root(&source.root) {
-        Ok(manifest) => resolve_manifest(source, manifest, generation),
+        Ok(manifest) => resolve_manifest(source, manifest, generation, config),
         Err(error) => failed_extension_snapshot(source, generation, error),
     }
 }
@@ -781,6 +790,7 @@ fn resolve_manifest(
     source: RuntimeSource,
     manifest: ExtensionManifest,
     generation: u64,
+    config: &ExtensionRuntimeConfig,
 ) -> ResolvedExtensionSnapshot {
     let install_dir = normalize_display_path(&source.root);
     let source_root = install_dir.clone();
@@ -843,6 +853,15 @@ fn resolve_manifest(
         ExtensionHealth::Ready
     };
 
+    let mut runtime = manifest.runtime.clone();
+    let baseline_defaults = ExtensionRuntimeSpec::default();
+    if runtime.timeout_ms == baseline_defaults.timeout_ms {
+        runtime.timeout_ms = config.runtime_defaults.timeout_ms;
+    }
+    if runtime.memory_limit_mb == baseline_defaults.memory_limit_mb {
+        runtime.memory_limit_mb = config.runtime_defaults.memory_limit_mb;
+    }
+
     ResolvedExtensionSnapshot {
         id: manifest.id.clone(),
         name: manifest.display_name(),
@@ -858,7 +877,7 @@ fn resolve_manifest(
         ui,
         worker,
         permissions: manifest.permissions,
-        runtime: manifest.runtime,
+        runtime,
         capabilities,
         resource_types,
         capability_rows,
@@ -1508,6 +1527,7 @@ mod tests {
             registry_file: root.join("config/extensions.toml"),
             logs_dir: root.join("logs"),
             home_dir: root.clone(),
+            runtime_defaults: ExtensionRuntimeSpec::default(),
         };
         write_registry_file(
             &config.registry_file,
@@ -1555,6 +1575,7 @@ mod tests {
             registry_file: root.join("config/extensions.toml"),
             logs_dir: root.join("logs"),
             home_dir: root.clone(),
+            runtime_defaults: ExtensionRuntimeSpec::default(),
         };
         let runtime = ExtensionRuntime::bootstrap(config).expect("bootstrap runtime");
         let attached = runtime

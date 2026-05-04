@@ -253,13 +253,6 @@ async fn internal_command(args: &[String]) -> Result<(), Box<dyn std::error::Err
     Ok(())
 }
 
-const HOST_RELOAD_DEBOUNCE: Duration = Duration::from_millis(800);
-const WATCH_POLL_INTERVAL: Duration = Duration::from_millis(250);
-const API_READY_TIMEOUT: Duration = Duration::from_secs(15);
-const API_HEALTHCHECK_INTERVAL: Duration = Duration::from_secs(3);
-const API_HEALTHCHECK_GRACE: Duration = Duration::from_secs(6);
-const API_PORT_RELEASE_TIMEOUT: Duration = Duration::from_secs(5);
-const DEV_CHILD_STARTUP_GRACE: Duration = Duration::from_millis(1500);
 const DEV_CHILD_LOG_TAIL_LINES: usize = 20;
 
 async fn run_dev_supervisor(
@@ -268,7 +261,11 @@ async fn run_dev_supervisor(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let repo_root = env::current_dir()?;
     let console_config = DevConsoleMirrorConfig::from_logging(&server_config.logging);
-    let mut dev_processes = DevProcessGroup::new(console_config.clone());
+    let mut dev_processes = DevProcessGroup::new(
+        console_config.clone(),
+        server_config.dev_supervisor.child_startup_grace_ms,
+    );
+    dev_processes.build_extension_ui_once(&repo_root, &paths)?;
     dev_processes.start_web(&paths, &server_config)?;
     dev_processes.start_extension_ui_watch(&repo_root, &paths)?;
     dev_processes.report_extension_ui_sources(&paths)?;
@@ -304,7 +301,9 @@ async fn run_dev_supervisor(
     );
     println!("Press Ctrl+C to stop API and Web processes.");
 
-    let mut ticker = tokio::time::interval(WATCH_POLL_INTERVAL);
+    let mut ticker = tokio::time::interval(Duration::from_millis(
+        server_config.dev_supervisor.watch_poll_ms,
+    ));
     let mut pending_host_change: Option<Instant> = None;
 
     loop {
@@ -327,7 +326,12 @@ async fn run_dev_supervisor(
                     pending_host_change = Some(Instant::now());
                 }
                 if pending_host_change
-                    .map(|changed_at| changed_at.elapsed() >= HOST_RELOAD_DEBOUNCE)
+                    .map(|changed_at| {
+                        changed_at.elapsed()
+                            >= Duration::from_millis(
+                                server_config.dev_supervisor.host_reload_debounce_ms,
+                            )
+                    })
                     .unwrap_or(false)
                 {
                     pending_host_change = None;
@@ -353,6 +357,7 @@ struct ApiDevProcess {
     current: Option<ApiChild>,
     next_health_probe_at: Instant,
     unhealthy_since: Option<Instant>,
+    unhealthy_reported: bool,
 }
 
 struct ApiChild {
@@ -368,6 +373,8 @@ impl ApiDevProcess {
         console_config: DevConsoleMirrorConfig,
     ) -> Self {
         let target_dir = repo_root.join("target").join("ennoia-dev-api");
+        let healthcheck_interval =
+            Duration::from_millis(server_config.dev_supervisor.api_healthcheck_interval_ms);
         Self {
             repo_root,
             paths,
@@ -375,8 +382,9 @@ impl ApiDevProcess {
             console_config,
             target_dir,
             current: None,
-            next_health_probe_at: Instant::now() + API_HEALTHCHECK_INTERVAL,
+            next_health_probe_at: Instant::now() + healthcheck_interval,
             unhealthy_since: None,
+            unhealthy_reported: false,
         }
     }
 
@@ -423,6 +431,7 @@ impl ApiDevProcess {
             }
             Err(error) => {
                 eprintln!("new API process failed; attempting rollback: {error}");
+                let _ = self.wait_for_api_port_release().await;
                 if let Some(previous_snapshot) = previous_snapshot {
                     self.current = Some(self.launch_snapshot(previous_snapshot).await?);
                     self.reset_health_watch();
@@ -438,7 +447,12 @@ impl ApiDevProcess {
         if now < self.next_health_probe_at {
             return Ok(());
         }
-        self.next_health_probe_at = now + API_HEALTHCHECK_INTERVAL;
+        self.next_health_probe_at = now
+            + Duration::from_millis(
+                self.server_config
+                    .dev_supervisor
+                    .api_healthcheck_interval_ms,
+            );
 
         let exited_snapshot = {
             let Some(child) = self.current.as_mut() else {
@@ -457,42 +471,35 @@ impl ApiDevProcess {
 
         let host = self.server_config.host.clone();
         let port = self.server_config.port;
-        let healthy = tokio::task::spawn_blocking(move || probe_api_health(&host, port))
-            .await
-            .unwrap_or(false);
+        let probe_timeout_ms = self.server_config.dev_supervisor.probe_socket_timeout_ms;
+        let healthy =
+            tokio::task::spawn_blocking(move || probe_api_health(&host, port, probe_timeout_ms))
+                .await
+                .unwrap_or(false);
         if healthy {
+            if self.unhealthy_reported {
+                println!("api health probe recovered");
+            }
             self.unhealthy_since = None;
+            self.unhealthy_reported = false;
             return Ok(());
         }
 
         let first_failed_at = *self.unhealthy_since.get_or_insert(now);
-        if now.duration_since(first_failed_at) < API_HEALTHCHECK_GRACE {
+        if now.duration_since(first_failed_at)
+            < Duration::from_millis(self.server_config.dev_supervisor.api_healthcheck_grace_ms)
+        {
             return Ok(());
         }
 
-        eprintln!(
-            "api health probe timed out for more than {}s; restarting current snapshot",
-            API_HEALTHCHECK_GRACE.as_secs()
-        );
-        self.restart_current_snapshot().await
-    }
-
-    async fn restart_current_snapshot(&mut self) -> io::Result<()> {
-        let Some(snapshot) = self
-            .current
-            .as_ref()
-            .map(|child| child.snapshot_path.clone())
-        else {
-            return Ok(());
-        };
-        if let Some(child) = self.current.as_mut() {
-            child.stop();
+        if !self.unhealthy_reported {
+            eprintln!(
+                "api health probe timed out for more than {}s; keeping current snapshot alive and retrying",
+                Duration::from_millis(self.server_config.dev_supervisor.api_healthcheck_grace_ms)
+                    .as_secs()
+            );
+            self.unhealthy_reported = true;
         }
-        self.current = None;
-        self.wait_for_api_port_release().await?;
-        self.current = Some(self.launch_snapshot(snapshot.clone()).await?);
-        self.reset_health_watch();
-        println!("restarted api from {}", snapshot.display());
         Ok(())
     }
 
@@ -506,7 +513,13 @@ impl ApiDevProcess {
 
     fn reset_health_watch(&mut self) {
         self.unhealthy_since = None;
-        self.next_health_probe_at = Instant::now() + API_HEALTHCHECK_INTERVAL;
+        self.unhealthy_reported = false;
+        self.next_health_probe_at = Instant::now()
+            + Duration::from_millis(
+                self.server_config
+                    .dev_supervisor
+                    .api_healthcheck_interval_ms,
+            );
     }
 
     async fn wait_for_api_port_release(&self) -> io::Result<()> {
@@ -517,14 +530,25 @@ impl ApiDevProcess {
             {
                 return Ok(());
             }
-            if started.elapsed() >= API_PORT_RELEASE_TIMEOUT {
+            if started.elapsed()
+                >= Duration::from_millis(
+                    self.server_config
+                        .dev_supervisor
+                        .api_port_release_timeout_ms,
+                )
+            {
                 return Err(io::Error::new(
                     io::ErrorKind::AddrInUse,
                     format!(
                         "API address {}:{} was not released within {}s",
                         self.server_config.host,
                         self.server_config.port,
-                        API_PORT_RELEASE_TIMEOUT.as_secs()
+                        Duration::from_millis(
+                            self.server_config
+                                .dev_supervisor
+                                .api_port_release_timeout_ms,
+                        )
+                        .as_secs()
                     ),
                 ));
             }
@@ -623,8 +647,16 @@ impl ApiDevProcess {
             &self.console_config,
         )?;
 
-        if let Err(error) = wait_for_api_ready(&self.server_config, API_READY_TIMEOUT).await {
+        if let Err(error) = wait_for_api_ready(&self.server_config).await {
             stop_child_process(&mut child);
+            let _ = wait_for_port_release(
+                &self.server_config.host,
+                self.server_config.port,
+                self.server_config
+                    .dev_supervisor
+                    .api_port_release_timeout_ms,
+            )
+            .await;
             return Err(error);
         }
 
@@ -659,6 +691,7 @@ impl Drop for ApiDevProcess {
 struct DevProcessGroup {
     children: Vec<DevChild>,
     console_config: DevConsoleMirrorConfig,
+    child_startup_grace_ms: u64,
 }
 
 struct DevChild {
@@ -668,10 +701,11 @@ struct DevChild {
 }
 
 impl DevProcessGroup {
-    fn new(console_config: DevConsoleMirrorConfig) -> Self {
+    fn new(console_config: DevConsoleMirrorConfig, child_startup_grace_ms: u64) -> Self {
         Self {
             children: Vec::new(),
             console_config,
+            child_startup_grace_ms,
         }
     }
 
@@ -717,6 +751,29 @@ impl DevProcessGroup {
         self.spawn("extension-ui", command, &log_path)
     }
 
+    fn build_extension_ui_once(&self, repo_root: &Path, paths: &RuntimePaths) -> io::Result<()> {
+        let script_path = repo_root.join("scripts").join("build-extension-ui.mjs");
+        if !script_path.exists() {
+            println!("Extension UI prebuild skipped: scripts/build-extension-ui.mjs not found");
+            return Ok(());
+        }
+        let log_path = paths.server_logs_dir().join("extension-ui-dev.log");
+        let status = run_logged_command(
+            "extension-ui-build",
+            shell_command("node scripts/build-extension-ui.mjs", repo_root),
+            &log_path,
+            &self.console_config,
+        )?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err(io::Error::other(format!(
+                "extension UI prebuild failed; log={}",
+                log_path.display()
+            )))
+        }
+    }
+
     fn report_extension_ui_sources(&mut self, paths: &RuntimePaths) -> io::Result<()> {
         for source_root in attached_dev_source_roots(paths)? {
             let Some(descriptor_path) = descriptor_path(&source_root) else {
@@ -748,7 +805,12 @@ impl DevProcessGroup {
             .spawn()?;
         attach_child_log_pumps(label, &mut child, log_path, &self.console_config)?;
         println!("started {label}; log={}", log_path.display());
-        ensure_dev_child_stable_start(label, &mut child, log_path, DEV_CHILD_STARTUP_GRACE)?;
+        ensure_dev_child_stable_start(
+            label,
+            &mut child,
+            log_path,
+            Duration::from_millis(self.child_startup_grace_ms),
+        )?;
         self.children.push(DevChild {
             label: label.to_string(),
             log_path: log_path.to_path_buf(),
@@ -1069,12 +1131,14 @@ fn is_host_reload_path(repo_root: &Path, path: &Path) -> bool {
     }
 }
 
-async fn wait_for_api_ready(config: &ServerConfig, timeout: Duration) -> io::Result<()> {
+async fn wait_for_api_ready(config: &ServerConfig) -> io::Result<()> {
+    let timeout = Duration::from_millis(config.dev_supervisor.api_ready_timeout_ms);
     let started = Instant::now();
     loop {
         let host = config.host.clone();
         let port = config.port;
-        if tokio::task::spawn_blocking(move || probe_api_health(&host, port))
+        let probe_timeout_ms = config.dev_supervisor.probe_socket_timeout_ms;
+        if tokio::task::spawn_blocking(move || probe_api_health(&host, port, probe_timeout_ms))
             .await
             .unwrap_or(false)
         {
@@ -1086,16 +1150,39 @@ async fn wait_for_api_ready(config: &ServerConfig, timeout: Duration) -> io::Res
                 format!("API did not become ready within {}s", timeout.as_secs()),
             ));
         }
-        tokio::time::sleep(Duration::from_millis(250)).await;
+        tokio::time::sleep(Duration::from_millis(
+            config.dev_supervisor.watch_poll_ms.max(100),
+        ))
+        .await;
     }
 }
 
-fn probe_api_health(host: &str, port: u16) -> bool {
+async fn wait_for_port_release(host: &str, port: u16, timeout_ms: u64) -> io::Result<()> {
+    let started = Instant::now();
+    loop {
+        if ensure_port_available(host, port, "API").is_ok() {
+            return Ok(());
+        }
+        if started.elapsed() >= Duration::from_millis(timeout_ms) {
+            return Err(io::Error::new(
+                io::ErrorKind::AddrInUse,
+                format!(
+                    "API address {host}:{port} was not released within {}s",
+                    Duration::from_millis(timeout_ms).as_secs()
+                ),
+            ));
+        }
+        tokio::time::sleep(Duration::from_millis(120)).await;
+    }
+}
+
+fn probe_api_health(host: &str, port: u16, timeout_ms: u64) -> bool {
     let Ok(mut stream) = TcpStream::connect((host, port)) else {
         return false;
     };
-    let _ = stream.set_read_timeout(Some(Duration::from_millis(800)));
-    let _ = stream.set_write_timeout(Some(Duration::from_millis(800)));
+    let timeout = Duration::from_millis(timeout_ms);
+    let _ = stream.set_read_timeout(Some(timeout));
+    let _ = stream.set_write_timeout(Some(timeout));
     if stream
         .write_all(format!("GET /health HTTP/1.1\r\nHost: {host}:{port}\r\n\r\n").as_bytes())
         .is_err()

@@ -21,6 +21,54 @@ enabled = true
 default_ms = 30000
 per_path_ms = {}
 
+[operations.command]
+default_timeout_ms = 30000
+min_timeout_ms = 1000
+max_timeout_ms = 120000
+
+[operations.net]
+default_timeout_ms = 30000
+min_timeout_ms = 1000
+max_timeout_ms = 120000
+
+[providers]
+default_request_timeout_ms = 90000
+
+[streams]
+conversation_poll_ms = 1000
+workflow_poll_ms = 1000
+logs_poll_ms = 1000
+
+[background]
+extension_refresh_ms = 2000
+schedule_tick_ms = 1000
+event_delivery_tick_ms = 1000
+
+[extension_runtime]
+timeout_ms = 30000
+memory_limit_mb = 128
+
+[schedules.command]
+default_timeout_ms = 120000
+min_timeout_ms = 1000
+max_timeout_ms = 3600000
+
+[schedules.retry]
+default_max_attempts = 1
+max_attempts_cap = 10
+default_backoff_seconds = 0
+max_backoff_seconds = 3600
+
+[dev_supervisor]
+host_reload_debounce_ms = 800
+watch_poll_ms = 250
+api_ready_timeout_ms = 30000
+api_healthcheck_interval_ms = 3000
+api_healthcheck_grace_ms = 6000
+api_port_release_timeout_ms = 20000
+child_startup_grace_ms = 1500
+probe_socket_timeout_ms = 1500
+
 [logging]
 enabled = true
 level = "info"

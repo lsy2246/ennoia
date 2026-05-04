@@ -4,6 +4,7 @@ import type {
   BootstrapState,
   RuntimeProfile,
   ServerConfig,
+  UiConfig,
   UiMessagesResponse,
   UiPreferenceRecord,
   UiRuntime,
@@ -81,6 +82,17 @@ export async function fetchServerConfig() {
 
 export async function saveServerConfig(payload: ServerConfig) {
   return fetchJson<ServerConfig>("/api/runtime/server-config", {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function fetchUiConfig() {
+  return fetchJson<UiConfig>("/api/runtime/ui-config");
+}
+
+export async function saveUiConfig(payload: UiConfig) {
+  return fetchJson<UiConfig>("/api/runtime/ui-config", {
     method: "PUT",
     body: JSON.stringify(payload),
   });

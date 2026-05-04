@@ -4,9 +4,11 @@ pub mod agent_permissions;
 pub mod app;
 pub mod event_bus;
 pub mod execution;
+pub mod extension_runtime;
 pub mod logs_store;
 pub mod middleware;
 pub mod pipeline;
+pub mod realtime;
 pub mod routes;
 pub mod runtime_bridge;
 

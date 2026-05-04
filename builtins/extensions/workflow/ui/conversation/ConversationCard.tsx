@@ -1,7 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ExtensionUiRenderHelpers } from "@ennoia/ui-sdk";
 
-import { getWorkflowRunDetail, listWorkflowRuns, type WorkflowRun, type WorkflowRunDetail } from "../page/api";
+import {
+  createWorkflowStream,
+  parseWorkflowStreamPayload,
+  type WorkflowRun,
+  type WorkflowRunDetail,
+  type WorkflowStreamSnapshot,
+} from "../page/api";
 
 type WorkflowConversationCardProps = {
   conversationId: string;
@@ -72,75 +78,69 @@ export default function WorkflowConversationCard({
   );
 
   useEffect(() => {
-    let cancelled = false;
-
-    async function refreshRuns(showLoading = true) {
-      if (showLoading) {
-        setLoadingRuns(true);
-      }
-      try {
-        const nextRuns = await listWorkflowRuns({
-          conversation_id: conversationId,
-          limit: 24,
-        });
-        if (cancelled) {
-          return;
-        }
-        setRuns(nextRuns);
-        setSelectedRunId((current) =>
-          current && nextRuns.some((item) => item.id === current) ? current : nextRuns[0]?.id ?? null);
-        setError(null);
-      } catch (nextError) {
-        if (!cancelled) {
-          setError(String(nextError));
-        }
-      } finally {
-        if (!cancelled && showLoading) {
-          setLoadingRuns(false);
-        }
-      }
-    }
-
-    void refreshRuns();
-    const timer = window.setInterval(() => {
-      void refreshRuns(false);
-    }, 8000);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [conversationId]);
-
-  useEffect(() => {
-    if (!selectedRun) {
-      setDetail(null);
+    if (typeof EventSource === "undefined") {
       return;
     }
-    let cancelled = false;
-    setLoadingDetail(true);
-    void getWorkflowRunDetail(selectedRun.id)
-      .then((nextDetail) => {
-        if (!cancelled) {
-          setDetail(nextDetail);
-          setError(null);
-        }
-      })
-      .catch((nextError) => {
-        if (!cancelled) {
-          setDetail(null);
-          setError(String(nextError));
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setLoadingDetail(false);
-        }
-      });
-    return () => {
-      cancelled = true;
+
+    setLoadingRuns(true);
+    setLoadingDetail(Boolean(selectedRunId));
+    const stream = createWorkflowStream({
+      conversation_id: conversationId,
+      run_id: selectedRunId ?? undefined,
+      limit: 24,
+    });
+
+    const applySnapshot = (snapshot: WorkflowStreamSnapshot) => {
+      setRuns(snapshot.runs);
+      setDetail(snapshot.detail ?? null);
+      setSelectedRunId((current) =>
+        current && snapshot.runs.some((item) => item.id === current) ? current : snapshot.runs[0]?.id ?? null);
+      setLoadingRuns(false);
+      setLoadingDetail(false);
+      setError(null);
     };
-  }, [selectedRun]);
+
+    const handleSnapshot = (event: Event) => {
+      if (!(event instanceof MessageEvent) || typeof event.data !== "string") {
+        return;
+      }
+      applySnapshot(parseWorkflowStreamPayload(event.data));
+    };
+
+    const handleErrorEvent = (event: Event) => {
+      if (!(event instanceof MessageEvent) || typeof event.data !== "string") {
+        return;
+      }
+      try {
+        const payload = JSON.parse(event.data) as { message?: string };
+        setError(payload.message?.trim() || t("ext.workflow.stream_error", "工作流实时同步暂时受阻，正在自动重试。"));
+      } catch {
+        setError(t("ext.workflow.stream_error", "工作流实时同步暂时受阻，正在自动重试。"));
+      } finally {
+        setLoadingRuns(false);
+        setLoadingDetail(false);
+      }
+    };
+
+    stream.addEventListener("workflow.snapshot", handleSnapshot);
+    stream.addEventListener("workflow.error", handleErrorEvent);
+    stream.onopen = () => {
+      setLoadingRuns(false);
+      setLoadingDetail(false);
+      setError(null);
+    };
+    stream.onerror = () => {
+      setLoadingRuns(false);
+      setLoadingDetail(false);
+      setError(t("ext.workflow.stream_error", "工作流实时同步暂时受阻，正在自动重试。"));
+    };
+
+    return () => {
+      stream.removeEventListener("workflow.snapshot", handleSnapshot);
+      stream.removeEventListener("workflow.error", handleErrorEvent);
+      stream.close();
+    };
+  }, [conversationId, selectedRunId, t]);
 
   if (!loadingRuns && runs.length === 0 && !error) {
     return null;

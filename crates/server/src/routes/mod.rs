@@ -35,8 +35,9 @@ use serde_json::Value as JsonValue;
 use uuid::Uuid;
 
 use crate::app::{
-    delete_config_from_dir, delete_skill_package, load_agent_configs, load_model_endpoint_configs,
-    load_skill_configs, upsert_skill_package, write_config_to_dir, AppState,
+    delete_config_from_dir, delete_skill_package, live_ui_config, load_agent_configs,
+    load_model_endpoint_configs, load_skill_configs, upsert_skill_package, write_config_to_dir,
+    AppState,
 };
 use crate::middleware::{
     body_limit_middleware, cors_middleware, logging_middleware, rate_limit_middleware,
@@ -53,6 +54,7 @@ mod permissions;
 mod resources;
 mod runtime;
 mod schedules;
+mod streams;
 
 use actions::*;
 use behavior::*;
@@ -64,6 +66,7 @@ use permissions::*;
 use resources::*;
 use runtime::*;
 use schedules::*;
+use streams::*;
 
 pub(crate) use schedules::run_due_schedules_once;
 
@@ -92,6 +95,10 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/api/runtime/server-config",
             get(runtime_server_config).put(runtime_server_config_put),
+        )
+        .route(
+            "/api/runtime/ui-config",
+            get(runtime_ui_config).put(runtime_ui_config_put),
         );
 
     Router::new()
@@ -110,6 +117,27 @@ pub fn build_router(state: AppState) -> Router {
         )
         .route("/api/extensions/runtime", get(extensions_runtime))
         .route("/api/extensions/events", get(extension_events))
+        .route(
+            "/api/extensions/state",
+            get(extension_state_list)
+                .post(extension_state_put)
+                .delete(extension_state_delete),
+        )
+        .route("/api/extensions/state/item", get(extension_state_get))
+        .route(
+            "/api/extensions/records",
+            get(extension_record_list)
+                .post(extension_record_append)
+                .put(extension_record_update),
+        )
+        .route(
+            "/api/extensions/records/{record_id}",
+            get(extension_record_get),
+        )
+        .route(
+            "/api/extensions/records/{record_id}/close",
+            post(extension_record_close),
+        )
         .route(
             "/api/extensions/events/stream",
             get(extension_events_stream),
@@ -180,6 +208,12 @@ pub fn build_router(state: AppState) -> Router {
             delete(extension_detach),
         )
         .route("/api/actions/{*action}", post(action_dispatch))
+        .route("/api/conversations/stream", get(conversations_stream))
+        .route(
+            "/api/conversations/{conversation_id}/stream",
+            get(conversation_stream),
+        )
+        .route("/api/workflow/stream", get(workflow_stream))
         .route("/api/agents", get(agents).post(agent_create))
         .route(
             "/api/agents/{agent_id}",
@@ -202,6 +236,7 @@ pub fn build_router(state: AppState) -> Router {
         )
         .route("/api/schedule-actions", get(schedule_actions))
         .route("/api/schedules", get(schedules_list).post(schedule_create))
+        .route("/api/schedules/stream", get(schedules_stream))
         .route(
             "/api/schedules/{schedule_id}",
             get(schedule_detail)
@@ -225,6 +260,7 @@ pub fn build_router(state: AppState) -> Router {
             get(permission_policy_summaries),
         )
         .route("/api/permissions/events", get(permission_events))
+        .route("/api/permissions/stream", get(permissions_stream))
         .route("/api/permissions/approvals", get(permission_approvals))
         .route("/api/permissions/grants", get(permission_grants))
         .route(
@@ -450,6 +486,7 @@ async fn health() -> Json<HealthResponse> {
 }
 
 async fn overview(State(state): State<AppState>) -> Json<OverviewResponse> {
+    let ui_config = live_ui_config(&state);
     let extension_snapshot = state.extensions.snapshot();
     let agent_count = load_agent_configs(&state.runtime_paths)
         .map(|items| items.len())
@@ -457,8 +494,8 @@ async fn overview(State(state): State<AppState>) -> Json<OverviewResponse> {
 
     Json(OverviewResponse {
         app_name: state.overview.app_name,
-        web_title: state.ui_config.web_title.clone(),
-        default_theme: state.ui_config.default_theme.clone(),
+        web_title: ui_config.web_title.clone(),
+        default_theme: ui_config.default_theme.clone(),
         modules: state.overview.modules,
         counts: serde_json::json!({
             "agents": agent_count,
@@ -469,6 +506,7 @@ async fn overview(State(state): State<AppState>) -> Json<OverviewResponse> {
 }
 
 async fn ui_runtime(State(state): State<AppState>) -> Json<UiRuntimeResponse> {
+    let ui_config = live_ui_config(&state);
     let snapshot = state.extensions.snapshot();
     let instance_preference = read_instance_ui_preference_from_disk(&state);
     let space_preferences = list_space_ui_preferences_from_disk(&state);
@@ -488,7 +526,7 @@ async fn ui_runtime(State(state): State<AppState>) -> Json<UiRuntimeResponse> {
     let preference_version = ui_preference_version_from_disk(&state);
 
     Json(UiRuntimeResponse {
-        ui_config: state.ui_config.clone(),
+        ui_config,
         registry: UiRuntimeRegistryResponse {
             resource_types: snapshot.resource_types,
             capabilities: snapshot.capabilities,
@@ -517,9 +555,10 @@ async fn ui_messages(
     State(state): State<AppState>,
     Query(query): Query<UiMessagesQuery>,
 ) -> Json<UiMessagesResponse> {
+    let ui_config = live_ui_config(&state);
     let locale = query
         .locale
-        .unwrap_or_else(|| state.ui_config.default_locale.clone());
+        .unwrap_or_else(|| ui_config.default_locale.clone());
     let namespaces = query
         .namespaces
         .as_deref()
@@ -534,18 +573,16 @@ async fn ui_messages(
             extension_message_bundle(
                 &snapshot.locales,
                 &locale,
-                &state.ui_config.fallback_locale,
+                &ui_config.fallback_locale,
                 namespace,
             )
-            .or_else(|| {
-                builtin_message_bundle(&locale, &state.ui_config.fallback_locale, namespace)
-            })
+            .or_else(|| builtin_message_bundle(&locale, &ui_config.fallback_locale, namespace))
         })
         .collect::<Vec<_>>();
 
     Json(UiMessagesResponse {
         locale,
-        fallback_locale: state.ui_config.fallback_locale.clone(),
+        fallback_locale: ui_config.fallback_locale.clone(),
         bundles,
     })
 }

@@ -29,8 +29,41 @@ export type WorkflowDecisionSnapshot = {
   at: string;
 };
 
+export type WorkflowPlanStep = {
+  id: string;
+  type: string;
+  goal: string;
+  tool?: string;
+  allowed_tools?: string[];
+  expected_outputs?: string[];
+  pass_if?: string[];
+  next_pass?: string;
+  next_fail?: string;
+  assigned_agent_id?: string;
+};
+
+export type WorkflowPlan = {
+  schema_version: string;
+  objective: string;
+  intent: string;
+  steps: WorkflowPlanStep[];
+  tool_plan?: Array<Record<string, unknown>>;
+  verify_contract?: Record<string, unknown> | null;
+  delegation?: Record<string, unknown> | null;
+  watchdog?: Record<string, unknown> | null;
+  model_strategy?: Record<string, unknown> | null;
+  meta?: {
+    plan_status?: string;
+    source?: string;
+    auto_generated?: boolean;
+    created_at?: string;
+    updated_at?: string;
+  };
+};
+
 export type WorkflowRunDetail = {
   run: ExecutionRun;
+  plan?: WorkflowPlan | null;
   tasks: ExecutionStep[];
   artifacts: RunOutput[];
   handoffs: Array<{

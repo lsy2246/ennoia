@@ -8,6 +8,7 @@ import {
 
 import {
   createAgent,
+  createPermissionEventsStream,
   deleteAgent,
   listAgents,
   listModelEndpoints,
@@ -160,6 +161,22 @@ export function AgentEditorView({
     }
     void refreshModelEndpoints();
   }, [modelEndpointsRevision, refreshModelEndpoints]);
+
+  useEffect(() => {
+    if (isNew || !form.id || typeof EventSource === "undefined") {
+      return;
+    }
+    const stream = createPermissionEventsStream(form.id);
+    const handleChanged = () => {
+      void hydratePermissions(form.id);
+    };
+    stream.addEventListener("permissions.changed", handleChanged);
+    stream.onerror = () => undefined;
+    return () => {
+      stream.removeEventListener("permissions.changed", handleChanged);
+      stream.close();
+    };
+  }, [form.id, hydratePermissions, isNew]);
 
   function toggleSkill(skillId: string) {
     setForm((current) => ({

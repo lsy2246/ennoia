@@ -11,6 +11,8 @@ use ennoia_kernel::{
     RunSpec, RunStage, RunStageEvent, Signals, StageTransition, TaskSpec,
 };
 
+use crate::planning::PlanSpec;
+
 // ========== StageMachine ==========
 
 /// StageMachine owns the rule that decides "given current stage and signals, what's next".
@@ -77,6 +79,7 @@ impl GatePipeline {
 /// RuntimeStore persists decision snapshots, stage transitions, and gate verdicts.
 #[async_trait]
 pub trait RuntimeStore: Send + Sync {
+    async fn save_run(&self, run: &RunSpec) -> Result<(), RuntimeError>;
     async fn save_run_bundle(
         &self,
         run: &RunSpec,
@@ -84,10 +87,17 @@ pub trait RuntimeStore: Send + Sync {
         artifacts: &[ArtifactSpec],
         handoffs: &[HandoffSpec],
     ) -> Result<(), RuntimeError>;
+    async fn save_plan(
+        &self,
+        run: &RunSpec,
+        plan: &PlanSpec,
+        default_agent_id: &str,
+    ) -> Result<Vec<TaskSpec>, RuntimeError>;
     async fn log_stage_event(&self, event: &RunStageEvent) -> Result<(), RuntimeError>;
     async fn log_decision(&self, snapshot: &DecisionSnapshot) -> Result<(), RuntimeError>;
     async fn log_gate_verdict(&self, record: &GateRecord) -> Result<(), RuntimeError>;
     async fn get_run(&self, run_id: &str) -> Result<Option<RunSpec>, RuntimeError>;
+    async fn get_plan(&self, run_id: &str) -> Result<Option<PlanSpec>, RuntimeError>;
     async fn list_tasks_for_run(&self, run_id: &str) -> Result<Vec<TaskSpec>, RuntimeError>;
     async fn list_artifacts_for_run(&self, run_id: &str)
         -> Result<Vec<ArtifactSpec>, RuntimeError>;

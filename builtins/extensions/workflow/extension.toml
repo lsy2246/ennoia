@@ -46,13 +46,6 @@ mount = "workflow.page"
 icon = "workflow"
 nav = { default_pinned = false, order = 35 }
 
-[[surfaces]]
-id = "workflow.conversation.card"
-kind = "conversation_card"
-title = { key = "ext.workflow.session.surface", fallback = "会话执行卡" }
-mount = "workflow.conversation.card"
-priority = 100
-
 [[entrypoints]]
 id = "workflow.workspace"
 label = { key = "ext.workflow.entry.workspace", fallback = "工作编排工作台" }

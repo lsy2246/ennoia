@@ -48,6 +48,14 @@ export type UiConfig = {
   default_display_name: string;
   default_time_zone: string;
   show_command_palette: boolean;
+  api: {
+    default_request_timeout_ms?: number | null;
+  };
+  notifications: {
+    success_auto_dismiss_ms: number;
+    error_auto_dismiss_ms: number;
+    pause_on_hover: boolean;
+  };
 };
 
 export type UiRuntime = {
@@ -126,6 +134,58 @@ export type ServerConfig = {
     default_ms: number;
     per_path_ms: Record<string, number>;
   };
+  operations: {
+    command: {
+      default_timeout_ms: number;
+      min_timeout_ms: number;
+      max_timeout_ms: number;
+    };
+    net: {
+      default_timeout_ms: number;
+      min_timeout_ms: number;
+      max_timeout_ms: number;
+    };
+  };
+  providers: {
+    default_request_timeout_ms: number;
+  };
+  streams: {
+    conversation_poll_ms: number;
+    workflow_poll_ms: number;
+    logs_poll_ms: number;
+  };
+  background: {
+    extension_refresh_ms: number;
+    schedule_tick_ms: number;
+    event_delivery_tick_ms: number;
+  };
+  extension_runtime: {
+    timeout_ms: number;
+    memory_limit_mb: number;
+  };
+  schedules: {
+    command: {
+      default_timeout_ms: number;
+      min_timeout_ms: number;
+      max_timeout_ms: number;
+    };
+    retry: {
+      default_max_attempts: number;
+      max_attempts_cap: number;
+      default_backoff_seconds: number;
+      max_backoff_seconds: number;
+    };
+  };
+  dev_supervisor: {
+    host_reload_debounce_ms: number;
+    watch_poll_ms: number;
+    api_ready_timeout_ms: number;
+    api_healthcheck_interval_ms: number;
+    api_healthcheck_grace_ms: number;
+    api_port_release_timeout_ms: number;
+    child_startup_grace_ms: number;
+    probe_socket_timeout_ms: number;
+  };
   logging: {
     enabled: boolean;
     level: string;
@@ -198,6 +258,7 @@ export type ModelEndpointConfig = {
   base_url: string;
   api_key: string;
   api_key_env: string;
+  request_timeout_ms?: number | null;
   default_model: string;
   available_models: ProviderModelDescriptor[];
   model_discovery: {
@@ -404,6 +465,7 @@ export type ConversationDetail = {
   lanes: ConversationLane[];
   branches: ConversationBranch[];
   messages: ConversationMessage[];
+  records: ExtensionRecordEntry[];
   runs: ExecutionRun[];
   tasks: ExecutionStep[];
   outputs: RunOutput[];
@@ -531,6 +593,36 @@ export type ExtensionDetail = {
 export type ExtensionSettingsResponse = {
   extension_id: string;
   values: Record<string, string | number | boolean>;
+};
+
+export type ExtensionStateEntry = {
+  extension_id: string;
+  namespace: string;
+  scope_type: string;
+  scope_id: string;
+  key: string;
+  value: unknown;
+  version: number;
+  updated_at: string;
+  expires_at?: string | null;
+};
+
+export type ExtensionRecordEntry = {
+  id: string;
+  extension_id: string;
+  namespace: string;
+  scope_type: string;
+  scope_id: string;
+  kind: string;
+  status?: string | null;
+  title?: string | null;
+  summary?: string | null;
+  payload: unknown;
+  related_message_id?: string | null;
+  parent_id?: string | null;
+  created_at: string;
+  updated_at: string;
+  closed_at?: string | null;
 };
 
 export type SystemLog = {

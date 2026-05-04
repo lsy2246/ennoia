@@ -2181,6 +2181,21 @@ label {
   box-shadow: var(--shadow-1);
 }
 
+.chat-error-bubble--provider {
+  border-color: color-mix(in srgb, var(--accent) 34%, transparent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-panel));
+}
+
+.chat-error-bubble--system {
+  border-color: color-mix(in srgb, var(--danger) 34%, transparent);
+  background: color-mix(in srgb, var(--danger) 7%, var(--bg-panel));
+}
+
+.chat-error-bubble--permission {
+  border-color: color-mix(in srgb, var(--warn) 38%, transparent);
+  background: color-mix(in srgb, var(--warn) 9%, var(--bg-panel));
+}
+
 .chat-error-bubble__header {
   display: flex;
   align-items: center;
@@ -2192,6 +2207,24 @@ label {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+.chat-error-bubble__eyebrow {
+  font-size: 11px;
+  line-height: 1;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.chat-error-bubble--provider .chat-error-bubble__eyebrow,
+.chat-error-bubble--provider .chat-error-bubble__summary {
+  color: color-mix(in srgb, var(--accent) 86%, var(--text));
+}
+
+.chat-error-bubble--permission .chat-error-bubble__eyebrow,
+.chat-error-bubble--permission .chat-error-bubble__summary {
+  color: color-mix(in srgb, var(--warn) 88%, var(--text));
 }
 
 .chat-error-bubble__summary {
@@ -6055,7 +6088,7 @@ label {
   height: 3px;
   width: 100%;
   transform-origin: left center;
-  animation: status-toast-progress var(--status-toast-duration, 3200ms) linear forwards;
+  animation: status-toast-progress var(--status-toast-duration) linear forwards;
   background: color-mix(in srgb, currentColor 32%, transparent);
   opacity: 0.7;
 }

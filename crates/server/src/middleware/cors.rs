@@ -6,12 +6,13 @@ use axum::{
     response::Response,
 };
 
-use crate::app::AppState;
+use crate::app::{live_server_config, AppState};
 
 /// cors_middleware injects CORS headers from the live CorsConfig and short-circuits
 /// OPTIONS preflight requests.
 pub async fn cors_middleware(State(state): State<AppState>, req: Request, next: Next) -> Response {
-    let cfg = &state.server_config.cors;
+    let server_config = live_server_config(&state);
+    let cfg = &server_config.cors;
     if !cfg.enabled {
         return next.run(req).await;
     }

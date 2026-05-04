@@ -9,6 +9,16 @@ CREATE TABLE IF NOT EXISTS runs (
 CREATE INDEX IF NOT EXISTS idx_workflow_runs_time
   ON runs(updated_at DESC);
 
+CREATE TABLE IF NOT EXISTS plans (
+  run_id TEXT PRIMARY KEY,
+  payload_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_workflow_plans_time
+  ON plans(updated_at DESC);
+
 CREATE TABLE IF NOT EXISTS tasks (
   id TEXT PRIMARY KEY,
   run_id TEXT NOT NULL,
@@ -80,3 +90,48 @@ CREATE TABLE IF NOT EXISTS gate_verdicts (
 
 CREATE INDEX IF NOT EXISTS idx_workflow_gate_verdicts_run
   ON gate_verdicts(run_id, at);
+
+CREATE TABLE IF NOT EXISTS drafts (
+  id TEXT PRIMARY KEY,
+  conversation_id TEXT NOT NULL,
+  agent_id TEXT NOT NULL,
+  status TEXT NOT NULL,
+  goal TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  source_message_id TEXT,
+  record_id TEXT,
+  latest_revision INTEGER NOT NULL DEFAULT 1,
+  payload_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_workflow_drafts_conversation_agent
+  ON drafts(conversation_id, agent_id, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS draft_revisions (
+  id TEXT PRIMARY KEY,
+  draft_id TEXT NOT NULL,
+  revision INTEGER NOT NULL,
+  goal TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  source_message_id TEXT,
+  payload_json TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_workflow_draft_revisions_draft
+  ON draft_revisions(draft_id, revision DESC);
+
+CREATE TABLE IF NOT EXISTS conversation_message_receipts (
+  conversation_id TEXT NOT NULL,
+  message_id TEXT NOT NULL,
+  agent_id TEXT NOT NULL,
+  status TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (conversation_id, message_id, agent_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_workflow_message_receipts_conversation
+  ON conversation_message_receipts(conversation_id, updated_at DESC);

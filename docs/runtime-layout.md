@@ -53,8 +53,8 @@
 
 ## 配置职责
 
-- `config/server.toml`：HTTP、中间件、前端开发地址、日志级别、开发模式控制台日志镜像和 bootstrap 状态等系统配置。
-- `config/ui.toml`：Web 标题、语言主题、默认操作者名、默认时区和本地化默认值。
+- `config/server.toml`：HTTP、中间件、内置工具超时、上游默认超时、流式轮询间隔、后台循环间隔、扩展运行时默认值、调度默认值、开发态 supervisor 参数和 bootstrap 状态等系统配置。
+- `config/ui.toml`：Web 标题、语言主题、默认操作者名、默认时区、本地化默认值、可选的前端 API 默认超时和通知默认行为。
 - `config/extensions.toml`：扩展注册表，记录来源、启用状态、路径和移除意图。
 - `config/skills.toml`：技能注册表，记录来源、启用状态、路径和移除意图。
 

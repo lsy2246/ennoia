@@ -7,7 +7,7 @@ use ennoia_logs::RequestContext;
 use std::time::Instant;
 
 use super::*;
-use crate::app::record_trace_span;
+use crate::app::{dispatch_extension_rpc, record_trace_span};
 use crate::logs_store::{LogEntryWrite, LogTraceWrite, LOGS_COMPONENT_BEHAVIOR};
 
 #[derive(Debug, Serialize)]
@@ -211,9 +211,8 @@ pub(super) async fn dispatch_worker_capability_request(
         }),
     };
 
-    let response = state
-        .extensions
-        .dispatch_rpc(extension_id, &routed_path, rpc_request)
+    let response = dispatch_extension_rpc(&state, extension_id, &routed_path, rpc_request)
+        .await
         .map_err(|error| scoped(ApiError::internal(error.to_string()), request))?;
 
     if response.ok {

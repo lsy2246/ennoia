@@ -6,6 +6,8 @@ use tokio::process::Command;
 use tokio::time::{sleep, timeout};
 
 use super::*;
+use crate::app::live_server_config;
+use crate::realtime::RealtimeEvent;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(super) struct ScheduleRecord {
@@ -113,7 +115,7 @@ pub(super) enum ScheduleDeliveryContentMode {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub(super) struct ScheduleRetryPolicy {
-    #[serde(default = "default_retry_attempts")]
+    #[serde(default)]
     pub max_attempts: u8,
     #[serde(default)]
     pub backoff_seconds: u64,
@@ -184,7 +186,8 @@ pub(super) async fn schedule_create(
     Extension(request): Extension<RequestContext>,
     Json(payload): Json<SchedulePayload>,
 ) -> ApiResult<ScheduleRecord> {
-    let payload = normalize_schedule_payload(payload);
+    let server_config = live_server_config(&state);
+    let payload = normalize_schedule_payload(payload, &server_config);
     ensure_schedule_payload(&state, &payload, &request)?;
     let _guard = state.schedule_lock.lock().await;
     let now = now_iso();
@@ -202,7 +205,7 @@ pub(super) async fn schedule_create(
         trigger: payload.trigger,
         executor: payload.executor,
         delivery: payload.delivery,
-        retry: normalize_retry_policy(payload.retry),
+        retry: normalize_retry_policy(payload.retry, &server_config),
         enabled: payload.enabled,
         last_run_at: None,
         last_status: None,
@@ -215,6 +218,7 @@ pub(super) async fn schedule_create(
     schedules.push(schedule.clone());
     write_schedules(&state, &schedules)
         .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?;
+    state.realtime.publish(RealtimeEvent::SchedulesChanged);
     Ok(Json(schedule))
 }
 
@@ -224,7 +228,8 @@ pub(super) async fn schedule_update(
     Path(schedule_id): Path<String>,
     Json(payload): Json<SchedulePayload>,
 ) -> ApiResult<ScheduleRecord> {
-    let payload = normalize_schedule_payload(payload);
+    let server_config = live_server_config(&state);
+    let payload = normalize_schedule_payload(payload, &server_config);
     ensure_schedule_payload(&state, &payload, &request)?;
     let _guard = state.schedule_lock.lock().await;
     let mut schedules = read_schedules(&state).unwrap_or_default();
@@ -237,7 +242,7 @@ pub(super) async fn schedule_update(
     schedule.trigger = payload.trigger;
     schedule.executor = payload.executor;
     schedule.delivery = payload.delivery;
-    schedule.retry = normalize_retry_policy(payload.retry);
+    schedule.retry = normalize_retry_policy(payload.retry, &server_config);
     schedule.enabled = payload.enabled;
     schedule.next_run_at = if schedule.enabled {
         next_run_at(&schedule.trigger, Utc::now()).map(|item| item.to_rfc3339())
@@ -248,6 +253,7 @@ pub(super) async fn schedule_update(
     let updated = schedule.clone();
     write_schedules(&state, &schedules)
         .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?;
+    state.realtime.publish(RealtimeEvent::SchedulesChanged);
     Ok(Json(updated))
 }
 
@@ -265,6 +271,7 @@ pub(super) async fn schedule_delete(
     }
     write_schedules(&state, &schedules)
         .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?;
+    state.realtime.publish(RealtimeEvent::SchedulesChanged);
     Ok(Json(serde_json::json!({ "deleted": true })))
 }
 
@@ -346,6 +353,7 @@ async fn set_schedule_enabled(
     let updated = schedule.clone();
     write_schedules(state, &schedules)
         .map_err(|error| scoped(ApiError::internal(error.to_string()), request))?;
+    state.realtime.publish(RealtimeEvent::SchedulesChanged);
     Ok(Json(updated))
 }
 
@@ -382,6 +390,7 @@ async fn run_schedule_by_id(
         write_schedules(state, &schedules)
             .map_err(|error| scoped(ApiError::internal(error.to_string()), request))?;
     }
+    state.realtime.publish(RealtimeEvent::SchedulesChanged);
 
     let response = serde_json::json!({
         "schedule_id": schedule_id,
@@ -430,7 +439,8 @@ async fn execute_schedule(
     request: &RequestContext,
 ) -> Result<ScheduleExecution, ApiError> {
     let started_at = now_iso();
-    let retry = normalize_retry_policy(schedule.retry.clone());
+    let server_config = live_server_config(state);
+    let retry = normalize_retry_policy(schedule.retry.clone(), &server_config);
     let delivery_target = resolve_delivery_target(state, &schedule.delivery, request).await?;
     let mut attempt = 0u8;
     let mut primary = ScheduleStepResult {
@@ -446,7 +456,7 @@ async fn execute_schedule(
             break;
         }
         if retry.backoff_seconds > 0 {
-            sleep(StdDuration::from_secs(retry.backoff_seconds.min(3_600))).await;
+            sleep(StdDuration::from_secs(retry.backoff_seconds)).await;
         }
     }
 
@@ -525,7 +535,7 @@ async fn run_schedule_executor(
 ) -> Result<ScheduleStepResult, ApiError> {
     match &schedule.executor {
         ScheduleExecutor::Command { command } => {
-            run_command_schedule_executor(command, request).await
+            run_command_schedule_executor(state, command, request).await
         }
         ScheduleExecutor::Agent { agent } => {
             run_agent_schedule_executor(state, schedule, agent, request).await
@@ -534,6 +544,7 @@ async fn run_schedule_executor(
 }
 
 async fn run_command_schedule_executor(
+    state: &AppState,
     command: &CommandScheduleExecutor,
     request: &RequestContext,
 ) -> Result<ScheduleStepResult, ApiError> {
@@ -544,10 +555,12 @@ async fn run_command_schedule_executor(
         ));
     }
 
+    let server_config = live_server_config(state);
+    let timeout_config = &server_config.schedules.command;
     let timeout_ms = command
         .timeout_ms
-        .unwrap_or(120_000)
-        .clamp(1_000, 3_600_000);
+        .unwrap_or(timeout_config.default_timeout_ms)
+        .clamp(timeout_config.min_timeout_ms, timeout_config.max_timeout_ms);
     let mut process = shell_command(&command.command);
     process.stdout(Stdio::piped()).stderr(Stdio::piped());
     if let Some(cwd) = command
@@ -811,24 +824,33 @@ fn truncate_output(value: &str) -> String {
     value.chars().take(MAX_OUTPUT_CHARS).collect()
 }
 
-fn normalize_schedule_payload(mut payload: SchedulePayload) -> SchedulePayload {
+fn normalize_schedule_payload(
+    mut payload: SchedulePayload,
+    server_config: &ServerConfig,
+) -> SchedulePayload {
     payload.name = normalize_optional_string(payload.name);
     payload.description = normalize_optional_string(payload.description);
     payload.delivery = normalize_delivery(payload.delivery);
-    payload.retry = normalize_retry_policy(payload.retry);
-    payload.executor = normalize_executor(payload.executor);
+    payload.retry = normalize_retry_policy(payload.retry, server_config);
+    payload.executor = normalize_executor(payload.executor, server_config);
     payload
 }
 
-fn normalize_executor(executor: ScheduleExecutor) -> ScheduleExecutor {
+fn normalize_executor(
+    executor: ScheduleExecutor,
+    server_config: &ServerConfig,
+) -> ScheduleExecutor {
     match executor {
         ScheduleExecutor::Command { command } => ScheduleExecutor::Command {
             command: CommandScheduleExecutor {
                 command: command.command.trim().to_string(),
                 cwd: normalize_optional_string(command.cwd),
-                timeout_ms: command
-                    .timeout_ms
-                    .map(|value| value.clamp(1_000, 3_600_000)),
+                timeout_ms: command.timeout_ms.map(|value| {
+                    value.clamp(
+                        server_config.schedules.command.min_timeout_ms,
+                        server_config.schedules.command.max_timeout_ms,
+                    )
+                }),
             },
         },
         ScheduleExecutor::Agent { agent } => ScheduleExecutor::Agent {
@@ -1097,12 +1119,20 @@ fn default_enabled() -> bool {
     true
 }
 
-fn default_retry_attempts() -> u8 {
-    1
-}
-
-fn normalize_retry_policy(mut retry: ScheduleRetryPolicy) -> ScheduleRetryPolicy {
-    retry.max_attempts = retry.max_attempts.clamp(1, 10);
-    retry.backoff_seconds = retry.backoff_seconds.min(3_600);
+fn normalize_retry_policy(
+    mut retry: ScheduleRetryPolicy,
+    server_config: &ServerConfig,
+) -> ScheduleRetryPolicy {
+    let defaults = &server_config.schedules.retry;
+    retry.max_attempts = if retry.max_attempts == 0 {
+        defaults.default_max_attempts
+    } else {
+        retry.max_attempts.clamp(1, defaults.max_attempts_cap)
+    };
+    retry.backoff_seconds = if retry.backoff_seconds == 0 {
+        defaults.default_backoff_seconds
+    } else {
+        retry.backoff_seconds.min(defaults.max_backoff_seconds)
+    };
     retry
 }

@@ -134,8 +134,17 @@ function normalizeModelEndpointConfig(config) {
     id: config.id || "openai",
     base_url: baseUrl,
     api_key: apiKey,
+    request_timeout_ms: normalizeTimeoutMs(config.request_timeout_ms),
     default_model: config.default_model || DEFAULT_MODEL,
   };
+}
+
+function normalizeTimeoutMs(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return null;
+  }
+  return Math.max(1000, Math.trunc(parsed));
 }
 
 function isLikelyEnvName(value) {
@@ -159,14 +168,17 @@ function normalizeModelDescriptor(value) {
 }
 
 async function openaiFetch(config, path, init) {
-  const response = await fetch(`${config.base_url}${path}`, {
+  const request = {
     ...init,
     headers: {
       authorization: `Bearer ${config.api_key}`,
       "content-type": "application/json",
       ...(init.headers ?? {}),
     },
-  });
+  };
+  const response = config.request_timeout_ms
+    ? await fetchWithTimeout(`${config.base_url}${path}`, config.request_timeout_ms, request)
+    : await fetch(`${config.base_url}${path}`, request);
 
   if (!response.ok) {
     const body = await response.text();
@@ -191,6 +203,38 @@ async function openaiFetch(config, path, init) {
   }
 
   return response;
+}
+
+async function fetchWithTimeout(url, timeoutMs, init) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => {
+    controller.abort(new DOMException("Request timed out", "TimeoutError"));
+  }, timeoutMs);
+  const sourceSignal = init?.signal;
+  const abortFromSource = () => controller.abort(sourceSignal?.reason);
+
+  if (sourceSignal?.aborted) {
+    abortFromSource();
+  } else if (sourceSignal) {
+    sourceSignal.addEventListener("abort", abortFromSource, { once: true });
+  }
+
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error instanceof DOMException && (error.name === "AbortError" || error.name === "TimeoutError")) {
+      throw new Error(`OpenAI request failed: timeout after ${timeoutMs}ms`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+    if (sourceSignal) {
+      sourceSignal.removeEventListener("abort", abortFromSource);
+    }
+  }
 }
 
 async function collectChatCompletionStream(response, fallbackModel) {

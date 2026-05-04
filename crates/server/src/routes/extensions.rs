@@ -1,14 +1,18 @@
 use super::*;
 use ennoia_kernel::{
-    ExtensionRpcRequest, ExtensionRpcResponse, ExtensionSettingFieldType, ExtensionSettingValue,
-    HookDispatchResponse, ModelEndpointConfig,
+    ExtensionRecordEntry, ExtensionRpcRequest, ExtensionRpcResponse, ExtensionSettingFieldType,
+    ExtensionSettingValue, ExtensionStateEntry, HookDispatchResponse, ModelEndpointConfig,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::PathBuf;
 use std::time::Instant;
 
-use crate::app::record_trace_span;
+use crate::app::{dispatch_extension_rpc, live_server_config, record_trace_span};
+use crate::extension_runtime::{
+    ExtensionRecordAppend, ExtensionRecordListQuery, ExtensionRecordUpdate, ExtensionStateGetQuery,
+    ExtensionStateListQuery, ExtensionStatePut,
+};
 use crate::logs_store::{LogEntryWrite, LogTraceWrite, LOGS_COMPONENT_EXTENSION_HOST};
 use crate::runtime_bridge::{
     authorize_provider_generate, invoke_provider_method, resolve_provider_entry_path,
@@ -108,24 +112,36 @@ pub(super) async fn extension_events(
 pub(super) async fn extension_events_stream(
     State(state): State<AppState>,
 ) -> Sse<impl futures_core::Stream<Item = Result<Event, std::convert::Infallible>>> {
+    let mut receiver = state.realtime.subscribe();
     let extensions = state.extensions.clone();
     let stream = async_stream::stream! {
-        let mut last_generation = extensions.snapshot().generation;
+        yield Ok(Event::default().event("extension.graph_swapped").data(extension_graph_swapped_payload(&extensions)));
         loop {
-            let snapshot = extensions.snapshot();
-            if snapshot.generation > last_generation {
-                last_generation = snapshot.generation;
-                let payload = serde_json::json!({
-                    "generation": snapshot.generation,
-                    "updated_at": snapshot.updated_at,
-                    "extensions": snapshot.extensions.len(),
-                });
-                yield Ok(Event::default().event("extension.graph_swapped").data(payload.to_string()));
+            match receiver.recv().await {
+                Ok(crate::realtime::RealtimeEvent::ExtensionsChanged) => {
+                    yield Ok(Event::default().event("extension.graph_swapped").data(extension_graph_swapped_payload(&extensions)));
+                }
+                Ok(_) => {}
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
+                    yield Ok(Event::default().event("extension.graph_swapped").data(extension_graph_swapped_payload(&extensions)));
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                    break;
+                }
             }
-            tokio::time::sleep(Duration::from_secs(1)).await;
         }
     };
     Sse::new(stream).keep_alive(KeepAlive::default())
+}
+
+fn extension_graph_swapped_payload(extensions: &ennoia_extension_host::ExtensionRuntime) -> String {
+    let snapshot = extensions.snapshot();
+    serde_json::json!({
+        "generation": snapshot.generation,
+        "updated_at": snapshot.updated_at,
+        "extensions": snapshot.extensions.len(),
+    })
+    .to_string()
 }
 
 pub(super) async fn extension_detail(
@@ -197,6 +213,118 @@ pub(super) async fn extension_diagnostics(
     Path(extension_id): Path<String>,
 ) -> Json<Vec<ExtensionDiagnostic>> {
     Json(state.extensions.diagnostics(&extension_id))
+}
+
+pub(super) async fn extension_state_get(
+    State(state): State<AppState>,
+    Extension(request): Extension<RequestContext>,
+    Query(query): Query<ExtensionStateGetQuery>,
+) -> ApiResult<ExtensionStateEntry> {
+    state
+        .extension_runtime_store
+        .get_state(&query)
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?
+        .map(Json)
+        .ok_or_else(|| scoped(ApiError::not_found("extension state not found"), &request))
+}
+
+pub(super) async fn extension_state_put(
+    State(state): State<AppState>,
+    Extension(request): Extension<RequestContext>,
+    Json(payload): Json<ExtensionStatePut>,
+) -> ApiResult<ExtensionStateEntry> {
+    state
+        .extension_runtime_store
+        .put_state(&payload)
+        .map(Json)
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))
+}
+
+pub(super) async fn extension_state_delete(
+    State(state): State<AppState>,
+    Extension(request): Extension<RequestContext>,
+    Query(query): Query<ExtensionStateGetQuery>,
+) -> ApiResult<JsonValue> {
+    let deleted = state
+        .extension_runtime_store
+        .delete_state(&query)
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?;
+    Ok(Json(serde_json::json!({ "deleted": deleted })))
+}
+
+pub(super) async fn extension_state_list(
+    State(state): State<AppState>,
+    Extension(request): Extension<RequestContext>,
+    Query(query): Query<ExtensionStateListQuery>,
+) -> ApiResult<Vec<ExtensionStateEntry>> {
+    state
+        .extension_runtime_store
+        .list_state(&query)
+        .map(Json)
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))
+}
+
+pub(super) async fn extension_record_append(
+    State(state): State<AppState>,
+    Extension(request): Extension<RequestContext>,
+    Json(payload): Json<ExtensionRecordAppend>,
+) -> ApiResult<ExtensionRecordEntry> {
+    state
+        .extension_runtime_store
+        .append_record(&payload)
+        .map(Json)
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))
+}
+
+pub(super) async fn extension_record_update(
+    State(state): State<AppState>,
+    Extension(request): Extension<RequestContext>,
+    Json(payload): Json<ExtensionRecordUpdate>,
+) -> ApiResult<ExtensionRecordEntry> {
+    state
+        .extension_runtime_store
+        .update_record(&payload)
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?
+        .map(Json)
+        .ok_or_else(|| scoped(ApiError::not_found("extension record not found"), &request))
+}
+
+pub(super) async fn extension_record_close(
+    State(state): State<AppState>,
+    Extension(request): Extension<RequestContext>,
+    Path(record_id): Path<String>,
+) -> ApiResult<ExtensionRecordEntry> {
+    state
+        .extension_runtime_store
+        .close_record(&record_id)
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?
+        .map(Json)
+        .ok_or_else(|| scoped(ApiError::not_found("extension record not found"), &request))
+}
+
+pub(super) async fn extension_record_get(
+    State(state): State<AppState>,
+    Extension(request): Extension<RequestContext>,
+    Path(record_id): Path<String>,
+) -> ApiResult<ExtensionRecordEntry> {
+    state
+        .extension_runtime_store
+        .get_record(&record_id)
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?
+        .map(Json)
+        .ok_or_else(|| scoped(ApiError::not_found("extension record not found"), &request))
+}
+
+pub(super) async fn extension_record_list(
+    State(state): State<AppState>,
+    Extension(request): Extension<RequestContext>,
+    Query(query): Query<ExtensionRecordListQuery>,
+) -> ApiResult<Vec<ExtensionRecordEntry>> {
+    state
+        .extension_runtime_store
+        .list_records(&query)
+        .map(Json)
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))
 }
 
 fn extension_settings_path(state: &AppState, extension_id: &str) -> PathBuf {
@@ -477,76 +605,76 @@ pub(super) async fn extension_rpc(
     let started = Instant::now();
     let started_at = now_iso();
     let ExtensionRpcRequest { params, context } = payload;
-    state
-        .extensions
-        .dispatch_rpc(
-            &extension_id,
-            &method,
-            ExtensionRpcRequest {
-                params,
-                context: serde_json::json!({
-                    "upstream": context,
-                    "trace": {
-                        "request_id": span_trace.request_id.clone(),
-                        "trace_id": span_trace.trace_id.clone(),
-                        "span_id": span_trace.span_id.clone(),
-                        "parent_span_id": span_trace.parent_span_id.clone(),
-                        "sampled": span_trace.sampled,
-                        "source": span_trace.source.clone(),
-                        "traceparent": span_trace.to_traceparent(),
-                    }
+    dispatch_extension_rpc(
+        &state,
+        &extension_id,
+        &method,
+        ExtensionRpcRequest {
+            params,
+            context: serde_json::json!({
+                "upstream": context,
+                "trace": {
+                    "request_id": span_trace.request_id.clone(),
+                    "trace_id": span_trace.trace_id.clone(),
+                    "span_id": span_trace.span_id.clone(),
+                    "parent_span_id": span_trace.parent_span_id.clone(),
+                    "sampled": span_trace.sampled,
+                    "source": span_trace.source.clone(),
+                    "traceparent": span_trace.to_traceparent(),
+                }
+            }),
+        },
+    )
+    .await
+    .map(|response| {
+        record_trace_span(
+            &state,
+            LogTraceWrite {
+                trace: span_trace.clone(),
+                kind: "extension_rpc".to_string(),
+                name: method.clone(),
+                component: LOGS_COMPONENT_EXTENSION_HOST.to_string(),
+                source_kind: "extension".to_string(),
+                source_id: Some(extension_id.clone()),
+                status: if response.ok {
+                    "ok".to_string()
+                } else {
+                    "error".to_string()
+                },
+                attributes: serde_json::json!({
+                    "extension_id": extension_id,
+                    "method": method,
                 }),
+                started_at: started_at.clone(),
+                ended_at: now_iso(),
+                duration_ms: started.elapsed().as_millis() as i64,
             },
-        )
-        .map(|response| {
-            record_trace_span(
-                &state,
-                LogTraceWrite {
-                    trace: span_trace.clone(),
-                    kind: "extension_rpc".to_string(),
-                    name: method.clone(),
-                    component: LOGS_COMPONENT_EXTENSION_HOST.to_string(),
-                    source_kind: "extension".to_string(),
-                    source_id: Some(extension_id.clone()),
-                    status: if response.ok {
-                        "ok".to_string()
-                    } else {
-                        "error".to_string()
-                    },
-                    attributes: serde_json::json!({
-                        "extension_id": extension_id,
-                        "method": method,
-                    }),
-                    started_at: started_at.clone(),
-                    ended_at: now_iso(),
-                    duration_ms: started.elapsed().as_millis() as i64,
-                },
-            );
-            Json(response)
-        })
-        .map_err(|error| {
-            record_trace_span(
-                &state,
-                LogTraceWrite {
-                    trace: span_trace,
-                    kind: "extension_rpc".to_string(),
-                    name: method.clone(),
-                    component: LOGS_COMPONENT_EXTENSION_HOST.to_string(),
-                    source_kind: "extension".to_string(),
-                    source_id: Some(extension_id.clone()),
-                    status: "error".to_string(),
-                    attributes: serde_json::json!({
-                        "extension_id": extension_id,
-                        "method": method,
-                        "error": error.to_string(),
-                    }),
-                    started_at,
-                    ended_at: now_iso(),
-                    duration_ms: started.elapsed().as_millis() as i64,
-                },
-            );
-            scoped(ApiError::internal(error.to_string()), &request)
-        })
+        );
+        Json(response)
+    })
+    .map_err(|error| {
+        record_trace_span(
+            &state,
+            LogTraceWrite {
+                trace: span_trace,
+                kind: "extension_rpc".to_string(),
+                name: method.clone(),
+                component: LOGS_COMPONENT_EXTENSION_HOST.to_string(),
+                source_kind: "extension".to_string(),
+                source_id: Some(extension_id.clone()),
+                status: "error".to_string(),
+                attributes: serde_json::json!({
+                    "extension_id": extension_id,
+                    "method": method,
+                    "error": error.to_string(),
+                }),
+                started_at,
+                ended_at: now_iso(),
+                duration_ms: started.elapsed().as_millis() as i64,
+            },
+        );
+        scoped(ApiError::internal(error.to_string()), &request)
+    })
 }
 
 pub(super) async fn extension_provider_invoke(
@@ -565,7 +693,7 @@ pub(super) async fn extension_provider_invoke(
             )
         },
     )?;
-    let model_endpoint: ModelEndpointConfig = serde_json::from_value(
+    let mut model_endpoint: ModelEndpointConfig = serde_json::from_value(
         payload
             .params
             .get("model_endpoint")
@@ -576,10 +704,23 @@ pub(super) async fn extension_provider_invoke(
         scoped(
             ApiError::bad_request(format!(
                 "provider invoke requires params.model_endpoint: {error}"
-            )),
+            ))
+            .with_details(serde_json::json!({
+                "source": "system",
+                "reason": "model_endpoint_payload_invalid",
+                "provider_kind": provider_kind,
+                "method": method,
+            })),
             &request,
         )
     })?;
+    if model_endpoint.request_timeout_ms.is_none() {
+        model_endpoint.request_timeout_ms = Some(
+            live_server_config(&state)
+                .providers
+                .default_request_timeout_ms,
+        );
+    }
     let permission_actor = provider_permission_actor_from_context(&payload.context);
     let grant_id = if method == "generate" {
         permission_actor
@@ -637,7 +778,15 @@ pub(super) async fn extension_provider_invoke(
             },
             Some(&request.trace_context()),
         );
-        scoped(ApiError::internal(error), &request)
+        scoped(
+            ApiError::internal(error).with_details(serde_json::json!({
+                "source": "provider",
+                "provider_kind": provider_kind,
+                "method": method,
+                "model_endpoint_id": model_endpoint.id,
+            })),
+            &request,
+        )
     })?;
 
     Ok(Json(response.get("result").cloned().unwrap_or(response)))
@@ -676,6 +825,9 @@ pub(super) async fn extension_reload(
         attributes: serde_json::json!({}),
         created_at: None,
     });
+    state
+        .realtime
+        .publish(crate::realtime::RealtimeEvent::ExtensionsChanged);
     Ok(Json(item))
 }
 
@@ -704,6 +856,9 @@ pub(super) async fn extension_restart(
         attributes: serde_json::json!({}),
         created_at: None,
     });
+    state
+        .realtime
+        .publish(crate::realtime::RealtimeEvent::ExtensionsChanged);
     Ok(Json(item))
 }
 
@@ -726,6 +881,9 @@ pub(super) async fn extension_attach(
         attributes: serde_json::json!({ "path": payload.path }),
         created_at: None,
     });
+    state
+        .realtime
+        .publish(crate::realtime::RealtimeEvent::ExtensionsChanged);
     Ok(Json(item))
 }
 
@@ -754,6 +912,9 @@ pub(super) async fn extension_detach(
         attributes: serde_json::json!({}),
         created_at: None,
     });
+    state
+        .realtime
+        .publish(crate::realtime::RealtimeEvent::ExtensionsChanged);
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -805,6 +966,9 @@ pub(super) async fn extension_enabled_put(
         attributes: serde_json::json!({ "enabled": payload.enabled }),
         created_at: None,
     });
+    state
+        .realtime
+        .publish(crate::realtime::RealtimeEvent::ExtensionsChanged);
     Ok(Json(updated))
 }
 
@@ -832,9 +996,8 @@ pub(crate) async fn dispatch_extension_hooks(
                 "handler": handler,
             }),
         };
-        let Ok(response) = state
-            .extensions
-            .dispatch_rpc(&hook.extension_id, &handler, request)
+        let Ok(response) =
+            dispatch_extension_rpc(state, &hook.extension_id, &handler, request).await
         else {
             continue;
         };

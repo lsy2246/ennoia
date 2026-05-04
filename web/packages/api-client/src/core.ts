@@ -2,11 +2,25 @@ import type { ApiErrorBody } from "@ennoia/contract";
 import { createLogger } from "@ennoia/logs";
 
 const logger = createLogger("api-client");
-const DEFAULT_REQUEST_TIMEOUT_MS = 8000;
+let runtimeDefaultRequestTimeoutMs = readGlobalRequestTimeoutMs();
+
+export type FetchJsonInit = RequestInit & {
+  timeoutMs?: number;
+};
 
 export function getApiBaseUrl() {
   const runtimeBaseUrl = (globalThis as { __ENNOIA_API_BASE_URL__?: string }).__ENNOIA_API_BASE_URL__;
-  return runtimeBaseUrl ?? import.meta.env.VITE_ENNOIA_API_URL ?? globalThis.location?.origin ?? "";
+  if (runtimeBaseUrl) {
+    return runtimeBaseUrl;
+  }
+  if (import.meta.env.DEV && globalThis.location?.origin) {
+    return globalThis.location.origin;
+  }
+  return import.meta.env.VITE_ENNOIA_API_URL ?? globalThis.location?.origin ?? "";
+}
+
+export function setApiClientRequestTimeout(timeoutMs: number | null | undefined) {
+  runtimeDefaultRequestTimeoutMs = normalizeTimeoutMs(timeoutMs) ?? readGlobalRequestTimeoutMs();
 }
 
 export function apiUrl(path: string) {
@@ -21,6 +35,8 @@ export class ApiError extends Error {
     message: string,
     public requestId?: string | null,
     public traceId?: string | null,
+    public details?: ApiErrorBody["details"],
+    public retryable?: boolean,
   ) {
     super(message);
   }
@@ -30,14 +46,15 @@ export class ApiError extends Error {
   }
 }
 
-export async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
+export async function fetchJson<T>(path: string, init?: FetchJsonInit): Promise<T> {
   const headers = new Headers(init?.headers);
   const method = (init?.method ?? "GET").toUpperCase();
   if (shouldAttachJsonContentType(method, init?.body, headers)) {
     headers.set("content-type", "application/json");
   }
 
-  const { signal, cleanup } = withRequestTimeout(init?.signal, DEFAULT_REQUEST_TIMEOUT_MS);
+  const timeoutMs = init?.timeoutMs ?? runtimeDefaultRequestTimeoutMs;
+  const { signal, cleanup } = withRequestTimeout(init?.signal, timeoutMs);
 
   let response: Response;
   try {
@@ -48,8 +65,12 @@ export async function fetchJson<T>(path: string, init?: RequestInit): Promise<T>
     });
   } catch (error) {
     cleanup();
-    if (isAbortError(error)) {
-      throw new ApiError(408, "TIMEOUT", `request timeout after ${DEFAULT_REQUEST_TIMEOUT_MS}ms`);
+    if (isAbortError(error) && timeoutMs != null) {
+      throw new ApiError(
+        408,
+        "TIMEOUT",
+        `request timeout: ${method} ${path} after ${timeoutMs}ms`,
+      );
     }
     throw error;
   }
@@ -77,6 +98,8 @@ export async function fetchJson<T>(path: string, init?: RequestInit): Promise<T>
         parsed.message || `request failed: ${response.status}`,
         parsed.request_id,
         parsed.trace_id,
+        parsed.details,
+        parsed.retryable,
       );
     }
     throw new ApiError(response.status, "INTERNAL", body || `request failed: ${response.status}`);
@@ -89,9 +112,25 @@ export async function fetchJson<T>(path: string, init?: RequestInit): Promise<T>
   return (await response.json()) as T;
 }
 
-function withRequestTimeout(sourceSignal: AbortSignal | null | undefined, timeoutMs: number) {
+function readGlobalRequestTimeoutMs() {
+  const globalTimeout = (globalThis as { __ENNOIA_API_REQUEST_TIMEOUT_MS__?: unknown })
+    .__ENNOIA_API_REQUEST_TIMEOUT_MS__;
+  return globalTimeout == null ? null : normalizeTimeoutMs(globalTimeout);
+}
+
+function normalizeTimeoutMs(value: unknown) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return null;
+  }
+  return Math.max(1000, Math.trunc(parsed));
+}
+
+function withRequestTimeout(sourceSignal: AbortSignal | null | undefined, timeoutMs: number | null) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(new DOMException("Request timed out", "TimeoutError")), timeoutMs);
+  const timeout = timeoutMs == null
+    ? null
+    : setTimeout(() => controller.abort(new DOMException("Request timed out", "TimeoutError")), timeoutMs);
   const abortFromSource = () => controller.abort(sourceSignal?.reason);
 
   if (sourceSignal?.aborted) {
@@ -103,7 +142,9 @@ function withRequestTimeout(sourceSignal: AbortSignal | null | undefined, timeou
   return {
     signal: controller.signal,
     cleanup: () => {
-      clearTimeout(timeout);
+      if (timeout != null) {
+        clearTimeout(timeout);
+      }
       if (sourceSignal) {
         sourceSignal.removeEventListener("abort", abortFromSource);
       }
@@ -143,7 +184,7 @@ function shouldAttachJsonContentType(
   return true;
 }
 
-export function toQueryString(input: Record<string, string | number | null | undefined>) {
+export function toQueryString(input: Record<string, string | number | boolean | null | undefined>) {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(input)) {
     if (value === undefined || value === null || value === "") {

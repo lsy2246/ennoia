@@ -83,6 +83,9 @@ export type UiBootstrapCache = {
   theme_id?: string;
   time_zone?: string;
   date_style?: string;
+  success_auto_dismiss_ms?: number;
+  error_auto_dismiss_ms?: number;
+  pause_notifications_on_hover?: boolean;
   version?: number;
   updated_at?: string;
 };

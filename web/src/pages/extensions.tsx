@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
+  createExtensionEventsStream,
   getExtension,
   getExtensionLogs,
   getExtensionSettings,
@@ -143,6 +144,11 @@ export function Extensions() {
   const [busy, setBusy] = useState(false);
   const [actionBusy, setActionBusy] = useState<"enable" | "disable" | "reload" | "restart" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const selectedIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    selectedIdRef.current = selected?.id ?? null;
+  }, [selected?.id]);
 
   const loadExtensionDetail = useCallback(async (extensionId: string) => {
     const requestId = ++detailRequestRef.current;
@@ -205,6 +211,22 @@ export function Extensions() {
 
   useEffect(() => {
     void refresh();
+  }, [refresh]);
+
+  useEffect(() => {
+    if (typeof EventSource === "undefined") {
+      return;
+    }
+    const stream = createExtensionEventsStream();
+    const handleChanged = () => {
+      void refresh(selectedIdRef.current);
+    };
+    stream.addEventListener("extension.graph_swapped", handleChanged);
+    stream.onerror = () => undefined;
+    return () => {
+      stream.removeEventListener("extension.graph_swapped", handleChanged);
+      stream.close();
+    };
   }, [refresh]);
 
   async function selectExtension(extension: ExtensionRuntimeState) {

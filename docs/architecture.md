@@ -26,12 +26,13 @@ Web
 ## 核心边界
 
 - `Kernel`：定义系统级配置、扩展 manifest、共享运行时模型和能力声明结构。
-- `config/server.toml`：系统级唯一宿主配置入口，统一承载 API 绑定地址、前端开发地址和宿主中间件配置；CLI 与 Web dev 只消费这份配置，不再各自维护地址常量。
+- `config/server.toml`：系统级唯一宿主配置入口，统一承载 API 绑定地址、前端开发地址、宿主中间件配置、内置工具默认值、provider 默认值、流式轮询节奏、后台循环节奏、调度默认值和开发态 supervisor 参数；CLI、Server、Worker 桥接和 Web dev 都只消费这份配置，不再各自维护运行时常量。
 - `Contract`：定义跨边界 DTO；当前保留 `behavior` 与 `memory` 兼容协议响应结构。
 - `Paths`：统一解析运行目录，所有运行时文件位置都通过 `RuntimePaths` 推导。
 - `Extension Host`：负责扩展扫描、attach / detach、reload / restart、诊断、Worker 解析和 Worker RPC 分发；Worker 可以是 Wasm，也可以是进程型 stdio RPC。
 - `Server`：负责 HTTP API、定时调度、Worker RPC 路由、日志、事件总线和系统内置组件装配。
 - `Pipeline Runtime`：负责稳定 action 的规则收集、阶段执行和结果收敛。它不拥有 conversation、memory、workflow 的主数据。
+- `Extension Runtime Store`：提供扩展可复用的宿主级轻量状态与记录原语，只负责通用 state/record 持久化，不承担 workflow draft、memory graph、conversation message 等业务语义。
 
 ## Agent 权限裁决
 
@@ -74,11 +75,13 @@ Web
 - `conversation` 不直接调用 `memory` 或 `workflow`；它只维护会话事实并发出事实事件。
 - `memory` 不直接读取 `conversation.db`，也不再镜像保存整段会话消息或 shadow session state。
 - `workflow` 不假设自己一定挂在 conversation 上；会话事实是否进入 workflow、何时回写 conversation / memory，由 workflow 扩展自己订阅 `conversation.message.created`、`permission.approval.resolved` 等事件后决定。
+- 宿主允许扩展通过通用 `extension.state` / `extension.record` 原语保存跨刷新轻量状态和会话可视记录；这些条目只表达扩展自己的运行事实，不提升为系统业务模型。
 - Conversation、Message、Memory Graph、Review 等业务数据组织属于扩展私有责任，不属于日志主数据。
 
 ## 运行与定时边界
 
 - `workflow` 是一个内置扩展实现，声明 run/task/artifact 接口，并承接定时器里的 Agent 执行。
+- `workflow` 自己负责生成结构化执行计划；`plan` 是执行真相源，`task` 只是从 `plan.steps` 派生出来的展示与执行投影视图，系统核心不再硬编码猜测任务清单。
 - `workflow` 相关读取与执行统一通过 `run.*`、`task.*`、`artifact.*` 动作键或扩展 RPC 暴露，不再保留 `/api/runs/*` 核心包装入口。
 - 系统 scheduler 只负责保存计划、计算到期、串行触发、失败重试和记录最近运行历史。
 - 定时器支持两类执行方式：
@@ -140,6 +143,7 @@ Web
 - Provider 模型发现也不再挂在 `/api/model-endpoints/*/models` 这类产品路由下，而是走宿主提供的通用 provider runtime 代理。
 - 扩展 UI、语言、主题和业务配置归扩展自身所有；Web 主壳只按 runtime snapshot 发现并挂载，不在系统前端包中静态注册某个扩展页面或文案。
 - 扩展 UI 通过独立 ESM bundle 动态加载；主壳只导入 `/api/extensions/{extension_id}/ui/module` 暴露的模块包装器，再按 mount id 调用扩展自己的 `mount/unmount`。
+- 会话时间线同样只提供通用 record mount 槽位；主壳不再硬编码 workflow 专属卡片，任何扩展都可以把自己的 record 以会话附件或独立块渲染出来。
 - 扩展主题通过 `ennoia.theme` 与主壳对接；主壳只消费稳定语义 token 和 dockview token，不把内部 class 结构暴露给扩展。
 - 扩展默认不进入会话目录；只有显式声明 `conversation.inject` 时，宿主才会把该扩展作为会话可见目录项暴露给模型。进入会话时只注入扩展自身的 `description`、受限资源/能力目录与 `docs` 入口，不自动注入 `docs` 正文。
 - 如需参与 Agent 权限裁决，扩展应在 capability metadata 中额外声明 `permission`，例如 `action`、`target_kind`、`scope_kind`；没有声明 `permission` 的 capability 不会自动进入 Agent 权限系统。
@@ -160,6 +164,7 @@ Web
 - 系统级日志：`~/.ennoia/data/system/sqlite/logs.db`
 - 系统级事件总线：`~/.ennoia/data/system/sqlite/events.db`
 - Agent 权限事件与审批：`~/.ennoia/data/system/sqlite/permissions.db`
+- 扩展通用运行态 state/record：`~/.ennoia/data/system/sqlite/extensions.db`
 - Agent 基础配置、权限配置与执行环境配置：`~/.ennoia/agents/{agent_id}/agent.toml`
 - 系统定时计划：`~/.ennoia/data/system/schedules.json`
 - 扩展私有数据：`~/.ennoia/data/extensions/{extension_id}/`

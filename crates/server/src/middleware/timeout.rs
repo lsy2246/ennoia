@@ -9,7 +9,7 @@ use axum::{
 use ennoia_contract::ApiError;
 use ennoia_logs::RequestContext;
 
-use crate::app::AppState;
+use crate::app::{live_server_config, AppState};
 
 /// timeout_middleware enforces a per-path or default-ms timeout from the live TimeoutConfig.
 pub async fn timeout_middleware(
@@ -17,8 +17,9 @@ pub async fn timeout_middleware(
     req: Request,
     next: Next,
 ) -> Response {
-    let cfg = &state.server_config.timeout;
-    if !cfg.enabled || is_event_stream_request(&req) {
+    let server_config = live_server_config(&state);
+    let cfg = &server_config.timeout;
+    if !cfg.enabled || is_event_stream_request(&req) || has_self_managed_timeout(&req) {
         return next.run(req).await;
     }
     let request_id = req.extensions().get::<RequestContext>().cloned();
@@ -43,6 +44,11 @@ pub async fn timeout_middleware(
             .unwrap_or_else(|| ApiError::timeout("request timed out"))
             .into_response(),
     }
+}
+
+fn has_self_managed_timeout(req: &Request) -> bool {
+    let path = req.uri().path();
+    path.starts_with("/api/extensions/providers/") || path.starts_with("/api/runtime/operations/")
 }
 
 fn is_event_stream_request(req: &Request) -> bool {
@@ -84,5 +90,25 @@ mod tests {
             .expect("request");
 
         assert!(!is_event_stream_request(&request));
+    }
+
+    #[test]
+    fn skips_provider_routes_with_internal_timeout() {
+        let request = Request::builder()
+            .uri("/api/extensions/providers/openai/generate")
+            .body(Body::empty())
+            .expect("request");
+
+        assert!(super::has_self_managed_timeout(&request));
+    }
+
+    #[test]
+    fn skips_runtime_operation_routes_with_internal_timeout() {
+        let request = Request::builder()
+            .uri("/api/runtime/operations/command.exec")
+            .body(Body::empty())
+            .expect("request");
+
+        assert!(super::has_self_managed_timeout(&request));
     }
 }

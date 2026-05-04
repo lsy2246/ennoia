@@ -3,6 +3,7 @@ use crate::app::{
     delete_agent_config, load_agent_document, load_agent_documents, normalize_agent_document,
     write_agent_document,
 };
+use crate::realtime::RealtimeEvent;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentRecord {
     #[serde(flatten)]
@@ -59,11 +60,13 @@ pub(super) async fn agent_create(
     .map_err(|error| ApiError::internal(error.to_string()))?;
     let document = load_agent_document(&state.runtime_paths, &payload.profile.id)
         .map_err(|error| ApiError::internal(error.to_string()))?;
-    document
+    let created = document
         .map(|document| normalize_agent_document(&state.runtime_paths, document))
         .map(AgentRecord::from)
         .map(Json)
-        .ok_or_else(|| ApiError::internal("failed to reload created agent"))
+        .ok_or_else(|| ApiError::internal("failed to reload created agent"))?;
+    state.realtime.publish(RealtimeEvent::ModelEndpointsChanged);
+    Ok(created)
 }
 
 pub(super) async fn agent_update(
@@ -82,11 +85,13 @@ pub(super) async fn agent_update(
     .map_err(|error| ApiError::internal(error.to_string()))?;
     let document = load_agent_document(&state.runtime_paths, &agent_id)
         .map_err(|error| ApiError::internal(error.to_string()))?;
-    document
+    let updated = document
         .map(|document| normalize_agent_document(&state.runtime_paths, document))
         .map(AgentRecord::from)
         .map(Json)
-        .ok_or_else(|| ApiError::internal("failed to reload updated agent"))
+        .ok_or_else(|| ApiError::internal("failed to reload updated agent"))?;
+    state.realtime.publish(RealtimeEvent::ModelEndpointsChanged);
+    Ok(updated)
 }
 
 pub(super) async fn agent_delete(
@@ -96,6 +101,7 @@ pub(super) async fn agent_delete(
     let deleted = delete_agent_config(&state.runtime_paths, &agent_id)
         .map_err(|error| ApiError::internal(error.to_string()))?;
     if deleted {
+        state.realtime.publish(RealtimeEvent::ModelEndpointsChanged);
         Ok(StatusCode::NO_CONTENT)
     } else {
         Err(ApiError::not_found(format!("agent '{agent_id}' not found")))
@@ -198,11 +204,13 @@ pub(super) async fn model_endpoint_create(
     .map_err(|error| ApiError::internal(error.to_string()))?;
     let model_endpoints = load_model_endpoint_configs(&state.runtime_paths)
         .map_err(|error| ApiError::internal(error.to_string()))?;
-    model_endpoints
+    let created = model_endpoints
         .into_iter()
         .find(|model_endpoint| model_endpoint.id == payload.id)
         .map(Json)
-        .ok_or_else(|| ApiError::internal("failed to reload created model endpoint"))
+        .ok_or_else(|| ApiError::internal("failed to reload created model endpoint"))?;
+    state.realtime.publish(RealtimeEvent::AgentsChanged);
+    Ok(created)
 }
 
 pub(super) async fn model_endpoint_update(
@@ -220,11 +228,13 @@ pub(super) async fn model_endpoint_update(
     .map_err(|error| ApiError::internal(error.to_string()))?;
     let model_endpoints = load_model_endpoint_configs(&state.runtime_paths)
         .map_err(|error| ApiError::internal(error.to_string()))?;
-    model_endpoints
+    let updated = model_endpoints
         .into_iter()
         .find(|model_endpoint| model_endpoint.id == model_endpoint_id)
         .map(Json)
-        .ok_or_else(|| ApiError::internal("failed to reload updated model endpoint"))
+        .ok_or_else(|| ApiError::internal("failed to reload updated model endpoint"))?;
+    state.realtime.publish(RealtimeEvent::AgentsChanged);
+    Ok(updated)
 }
 
 pub(super) async fn model_endpoint_delete(
@@ -237,6 +247,7 @@ pub(super) async fn model_endpoint_delete(
     )
     .map_err(|error| ApiError::internal(error.to_string()))?;
     if deleted {
+        state.realtime.publish(RealtimeEvent::AgentsChanged);
         Ok(StatusCode::NO_CONTENT)
     } else {
         Err(ApiError::not_found(format!(
@@ -278,6 +289,11 @@ fn validate_model_endpoint_payload(
             .any(|model| model.id.trim() == payload.default_model.trim())
     {
         return Err(ApiError::bad_request("默认模型必须存在于模型列表里。"));
+    }
+    if let Some(timeout_ms) = payload.request_timeout_ms {
+        if timeout_ms < 1_000 {
+            return Err(ApiError::bad_request("模型接入超时至少需要 1000ms。"));
+        }
     }
     Ok(())
 }

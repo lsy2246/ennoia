@@ -6,12 +6,13 @@ use ennoia_kernel::{
 use std::time::Instant;
 
 use super::*;
-use crate::app::record_trace_span;
+use crate::app::{dispatch_extension_rpc, record_trace_span};
 use crate::event_bus::HookEventWrite;
 use crate::logs_store::{
     LogEntryWrite, LogTraceWrite, LOGS_COMPONENT_EVENT_BUS, LOGS_COMPONENT_PROXY,
 };
 use crate::pipeline::dispatch_action_pipeline;
+use crate::realtime::RealtimeEvent;
 
 #[derive(Debug, Serialize)]
 pub(super) struct ActionStatusRecord {
@@ -162,31 +163,31 @@ pub(crate) async fn dispatch_action_rule_execute(
     let span_trace = request.child_trace("action_rpc");
     let started = Instant::now();
     let started_at = now_iso();
-    let response = state
-        .extensions
-        .dispatch_rpc(
-            &rule.extension_id,
-            &rule.action.method,
-            ennoia_kernel::ExtensionRpcRequest {
-                params,
-                context: serde_json::json!({
-                    "action": key,
-                    "capability_id": rule.action.capability_id,
-                    "request_id": request.request_id,
-                    "trace": {
-                        "request_id": span_trace.request_id,
-                        "trace_id": span_trace.trace_id,
-                        "span_id": span_trace.span_id,
-                        "parent_span_id": span_trace.parent_span_id,
-                        "sampled": span_trace.sampled,
-                        "source": span_trace.source,
-                        "traceparent": span_trace.to_traceparent(),
-                    },
-                    "extra": context
-                }),
-            },
-        )
-        .map_err(|error| scoped(ApiError::internal(error.to_string()), request))?;
+    let response = dispatch_extension_rpc(
+        state,
+        &rule.extension_id,
+        &rule.action.method,
+        ennoia_kernel::ExtensionRpcRequest {
+            params,
+            context: serde_json::json!({
+                "action": key,
+                "capability_id": rule.action.capability_id,
+                "request_id": request.request_id,
+                "trace": {
+                    "request_id": span_trace.request_id,
+                    "trace_id": span_trace.trace_id,
+                    "span_id": span_trace.span_id,
+                    "parent_span_id": span_trace.parent_span_id,
+                    "sampled": span_trace.sampled,
+                    "source": span_trace.source,
+                    "traceparent": span_trace.to_traceparent(),
+                },
+                "extra": context
+            }),
+        },
+    )
+    .await
+    .map_err(|error| scoped(ApiError::internal(error.to_string()), request))?;
 
     if response.ok {
         record_trace_span(
@@ -267,6 +268,16 @@ fn authorize_action_dispatch(
         .agent_permissions
         .evaluate_request(&permission_request, Some(request))
         .map_err(|error| scoped(ApiError::internal(error.to_string()), request))?;
+    state
+        .realtime
+        .publish(RealtimeEvent::PermissionAgentChanged {
+            agent_id: permission_request.agent_id.clone(),
+        });
+    if let Some(conversation_id) = permission_request.scope.conversation_id.clone() {
+        state
+            .realtime
+            .publish(RealtimeEvent::PermissionConversationChanged { conversation_id });
+    }
     match decision.decision.as_str() {
         "allow" => Ok(decision.grant_id),
         "ask" => {

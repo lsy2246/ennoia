@@ -4,6 +4,7 @@ kind = "openai"
 description = "默认 OpenAI 模型接入实例。"
 base_url = "https://api.openai.com/v1"
 api_key_env = "OPENAI_API_KEY"
+request_timeout_ms = 90000
 default_model = "gpt-5.4"
 available_models = [{ id = "gpt-5.4" }]
 enabled = true

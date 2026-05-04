@@ -2,9 +2,12 @@ import { useEffect, useState, type FormEvent } from "react";
 
 import {
   fetchServerConfig,
+  fetchUiConfig,
   saveRuntimeProfile,
   saveServerConfig,
   type ServerConfig,
+  saveUiConfig,
+  type UiConfig,
 } from "@ennoia/api-client";
 import { StatusNotice } from "@/components/StatusNotice";
 import { buildTimeZoneOptionGroups } from "@/lib/timeZones";
@@ -12,7 +15,7 @@ import { resolveDefaultDisplayName, resolveDefaultTimeZone } from "@/lib/uiDefau
 import { Select } from "@/components/Select";
 import { ModelEndpointsPage } from "@/pages/model-endpoints";
 import { useRuntimeStore } from "@/stores/runtime";
-import { useUiHelpers } from "@/stores/ui";
+import { useUiHelpers, useUiStore } from "@/stores/ui";
 
 type StringEntry = {
   key: string;
@@ -200,10 +203,12 @@ function NumberMapEditor({
 export function Settings() {
   const profile = useRuntimeStore((state) => state.profile);
   const hydrateRuntime = useRuntimeStore((state) => state.hydrate);
+  const refreshUiRuntime = useUiStore((state) => state.refreshRuntime);
   const { runtime, t } = useUiHelpers();
   const defaultProfileName = resolveDefaultDisplayName(runtime);
   const defaultTimeZone = resolveDefaultTimeZone(runtime);
   const [config, setConfig] = useState<ServerConfig | null>(null);
+  const [uiConfig, setUiConfig] = useState<UiConfig | null>(null);
   const [profileName, setProfileName] = useState(profile?.display_name ?? defaultProfileName);
   const [timeZone, setTimeZone] = useState(profile?.time_zone ?? defaultTimeZone);
   const [corsOrigins, setCorsOrigins] = useState<StringEntry[]>([]);
@@ -223,12 +228,16 @@ export function Settings() {
   }, [defaultProfileName, defaultTimeZone, profile]);
 
   async function hydrate() {
-    const snapshot = await fetchServerConfig();
-    setConfig(snapshot);
-    setCorsOrigins(toStringEntries(snapshot.cors.origins));
-    setTimeoutOverrides(toMapEntries(snapshot.timeout.per_path_ms));
-    setBodyLimitOverrides(toMapEntries(snapshot.body_limit.per_path_max));
-    setRedactHeaders(toStringEntries(snapshot.logging.redact_headers));
+    const [serverSnapshot, uiSnapshot] = await Promise.all([
+      fetchServerConfig(),
+      fetchUiConfig(),
+    ]);
+    setConfig(serverSnapshot);
+    setUiConfig(uiSnapshot);
+    setCorsOrigins(toStringEntries(serverSnapshot.cors.origins));
+    setTimeoutOverrides(toMapEntries(serverSnapshot.timeout.per_path_ms));
+    setBodyLimitOverrides(toMapEntries(serverSnapshot.body_limit.per_path_max));
+    setRedactHeaders(toStringEntries(serverSnapshot.logging.redact_headers));
   }
 
   async function saveProfile(event: FormEvent<HTMLFormElement>) {
@@ -248,32 +257,36 @@ export function Settings() {
   }
 
   async function saveRuntimeConfig() {
-    if (!config) {
+    if (!config || !uiConfig) {
       return;
     }
     setError(null);
     setMessage(null);
     try {
-      await saveServerConfig({
-        ...config,
-        cors: {
-          ...config.cors,
-          origins: collectStringEntries(corsOrigins),
-        },
-        timeout: {
-          ...config.timeout,
-          per_path_ms: collectMapEntries(timeoutOverrides),
-        },
-        logging: {
-          ...config.logging,
-          redact_headers: collectStringEntries(redactHeaders),
-        },
-        body_limit: {
-          ...config.body_limit,
-          per_path_max: collectMapEntries(bodyLimitOverrides),
-        },
-      });
+      await Promise.all([
+        saveServerConfig({
+          ...config,
+          cors: {
+            ...config.cors,
+            origins: collectStringEntries(corsOrigins),
+          },
+          timeout: {
+            ...config.timeout,
+            per_path_ms: collectMapEntries(timeoutOverrides),
+          },
+          logging: {
+            ...config.logging,
+            redact_headers: collectStringEntries(redactHeaders),
+          },
+          body_limit: {
+            ...config.body_limit,
+            per_path_max: collectMapEntries(bodyLimitOverrides),
+          },
+        }),
+        saveUiConfig(uiConfig),
+      ]);
       await hydrate();
+      await refreshUiRuntime();
       setMessage(t("web.settings.runtime_saved", "运行时配置已保存。"));
     } catch (err) {
       setError(String(err));
@@ -304,7 +317,7 @@ export function Settings() {
             <button
               type="button"
               onClick={() => void saveRuntimeConfig()}
-              disabled={!config}
+              disabled={!config || !uiConfig}
             >
               {t("web.settings.save_system", "保存系统设置")}
             </button>
@@ -352,7 +365,7 @@ export function Settings() {
           </div>
         </form>
 
-        {config ? (
+        {config && uiConfig ? (
           <>
             <article
               id="settings-service"
@@ -583,6 +596,622 @@ export function Settings() {
                     deleteLabel={deleteLabel}
                     onChange={setTimeoutOverrides}
                   />
+            </article>
+
+            <article className="mini-card settings-section-card settings-section-anchor settings-module">
+              <div className="settings-section-card__header">
+                <div className="panel-title">内置工具</div>
+                <p className="helper-text">命令执行和网络请求的默认超时与上下限。</p>
+              </div>
+              <div className="form-grid settings-form-grid">
+                <label className="settings-field">
+                  命令默认超时
+                  <input
+                    value={config.operations.command.default_timeout_ms}
+                    onChange={(event) =>
+                      setConfig({
+                        ...config,
+                        operations: {
+                          ...config.operations,
+                          command: {
+                            ...config.operations.command,
+                            default_timeout_ms: Number(event.target.value),
+                          },
+                        },
+                      })
+                    }
+                  />
+                </label>
+                <label className="settings-field">
+                  命令最小超时
+                  <input
+                    value={config.operations.command.min_timeout_ms}
+                    onChange={(event) =>
+                      setConfig({
+                        ...config,
+                        operations: {
+                          ...config.operations,
+                          command: {
+                            ...config.operations.command,
+                            min_timeout_ms: Number(event.target.value),
+                          },
+                        },
+                      })
+                    }
+                  />
+                </label>
+                <label className="settings-field">
+                  命令最大超时
+                  <input
+                    value={config.operations.command.max_timeout_ms}
+                    onChange={(event) =>
+                      setConfig({
+                        ...config,
+                        operations: {
+                          ...config.operations,
+                          command: {
+                            ...config.operations.command,
+                            max_timeout_ms: Number(event.target.value),
+                          },
+                        },
+                      })
+                    }
+                  />
+                </label>
+                <label className="settings-field">
+                  网络默认超时
+                  <input
+                    value={config.operations.net.default_timeout_ms}
+                    onChange={(event) =>
+                      setConfig({
+                        ...config,
+                        operations: {
+                          ...config.operations,
+                          net: {
+                            ...config.operations.net,
+                            default_timeout_ms: Number(event.target.value),
+                          },
+                        },
+                      })
+                    }
+                  />
+                </label>
+                <label className="settings-field">
+                  网络最小超时
+                  <input
+                    value={config.operations.net.min_timeout_ms}
+                    onChange={(event) =>
+                      setConfig({
+                        ...config,
+                        operations: {
+                          ...config.operations,
+                          net: {
+                            ...config.operations.net,
+                            min_timeout_ms: Number(event.target.value),
+                          },
+                        },
+                      })
+                    }
+                  />
+                </label>
+                <label className="settings-field">
+                  网络最大超时
+                  <input
+                    value={config.operations.net.max_timeout_ms}
+                    onChange={(event) =>
+                      setConfig({
+                        ...config,
+                        operations: {
+                          ...config.operations,
+                          net: {
+                            ...config.operations.net,
+                            max_timeout_ms: Number(event.target.value),
+                          },
+                        },
+                      })
+                    }
+                  />
+                </label>
+              </div>
+            </article>
+
+            <article className="mini-card settings-section-card settings-section-anchor settings-module">
+              <div className="settings-section-card__header">
+                <div className="panel-title">上游与流式</div>
+                <p className="helper-text">控制上游请求超时，以及会话、工作流、日志流的轮询间隔。</p>
+              </div>
+              <div className="form-grid settings-form-grid">
+                <label className="settings-field">
+                  上游默认超时
+                  <input
+                    value={config.providers.default_request_timeout_ms}
+                    onChange={(event) =>
+                      setConfig({
+                        ...config,
+                        providers: {
+                          ...config.providers,
+                          default_request_timeout_ms: Number(event.target.value),
+                        },
+                      })
+                    }
+                  />
+                </label>
+                <label className="settings-field">
+                  会话流间隔
+                  <input
+                    value={config.streams.conversation_poll_ms}
+                    onChange={(event) =>
+                      setConfig({
+                        ...config,
+                        streams: {
+                          ...config.streams,
+                          conversation_poll_ms: Number(event.target.value),
+                        },
+                      })
+                    }
+                  />
+                </label>
+                <label className="settings-field">
+                  工作流流间隔
+                  <input
+                    value={config.streams.workflow_poll_ms}
+                    onChange={(event) =>
+                      setConfig({
+                        ...config,
+                        streams: {
+                          ...config.streams,
+                          workflow_poll_ms: Number(event.target.value),
+                        },
+                      })
+                    }
+                  />
+                </label>
+                <label className="settings-field">
+                  日志流间隔
+                  <input
+                    value={config.streams.logs_poll_ms}
+                    onChange={(event) =>
+                      setConfig({
+                        ...config,
+                        streams: {
+                          ...config.streams,
+                          logs_poll_ms: Number(event.target.value),
+                        },
+                      })
+                    }
+                  />
+                </label>
+              </div>
+            </article>
+
+            <article className="mini-card settings-section-card settings-section-anchor settings-module">
+              <div className="settings-section-card__header">
+                <div className="panel-title">后台循环</div>
+                <p className="helper-text">控制扩展刷新、计划扫描和事件投递这些后台循环的运行节奏。</p>
+              </div>
+              <div className="form-grid settings-form-grid">
+                <label className="settings-field">
+                  扩展刷新间隔
+                  <input
+                    value={config.background.extension_refresh_ms}
+                    onChange={(event) =>
+                      setConfig({
+                        ...config,
+                        background: {
+                          ...config.background,
+                          extension_refresh_ms: Number(event.target.value),
+                        },
+                      })
+                    }
+                  />
+                </label>
+                <label className="settings-field">
+                  计划扫描间隔
+                  <input
+                    value={config.background.schedule_tick_ms}
+                    onChange={(event) =>
+                      setConfig({
+                        ...config,
+                        background: {
+                          ...config.background,
+                          schedule_tick_ms: Number(event.target.value),
+                        },
+                      })
+                    }
+                  />
+                </label>
+                <label className="settings-field">
+                  事件投递间隔
+                  <input
+                    value={config.background.event_delivery_tick_ms}
+                    onChange={(event) =>
+                      setConfig({
+                        ...config,
+                        background: {
+                          ...config.background,
+                          event_delivery_tick_ms: Number(event.target.value),
+                        },
+                      })
+                    }
+                  />
+                </label>
+              </div>
+            </article>
+
+            <article className="mini-card settings-section-card settings-section-anchor settings-module">
+              <div className="settings-section-card__header">
+                <div className="panel-title">扩展运行时</div>
+                <p className="helper-text">给没有显式声明 runtime 配额的扩展提供宿主默认值。</p>
+              </div>
+              <div className="form-grid settings-form-grid">
+                <label className="settings-field">
+                  Worker 默认超时
+                  <input
+                    value={config.extension_runtime.timeout_ms}
+                    onChange={(event) =>
+                      setConfig({
+                        ...config,
+                        extension_runtime: {
+                          ...config.extension_runtime,
+                          timeout_ms: Number(event.target.value),
+                        },
+                      })
+                    }
+                  />
+                </label>
+                <label className="settings-field">
+                  Worker 默认内存
+                  <input
+                    value={config.extension_runtime.memory_limit_mb}
+                    onChange={(event) =>
+                      setConfig({
+                        ...config,
+                        extension_runtime: {
+                          ...config.extension_runtime,
+                          memory_limit_mb: Number(event.target.value),
+                        },
+                      })
+                    }
+                  />
+                </label>
+              </div>
+            </article>
+
+            <article className="mini-card settings-section-card settings-section-anchor settings-module">
+              <div className="settings-section-card__header">
+                <div className="panel-title">调度默认值</div>
+                <p className="helper-text">统一调度命令的超时范围和重试策略边界。</p>
+              </div>
+              <div className="form-grid settings-form-grid">
+                <label className="settings-field">
+                  调度命令默认超时
+                  <input
+                    value={config.schedules.command.default_timeout_ms}
+                    onChange={(event) =>
+                      setConfig({
+                        ...config,
+                        schedules: {
+                          ...config.schedules,
+                          command: {
+                            ...config.schedules.command,
+                            default_timeout_ms: Number(event.target.value),
+                          },
+                        },
+                      })
+                    }
+                  />
+                </label>
+                <label className="settings-field">
+                  调度命令最小超时
+                  <input
+                    value={config.schedules.command.min_timeout_ms}
+                    onChange={(event) =>
+                      setConfig({
+                        ...config,
+                        schedules: {
+                          ...config.schedules,
+                          command: {
+                            ...config.schedules.command,
+                            min_timeout_ms: Number(event.target.value),
+                          },
+                        },
+                      })
+                    }
+                  />
+                </label>
+                <label className="settings-field">
+                  调度命令最大超时
+                  <input
+                    value={config.schedules.command.max_timeout_ms}
+                    onChange={(event) =>
+                      setConfig({
+                        ...config,
+                        schedules: {
+                          ...config.schedules,
+                          command: {
+                            ...config.schedules.command,
+                            max_timeout_ms: Number(event.target.value),
+                          },
+                        },
+                      })
+                    }
+                  />
+                </label>
+                <label className="settings-field">
+                  默认重试次数
+                  <input
+                    value={config.schedules.retry.default_max_attempts}
+                    onChange={(event) =>
+                      setConfig({
+                        ...config,
+                        schedules: {
+                          ...config.schedules,
+                          retry: {
+                            ...config.schedules.retry,
+                            default_max_attempts: Number(event.target.value),
+                          },
+                        },
+                      })
+                    }
+                  />
+                </label>
+                <label className="settings-field">
+                  最大重试次数
+                  <input
+                    value={config.schedules.retry.max_attempts_cap}
+                    onChange={(event) =>
+                      setConfig({
+                        ...config,
+                        schedules: {
+                          ...config.schedules,
+                          retry: {
+                            ...config.schedules.retry,
+                            max_attempts_cap: Number(event.target.value),
+                          },
+                        },
+                      })
+                    }
+                  />
+                </label>
+                <label className="settings-field">
+                  默认重试间隔
+                  <input
+                    value={config.schedules.retry.default_backoff_seconds}
+                    onChange={(event) =>
+                      setConfig({
+                        ...config,
+                        schedules: {
+                          ...config.schedules,
+                          retry: {
+                            ...config.schedules.retry,
+                            default_backoff_seconds: Number(event.target.value),
+                          },
+                        },
+                      })
+                    }
+                  />
+                </label>
+                <label className="settings-field">
+                  最大重试间隔
+                  <input
+                    value={config.schedules.retry.max_backoff_seconds}
+                    onChange={(event) =>
+                      setConfig({
+                        ...config,
+                        schedules: {
+                          ...config.schedules,
+                          retry: {
+                            ...config.schedules.retry,
+                            max_backoff_seconds: Number(event.target.value),
+                          },
+                        },
+                      })
+                    }
+                  />
+                </label>
+              </div>
+            </article>
+
+            <article className="mini-card settings-section-card settings-section-anchor settings-module">
+              <div className="settings-section-card__header">
+                <div className="panel-title">前端运行时</div>
+                <p className="helper-text">控制前端 API 请求默认超时，以及全局弹窗的自动消失行为。</p>
+              </div>
+              <div className="form-grid settings-form-grid">
+                <label className="settings-field">
+                  前端 API 默认超时
+                  <input
+                    value={uiConfig.api.default_request_timeout_ms ?? ""}
+                    placeholder="留空表示不在前端层强制超时"
+                    onChange={(event) =>
+                      setUiConfig({
+                        ...uiConfig,
+                        api: {
+                          ...uiConfig.api,
+                          default_request_timeout_ms: event.target.value.trim()
+                            ? Number(event.target.value)
+                            : null,
+                        },
+                      })
+                    }
+                  />
+                </label>
+                <label className="settings-field">
+                  成功提示自动消失
+                  <input
+                    value={uiConfig.notifications.success_auto_dismiss_ms}
+                    onChange={(event) =>
+                      setUiConfig({
+                        ...uiConfig,
+                        notifications: {
+                          ...uiConfig.notifications,
+                          success_auto_dismiss_ms: Number(event.target.value),
+                        },
+                      })
+                    }
+                  />
+                </label>
+                <label className="settings-field">
+                  错误提示自动消失
+                  <input
+                    value={uiConfig.notifications.error_auto_dismiss_ms}
+                    onChange={(event) =>
+                      setUiConfig({
+                        ...uiConfig,
+                        notifications: {
+                          ...uiConfig.notifications,
+                          error_auto_dismiss_ms: Number(event.target.value),
+                        },
+                      })
+                    }
+                  />
+                </label>
+                <label className="check-row settings-toggle-row settings-field settings-field--wide">
+                  <input
+                    type="checkbox"
+                    checked={uiConfig.notifications.pause_on_hover}
+                    onChange={(event) =>
+                      setUiConfig({
+                        ...uiConfig,
+                        notifications: {
+                          ...uiConfig.notifications,
+                          pause_on_hover: event.target.checked,
+                        },
+                      })
+                    }
+                  />
+                  悬停时暂停自动消失
+                </label>
+              </div>
+            </article>
+
+            <article className="mini-card settings-section-card settings-section-anchor settings-module">
+              <div className="settings-section-card__header">
+                <div className="panel-title">开发态高级</div>
+                <p className="helper-text">只影响 `ennoia dev` 这类本地开发链路，不影响生产服务运行。</p>
+              </div>
+              <div className="form-grid settings-form-grid">
+                <label className="settings-field">
+                  Host reload debounce
+                  <input
+                    value={config.dev_supervisor.host_reload_debounce_ms}
+                    onChange={(event) =>
+                      setConfig({
+                        ...config,
+                        dev_supervisor: {
+                          ...config.dev_supervisor,
+                          host_reload_debounce_ms: Number(event.target.value),
+                        },
+                      })
+                    }
+                  />
+                </label>
+                <label className="settings-field">
+                  Watch poll
+                  <input
+                    value={config.dev_supervisor.watch_poll_ms}
+                    onChange={(event) =>
+                      setConfig({
+                        ...config,
+                        dev_supervisor: {
+                          ...config.dev_supervisor,
+                          watch_poll_ms: Number(event.target.value),
+                        },
+                      })
+                    }
+                  />
+                </label>
+                <label className="settings-field">
+                  API ready timeout
+                  <input
+                    value={config.dev_supervisor.api_ready_timeout_ms}
+                    onChange={(event) =>
+                      setConfig({
+                        ...config,
+                        dev_supervisor: {
+                          ...config.dev_supervisor,
+                          api_ready_timeout_ms: Number(event.target.value),
+                        },
+                      })
+                    }
+                  />
+                </label>
+                <label className="settings-field">
+                  健康检查间隔
+                  <input
+                    value={config.dev_supervisor.api_healthcheck_interval_ms}
+                    onChange={(event) =>
+                      setConfig({
+                        ...config,
+                        dev_supervisor: {
+                          ...config.dev_supervisor,
+                          api_healthcheck_interval_ms: Number(event.target.value),
+                        },
+                      })
+                    }
+                  />
+                </label>
+                <label className="settings-field">
+                  健康检查宽限
+                  <input
+                    value={config.dev_supervisor.api_healthcheck_grace_ms}
+                    onChange={(event) =>
+                      setConfig({
+                        ...config,
+                        dev_supervisor: {
+                          ...config.dev_supervisor,
+                          api_healthcheck_grace_ms: Number(event.target.value),
+                        },
+                      })
+                    }
+                  />
+                </label>
+                <label className="settings-field">
+                  端口释放等待
+                  <input
+                    value={config.dev_supervisor.api_port_release_timeout_ms}
+                    onChange={(event) =>
+                      setConfig({
+                        ...config,
+                        dev_supervisor: {
+                          ...config.dev_supervisor,
+                          api_port_release_timeout_ms: Number(event.target.value),
+                        },
+                      })
+                    }
+                  />
+                </label>
+                <label className="settings-field">
+                  子进程启动宽限
+                  <input
+                    value={config.dev_supervisor.child_startup_grace_ms}
+                    onChange={(event) =>
+                      setConfig({
+                        ...config,
+                        dev_supervisor: {
+                          ...config.dev_supervisor,
+                          child_startup_grace_ms: Number(event.target.value),
+                        },
+                      })
+                    }
+                  />
+                </label>
+                <label className="settings-field">
+                  Probe socket timeout
+                  <input
+                    value={config.dev_supervisor.probe_socket_timeout_ms}
+                    onChange={(event) =>
+                      setConfig({
+                        ...config,
+                        dev_supervisor: {
+                          ...config.dev_supervisor,
+                          probe_socket_timeout_ms: Number(event.target.value),
+                        },
+                      })
+                    }
+                  />
+                </label>
+              </div>
             </article>
 
             <article

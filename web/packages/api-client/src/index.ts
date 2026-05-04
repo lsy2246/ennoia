@@ -4,6 +4,7 @@ export * from "./runtime";
 export * from "./agents";
 export * from "./conversations";
 export * from "./extensions";
+export * from "./extension-runtime";
 export * from "./actions";
 export * from "./logs";
 export * from "./permissions";

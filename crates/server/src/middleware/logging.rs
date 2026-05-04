@@ -8,8 +8,7 @@ use ennoia_logs::RequestContext;
 use std::time::Instant;
 use tracing::info;
 
-use crate::app::record_trace_span;
-use crate::app::AppState;
+use crate::app::{live_server_config, record_trace_span, AppState};
 use crate::logs_store::LogTraceWrite;
 
 /// logging_middleware emits one line per request: method path status latency-ms.
@@ -19,7 +18,8 @@ pub async fn logging_middleware(
     req: Request,
     next: Next,
 ) -> Response {
-    let cfg = &state.server_config.logging;
+    let server_config = live_server_config(&state);
+    let cfg = &server_config.logging;
     if !cfg.enabled {
         return next.run(req).await;
     }

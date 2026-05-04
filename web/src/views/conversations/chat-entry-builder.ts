@@ -6,6 +6,7 @@ import type {
   LocalMessageDraft,
   PendingReplyMarker,
 } from "./chat-types";
+import { classifyConversationFailure, isLikelyFailureMessage } from "./error-classification";
 
 type StatusTexts = {
   typingLabel: string;
@@ -35,20 +36,7 @@ function isLikelyErrorMessage(role: ConversationMessage["role"], body: string) {
   if (role === "operator") {
     return false;
   }
-  const normalized = body.trim().toLowerCase();
-  if (!normalized) {
-    return false;
-  }
-  return normalized.startsWith("error:")
-    || normalized.startsWith("exception:")
-    || normalized.startsWith("panic:")
-    || normalized.includes(" request failed:")
-    || normalized.endsWith(" failed")
-    || normalized.includes(" upstream call failed")
-    || normalized.includes(" provider returned empty")
-    || normalized.includes("native sandbox only accepts")
-    || normalized.includes("path cannot escape the selected execution root")
-    || normalized.includes("path must stay inside the selected execution root");
+  return isLikelyFailureMessage(body);
 }
 
 function summarizeError(message: string) {
@@ -60,16 +48,7 @@ function summarizeError(message: string) {
 }
 
 function detectFailureCode(message: string) {
-  const normalized = message.trim().toLowerCase();
-  if (
-    normalized.includes("native sandbox only accepts /workspace, /artifacts and /tmp paths")
-    || normalized.includes("native sandbox only accepts")
-    || normalized.includes("path cannot escape the selected execution root")
-    || normalized.includes("path must stay inside the selected execution root")
-  ) {
-    return "sandbox_path_restricted";
-  }
-  return undefined;
+  return classifyConversationFailure(message)?.code;
 }
 
 function createErrorDetail(message: string) {
@@ -147,6 +126,7 @@ function findLegacyToolActor(messages: ConversationMessage[], startIndex: number
 
 export function buildChatEntries(params: {
   messages: ConversationMessage[];
+  records?: Array<import("@ennoia/api-client").ExtensionRecordEntry>;
   localDrafts: LocalMessageDraft[];
   resolveRecipients: (mentions: string[]) => AgentProfile[];
 }): ChatEntryViewModel[] {
@@ -179,6 +159,7 @@ export function buildChatEntries(params: {
 
     if (isLikelyErrorMessage(message.role, message.body)) {
       if (message.role === "agent") {
+        const failure = classifyConversationFailure(message.body);
         entries.push({
           order: order++,
           entry: {
@@ -193,9 +174,10 @@ export function buildChatEntries(params: {
             recipients,
             mentions: message.mentions,
             source: "remote",
-            failureCode: detectFailureCode(message.body),
-            failureSummary: summarizeError(message.body),
-            failureDetail: message.body.trim(),
+            failureCode: failure?.code ?? detectFailureCode(message.body),
+            failureSource: failure?.source,
+            failureSummary: failure?.summary ?? summarizeError(message.body),
+            failureDetail: failure?.detail ?? message.body.trim(),
           },
         });
         continue;
@@ -268,6 +250,24 @@ export function buildChatEntries(params: {
         recipients,
         mentions: message.mentions,
         source: "remote",
+      },
+    });
+  }
+
+  for (const record of params.records ?? []) {
+    entries.push({
+      order: order++,
+      entry: {
+        id: `record:${record.id}`,
+        role: "agent",
+        kind: "record",
+        format: "plain",
+        state: record.closed_at ? "done" : "streaming",
+        sender: record.extension_id,
+        body: record.summary?.trim() || record.title?.trim() || record.kind,
+        createdAt: record.created_at,
+        relatedMessageId: record.related_message_id ?? undefined,
+        record,
       },
     });
   }

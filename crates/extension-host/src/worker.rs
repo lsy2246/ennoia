@@ -82,11 +82,14 @@ impl ProcessWorkerHandle {
 
 impl Drop for WorkerRuntime {
     fn drop(&mut self) {
-        if let Ok(processes) = self.processes.lock() {
-            for handle in processes.values() {
-                if let Ok(mut handle) = handle.lock() {
-                    handle.shutdown();
-                }
+        let handles = self
+            .processes
+            .lock()
+            .map(|processes| processes.values().cloned().collect::<Vec<_>>())
+            .unwrap_or_default();
+        for handle in handles {
+            if let Ok(mut handle) = handle.lock() {
+                handle.shutdown();
             }
         }
     }
@@ -178,57 +181,56 @@ impl WorkerRuntime {
             });
         }
 
-        if let Ok(mut processes) = self.processes.lock() {
-            processes.retain(|extension_id, handle| {
-                let Some(extension) = extensions.iter().find(|item| &item.id == extension_id)
-                else {
-                    if let Ok(mut handle) = handle.lock() {
-                        handle.shutdown();
-                    }
-                    return false;
-                };
-                let Some(worker) = extension.worker.as_ref() else {
-                    if let Ok(mut handle) = handle.lock() {
-                        handle.shutdown();
-                    }
-                    return false;
-                };
-                if worker.kind != "process" {
-                    if let Ok(mut handle) = handle.lock() {
-                        handle.shutdown();
-                    }
-                    return false;
-                }
-                let entry = PathBuf::from(&worker.entry);
-                let protocol = worker
-                    .protocol
-                    .as_deref()
-                    .unwrap_or(SUPPORTED_PROCESS_PROTOCOL)
-                    .to_string();
-                let Ok(fingerprint) = worker_fingerprint(&entry) else {
-                    if let Ok(mut handle) = handle.lock() {
-                        handle.shutdown();
-                    }
-                    return false;
-                };
-                let Ok(mut process) = handle.lock() else {
-                    return false;
-                };
-                let alive = process
-                    .child
-                    .try_wait()
-                    .map(|status| status.is_none())
-                    .unwrap_or(false);
-                let keep = alive
-                    && process.entry == entry
-                    && process.fingerprint == fingerprint
-                    && process.protocol == protocol;
-                if !keep {
-                    process.shutdown();
-                }
-                keep
-            });
+        let current = self
+            .processes
+            .lock()
+            .map(|processes| {
+                processes
+                    .iter()
+                    .map(|(extension_id, handle)| (extension_id.clone(), handle.clone()))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        let mut stale = Vec::new();
+        for (extension_id, handle) in current {
+            let Some(extension) = extensions.iter().find(|item| item.id == extension_id) else {
+                stale.push((extension_id, handle));
+                continue;
+            };
+            let Some(worker) = extension.worker.as_ref() else {
+                stale.push((extension_id, handle));
+                continue;
+            };
+            if worker.kind != "process" {
+                stale.push((extension_id, handle));
+                continue;
+            }
+            let entry = PathBuf::from(&worker.entry);
+            let protocol = worker
+                .protocol
+                .as_deref()
+                .unwrap_or(SUPPORTED_PROCESS_PROTOCOL);
+            let Ok(fingerprint) = worker_fingerprint(&entry) else {
+                stale.push((extension_id, handle));
+                continue;
+            };
+            let keep = self
+                .process_matches(&handle, &entry, &fingerprint, protocol)
+                .unwrap_or(false);
+            if !keep {
+                stale.push((extension_id, handle));
+            }
         }
+        for (extension_id, handle) in stale {
+            self.remove_process_if_current(&extension_id, &handle);
+        }
+    }
+
+    pub fn terminate_extension(&self, extension_id: &str) {
+        if let Ok(mut modules) = self.modules.lock() {
+            modules.remove(extension_id);
+        }
+        self.remove_process(extension_id);
     }
 
     fn dispatch_wasm(
@@ -438,34 +440,45 @@ impl WorkerRuntime {
         protocol: &str,
     ) -> io::Result<Arc<Mutex<ProcessWorkerHandle>>> {
         let fingerprint = worker_fingerprint(entry)?;
-        let mut processes = self
+        if let Some(existing) = self
             .processes
             .lock()
-            .map_err(|_| io::Error::other("worker process cache poisoned"))?;
-
-        if let Some(existing) = processes.get(&extension.id) {
-            let existing = existing.clone();
-            let mut handle = existing
-                .lock()
-                .map_err(|_| io::Error::other("worker process handle poisoned"))?;
-            let alive = handle.child.try_wait()?.is_none();
-            if alive
-                && handle.entry == entry
-                && handle.fingerprint == fingerprint
-                && handle.protocol == protocol
-            {
-                drop(handle);
+            .map_err(|_| io::Error::other("worker process cache poisoned"))?
+            .get(&extension.id)
+            .cloned()
+        {
+            if self.process_matches(&existing, entry, &fingerprint, protocol)? {
                 return Ok(existing);
             }
-            handle.shutdown();
+            self.remove_process_if_current(&extension.id, &existing);
         }
 
         let spawned = Arc::new(Mutex::new(self.spawn_process(
             extension,
             entry,
-            fingerprint,
+            fingerprint.clone(),
             protocol,
         )?));
+        let mut processes = self
+            .processes
+            .lock()
+            .map_err(|_| io::Error::other("worker process cache poisoned"))?;
+        if let Some(existing) = processes.get(&extension.id).cloned() {
+            drop(processes);
+            if self.process_matches(&existing, entry, &fingerprint, protocol)? {
+                if let Ok(mut handle) = spawned.lock() {
+                    handle.shutdown();
+                }
+                return Ok(existing);
+            }
+            self.remove_process_if_current(&extension.id, &existing);
+            let mut processes = self
+                .processes
+                .lock()
+                .map_err(|_| io::Error::other("worker process cache poisoned"))?;
+            processes.insert(extension.id.clone(), spawned.clone());
+            return Ok(spawned);
+        }
         processes.insert(extension.id.clone(), spawned.clone());
         Ok(spawned)
     }
@@ -561,11 +574,50 @@ impl WorkerRuntime {
     }
 
     fn remove_process(&self, extension_id: &str) {
-        if let Ok(mut processes) = self.processes.lock() {
-            if let Some(handle) = processes.remove(extension_id) {
-                if let Ok(mut handle) = handle.lock() {
-                    handle.shutdown();
-                }
+        if let Some(handle) = self
+            .processes
+            .lock()
+            .ok()
+            .and_then(|mut processes| processes.remove(extension_id))
+        {
+            if let Ok(mut handle) = handle.lock() {
+                handle.shutdown();
+            }
+        }
+    }
+
+    fn process_matches(
+        &self,
+        handle: &Arc<Mutex<ProcessWorkerHandle>>,
+        entry: &Path,
+        fingerprint: &WorkerFingerprint,
+        protocol: &str,
+    ) -> io::Result<bool> {
+        let mut handle = handle
+            .lock()
+            .map_err(|_| io::Error::other("worker process handle poisoned"))?;
+        Ok(handle.child.try_wait()?.is_none()
+            && handle.entry == entry
+            && handle.fingerprint == *fingerprint
+            && handle.protocol == protocol)
+    }
+
+    fn remove_process_if_current(
+        &self,
+        extension_id: &str,
+        handle: &Arc<Mutex<ProcessWorkerHandle>>,
+    ) {
+        let removed = self.processes.lock().ok().and_then(|mut processes| {
+            let current = processes.get(extension_id)?;
+            if Arc::ptr_eq(current, handle) {
+                processes.remove(extension_id)
+            } else {
+                None
+            }
+        });
+        if let Some(handle) = removed {
+            if let Ok(mut handle) = handle.lock() {
+                handle.shutdown();
             }
         }
     }

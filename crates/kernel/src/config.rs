@@ -5,8 +5,10 @@ use serde::{Deserialize, Serialize};
 use crate::extension::ProviderModelDescriptor;
 use crate::permission::{AgentExecutionEnvironment, AgentPermissionProfile};
 use crate::server_settings::{
-    default_local_dev_origins, BodyLimitConfig, BootstrapState, CorsConfig, LoggingConfig,
-    RateLimitConfig, TimeoutConfig, WebDevConfig,
+    default_local_dev_origins, BackgroundRuntimeConfig, BodyLimitConfig, BootstrapState,
+    CorsConfig, DevSupervisorConfig, ExtensionRuntimeDefaultsConfig, LoggingConfig,
+    ProviderRuntimeConfig, RateLimitConfig, RuntimeOperationsConfig, ScheduleRuntimeConfig,
+    StreamRuntimeConfig, TimeoutConfig, WebDevConfig,
 };
 use crate::ui::LocalizedText;
 
@@ -23,6 +25,20 @@ pub struct ServerConfig {
     pub cors: CorsConfig,
     #[serde(default)]
     pub timeout: TimeoutConfig,
+    #[serde(default)]
+    pub operations: RuntimeOperationsConfig,
+    #[serde(default)]
+    pub providers: ProviderRuntimeConfig,
+    #[serde(default)]
+    pub streams: StreamRuntimeConfig,
+    #[serde(default)]
+    pub background: BackgroundRuntimeConfig,
+    #[serde(default)]
+    pub extension_runtime: ExtensionRuntimeDefaultsConfig,
+    #[serde(default)]
+    pub schedules: ScheduleRuntimeConfig,
+    #[serde(default)]
+    pub dev_supervisor: DevSupervisorConfig,
     #[serde(default)]
     pub logging: LoggingConfig,
     #[serde(default)]
@@ -44,6 +60,13 @@ impl Default for ServerConfig {
                 ..CorsConfig::default()
             },
             timeout: TimeoutConfig::default(),
+            operations: RuntimeOperationsConfig::default(),
+            providers: ProviderRuntimeConfig::default(),
+            streams: StreamRuntimeConfig::default(),
+            background: BackgroundRuntimeConfig::default(),
+            extension_runtime: ExtensionRuntimeDefaultsConfig::default(),
+            schedules: ScheduleRuntimeConfig::default(),
+            dev_supervisor: DevSupervisorConfig::default(),
             logging: LoggingConfig::default(),
             body_limit: BodyLimitConfig::default(),
             bootstrap: BootstrapState::default(),
@@ -54,6 +77,13 @@ impl Default for ServerConfig {
 impl ServerConfig {
     pub fn normalize(mut self) -> Self {
         self.sync_web_dev_origins();
+        self.operations.normalize();
+        self.providers.normalize();
+        self.streams.normalize();
+        self.background.normalize();
+        self.extension_runtime.normalize();
+        self.schedules.normalize();
+        self.dev_supervisor.normalize();
         self
     }
 
@@ -107,6 +137,10 @@ pub struct UiConfig {
     #[serde(default = "default_ui_time_zone")]
     pub default_time_zone: String,
     pub show_command_palette: bool,
+    #[serde(default)]
+    pub api: UiApiConfig,
+    #[serde(default)]
+    pub notifications: UiNotificationConfig,
 }
 
 impl Default for UiConfig {
@@ -120,6 +154,61 @@ impl Default for UiConfig {
             default_display_name: default_ui_display_name(),
             default_time_zone: default_ui_time_zone(),
             show_command_palette: true,
+            api: UiApiConfig::default(),
+            notifications: UiNotificationConfig::default(),
+        }
+    }
+}
+
+impl UiConfig {
+    pub fn normalize(mut self) -> Self {
+        self.api.normalize();
+        self.notifications.normalize();
+        self
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct UiApiConfig {
+    pub default_request_timeout_ms: Option<u64>,
+}
+
+impl UiApiConfig {
+    pub fn normalize(&mut self) {
+        self.default_request_timeout_ms = self
+            .default_request_timeout_ms
+            .map(|value| value.clamp(1_000, 300_000));
+    }
+}
+
+impl Default for UiApiConfig {
+    fn default() -> Self {
+        Self {
+            default_request_timeout_ms: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct UiNotificationConfig {
+    pub success_auto_dismiss_ms: u64,
+    pub error_auto_dismiss_ms: u64,
+    pub pause_on_hover: bool,
+}
+
+impl UiNotificationConfig {
+    pub fn normalize(&mut self) {
+        self.success_auto_dismiss_ms = self.success_auto_dismiss_ms.clamp(500, 60_000);
+        self.error_auto_dismiss_ms = self.error_auto_dismiss_ms.clamp(500, 60_000);
+    }
+}
+
+impl Default for UiNotificationConfig {
+    fn default() -> Self {
+        Self {
+            success_auto_dismiss_ms: 3_200,
+            error_auto_dismiss_ms: 6_000,
+            pause_on_hover: true,
         }
     }
 }
@@ -140,6 +229,11 @@ available_locales = ["zh-CN", "en-US"]
 default_display_name = "Operator"
 default_time_zone = "Asia/Shanghai"
 show_command_palette = true
+
+[notifications]
+success_auto_dismiss_ms = 3200
+error_auto_dismiss_ms = 6000
+pause_on_hover = true
 "#,
         )
         .expect("web_title should deserialize");
@@ -160,6 +254,11 @@ available_locales = ["zh-CN", "en-US"]
 default_display_name = "Operator"
 default_time_zone = "Asia/Shanghai"
 show_command_palette = true
+
+[notifications]
+success_auto_dismiss_ms = 3200
+error_auto_dismiss_ms = 6000
+pause_on_hover = true
 "#,
         )
         .expect_err("shell_title should no longer deserialize");
@@ -314,6 +413,8 @@ pub struct ModelEndpointConfig {
     pub available_models: Vec<ProviderModelDescriptor>,
     #[serde(default)]
     pub model_discovery: ModelEndpointModelDiscoveryConfig,
+    #[serde(default)]
+    pub request_timeout_ms: Option<u64>,
     #[serde(default = "default_enabled")]
     pub enabled: bool,
 }

@@ -65,6 +65,10 @@ export async function listExtensionEvents(limit = 100) {
   );
 }
 
+export function createExtensionEventsStream() {
+  return new EventSource(apiUrl("/api/extensions/events/stream"));
+}
+
 export function getExtensionUiModuleUrl(extensionId: string) {
   return apiUrl(`/api/extensions/${encodeURIComponent(extensionId)}/ui/module`);
 }

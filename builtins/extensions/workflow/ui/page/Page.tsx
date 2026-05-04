@@ -2,15 +2,18 @@ import { useEffect, useMemo, useState } from "react";
 import type { ExtensionUiRenderHelpers } from "@ennoia/ui-sdk";
 
 import {
+  createWorkflowStream,
   getWorkflowRunDetail,
   getWorkflowWorkspaceSummary,
   listWorkflowRuns,
+  parseWorkflowStreamPayload,
   type WorkflowArtifact,
   type WorkflowDecisionSnapshot,
   type WorkflowGateVerdict,
   type WorkflowRun,
   type WorkflowRunDetail,
   type WorkflowStageEvent,
+  type WorkflowStreamSnapshot,
   type WorkflowTask,
   type WorkflowWorkspaceSummary,
 } from "./api";
@@ -36,35 +39,6 @@ type InspectorSelection =
   | { kind: "task"; value: string }
   | { kind: "artifact"; value: string }
   | { kind: "decision"; value: string };
-
-function readInitialSearchParams() {
-  if (typeof window === "undefined") {
-    return { runId: "", conversationId: "" };
-  }
-  const params = new URLSearchParams(window.location.search);
-  return {
-    runId: params.get("run_id") ?? "",
-    conversationId: params.get("conversation_id") ?? "",
-  };
-}
-
-function updateLocationSearch(runId: string, conversationId: string) {
-  if (typeof window === "undefined") {
-    return;
-  }
-  const url = new URL(window.location.href);
-  if (runId) {
-    url.searchParams.set("run_id", runId);
-  } else {
-    url.searchParams.delete("run_id");
-  }
-  if (conversationId) {
-    url.searchParams.set("conversation_id", conversationId);
-  } else {
-    url.searchParams.delete("conversation_id");
-  }
-  window.history.replaceState(null, "", url);
-}
 
 function stageLabel(stage: string) {
   switch (stage) {
@@ -136,37 +110,85 @@ function latestDecisionForStage(stage: string, decisions: WorkflowDecisionSnapsh
 
 export default function WorkflowPage({ helpers }: WorkflowPageProps) {
   const { formatDateTime, t } = helpers;
-  const initial = useMemo(() => readInitialSearchParams(), []);
   const [workspace, setWorkspace] = useState<WorkflowWorkspaceSummary | null>(null);
   const [runs, setRuns] = useState<WorkflowRun[]>([]);
   const [detail, setDetail] = useState<WorkflowRunDetail | null>(null);
-  const [selectedRunId, setSelectedRunId] = useState(initial.runId);
+  const [selectedRunId, setSelectedRunId] = useState("");
   const [inspector, setInspector] = useState<InspectorSelection>({ kind: "run" });
   const [query, setQuery] = useState("");
   const [stageFilter, setStageFilter] = useState("all");
-  const [conversationId, setConversationId] = useState(initial.conversationId);
+  const [conversationId, setConversationId] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    void refresh();
-    const timer = window.setInterval(() => {
-      void refresh(false);
-    }, 8000);
-    return () => window.clearInterval(timer);
-  }, [conversationId, query, stageFilter]);
+  function applySnapshot(snapshot: WorkflowStreamSnapshot) {
+    setWorkspace(snapshot.workspace);
+    setRuns(snapshot.runs);
+    setDetail(snapshot.detail ?? null);
+    setSelectedRunId((current) => {
+      if (current && snapshot.runs.some((item) => item.id === current)) {
+        return current;
+      }
+      return snapshot.runs[0]?.id ?? "";
+    });
+  }
 
   useEffect(() => {
-    updateLocationSearch(selectedRunId, conversationId);
-  }, [conversationId, selectedRunId]);
-
-  useEffect(() => {
-    if (!selectedRunId) {
-      setDetail(null);
+    if (typeof EventSource === "undefined") {
+      void refresh();
       return;
     }
-    void loadDetail(selectedRunId);
-  }, [selectedRunId]);
+
+    setBusy(true);
+    const stream = createWorkflowStream({
+      conversation_id: conversationId.trim() || undefined,
+      run_id: selectedRunId || undefined,
+      stage: stageFilter === "all" ? undefined : stageFilter,
+      q: query.trim() || undefined,
+      limit: 120,
+    });
+
+    const handleSnapshot = (event: Event) => {
+      if (!(event instanceof MessageEvent) || typeof event.data !== "string") {
+        return;
+      }
+      const snapshot = parseWorkflowStreamPayload(event.data);
+      applySnapshot(snapshot);
+      setBusy(false);
+      setError(null);
+    };
+
+    const handleErrorEvent = (event: Event) => {
+      if (!(event instanceof MessageEvent) || typeof event.data !== "string") {
+        return;
+      }
+      try {
+        const payload = JSON.parse(event.data) as { message?: string };
+        setError(payload.message?.trim() || t("ext.workflow.stream_error", "工作流实时同步暂时受阻，正在自动重试。"));
+      } catch {
+        setError(t("ext.workflow.stream_error", "工作流实时同步暂时受阻，正在自动重试。"));
+      } finally {
+        setBusy(false);
+      }
+    };
+
+    stream.addEventListener("workflow.snapshot", handleSnapshot);
+    stream.addEventListener("workflow.error", handleErrorEvent);
+    stream.onopen = () => {
+      setBusy(false);
+      setError(null);
+    };
+    stream.onerror = () => {
+      setBusy(false);
+      setError(t("ext.workflow.stream_error", "工作流实时同步暂时受阻，正在自动重试。"));
+    };
+
+    return () => {
+      stream.removeEventListener("workflow.snapshot", handleSnapshot);
+      stream.removeEventListener("workflow.error", handleErrorEvent);
+      stream.close();
+    };
+  }, [conversationId, query, selectedRunId, stageFilter, t]);
 
   async function refresh(showBusy = true) {
     if (showBusy) {
@@ -183,28 +205,21 @@ export default function WorkflowPage({ helpers }: WorkflowPageProps) {
           limit: 120,
         }),
       ]);
-      setWorkspace(nextWorkspace);
-      setRuns(nextRuns);
-      if (!selectedRunId && nextRuns[0]) {
-        setSelectedRunId(nextRuns[0].id);
-      } else if (selectedRunId && !nextRuns.some((item) => item.id === selectedRunId) && nextRuns[0]) {
-        setSelectedRunId(nextRuns[0].id);
-      }
+      const resolvedRunId = selectedRunId && nextRuns.some((item) => item.id === selectedRunId)
+        ? selectedRunId
+        : nextRuns[0]?.id ?? "";
+      const nextDetail = resolvedRunId ? await getWorkflowRunDetail(resolvedRunId) : null;
+      applySnapshot({
+        workspace: nextWorkspace,
+        runs: nextRuns,
+        detail: nextDetail,
+      });
     } catch (err) {
       setError(String(err));
     } finally {
       if (showBusy) {
         setBusy(false);
       }
-    }
-  }
-
-  async function loadDetail(runId: string) {
-    try {
-      const nextDetail = await getWorkflowRunDetail(runId);
-      setDetail(nextDetail);
-    } catch (err) {
-      setError(String(err));
     }
   }
 

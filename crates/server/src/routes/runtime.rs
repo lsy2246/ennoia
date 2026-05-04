@@ -1,5 +1,5 @@
 use super::*;
-use ennoia_kernel::apply_server_log_env_overrides;
+use crate::app::{live_server_config, live_ui_config};
 
 use crate::runtime_bridge::{execute_runtime_operation, RuntimeOperationRequest};
 
@@ -15,11 +15,7 @@ pub(super) async fn runtime_operation_invoke(
 }
 
 pub(super) async fn bootstrap_status(State(state): State<AppState>) -> Json<BootstrapState> {
-    Json(
-        read_server_config_from_disk(&state)
-            .map(|config| config.bootstrap)
-            .unwrap_or_else(|| state.server_config.bootstrap.clone()),
-    )
+    Json(live_server_config(&state).bootstrap)
 }
 
 pub(super) async fn bootstrap_setup(
@@ -27,9 +23,7 @@ pub(super) async fn bootstrap_setup(
     Extension(request): Extension<RequestContext>,
     Json(payload): Json<BootstrapSetupPayload>,
 ) -> ApiResult<BootstrapSetupResponse> {
-    let current = read_server_config_from_disk(&state)
-        .map(|config| config.bootstrap)
-        .unwrap_or_else(|| state.server_config.bootstrap.clone());
+    let current = live_server_config(&state).bootstrap;
     if current.is_initialized {
         return Err(scoped(
             ApiError::conflict("bootstrap already completed"),
@@ -38,29 +32,30 @@ pub(super) async fn bootstrap_setup(
     }
 
     let now = now_iso();
+    let ui_config = live_ui_config(&state);
     let locale = ensure_supported_locale(
         &state,
         &request,
         payload
             .locale
-            .unwrap_or_else(|| state.ui_config.default_locale.clone()),
+            .unwrap_or_else(|| ui_config.default_locale.clone()),
     )?;
     let theme_id = ensure_supported_theme_id(
         &state,
         &request,
         payload
             .theme_id
-            .unwrap_or_else(|| state.ui_config.default_theme.clone()),
+            .unwrap_or_else(|| ui_config.default_theme.clone()),
     )?;
     let profile = RuntimeProfile {
         id: "runtime".to_string(),
         display_name: payload
             .display_name
-            .unwrap_or_else(|| state.ui_config.default_display_name.clone()),
+            .unwrap_or_else(|| ui_config.default_display_name.clone()),
         locale,
         time_zone: payload
             .time_zone
-            .unwrap_or_else(|| state.ui_config.default_time_zone.clone()),
+            .unwrap_or_else(|| ui_config.default_time_zone.clone()),
         default_space_id: payload
             .default_space_id
             .or_else(|| state.spaces.first().map(|space| space.id.clone())),
@@ -87,8 +82,7 @@ pub(super) async fn bootstrap_setup(
         is_initialized: true,
         initialized_at: Some(now.clone()),
     };
-    let mut server_config =
-        read_server_config_from_disk(&state).unwrap_or_else(|| state.server_config.clone());
+    let mut server_config = live_server_config(&state);
     server_config.bootstrap = bootstrap.clone();
     persist_server_config(&state, &server_config)
         .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?;
@@ -109,6 +103,7 @@ pub(super) async fn runtime_profile_put(
     Extension(request): Extension<RequestContext>,
     Json(payload): Json<RuntimeProfilePayload>,
 ) -> ApiResult<RuntimeProfile> {
+    let ui_config = live_ui_config(&state);
     let current = read_runtime_profile_from_disk(&state);
     let now = now_iso();
     let requested_locale = payload
@@ -123,14 +118,14 @@ pub(super) async fn runtime_profile_put(
         display_name: payload
             .display_name
             .or_else(|| current.as_ref().map(|profile| profile.display_name.clone()))
-            .unwrap_or_else(|| state.ui_config.default_display_name.clone()),
+            .unwrap_or_else(|| ui_config.default_display_name.clone()),
         locale: requested_locale
             .or_else(|| current.as_ref().map(|profile| profile.locale.clone()))
-            .unwrap_or_else(|| state.ui_config.default_locale.clone()),
+            .unwrap_or_else(|| ui_config.default_locale.clone()),
         time_zone: payload
             .time_zone
             .or_else(|| current.as_ref().map(|profile| profile.time_zone.clone()))
-            .unwrap_or_else(|| state.ui_config.default_time_zone.clone()),
+            .unwrap_or_else(|| ui_config.default_time_zone.clone()),
         default_space_id: payload.default_space_id.or_else(|| {
             current
                 .as_ref()
@@ -167,11 +162,7 @@ pub(super) async fn runtime_preferences_put(
 }
 
 pub(super) async fn runtime_server_config(State(state): State<AppState>) -> Json<ServerConfig> {
-    let mut config =
-        read_server_config_from_disk(&state).unwrap_or_else(|| state.server_config.clone());
-    config = config.normalize();
-    apply_server_log_env_overrides(&mut config.logging);
-    Json(config)
+    Json(live_server_config(&state))
 }
 
 pub(super) async fn runtime_server_config_put(
@@ -185,9 +176,19 @@ pub(super) async fn runtime_server_config_put(
     Ok(Json(payload))
 }
 
-fn read_server_config_from_disk(state: &AppState) -> Option<ServerConfig> {
-    let contents = fs::read_to_string(state.runtime_paths.server_config_file()).ok()?;
-    toml::from_str(&contents).ok()
+pub(super) async fn runtime_ui_config(State(state): State<AppState>) -> Json<UiConfig> {
+    Json(live_ui_config(&state))
+}
+
+pub(super) async fn runtime_ui_config_put(
+    State(state): State<AppState>,
+    Extension(request): Extension<RequestContext>,
+    Json(payload): Json<UiConfig>,
+) -> ApiResult<UiConfig> {
+    let payload = payload.normalize();
+    persist_ui_config(&state, &payload)
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?;
+    Ok(Json(payload))
 }
 
 fn persist_server_config(state: &AppState, config: &ServerConfig) -> std::io::Result<()> {
@@ -196,6 +197,14 @@ fn persist_server_config(state: &AppState, config: &ServerConfig) -> std::io::Re
     }
     let contents = toml::to_string_pretty(config).map_err(std::io::Error::other)?;
     fs::write(state.runtime_paths.server_config_file(), contents)
+}
+
+fn persist_ui_config(state: &AppState, config: &UiConfig) -> std::io::Result<()> {
+    if let Some(parent) = state.runtime_paths.ui_config_file().parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let contents = toml::to_string_pretty(config).map_err(std::io::Error::other)?;
+    fs::write(state.runtime_paths.ui_config_file(), contents)
 }
 
 pub(super) async fn space_ui_preferences(

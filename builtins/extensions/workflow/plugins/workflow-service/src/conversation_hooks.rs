@@ -1,19 +1,24 @@
 use std::fs;
 use std::sync::Arc;
 
+use chrono::Utc;
 use ennoia_contract::behavior::{BehaviorRunRequest, BehaviorSourceRef, BehaviorTrigger};
 use ennoia_contract::{ApiErrorBody, ErrorCode};
 use ennoia_kernel::{
-    AgentConfig, AgentDocument, ExtensionRpcRequest, HookDispatchResponse, HookEventEnvelope,
-    ModelEndpointConfig, OwnerKind, OwnerRef, PermissionApprovalRecord, RunContext, RunStage,
-    ServerConfig,
+    AgentConfig, AgentDocument, DecisionSnapshot, ExtensionRecordEntry, ExtensionRpcRequest,
+    HookDispatchResponse, HookEventEnvelope, ModelEndpointConfig, NextAction, OwnerKind, OwnerRef,
+    PermissionApprovalRecord, RunContext, RunStage, RunStageEvent, ServerConfig,
 };
 use ennoia_paths::RuntimePaths;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use sqlx::Row;
+use uuid::Uuid;
 
 use crate::pipeline::{run_behavior, WorkflowRuntime};
+use crate::planning::{
+    build_planning_prompt, parse_plan_from_text, summarize_plan_steps, validate_plan, PlanSpec,
+};
 use crate::runtime::{RuntimeStore, SqliteRuntimeStore};
 
 #[derive(Debug)]
@@ -60,6 +65,36 @@ struct ToolMessageError {
     code: String,
     message: String,
     details: JsonValue,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct ActiveWorkflowSession {
+    draft_id: String,
+    record_id: String,
+    status: String,
+    revision: i64,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct WorkflowDraftRow {
+    id: String,
+    conversation_id: String,
+    agent_id: String,
+    status: String,
+    goal: String,
+    summary: String,
+    source_message_id: Option<String>,
+    record_id: Option<String>,
+    latest_revision: i64,
+    plan: PlanSpec,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ConversationRoute {
+    DirectReply,
+    ManagedDiscussion,
 }
 
 #[derive(Debug)]
@@ -213,6 +248,143 @@ impl HostApiClient {
             Err(HostApiError { body })
         }
     }
+
+    async fn get_extension_state(
+        &self,
+        extension_id: &str,
+        namespace: &str,
+        scope_type: &str,
+        scope_id: &str,
+        key: &str,
+    ) -> Result<Option<JsonValue>, HostApiError> {
+        let path = format!(
+            "/api/extensions/state/item?extension_id={}&namespace={}&scope_type={}&scope_id={}&key={}",
+            encode_url_component(extension_id),
+            encode_url_component(namespace),
+            encode_url_component(scope_type),
+            encode_url_component(scope_id),
+            encode_url_component(key),
+        );
+        match self.get_json(&path).await {
+            Ok(value) => Ok(value.get("value").cloned()),
+            Err(error) if error.code() == ErrorCode::NotFound => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
+    async fn put_extension_state(
+        &self,
+        extension_id: &str,
+        namespace: &str,
+        scope_type: &str,
+        scope_id: &str,
+        key: &str,
+        value: JsonValue,
+    ) -> Result<JsonValue, HostApiError> {
+        self.post_json(
+            "/api/extensions/state",
+            &serde_json::json!({
+                "extension_id": extension_id,
+                "namespace": namespace,
+                "scope_type": scope_type,
+                "scope_id": scope_id,
+                "key": key,
+                "value": value,
+            }),
+        )
+        .await
+    }
+
+    async fn delete_extension_state(
+        &self,
+        extension_id: &str,
+        namespace: &str,
+        scope_type: &str,
+        scope_id: &str,
+        key: &str,
+    ) -> Result<(), HostApiError> {
+        let path = format!(
+            "/api/extensions/state?extension_id={}&namespace={}&scope_type={}&scope_id={}&key={}",
+            encode_url_component(extension_id),
+            encode_url_component(namespace),
+            encode_url_component(scope_type),
+            encode_url_component(scope_id),
+            encode_url_component(key),
+        );
+        let response = self
+            .client
+            .delete(format!("{}{}", self.base_url, path))
+            .send()
+            .await
+            .map_err(internal_http_error)?;
+        self.read_response(response).await.map(|_| ())
+    }
+
+    async fn append_extension_record(
+        &self,
+        payload: JsonValue,
+    ) -> Result<ExtensionRecordEntry, HostApiError> {
+        let value = self.post_json("/api/extensions/records", &payload).await?;
+        serde_json::from_value(value).map_err(|error| {
+            internal_error(format!(
+                "parse extension record append response failed: {error}"
+            ))
+        })
+    }
+
+    async fn update_extension_record(
+        &self,
+        payload: JsonValue,
+    ) -> Result<ExtensionRecordEntry, HostApiError> {
+        let value = self
+            .post_json_with_method("/api/extensions/records", "PUT", &payload)
+            .await?;
+        serde_json::from_value(value).map_err(|error| {
+            internal_error(format!(
+                "parse extension record update response failed: {error}"
+            ))
+        })
+    }
+
+    async fn close_extension_record(
+        &self,
+        record_id: &str,
+    ) -> Result<ExtensionRecordEntry, HostApiError> {
+        let value = self
+            .post_json(
+                &format!(
+                    "/api/extensions/records/{}/close",
+                    encode_url_component(record_id)
+                ),
+                &serde_json::json!({}),
+            )
+            .await?;
+        serde_json::from_value(value).map_err(|error| {
+            internal_error(format!(
+                "parse extension record close response failed: {error}"
+            ))
+        })
+    }
+
+    async fn post_json_with_method<T: Serialize + ?Sized>(
+        &self,
+        path: &str,
+        method: &str,
+        body: &T,
+    ) -> Result<JsonValue, HostApiError> {
+        let response = self
+            .client
+            .request(
+                reqwest::Method::from_bytes(method.as_bytes())
+                    .map_err(|error| internal_error(format!("invalid method {method}: {error}")))?,
+                format!("{}{}", self.base_url, path),
+            )
+            .json(body)
+            .send()
+            .await
+            .map_err(internal_http_error)?;
+        self.read_response(response).await
+    }
 }
 
 pub async fn handle_conversation_message_created(
@@ -336,6 +508,17 @@ async fn generate_conversation_agent_reply(
     let owner = payload_owner(payload).unwrap_or_else(|| OwnerRef::global("runtime"));
 
     for agent_id in &addressed_agents {
+        if workflow_resume_run_id.is_none()
+            && already_processed_conversation_message(
+                store,
+                &conversation_id,
+                message_id.as_deref(),
+                agent_id,
+            )
+            .await?
+        {
+            continue;
+        }
         let conversation_messages = client
             .dispatch_action(
                 "message.list",
@@ -368,19 +551,98 @@ async fn generate_conversation_agent_reply(
             "origin": "workflow.conversation_message.created",
             "message_id": message_id,
         });
-        let run_response = if let Some(run_id) = workflow_resume_run_id.as_deref() {
-            load_run_response_for_agent(store, &conversation_id, agent_id, run_id)
-                .await?
-                .ok_or_else(|| format!("workflow run '{run_id}' not found for agent"))?
-        } else if is_workflow_execution_confirmation(&body) {
-            let Some(run_response) = load_latest_pending_run_for_agent(
+
+        if let Some(run_id) = workflow_resume_run_id.as_deref() {
+            if let Some(run_response) =
+                load_run_response_for_agent(store, &conversation_id, agent_id, run_id).await?
+            {
+                execute_workflow_run(
+                    client,
+                    runtime,
+                    store,
+                    &agents,
+                    &model_endpoints,
+                    &conversation_id,
+                    lane_id.as_deref(),
+                    message_id.as_deref(),
+                    &conversation_messages,
+                    &run_response,
+                    agent_id,
+                    true,
+                )
+                .await?;
+            } else if run_id.starts_with("direct-") {
+                execute_direct_reply(
+                    client,
+                    &runtime.runtime_paths,
+                    &agents,
+                    &model_endpoints,
+                    &conversation_id,
+                    lane_id.as_deref(),
+                    message_id.as_deref(),
+                    &conversation_messages,
+                    agent_id,
+                    run_id,
+                )
+                .await?;
+            } else {
+                return Err(format!("workflow run '{run_id}' not found for agent"));
+            }
+            continue;
+        }
+
+        let mut active_session = load_active_workflow_session(client, &conversation_id, agent_id)
+            .await
+            .map_err(|error| error.to_string())?;
+
+        if active_session.is_some() && is_explicit_new_topic(&body) {
+            abandon_active_workflow_session(
+                client,
                 store,
                 &conversation_id,
-                message_id.as_deref(),
                 agent_id,
+                active_session.as_ref(),
+            )
+            .await
+            .map_err(|error| error.to_string())?;
+            active_session = None;
+        }
+
+        if is_workflow_execution_confirmation(&body) {
+            if let Some(run_response) = resume_pending_workflow_run(
+                client,
+                runtime,
+                store,
+                &owner,
+                &agents,
+                &model_endpoints,
+                &conversation_id,
+                lane_id.as_deref(),
+                message_id.as_deref(),
+                &conversation_messages,
+                agent_id,
+                memory_context.clone(),
+                metadata.clone(),
+                active_session.as_ref(),
             )
             .await?
-            else {
+            {
+                execute_workflow_run(
+                    client,
+                    runtime,
+                    store,
+                    &agents,
+                    &model_endpoints,
+                    &conversation_id,
+                    lane_id.as_deref(),
+                    message_id.as_deref(),
+                    &conversation_messages,
+                    &run_response,
+                    agent_id,
+                    false,
+                )
+                .await?;
+            } else {
                 append_agent_conversation_reply(
                     client,
                     &conversation_id,
@@ -388,83 +650,991 @@ async fn generate_conversation_agent_reply(
                     message_id.as_deref(),
                     agent_id,
                     None,
-                    &build_workflow_no_pending_reply(),
+                    "当前没有可直接继续执行的复杂任务。你可以继续补充要求，或者直接让我处理一个具体操作。",
                 )
                 .await?;
-                continue;
-            };
-            run_response
-        } else {
-            let run_response = create_workflow_run_response(
-                runtime,
-                &owner,
-                &conversation_id,
-                lane_id.as_deref(),
-                message_id.as_deref(),
-                &body,
-                agent_id,
-                memory_context,
-                metadata,
-            )
-            .await?;
-            remember_workflow_run(
-                client,
-                &owner,
-                &conversation_id,
-                lane_id.as_deref(),
-                &body,
-                agent_id,
-                message_id.as_deref(),
-                run_response_id(&run_response),
-                &run_response,
-            )
-            .await;
-            append_agent_conversation_reply(
-                client,
-                &conversation_id,
-                lane_id.as_deref(),
-                message_id.as_deref(),
-                agent_id,
-                run_response_id(&run_response),
-                &build_workflow_plan_reply(&run_response),
-            )
-            .await?;
+            }
             continue;
-        };
-        let reply_body = match generate_real_agent_reply(
-            client,
-            &runtime.runtime_paths,
-            &agents,
-            &model_endpoints,
-            &conversation_id,
-            lane_id.as_deref(),
-            message_id.as_deref(),
-            &conversation_messages,
-            &run_response,
-            agent_id,
-        )
-        .await
-        {
-            Ok(reply) => reply,
-            Err(error) if error.is_permission_approval() => continue,
-            Err(error) => error.to_string(),
-        };
-        append_agent_conversation_reply(
-            client,
-            &conversation_id,
-            lane_id.as_deref(),
-            message_id.as_deref(),
-            agent_id,
-            run_response_id(&run_response),
-            &reply_body,
-        )
-        .await?;
+        }
+
+        match decide_conversation_route(&body, active_session.as_ref()) {
+            ConversationRoute::ManagedDiscussion => {
+                let discussion_reply = upsert_managed_discussion(
+                    client,
+                    runtime,
+                    store,
+                    &agents,
+                    &model_endpoints,
+                    &conversation_id,
+                    lane_id.as_deref(),
+                    message_id.as_deref(),
+                    &conversation_messages,
+                    &body,
+                    agent_id,
+                    active_session.as_ref(),
+                )
+                .await
+                .map_err(|error| error.to_string())?;
+                append_agent_conversation_reply(
+                    client,
+                    &conversation_id,
+                    lane_id.as_deref(),
+                    message_id.as_deref(),
+                    agent_id,
+                    None,
+                    &discussion_reply,
+                )
+                .await?;
+            }
+            ConversationRoute::DirectReply => {
+                let direct_run_id = synthetic_direct_run_id(agent_id, message_id.as_deref());
+                execute_direct_reply(
+                    client,
+                    &runtime.runtime_paths,
+                    &agents,
+                    &model_endpoints,
+                    &conversation_id,
+                    lane_id.as_deref(),
+                    message_id.as_deref(),
+                    &conversation_messages,
+                    agent_id,
+                    &direct_run_id,
+                )
+                .await?;
+            }
+        }
+
+        if workflow_resume_run_id.is_none() {
+            mark_conversation_message_processed(
+                store,
+                &conversation_id,
+                message_id.as_deref(),
+                agent_id,
+            )
+            .await?;
+        }
     }
 
     Ok(())
 }
 
-async fn generate_real_agent_reply(
+fn workflow_session_namespace() -> &'static str {
+    "workflow.session"
+}
+
+fn workflow_session_state_key(agent_id: &str) -> String {
+    format!("agent:{agent_id}:active")
+}
+
+async fn load_active_workflow_session(
+    client: &HostApiClient,
+    conversation_id: &str,
+    agent_id: &str,
+) -> Result<Option<ActiveWorkflowSession>, HostApiError> {
+    let Some(value) = client
+        .get_extension_state(
+            "workflow",
+            workflow_session_namespace(),
+            "conversation",
+            conversation_id,
+            &workflow_session_state_key(agent_id),
+        )
+        .await?
+    else {
+        return Ok(None);
+    };
+    serde_json::from_value(value)
+        .map(Some)
+        .map_err(|error| internal_error(format!("parse active workflow session failed: {error}")))
+}
+
+async fn save_active_workflow_session(
+    client: &HostApiClient,
+    conversation_id: &str,
+    agent_id: &str,
+    session: &ActiveWorkflowSession,
+) -> Result<(), HostApiError> {
+    client
+        .put_extension_state(
+            "workflow",
+            workflow_session_namespace(),
+            "conversation",
+            conversation_id,
+            &workflow_session_state_key(agent_id),
+            serde_json::to_value(session).map_err(|error| {
+                internal_error(format!("serialize active workflow session failed: {error}"))
+            })?,
+        )
+        .await
+        .map(|_| ())
+}
+
+async fn clear_active_workflow_session(
+    client: &HostApiClient,
+    conversation_id: &str,
+    agent_id: &str,
+) -> Result<(), HostApiError> {
+    client
+        .delete_extension_state(
+            "workflow",
+            workflow_session_namespace(),
+            "conversation",
+            conversation_id,
+            &workflow_session_state_key(agent_id),
+        )
+        .await
+}
+
+async fn abandon_active_workflow_session(
+    client: &HostApiClient,
+    store: &SqliteRuntimeStore,
+    conversation_id: &str,
+    agent_id: &str,
+    session: Option<&ActiveWorkflowSession>,
+) -> Result<(), HostApiError> {
+    let Some(session) = session else {
+        return Ok(());
+    };
+    let _ = update_workflow_draft_status(store, &session.draft_id, "abandoned").await;
+    let _ = client
+        .update_extension_record(serde_json::json!({
+            "id": session.record_id,
+            "status": "abandoned",
+            "summary": "这条复杂任务主线已结束，后续消息会按新话题处理。",
+        }))
+        .await;
+    let _ = client.close_extension_record(&session.record_id).await;
+    clear_active_workflow_session(client, conversation_id, agent_id).await
+}
+
+fn is_explicit_new_topic(body: &str) -> bool {
+    let normalized = body.trim().to_ascii_lowercase();
+    ["另外", "另一个", "新问题", "换个", "换一下", "重新开一个"]
+        .iter()
+        .any(|needle| normalized.contains(&needle.to_ascii_lowercase()))
+}
+
+fn is_explicit_plan_request(body: &str) -> bool {
+    let normalized = body.trim().to_ascii_lowercase();
+    [
+        "先计划",
+        "先出方案",
+        "任务编排",
+        "按步骤",
+        "先别执行",
+        "先讨论方案",
+    ]
+    .iter()
+    .any(|needle| normalized.contains(&needle.to_ascii_lowercase()))
+}
+
+fn looks_complex_request(body: &str) -> bool {
+    let normalized = body.trim().to_ascii_lowercase();
+    let mut score = 0;
+    for needle in [
+        "重构",
+        "架构",
+        "方案",
+        "系统级",
+        "一次性",
+        "长期",
+        "前后端",
+        "多文件",
+        "多模块",
+        "权限系统",
+        "任务编排",
+        "工作流",
+        "设计一下",
+    ] {
+        if normalized.contains(&needle.to_ascii_lowercase()) {
+            score += 1;
+        }
+    }
+    if body.lines().count() >= 4 {
+        score += 1;
+    }
+    score >= 2
+}
+
+fn decide_conversation_route(
+    body: &str,
+    active_session: Option<&ActiveWorkflowSession>,
+) -> ConversationRoute {
+    if is_explicit_plan_request(body) {
+        return ConversationRoute::ManagedDiscussion;
+    }
+    if active_session.is_some() {
+        return ConversationRoute::ManagedDiscussion;
+    }
+    if looks_complex_request(body) {
+        return ConversationRoute::ManagedDiscussion;
+    }
+    ConversationRoute::DirectReply
+}
+
+fn synthetic_direct_run_id(agent_id: &str, message_id: Option<&str>) -> String {
+    format!(
+        "direct-{}-{}",
+        agent_id,
+        message_id
+            .map(str::to_string)
+            .unwrap_or_else(|| Uuid::new_v4().to_string())
+    )
+}
+
+async fn load_workflow_draft(
+    store: &SqliteRuntimeStore,
+    draft_id: &str,
+) -> Result<Option<WorkflowDraftRow>, String> {
+    let row = sqlx::query(
+        "SELECT id, conversation_id, agent_id, status, goal, summary, source_message_id, record_id, latest_revision, payload_json, created_at, updated_at
+         FROM drafts WHERE id = ?1",
+    )
+    .bind(draft_id)
+    .fetch_optional(store.pool())
+    .await
+    .map_err(|error| error.to_string())?;
+    map_workflow_draft_row(row)
+}
+
+async fn already_processed_conversation_message(
+    store: &SqliteRuntimeStore,
+    conversation_id: &str,
+    message_id: Option<&str>,
+    agent_id: &str,
+) -> Result<bool, String> {
+    let Some(message_id) = message_id.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(false);
+    };
+    let row = sqlx::query(
+        "SELECT status
+         FROM conversation_message_receipts
+         WHERE conversation_id = ?1 AND message_id = ?2 AND agent_id = ?3
+         LIMIT 1",
+    )
+    .bind(conversation_id)
+    .bind(message_id)
+    .bind(agent_id)
+    .fetch_optional(store.pool())
+    .await
+    .map_err(|error| format!("load conversation message receipt failed: {error}"))?;
+    Ok(row.is_some_and(|item| item.get::<String, _>("status") == "completed"))
+}
+
+async fn mark_conversation_message_processed(
+    store: &SqliteRuntimeStore,
+    conversation_id: &str,
+    message_id: Option<&str>,
+    agent_id: &str,
+) -> Result<(), String> {
+    let Some(message_id) = message_id.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(());
+    };
+    let now = Utc::now().to_rfc3339();
+    sqlx::query(
+        "INSERT INTO conversation_message_receipts
+         (conversation_id, message_id, agent_id, status, created_at, updated_at)
+         VALUES (?1, ?2, ?3, 'completed', ?4, ?4)
+         ON CONFLICT(conversation_id, message_id, agent_id) DO UPDATE SET
+           status = excluded.status,
+           updated_at = excluded.updated_at",
+    )
+    .bind(conversation_id)
+    .bind(message_id)
+    .bind(agent_id)
+    .bind(&now)
+    .execute(store.pool())
+    .await
+    .map(|_| ())
+    .map_err(|error| format!("save conversation message receipt failed: {error}"))
+}
+
+async fn save_workflow_draft(
+    store: &SqliteRuntimeStore,
+    current: Option<&WorkflowDraftRow>,
+    conversation_id: &str,
+    agent_id: &str,
+    goal: &str,
+    summary: &str,
+    source_message_id: Option<&str>,
+    record_id: &str,
+    plan: &PlanSpec,
+) -> Result<WorkflowDraftRow, String> {
+    let now = Utc::now().to_rfc3339();
+    let draft_id = current
+        .map(|item| item.id.clone())
+        .unwrap_or_else(|| format!("draft-{}", Uuid::new_v4()));
+    let revision = current.map(|item| item.latest_revision + 1).unwrap_or(1);
+    let plan_json = serde_json::to_string(plan).map_err(|error| error.to_string())?;
+    sqlx::query(
+        "INSERT INTO drafts
+         (id, conversation_id, agent_id, status, goal, summary, source_message_id, record_id, latest_revision, payload_json, created_at, updated_at)
+         VALUES (?1, ?2, ?3, 'ready', ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10)
+         ON CONFLICT(id) DO UPDATE SET
+           status = 'ready',
+           goal = excluded.goal,
+           summary = excluded.summary,
+           source_message_id = excluded.source_message_id,
+           record_id = excluded.record_id,
+           latest_revision = excluded.latest_revision,
+           payload_json = excluded.payload_json,
+           updated_at = excluded.updated_at",
+    )
+    .bind(&draft_id)
+    .bind(conversation_id)
+    .bind(agent_id)
+    .bind(goal)
+    .bind(summary)
+    .bind(source_message_id)
+    .bind(record_id)
+    .bind(revision)
+    .bind(plan_json)
+    .bind(&now)
+    .execute(store.pool())
+    .await
+    .map_err(|error| error.to_string())?;
+
+    sqlx::query(
+        "INSERT INTO draft_revisions
+         (id, draft_id, revision, goal, summary, source_message_id, payload_json, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+    )
+    .bind(format!("draftrev-{}", Uuid::new_v4()))
+    .bind(&draft_id)
+    .bind(revision)
+    .bind(goal)
+    .bind(summary)
+    .bind(source_message_id)
+    .bind(serde_json::to_string(plan).map_err(|error| error.to_string())?)
+    .bind(&now)
+    .execute(store.pool())
+    .await
+    .map_err(|error| error.to_string())?;
+
+    load_workflow_draft(store, &draft_id)
+        .await?
+        .ok_or_else(|| "saved workflow draft missing".to_string())
+}
+
+async fn update_workflow_draft_status(
+    store: &SqliteRuntimeStore,
+    draft_id: &str,
+    status: &str,
+) -> Result<(), String> {
+    sqlx::query("UPDATE drafts SET status = ?2, updated_at = ?3 WHERE id = ?1")
+        .bind(draft_id)
+        .bind(status)
+        .bind(Utc::now().to_rfc3339())
+        .execute(store.pool())
+        .await
+        .map(|_| ())
+        .map_err(|error| error.to_string())
+}
+
+fn map_workflow_draft_row(
+    row: Option<sqlx::sqlite::SqliteRow>,
+) -> Result<Option<WorkflowDraftRow>, String> {
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    let payload_json: String = row.get("payload_json");
+    let plan = serde_json::from_str::<PlanSpec>(&payload_json)
+        .map_err(|error| format!("parse workflow draft payload failed: {error}"))?;
+    Ok(Some(WorkflowDraftRow {
+        id: row.get("id"),
+        conversation_id: row.get("conversation_id"),
+        agent_id: row.get("agent_id"),
+        status: row.get("status"),
+        goal: row.get("goal"),
+        summary: row.get("summary"),
+        source_message_id: row.get("source_message_id"),
+        record_id: row.get("record_id"),
+        latest_revision: row.get("latest_revision"),
+        plan,
+        created_at: row.get("created_at"),
+        updated_at: row.get("updated_at"),
+    }))
+}
+
+async fn upsert_managed_discussion(
+    client: &HostApiClient,
+    runtime: &WorkflowRuntime,
+    store: &SqliteRuntimeStore,
+    agents: &[AgentConfig],
+    model_endpoints: &[ModelEndpointConfig],
+    conversation_id: &str,
+    lane_id: Option<&str>,
+    message_id: Option<&str>,
+    conversation_messages: &JsonValue,
+    body: &str,
+    agent_id: &str,
+    active_session: Option<&ActiveWorkflowSession>,
+) -> Result<String, HostApiError> {
+    let current = if let Some(session) = active_session {
+        load_workflow_draft(store, &session.draft_id)
+            .await
+            .map_err(internal_error)?
+    } else {
+        None
+    };
+    let goal = current
+        .as_ref()
+        .map(|draft| draft.goal.clone())
+        .unwrap_or_else(|| body.trim().to_string());
+    let plan = generate_draft_plan(
+        client,
+        runtime,
+        agents,
+        model_endpoints,
+        conversation_id,
+        lane_id,
+        message_id,
+        conversation_messages,
+        &goal,
+        current.as_ref().map(|draft| &draft.plan),
+        agent_id,
+    )
+    .await?;
+    let revision = current
+        .as_ref()
+        .map(|draft| draft.latest_revision + 1)
+        .unwrap_or(1);
+    let reply = build_draft_reply(&goal, &plan, revision);
+
+    let record = if let Some(record_id) = current
+        .as_ref()
+        .and_then(|draft| draft.record_id.as_deref())
+    {
+        client
+            .update_extension_record(serde_json::json!({
+                "id": record_id,
+                "status": "ready",
+                "title": format!("复杂任务方案 v{revision}"),
+                "summary": reply.lines().next().unwrap_or("复杂任务方案已更新"),
+                "payload": {
+                    "agent_id": agent_id,
+                    "goal": goal,
+                    "revision": revision,
+                    "status": "ready",
+                    "steps": summarize_plan_steps(&plan),
+                    "plan": plan,
+                },
+                "related_message_id": message_id,
+            }))
+            .await?
+    } else {
+        client
+            .append_extension_record(serde_json::json!({
+                "extension_id": "workflow",
+                "namespace": "workflow.discussion",
+                "scope_type": "conversation",
+                "scope_id": conversation_id,
+                "kind": "workflow.discussion",
+                "status": "ready",
+                "title": format!("复杂任务方案 v{revision}"),
+                "summary": reply.lines().next().unwrap_or("复杂任务方案已创建"),
+                "related_message_id": message_id,
+                "payload": {
+                    "agent_id": agent_id,
+                    "goal": goal,
+                    "revision": revision,
+                    "status": "ready",
+                    "steps": summarize_plan_steps(&plan),
+                    "plan": plan,
+                }
+            }))
+            .await?
+    };
+
+    let draft = save_workflow_draft(
+        store,
+        current.as_ref(),
+        conversation_id,
+        agent_id,
+        &goal,
+        reply.lines().next().unwrap_or("复杂任务方案已更新"),
+        message_id,
+        &record.id,
+        &plan,
+    )
+    .await
+    .map_err(internal_error)?;
+    save_active_workflow_session(
+        client,
+        conversation_id,
+        agent_id,
+        &ActiveWorkflowSession {
+            draft_id: draft.id,
+            record_id: record.id,
+            status: "ready".to_string(),
+            revision: draft.latest_revision,
+        },
+    )
+    .await?;
+    Ok(reply)
+}
+
+async fn generate_draft_plan(
+    client: &HostApiClient,
+    runtime: &WorkflowRuntime,
+    agents: &[AgentConfig],
+    model_endpoints: &[ModelEndpointConfig],
+    conversation_id: &str,
+    lane_id: Option<&str>,
+    message_id: Option<&str>,
+    conversation_messages: &JsonValue,
+    goal: &str,
+    previous_plan: Option<&PlanSpec>,
+    agent_id: &str,
+) -> Result<PlanSpec, HostApiError> {
+    let agent = agents
+        .iter()
+        .find(|item| item.id == agent_id)
+        .ok_or_else(|| not_found_error(format!("agent '{agent_id}' not found")))?;
+    let model_endpoint = model_endpoints
+        .iter()
+        .find(|item| item.id == agent.model_endpoint_id && item.enabled)
+        .ok_or_else(|| {
+            not_found_error(format!(
+                "model endpoint '{}' not found",
+                agent.model_endpoint_id
+            ))
+        })?;
+    let model_id = if agent.model_id.trim().is_empty() {
+        model_endpoint.default_model.trim().to_string()
+    } else {
+        agent.model_id.trim().to_string()
+    };
+    if model_id.is_empty() {
+        return Err(bad_request_error(format!(
+            "agent '{}' has no model configured",
+            agent.id
+        )));
+    }
+
+    let draft_run_id = format!("draft-{}", message_id.unwrap_or("preview"));
+    let base_messages =
+        normalize_conversation_messages_for_provider(conversation_messages, agent_id);
+    let mut planning_prompt = build_planning_prompt(goal, true);
+    if previous_plan.is_some() {
+        planning_prompt
+            .push_str("\n请基于当前已有方案继续修订，不要换掉任务目标，只修正策略、步骤和约束。\n");
+    }
+    let previous_plan_value =
+        previous_plan.map(|plan| serde_json::to_value(plan).unwrap_or(JsonValue::Null));
+    let context = build_agent_provider_context(
+        client,
+        &runtime.runtime_paths,
+        agent,
+        conversation_id,
+        lane_id,
+        message_id,
+        &draft_run_id,
+        previous_plan_value.as_ref(),
+    )
+    .await;
+    let metadata = serde_json::json!({
+        "conversation_id": conversation_id,
+        "lane_id": lane_id,
+        "message_id": message_id,
+        "run_id": draft_run_id,
+        "agent_id": agent.id,
+        "mode": "workflow_discussion",
+    });
+
+    let mut last_reason = "planner did not return a valid plan".to_string();
+    let mut previous_text = String::new();
+    for attempt in 0..2 {
+        let prompt = if attempt == 0 {
+            planning_prompt.clone()
+        } else {
+            format!(
+                "{}\n\n上轮输出没有通过计划校验，原因：{}。请继续在原目标上修订。",
+                planning_prompt, last_reason
+            )
+        };
+        let mut messages = base_messages.clone();
+        if !previous_text.trim().is_empty() {
+            messages.push(serde_json::json!({
+                "role": "assistant",
+                "content": previous_text,
+            }));
+        }
+        messages.push(serde_json::json!({
+            "role": "user",
+            "content": prompt,
+        }));
+        let response = client
+            .provider_generate(
+                &model_endpoint.kind,
+                serde_json::json!({
+                    "model_endpoint": model_endpoint_runtime_request_config(model_endpoint),
+                    "model": model_id,
+                    "instructions": ProviderInstructions {
+                        base: build_agent_runtime_prompt(agent, &draft_run_id),
+                    },
+                    "system_prompt": build_agent_runtime_prompt(agent, &draft_run_id),
+                    "context": context,
+                    "messages": messages,
+                    "generation_options": agent.generation_options,
+                    "tools": [],
+                    "metadata": metadata,
+                }),
+                permission_actor_context(
+                    agent_id,
+                    "workflow.provider_generate",
+                    Some(conversation_id),
+                    Some(&draft_run_id),
+                    message_id,
+                ),
+            )
+            .await?;
+        let text = response
+            .get("text")
+            .and_then(JsonValue::as_str)
+            .map(str::trim)
+            .filter(|item| !item.is_empty())
+            .ok_or_else(|| internal_error("planner returned empty text"))?
+            .to_string();
+        previous_text = text.clone();
+        match parse_plan_from_text(&text, goal) {
+            Ok(plan) => {
+                let verdict = validate_plan(&plan);
+                if verdict.ready {
+                    return Ok(plan);
+                }
+                last_reason = verdict.reason;
+            }
+            Err(reason) => last_reason = reason,
+        }
+    }
+    Err(bad_request_error(format!(
+        "计划输出未通过校验：{last_reason}"
+    )))
+}
+
+fn build_draft_reply(goal: &str, plan: &PlanSpec, revision: i64) -> String {
+    let mut lines = vec![format!(
+        "我先把这件事整理成第 {revision} 版方案，目标还是：{goal}"
+    )];
+    for item in summarize_plan_steps(plan).into_iter().take(5) {
+        lines.push(format!("- {item}"));
+    }
+    lines.push("如果方向不对，你继续指出要改哪一点，我会在这版上继续修。".to_string());
+    lines.push("如果方向已经对了，直接说“开始执行”或“去改吧”，我就按这版进入执行。".to_string());
+    lines.join("\n")
+}
+
+async fn resume_pending_workflow_run(
+    client: &HostApiClient,
+    runtime: &WorkflowRuntime,
+    store: &SqliteRuntimeStore,
+    owner: &OwnerRef,
+    agents: &[AgentConfig],
+    model_endpoints: &[ModelEndpointConfig],
+    conversation_id: &str,
+    lane_id: Option<&str>,
+    message_id: Option<&str>,
+    conversation_messages: &JsonValue,
+    agent_id: &str,
+    memory_context: Option<RunContext>,
+    metadata: JsonValue,
+    active_session: Option<&ActiveWorkflowSession>,
+) -> Result<Option<JsonValue>, String> {
+    if let Some(session) = active_session {
+        let Some(draft) = load_workflow_draft(store, &session.draft_id).await? else {
+            return Ok(None);
+        };
+        let execution_record = client
+            .append_extension_record(serde_json::json!({
+                "extension_id": "workflow",
+                "namespace": "workflow.execution",
+                "scope_type": "conversation",
+                "scope_id": conversation_id,
+                "kind": "workflow.execution",
+                "status": "running",
+                "title": "复杂任务执行中",
+                "summary": draft.summary,
+                "related_message_id": message_id,
+                "payload": {
+                    "agent_id": agent_id,
+                    "goal": draft.goal,
+                    "draft_id": draft.id,
+                    "stage": "pending",
+                    "steps": summarize_plan_steps(&draft.plan),
+                }
+            }))
+            .await
+            .map_err(|error| error.to_string())?;
+        let run_metadata = merge_json_objects(
+            metadata,
+            serde_json::json!({
+                "conversation_record_id": execution_record.id,
+                "draft_id": draft.id,
+                "route": "managed_run",
+            }),
+        );
+        let run_response = create_workflow_run_response(
+            runtime,
+            store,
+            owner,
+            conversation_id,
+            lane_id,
+            message_id,
+            &draft.goal,
+            agent_id,
+            memory_context,
+            run_metadata,
+        )
+        .await?;
+        let run = store
+            .get_run(run_response_id(&run_response).unwrap_or_default())
+            .await
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| "workflow run missing after create".to_string())?;
+        runtime
+            .runtime_store
+            .save_plan(&run, &draft.plan, agent_id)
+            .await
+            .map_err(|error| error.to_string())?;
+        let run_response = load_run_detail_json(store, &run.id)
+            .await?
+            .ok_or_else(|| "workflow run detail missing after save_plan".to_string())?;
+        remember_workflow_run(
+            client,
+            owner,
+            conversation_id,
+            lane_id,
+            &draft.goal,
+            agent_id,
+            message_id,
+            run_response_id(&run_response),
+            &run_response,
+        )
+        .await;
+        let _ = client
+            .update_extension_record(serde_json::json!({
+                "id": session.record_id,
+                "status": "closed",
+                "summary": "方案讨论已结束，已进入执行。",
+            }))
+            .await;
+        let _ = client.close_extension_record(&session.record_id).await;
+        let _ = update_workflow_draft_status(store, &draft.id, "running").await;
+        clear_active_workflow_session(client, conversation_id, agent_id)
+            .await
+            .map_err(|error| error.to_string())?;
+        let _ = (agents, model_endpoints, conversation_messages);
+        return Ok(Some(run_response));
+    }
+
+    load_latest_pending_run_for_agent(store, conversation_id, message_id, agent_id).await
+}
+
+async fn execute_workflow_run(
+    client: &HostApiClient,
+    runtime: &WorkflowRuntime,
+    store: &SqliteRuntimeStore,
+    agents: &[AgentConfig],
+    model_endpoints: &[ModelEndpointConfig],
+    conversation_id: &str,
+    lane_id: Option<&str>,
+    message_id: Option<&str>,
+    conversation_messages: &JsonValue,
+    run_response: &JsonValue,
+    agent_id: &str,
+    resumed_from_approval: bool,
+) -> Result<(), String> {
+    let run_response = match prepare_workflow_run_for_execution(
+        store,
+        run_response,
+        resumed_from_approval,
+    )
+    .await
+    {
+        Ok(detail) => detail,
+        Err(reason) => {
+            append_agent_conversation_reply(
+                client,
+                conversation_id,
+                lane_id,
+                message_id,
+                agent_id,
+                run_response_id(run_response),
+                &reason,
+            )
+            .await?;
+            return Ok(());
+        }
+    };
+    sync_execution_record(
+        client,
+        &run_response,
+        "running",
+        None,
+        Some(run_stage_label(&run_response)),
+    )
+    .await;
+    let reply_body = match generate_real_agent_reply(
+        client,
+        store,
+        &runtime.runtime_paths,
+        agents,
+        model_endpoints,
+        conversation_id,
+        lane_id,
+        message_id,
+        conversation_messages,
+        &run_response,
+        agent_id,
+    )
+    .await
+    {
+        Ok(reply) => {
+            let _ = transition_workflow_run_stage(
+                store,
+                run_response_id(&run_response).unwrap_or_default(),
+                RunStage::Completed,
+                "本轮按计划执行完成",
+                "WF_EXECUTION_COMPLETED",
+                NextAction::Complete,
+            )
+            .await;
+            sync_execution_record(
+                client,
+                &run_response,
+                "completed",
+                Some("执行完成".to_string()),
+                Some("completed".to_string()),
+            )
+            .await;
+            reply
+        }
+        Err(error) if error.is_permission_approval() => {
+            let _ = transition_workflow_run_stage(
+                store,
+                run_response_id(&run_response).unwrap_or_default(),
+                RunStage::Blocked,
+                "执行过程中等待权限审批",
+                "WF_EXECUTION_WAITING_APPROVAL",
+                NextAction::EnterBlocked,
+            )
+            .await;
+            sync_execution_record(
+                client,
+                &run_response,
+                "blocked",
+                Some("执行过程中等待权限审批".to_string()),
+                Some("blocked".to_string()),
+            )
+            .await;
+            return Ok(());
+        }
+        Err(error) => {
+            let _ = transition_workflow_run_stage(
+                store,
+                run_response_id(&run_response).unwrap_or_default(),
+                RunStage::Failed,
+                "执行过程中发生错误",
+                "WF_EXECUTION_FAILED",
+                NextAction::Fail,
+            )
+            .await;
+            sync_execution_record(
+                client,
+                &run_response,
+                "failed",
+                Some(format_host_api_error_for_conversation(&error)),
+                Some("failed".to_string()),
+            )
+            .await;
+            format_host_api_error_for_conversation(&error)
+        }
+    };
+    append_agent_conversation_reply(
+        client,
+        conversation_id,
+        lane_id,
+        message_id,
+        agent_id,
+        run_response_id(&run_response),
+        &reply_body,
+    )
+    .await
+}
+
+async fn sync_execution_record(
+    client: &HostApiClient,
+    run_response: &JsonValue,
+    status: &str,
+    summary: Option<String>,
+    stage: Option<String>,
+) {
+    let Some(record_id) = run_response_record_id(run_response) else {
+        return;
+    };
+    let _ = client
+        .update_extension_record(serde_json::json!({
+            "id": record_id,
+            "status": status,
+            "summary": summary,
+            "payload": {
+                "run_id": run_response_id(run_response),
+                "goal": run_response_goal(run_response),
+                "stage": stage.as_deref().unwrap_or("unknown"),
+                "steps": run_response
+                    .get("tasks")
+                    .and_then(JsonValue::as_array)
+                    .cloned()
+                    .unwrap_or_default(),
+                "artifacts": run_response
+                    .get("artifacts")
+                    .and_then(JsonValue::as_array)
+                    .cloned()
+                    .unwrap_or_default(),
+            }
+        }))
+        .await;
+    if matches!(status, "completed" | "failed") {
+        let _ = client.close_extension_record(record_id).await;
+    }
+}
+
+fn run_response_record_id(run_response: &JsonValue) -> Option<&str> {
+    run_response
+        .get("run")
+        .and_then(|item| item.get("metadata"))
+        .and_then(|item| item.get("conversation_record_id"))
+        .and_then(JsonValue::as_str)
+}
+
+fn run_response_goal(run_response: &JsonValue) -> String {
+    run_response
+        .get("run")
+        .and_then(|item| item.get("goal"))
+        .and_then(JsonValue::as_str)
+        .unwrap_or_default()
+        .to_string()
+}
+
+fn run_stage_label(run_response: &JsonValue) -> String {
+    run_response
+        .get("run")
+        .and_then(|item| item.get("stage"))
+        .and_then(JsonValue::as_str)
+        .unwrap_or("unknown")
+        .to_string()
+}
+
+fn merge_json_objects(left: JsonValue, right: JsonValue) -> JsonValue {
+    let mut base = left.as_object().cloned().unwrap_or_default();
+    for (key, value) in right.as_object().cloned().unwrap_or_default() {
+        base.insert(key, value);
+    }
+    JsonValue::Object(base)
+}
+
+async fn execute_direct_reply(
     client: &HostApiClient,
     runtime_paths: &Arc<RuntimePaths>,
     agents: &[AgentConfig],
@@ -473,7 +1643,95 @@ async fn generate_real_agent_reply(
     lane_id: Option<&str>,
     message_id: Option<&str>,
     conversation_messages: &JsonValue,
+    agent_id: &str,
+    run_id: &str,
+) -> Result<(), String> {
+    match generate_agent_reply(
+        client,
+        runtime_paths,
+        agents,
+        model_endpoints,
+        conversation_id,
+        lane_id,
+        message_id,
+        conversation_messages,
+        None,
+        run_id,
+        agent_id,
+    )
+    .await
+    {
+        Ok(reply_body) => {
+            append_agent_conversation_reply(
+                client,
+                conversation_id,
+                lane_id,
+                message_id,
+                agent_id,
+                None,
+                &reply_body,
+            )
+            .await
+        }
+        Err(error) if error.is_permission_approval() => Ok(()),
+        Err(error) => {
+            append_agent_conversation_reply(
+                client,
+                conversation_id,
+                lane_id,
+                message_id,
+                agent_id,
+                None,
+                &format_host_api_error_for_conversation(&error),
+            )
+            .await
+        }
+    }
+}
+
+async fn generate_real_agent_reply(
+    client: &HostApiClient,
+    _store: &SqliteRuntimeStore,
+    runtime_paths: &Arc<RuntimePaths>,
+    agents: &[AgentConfig],
+    model_endpoints: &[ModelEndpointConfig],
+    conversation_id: &str,
+    lane_id: Option<&str>,
+    message_id: Option<&str>,
+    conversation_messages: &JsonValue,
     run_response: &JsonValue,
+    agent_id: &str,
+) -> Result<String, HostApiError> {
+    let run_id = run_response_id(run_response)
+        .unwrap_or_default()
+        .to_string();
+    generate_agent_reply(
+        client,
+        runtime_paths,
+        agents,
+        model_endpoints,
+        conversation_id,
+        lane_id,
+        message_id,
+        conversation_messages,
+        run_response.get("plan"),
+        &run_id,
+        agent_id,
+    )
+    .await
+}
+
+async fn generate_agent_reply(
+    client: &HostApiClient,
+    runtime_paths: &Arc<RuntimePaths>,
+    agents: &[AgentConfig],
+    model_endpoints: &[ModelEndpointConfig],
+    conversation_id: &str,
+    lane_id: Option<&str>,
+    message_id: Option<&str>,
+    conversation_messages: &JsonValue,
+    plan: Option<&JsonValue>,
+    run_id: &str,
     agent_id: &str,
 ) -> Result<String, HostApiError> {
     let agent = agents
@@ -500,9 +1758,7 @@ async fn generate_real_agent_reply(
             agent.id
         )));
     }
-    let run_id = run_response_id(run_response)
-        .unwrap_or_default()
-        .to_string();
+
     let mut messages =
         normalize_conversation_messages_for_provider(conversation_messages, agent_id);
     let tools = build_agent_builtin_tool_specs(agent);
@@ -513,11 +1769,12 @@ async fn generate_real_agent_reply(
         conversation_id,
         lane_id,
         message_id,
-        &run_id,
+        run_id,
+        plan,
     )
     .await;
     let instructions = ProviderInstructions {
-        base: build_agent_runtime_prompt(agent, &run_id),
+        base: build_agent_runtime_prompt(agent, run_id),
     };
     let metadata = serde_json::json!({
         "conversation_id": conversation_id,
@@ -537,7 +1794,7 @@ async fn generate_real_agent_reply(
                     "model_endpoint": model_endpoint_runtime_request_config(model_endpoint),
                     "model": model_id,
                     "instructions": instructions,
-                    "system_prompt": build_agent_runtime_prompt(agent, &run_id),
+                    "system_prompt": build_agent_runtime_prompt(agent, run_id),
                     "context": context,
                     "messages": messages,
                     "generation_options": agent.generation_options,
@@ -549,12 +1806,11 @@ async fn generate_real_agent_reply(
                     agent_id,
                     "workflow.provider_generate",
                     Some(conversation_id),
-                    Some(&run_id),
+                    Some(run_id),
                     message_id,
                 ),
             )
             .await?;
-
         let text = response
             .get("text")
             .and_then(JsonValue::as_str)
@@ -568,11 +1824,9 @@ async fn generate_real_agent_reply(
             .transpose()
             .map_err(|error| internal_error(format!("parse agent tool calls failed: {error}")))?
             .unwrap_or_default();
-
         if tool_calls.is_empty() {
             return text.ok_or_else(|| internal_error("provider returned empty text"));
         }
-
         messages.push(serde_json::json!({
             "role": "assistant",
             "content": text.unwrap_or_default(),
@@ -582,7 +1836,6 @@ async fn generate_real_agent_reply(
                 "arguments": call.arguments,
             })).collect::<Vec<_>>(),
         }));
-
         for tool_call in tool_calls {
             match execute_builtin_tool(
                 client,
@@ -590,7 +1843,7 @@ async fn generate_real_agent_reply(
                 conversation_id,
                 lane_id,
                 message_id,
-                &run_id,
+                run_id,
                 &tool_call,
             )
             .await
@@ -635,7 +1888,6 @@ async fn generate_real_agent_reply(
             }
         }
     }
-
     Err(internal_error(
         "agent tool loop exceeded maximum iterations",
     ))
@@ -921,6 +2173,7 @@ async fn load_run_response_for_agent(
 
 async fn create_workflow_run_response(
     runtime: &WorkflowRuntime,
+    store: &SqliteRuntimeStore,
     owner: &OwnerRef,
     conversation_id: &str,
     lane_id: Option<&str>,
@@ -952,8 +2205,12 @@ async fn create_workflow_run_response(
         },
     )
     .await?;
-    serde_json::to_value(response)
-        .map_err(|error| format!("serialize workflow run response failed: {error}"))
+    if let Some(detail) = load_run_detail_json(store, &response.run.id).await? {
+        Ok(detail)
+    } else {
+        serde_json::to_value(response)
+            .map_err(|error| format!("serialize workflow run response failed: {error}"))
+    }
 }
 
 async fn list_recent_message_runs(
@@ -978,6 +2235,164 @@ async fn list_recent_message_runs(
     Ok(runs)
 }
 
+async fn prepare_workflow_run_for_execution(
+    store: &SqliteRuntimeStore,
+    run_response: &JsonValue,
+    resumed_from_approval: bool,
+) -> Result<JsonValue, String> {
+    let run_id = run_response_id(run_response)
+        .ok_or_else(|| "workflow run 缺少 run.id，无法进入执行阶段。".to_string())?;
+    let plan = parse_valid_plan_from_run_response(run_response)?;
+    let mut detail = load_run_detail_json(store, run_id)
+        .await?
+        .ok_or_else(|| format!("workflow run '{run_id}' not found"))?;
+    let current_stage = detail
+        .get("run")
+        .and_then(|item| item.get("stage"))
+        .and_then(JsonValue::as_str)
+        .map(RunStage::from_str)
+        .unwrap_or(RunStage::Pending);
+
+    if current_stage == RunStage::Planning {
+        detail = transition_workflow_run_stage(
+            store,
+            run_id,
+            RunStage::Dispatched,
+            "用户已确认执行该计划",
+            "WF_PLAN_CONFIRMED",
+            NextAction::Dispatch,
+        )
+        .await?;
+    } else if current_stage == RunStage::Blocked && resumed_from_approval {
+        detail = transition_workflow_run_stage(
+            store,
+            run_id,
+            RunStage::Dispatched,
+            "权限审批已通过，准备恢复执行",
+            "WF_APPROVAL_RESUMED",
+            NextAction::Dispatch,
+        )
+        .await?;
+    }
+
+    let next_stage = detail
+        .get("run")
+        .and_then(|item| item.get("stage"))
+        .and_then(JsonValue::as_str)
+        .map(RunStage::from_str)
+        .unwrap_or(RunStage::Pending);
+    if next_stage != RunStage::Running {
+        detail = transition_workflow_run_stage(
+            store,
+            run_id,
+            RunStage::Running,
+            if resumed_from_approval {
+                "按已确认的计划恢复执行"
+            } else {
+                "按已确认的计划开始执行"
+            },
+            "WF_EXECUTION_STARTED",
+            NextAction::StayRunning,
+        )
+        .await?;
+    }
+
+    if detail.get("plan").is_none() || detail.get("plan") == Some(&JsonValue::Null) {
+        let mut detail_object = detail.as_object().cloned().unwrap_or_default();
+        detail_object.insert(
+            "plan".to_string(),
+            serde_json::to_value(plan)
+                .map_err(|error| format!("serialize workflow plan failed: {error}"))?,
+        );
+        detail = JsonValue::Object(detail_object);
+    }
+
+    Ok(detail)
+}
+
+fn parse_valid_plan_from_run_response(run_response: &JsonValue) -> Result<PlanSpec, String> {
+    let plan_value = run_response
+        .get("plan")
+        .filter(|value| !value.is_null())
+        .cloned()
+        .ok_or_else(|| "当前还没有可执行计划，请先重新发起任务，让我先生成计划。".to_string())?;
+    let plan = serde_json::from_value::<PlanSpec>(plan_value)
+        .map_err(|error| format!("当前计划结构无效，暂时不能执行：{error}"))?;
+    let verdict = validate_plan(&plan);
+    if verdict.ready {
+        Ok(plan)
+    } else {
+        Err(format!("当前计划还不能执行，原因：{}", verdict.reason))
+    }
+}
+
+async fn transition_workflow_run_stage(
+    store: &SqliteRuntimeStore,
+    run_id: &str,
+    to_stage: RunStage,
+    reason: &str,
+    policy_rule_id: &str,
+    next_action: NextAction,
+) -> Result<JsonValue, String> {
+    if run_id.trim().is_empty() {
+        return Err("workflow run 缺少 run.id，无法更新阶段。".to_string());
+    }
+    let Some(mut run) = store
+        .get_run(run_id)
+        .await
+        .map_err(|error| format!("load workflow run failed: {error}"))?
+    else {
+        return Err(format!("workflow run '{run_id}' not found"));
+    };
+    if run.stage == to_stage {
+        return load_run_detail_json(store, run_id)
+            .await?
+            .ok_or_else(|| format!("workflow run '{run_id}' not found"));
+    }
+
+    let from_stage = run.stage;
+    let now = Utc::now().to_rfc3339();
+    run.stage = to_stage;
+    run.updated_at = now.clone();
+    store
+        .save_run(&run)
+        .await
+        .map_err(|error| format!("save workflow run failed: {error}"))?;
+
+    let stage_event = RunStageEvent {
+        id: format!("rse-{}", Uuid::new_v4()),
+        run_id: run.id.clone(),
+        from_stage: Some(from_stage),
+        to_stage,
+        policy_rule_id: Some(policy_rule_id.to_string()),
+        reason: Some(reason.to_string()),
+        at: now.clone(),
+    };
+    store
+        .log_stage_event(&stage_event)
+        .await
+        .map_err(|error| format!("log workflow stage event failed: {error}"))?;
+
+    let decision = DecisionSnapshot {
+        id: format!("dec-{}", Uuid::new_v4()),
+        run_id: Some(run.id.clone()),
+        task_id: None,
+        stage: from_stage.as_str().to_string(),
+        signals_json: "{}".to_string(),
+        next_action: next_action.as_str().to_string(),
+        policy_rule_id: policy_rule_id.to_string(),
+        at: now,
+    };
+    store
+        .log_decision(&decision)
+        .await
+        .map_err(|error| format!("log workflow decision failed: {error}"))?;
+
+    load_run_detail_json(store, run_id)
+        .await?
+        .ok_or_else(|| format!("workflow run '{run_id}' not found"))
+}
+
 async fn load_run_detail_json(
     store: &SqliteRuntimeStore,
     run_id: &str,
@@ -989,6 +2404,10 @@ async fn load_run_detail_json(
     else {
         return Ok(None);
     };
+    let plan = store
+        .get_plan(run_id)
+        .await
+        .map_err(|error| format!("load workflow plan failed: {error}"))?;
     let tasks = store
         .list_tasks_for_run(run_id)
         .await
@@ -1015,6 +2434,7 @@ async fn load_run_detail_json(
         .map_err(|error| format!("load workflow decisions failed: {error}"))?;
     Ok(Some(serde_json::json!({
         "run": run,
+        "plan": plan,
         "tasks": tasks,
         "artifacts": artifacts,
         "handoffs": handoffs,
@@ -1032,10 +2452,25 @@ async fn build_agent_provider_context(
     lane_id: Option<&str>,
     message_id: Option<&str>,
     run_id: &str,
+    plan: Option<&JsonValue>,
 ) -> JsonValue {
     let extensions_runtime = client
         .get_json("/api/extensions/runtime")
         .await
+        .unwrap_or(JsonValue::Null);
+    let plan_context = plan
+        .cloned()
+        .filter(|value| !value.is_null())
+        .and_then(|value| serde_json::from_value::<PlanSpec>(value).ok())
+        .map(|value| {
+            let summary = summarize_plan_steps(&value);
+            let ready = validate_plan(&value).ready;
+            serde_json::json!({
+                "raw": value,
+                "summary": summary,
+                "ready": ready,
+            })
+        })
         .unwrap_or(JsonValue::Null);
     serde_json::json!({
         "kind": "ennoia.agent_context",
@@ -1053,6 +2488,10 @@ async fn build_agent_provider_context(
             "conversation_id": conversation_id,
             "lane_id": lane_id,
             "message_id": message_id,
+        },
+        "workflow": {
+            "run_id": normalize_unknown(run_id),
+            "plan": plan_context,
         },
         "extensions": extract_conversation_extensions(&extensions_runtime),
         "skills": agent.skills,
@@ -1196,12 +2635,17 @@ fn serialize_tool_message_envelope(
 fn model_endpoint_runtime_request_config(model_endpoint: &ModelEndpointConfig) -> JsonValue {
     serde_json::json!({
         "id": model_endpoint.id,
+        "display_name": model_endpoint.display_name,
         "kind": model_endpoint.kind,
+        "description": model_endpoint.description,
         "base_url": model_endpoint.base_url,
         "api_key": model_endpoint.api_key,
         "api_key_env": model_endpoint.api_key_env,
+        "request_timeout_ms": model_endpoint.request_timeout_ms,
         "default_model": model_endpoint.default_model,
         "available_models": model_endpoint.available_models,
+        "model_discovery": model_endpoint.model_discovery,
+        "enabled": model_endpoint.enabled,
     })
 }
 
@@ -1409,7 +2853,7 @@ fn run_response_id(run_response: &JsonValue) -> Option<&str> {
 fn run_stage_can_be_resumed(stage: RunStage) -> bool {
     !matches!(
         stage,
-        RunStage::Completed | RunStage::Failed | RunStage::Cancelled | RunStage::Blocked
+        RunStage::Completed | RunStage::Failed | RunStage::Cancelled
     )
 }
 
@@ -1444,6 +2888,8 @@ fn is_workflow_execution_confirmation(body: &str) -> bool {
             | "开始"
             | "继续执行"
             | "开始执行"
+            | "去改吧"
+            | "执行吧"
             | "确认执行"
             | "继续吧"
             | "开始吧"
@@ -1451,45 +2897,6 @@ fn is_workflow_execution_confirmation(body: &str) -> bool {
             | "继续处理"
             | "开始处理"
     )
-}
-
-fn build_workflow_plan_reply(run_response: &JsonValue) -> String {
-    let goal = run_response
-        .get("run")
-        .and_then(|item| item.get("goal"))
-        .and_then(JsonValue::as_str)
-        .unwrap_or_default();
-    let mut lines = vec![
-        "我先把执行计划整理好了，当前还没有真正开始动手。".to_string(),
-        if goal.trim().is_empty() {
-            "下面是准备执行的计划：".to_string()
-        } else {
-            format!("围绕“{}”，我打算这样推进：", goal.trim())
-        },
-    ];
-    if let Some(tasks) = run_response.get("tasks").and_then(JsonValue::as_array) {
-        let task_titles = tasks
-            .iter()
-            .filter_map(|task| task.get("title").and_then(JsonValue::as_str))
-            .take(6)
-            .enumerate()
-            .map(|(index, title)| format!("{}. {}", index + 1, title.trim()))
-            .collect::<Vec<_>>();
-        if !task_titles.is_empty() {
-            lines.extend(task_titles);
-        }
-    }
-    if lines.len() <= 2 {
-        lines.push("1. 梳理目标与约束".to_string());
-        lines.push("2. 拆分关键步骤".to_string());
-        lines.push("3. 确认交付位置与执行方式".to_string());
-    }
-    lines.push("如果这个计划没问题，回复“继续执行”或“开始执行”，我就按这个计划继续。".to_string());
-    lines.join("\n")
-}
-
-fn build_workflow_no_pending_reply() -> String {
-    "当前没有可继续执行的编排任务。先发一条任务请求，我会先给出编排结果。".to_string()
 }
 
 fn build_workflow_memory_sources(
@@ -1553,6 +2960,18 @@ fn payload_string_field(payload: &JsonValue, path: &[&str]) -> Option<String> {
         current = current.get(*segment)?;
     }
     current.as_str().map(str::to_string)
+}
+
+fn encode_url_component(value: &str) -> String {
+    value
+        .bytes()
+        .flat_map(|byte| match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                vec![byte as char]
+            }
+            _ => format!("%{byte:02X}").chars().collect::<Vec<_>>(),
+        })
+        .collect()
 }
 
 fn payload_string_array_field(payload: &JsonValue, path: &[&str]) -> Vec<String> {
@@ -1722,6 +3141,62 @@ fn normalize_unknown(value: &str) -> String {
 
 fn internal_http_error(error: reqwest::Error) -> HostApiError {
     internal_error(format!("host request failed: {error}"))
+}
+
+fn format_host_api_error_for_conversation(error: &HostApiError) -> String {
+    let message = error.message().trim();
+    if message.is_empty() {
+        return "系统错误".to_string();
+    }
+    if message.starts_with("系统内部错误")
+        || message.starts_with("系统错误")
+        || message.starts_with("上游模型错误")
+        || message.starts_with("请求超时")
+        || message.starts_with("配置错误")
+        || message.starts_with("扩展运行错误")
+        || message.starts_with("沙盒路径已拦截")
+    {
+        return message.to_string();
+    }
+
+    let normalized = message.to_lowercase();
+    let heading = if normalized.contains("native sandbox only accepts")
+        || normalized.contains("path cannot escape the selected execution root")
+        || normalized.contains("path must stay inside the selected execution root")
+    {
+        "沙盒路径已拦截"
+    } else if normalized.contains("openai api key is missing")
+        || normalized.contains("openai request failed")
+        || normalized.contains("upstream returned")
+        || normalized.contains("provider returned empty")
+        || normalized.contains("当前上游不支持")
+    {
+        "上游模型错误"
+    } else if matches!(error.code(), ErrorCode::Timeout)
+        || normalized.contains("request timeout:")
+        || normalized.contains("request timeout after")
+        || normalized.contains("timed out")
+    {
+        "请求超时"
+    } else if normalized.contains("provider invoke requires params.model_endpoint")
+        || normalized.contains("missing field `display_name`")
+        || normalized.contains("missing field")
+        || normalized.contains("invalid configuration")
+    {
+        "配置错误"
+    } else if normalized.contains("extension rpc failed")
+        || normalized.contains("method_not_found")
+        || normalized.contains("conversation worker method")
+        || normalized.contains("parse extension record")
+    {
+        "扩展运行错误"
+    } else if matches!(error.code(), ErrorCode::BadRequest | ErrorCode::Internal) {
+        "系统错误"
+    } else {
+        "执行失败"
+    };
+
+    format!("{heading}\n{message}")
 }
 
 fn internal_error(message: impl Into<String>) -> HostApiError {

@@ -1,4 +1,4 @@
-import { fetchJson } from "./core";
+import { apiUrl, fetchJson, type FetchJsonInit } from "./core";
 import type {
   PermissionApprovalRecord,
   PermissionEventRecord,
@@ -40,7 +40,7 @@ export async function listPermissionApprovals(query?: {
   conversation_id?: string;
   status?: string;
   limit?: number;
-}) {
+}, init?: FetchJsonInit) {
   const params = new URLSearchParams();
   if (query?.agent_id) {
     params.set("agent_id", query.agent_id);
@@ -57,6 +57,7 @@ export async function listPermissionApprovals(query?: {
   const suffix = params.toString();
   return fetchJson<PermissionApprovalRecord[]>(
     `/api/permissions/approvals${suffix ? `?${suffix}` : ""}`,
+    init,
   );
 }
 
@@ -66,12 +67,13 @@ export async function listConversationPermissionApprovals(
     status?: string;
     limit?: number;
   },
+  init?: FetchJsonInit,
 ) {
   return listPermissionApprovals({
     conversation_id: conversationId,
     status: query?.status,
     limit: query?.limit,
-  });
+  }, init);
 }
 
 export async function resolvePermissionApproval(
@@ -129,4 +131,9 @@ export async function revokePermissionGrant(grantId: string) {
       method: "POST",
     },
   );
+}
+
+export function createPermissionEventsStream(agentId: string) {
+  const params = new URLSearchParams({ agent_id: agentId });
+  return new EventSource(apiUrl(`/api/permissions/stream?${params.toString()}`));
 }

@@ -442,6 +442,55 @@ pub struct HookDispatchResponse {
     pub message: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ExtensionStateEntry {
+    pub extension_id: String,
+    pub namespace: String,
+    pub scope_type: String,
+    pub scope_id: String,
+    pub key: String,
+    pub value: JsonValue,
+    pub version: i64,
+    pub updated_at: String,
+    #[serde(default)]
+    pub expires_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ExtensionStateSelector {
+    pub extension_id: String,
+    pub namespace: String,
+    pub scope_type: String,
+    pub scope_id: String,
+    pub key: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ExtensionRecordEntry {
+    pub id: String,
+    pub extension_id: String,
+    pub namespace: String,
+    pub scope_type: String,
+    pub scope_id: String,
+    pub kind: String,
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub summary: Option<String>,
+    #[serde(default)]
+    pub payload: JsonValue,
+    #[serde(default)]
+    pub related_message_id: Option<String>,
+    #[serde(default)]
+    pub parent_id: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    #[serde(default)]
+    pub closed_at: Option<String>,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ExtensionCapabilities {
     #[serde(default)]

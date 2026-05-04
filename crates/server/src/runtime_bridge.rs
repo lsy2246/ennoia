@@ -15,11 +15,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use tokio::io::AsyncWriteExt;
 
-use crate::app::AppState;
+use crate::app::{live_server_config, AppState};
 use crate::execution::{
     execute_native_operation, resolve_agent_tool_path, resolve_command_cwd, AgentExecutionPaths,
     SandboxOperation,
 };
+use crate::realtime::RealtimeEvent;
 use crate::routes::scoped;
 
 const PROVIDER_NODE_RUNNER: &str = r#"
@@ -60,12 +61,16 @@ pub struct RuntimeOperationRequest {
 pub fn model_endpoint_runtime_request_config(model_endpoint: &ModelEndpointConfig) -> JsonValue {
     serde_json::json!({
         "id": model_endpoint.id,
+        "display_name": model_endpoint.display_name,
         "kind": model_endpoint.kind,
+        "description": model_endpoint.description,
         "base_url": model_endpoint.base_url,
         "api_key": model_endpoint.api_key,
         "api_key_env": model_endpoint.api_key_env,
         "default_model": model_endpoint.default_model,
         "available_models": model_endpoint.available_models,
+        "model_discovery": model_endpoint.model_discovery,
+        "enabled": model_endpoint.enabled,
     })
 }
 
@@ -255,6 +260,16 @@ fn authorize_permission_request(
         .agent_permissions
         .evaluate_request(permission_request, Some(request))
         .map_err(|error| scoped(ApiError::internal(error.to_string()), request))?;
+    state
+        .realtime
+        .publish(RealtimeEvent::PermissionAgentChanged {
+            agent_id: permission_request.agent_id.clone(),
+        });
+    if let Some(conversation_id) = permission_request.scope.conversation_id.clone() {
+        state
+            .realtime
+            .publish(RealtimeEvent::PermissionConversationChanged { conversation_id });
+    }
     match decision.decision.as_str() {
         "allow" => Ok(decision.grant_id),
         "ask" => {
@@ -474,6 +489,7 @@ async fn execute_command_exec(
     agent: &AgentConfig,
     payload: &RuntimeOperationRequest,
 ) -> Result<JsonValue, ApiError> {
+    let server_config = live_server_config(state);
     let command_name = required_string_argument(&payload.arguments, "command", request)?;
     let args = string_array_argument(&payload.arguments, "args");
     let cwd_value = string_argument(&payload.arguments, "cwd");
@@ -484,9 +500,13 @@ async fn execute_command_exec(
         cwd_value.as_deref(),
     )
     .map_err(|error| scoped(error, request))?;
+    let operation_config = &server_config.operations.command;
     let timeout_ms = integer_argument(&payload.arguments, "timeout_ms")
-        .unwrap_or(30_000)
-        .clamp(1_000, 120_000) as u64;
+        .unwrap_or(operation_config.default_timeout_ms as i64)
+        .clamp(
+            operation_config.min_timeout_ms as i64,
+            operation_config.max_timeout_ms as i64,
+        ) as u64;
     let grant_id = authorize_runtime_operation(
         state,
         request,
@@ -550,12 +570,17 @@ async fn execute_net_fetch(
     agent: &AgentConfig,
     payload: &RuntimeOperationRequest,
 ) -> Result<JsonValue, ApiError> {
+    let server_config = live_server_config(state);
     let url = required_string_argument(&payload.arguments, "url", request)?;
     let method = string_argument(&payload.arguments, "method").unwrap_or_else(|| "GET".to_string());
     let body = string_argument(&payload.arguments, "body");
+    let operation_config = &server_config.operations.net;
     let timeout_ms = integer_argument(&payload.arguments, "timeout_ms")
-        .unwrap_or(30_000)
-        .clamp(1_000, 120_000) as u64;
+        .unwrap_or(operation_config.default_timeout_ms as i64)
+        .clamp(
+            operation_config.min_timeout_ms as i64,
+            operation_config.max_timeout_ms as i64,
+        ) as u64;
     let host = reqwest::Url::parse(&url)
         .ok()
         .and_then(|parsed| parsed.host_str().map(str::to_string));

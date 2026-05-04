@@ -4,6 +4,7 @@ use crate::logs_store::{
 };
 
 use super::*;
+use crate::app::live_server_config;
 
 #[derive(Debug, Serialize)]
 struct LogStreamPayload {
@@ -166,7 +167,9 @@ pub(super) async fn logs_stream(
         let mut last_log_seq = latest_log_seq(&logs_store).unwrap_or(0);
         let mut last_span_seq = latest_span_seq(&logs_store).unwrap_or(0);
         loop {
-            tokio::time::sleep(Duration::from_secs(1)).await;
+            tokio::time::sleep(Duration::from_millis(
+                live_server_config(&state).streams.logs_poll_ms,
+            )).await;
 
             let next_logs = logs_store.list_logs(&LogEntryQuery {
                 after_seq: Some(last_log_seq),

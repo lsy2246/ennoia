@@ -28,7 +28,6 @@ import { useConversationsStore } from "@/stores/conversations";
 import { useSessionCommandsStore } from "@/stores/sessionCommands";
 import { useUiHelpers } from "@/stores/ui";
 import { useWorkbenchStore } from "@/stores/workbench";
-import { ConversationExtensionCards } from "@/views/extensions/ConversationCards";
 import { ChatStream } from "./ChatStream";
 import { buildChatEntries, buildStatusEntries } from "./chat-entry-builder";
 import type {
@@ -788,7 +787,7 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
   const seenPendingApprovalIdsRef = useRef<Set<string>>(new Set());
   const streamDisconnectedMessage = t(
     "web.conversations.stream_disconnected",
-    "会话流连接中断，正在等待自动重连。",
+    "会话同步暂时受阻，正在自动重试。",
   );
 
   const activeAgents = useMemo(() => {
@@ -1278,9 +1277,10 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
 
   const chatEntries = useMemo(() => buildChatEntries({
     messages: detail?.messages ?? [],
+    records: detail?.records ?? [],
     localDrafts,
     resolveRecipients,
-  }), [detail?.messages, localDrafts, resolveRecipients]);
+  }), [detail?.messages, detail?.records, localDrafts, resolveRecipients]);
 
   const statusEntries = useMemo(() => buildStatusEntries({
     pendingReplies,
@@ -1930,10 +1930,6 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
             </div>
           </header>
 
-          {detail.messages.length > 0 ? (
-            <ConversationExtensionCards conversationId={sessionId} />
-          ) : null}
-
           <div ref={scrollRef} className="message-stream message-stream--chat">
             <ChatStream
               entries={streamEntries}
@@ -1941,6 +1937,7 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
               agents={activeAgents}
               skills={skills}
               approvals={visibleApprovals}
+              conversationId={sessionId}
               t={t}
               showThinking={chatVisibility.showThinking}
               showToolCalls={chatVisibility.showToolCalls}

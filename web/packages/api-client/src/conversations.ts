@@ -1,4 +1,5 @@
 import { dispatchAction } from "./actions";
+import { apiUrl } from "./core";
 import type {
   ConversationBranch,
   ConversationLane,
@@ -9,24 +10,23 @@ import type {
   ConversationStreamSnapshot,
   ExecutionRun,
   ExecutionStep,
+  ExtensionRecordEntry,
   PermissionApprovalRecord,
   RunOutput,
 } from "./types";
-import { listConversationPermissionApprovals } from "./permissions";
-
-const CONVERSATION_STREAM_POLL_MS = 1000;
+import { listConversationExtensionRecords } from "./extension-runtime";
+import type { FetchJsonInit } from "./core";
 
 type ConversationDetailPayload = {
   conversation: ConversationSummary;
   lanes?: ConversationLane[];
   branches?: ConversationBranch[];
   messages?: ConversationMessage[];
+  records?: ExtensionRecordEntry[];
   runs?: ExecutionRun[];
   tasks?: ExecutionStep[];
   outputs?: RunOutput[];
 };
-
-type ConversationStreamListener = (event: Event) => void;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -53,18 +53,19 @@ function normalizeConversationDetailPayload(payload: unknown): ConversationDetai
     lanes: Array.isArray(payload.lanes) ? payload.lanes as ConversationLane[] : undefined,
     branches: Array.isArray(payload.branches) ? payload.branches as ConversationBranch[] : undefined,
     messages: Array.isArray(payload.messages) ? payload.messages as ConversationMessage[] : undefined,
+    records: Array.isArray(payload.records) ? payload.records as ExtensionRecordEntry[] : undefined,
     runs: Array.isArray(payload.runs) ? payload.runs as ExecutionRun[] : undefined,
     tasks: Array.isArray(payload.tasks) ? payload.tasks as ExecutionStep[] : undefined,
     outputs: Array.isArray(payload.outputs) ? payload.outputs as RunOutput[] : undefined,
   };
 }
 
-async function listConversationRuns(conversationId: string) {
+async function listConversationRuns(conversationId: string, init?: FetchJsonInit) {
   try {
     return await dispatchAction<ExecutionRun[]>("run.list", {
       conversation_id: conversationId,
       limit: 24,
-    });
+    }, init);
   } catch {
     return [];
   }
@@ -73,19 +74,23 @@ async function listConversationRuns(conversationId: string) {
 async function hydrateConversationDetail(
   conversationId: string,
   payload: unknown,
+  init?: FetchJsonInit,
 ): Promise<ConversationDetail> {
   const normalized = normalizeConversationDetailPayload(payload);
-  const [lanes, branches, messages, runs] = await Promise.all([
+  const [lanes, branches, messages, records, runs] = await Promise.all([
     normalized.lanes
       ? Promise.resolve(normalized.lanes)
-      : dispatchAction<ConversationLane[]>("lane.list", { conversation_id: conversationId }),
+      : dispatchAction<ConversationLane[]>("lane.list", { conversation_id: conversationId }, init),
     normalized.branches
       ? Promise.resolve(normalized.branches)
-      : dispatchAction<ConversationBranch[]>("branch.list", { conversation_id: conversationId }),
+      : dispatchAction<ConversationBranch[]>("branch.list", { conversation_id: conversationId }, init),
     normalized.messages
       ? Promise.resolve(normalized.messages)
-      : dispatchAction<ConversationMessage[]>("message.list", { conversation_id: conversationId }),
-    normalized.runs ? Promise.resolve(normalized.runs) : listConversationRuns(conversationId),
+      : dispatchAction<ConversationMessage[]>("message.list", { conversation_id: conversationId }, init),
+    normalized.records
+      ? Promise.resolve(normalized.records)
+      : listConversationExtensionRecords(conversationId, 120, init),
+    normalized.runs ? Promise.resolve(normalized.runs) : listConversationRuns(conversationId, init),
   ]);
 
   return {
@@ -93,113 +98,11 @@ async function hydrateConversationDetail(
     lanes,
     branches,
     messages,
+    records,
     runs,
     tasks: normalized.tasks ?? [],
     outputs: normalized.outputs ?? [],
   };
-}
-
-async function loadConversationSnapshot(
-  conversationId: string,
-): Promise<ConversationStreamSnapshot> {
-  const [detail, approvals] = await Promise.all([
-    getConversation(conversationId),
-    listConversationPermissionApprovals(conversationId, { limit: 80 }),
-  ]);
-  return { detail, approvals };
-}
-
-function createMessageEvent(type: string, data: string) {
-  if (typeof MessageEvent !== "undefined") {
-    return new MessageEvent(type, { data });
-  }
-  return new Event(type);
-}
-
-class PollingConversationStream {
-  private readonly listeners = new Map<string, Set<ConversationStreamListener>>();
-  private closed = false;
-  private timer: number | null = null;
-  private opened = false;
-
-  onopen: ((event: Event) => void) | null = null;
-  onerror: ((event: Event) => void) | null = null;
-
-  constructor(private readonly conversationId: string) {
-    void this.poll();
-  }
-
-  addEventListener(type: string, listener: ConversationStreamListener) {
-    const bucket = this.listeners.get(type) ?? new Set<ConversationStreamListener>();
-    bucket.add(listener);
-    this.listeners.set(type, bucket);
-  }
-
-  removeEventListener(type: string, listener: ConversationStreamListener) {
-    const bucket = this.listeners.get(type);
-    if (!bucket) {
-      return;
-    }
-    bucket.delete(listener);
-    if (bucket.size === 0) {
-      this.listeners.delete(type);
-    }
-  }
-
-  close() {
-    this.closed = true;
-    if (this.timer !== null && typeof window !== "undefined") {
-      window.clearTimeout(this.timer);
-      this.timer = null;
-    }
-  }
-
-  private emit(type: string, event: Event) {
-    const bucket = this.listeners.get(type);
-    if (!bucket) {
-      return;
-    }
-    for (const listener of bucket) {
-      listener(event);
-    }
-  }
-
-  private scheduleNextPoll() {
-    if (this.closed || typeof window === "undefined") {
-      return;
-    }
-    this.timer = window.setTimeout(() => {
-      void this.poll();
-    }, CONVERSATION_STREAM_POLL_MS);
-  }
-
-  private async poll() {
-    if (this.closed) {
-      return;
-    }
-
-    try {
-      const snapshot = await loadConversationSnapshot(this.conversationId);
-      const payload = JSON.stringify(snapshot);
-      if (!this.opened) {
-        this.opened = true;
-        this.onopen?.(new Event("open"));
-      }
-      this.emit(
-        "conversation.snapshot",
-        createMessageEvent("conversation.snapshot", payload),
-      );
-    } catch (error) {
-      const payload = JSON.stringify({
-        message: String(error),
-      });
-      const event = createMessageEvent("conversation.error", payload);
-      this.emit("conversation.error", event);
-      this.onerror?.(event);
-    } finally {
-      this.scheduleNextPoll();
-    }
-  }
 }
 
 export async function listConversations() {
@@ -224,11 +127,14 @@ export async function deleteConversation(conversationId: string) {
   await dispatchAction("conversation.delete", { conversation_id: conversationId });
 }
 
-export async function getConversation(conversationId: string): Promise<ConversationDetail> {
+export async function getConversation(
+  conversationId: string,
+  init?: FetchJsonInit,
+): Promise<ConversationDetail> {
   const detail = await dispatchAction<unknown>("conversation.get", {
     conversation_id: conversationId,
-  });
-  return hydrateConversationDetail(conversationId, detail);
+  }, init);
+  return hydrateConversationDetail(conversationId, detail, init);
 }
 
 export async function appendConversationMessage(
@@ -322,7 +228,11 @@ export async function deleteConversationBranch(
 }
 
 export function createConversationStream(conversationId: string) {
-  return new PollingConversationStream(conversationId);
+  return new EventSource(apiUrl(`/api/conversations/${encodeURIComponent(conversationId)}/stream`));
+}
+
+export function createConversationsStream() {
+  return new EventSource(apiUrl("/api/conversations/stream"));
 }
 
 export function parseConversationStreamPayload(value: string): ConversationStreamSnapshot {
@@ -340,6 +250,7 @@ export function parseConversationStreamPayload(value: string): ConversationStrea
       lanes: normalized.lanes ?? [],
       branches: normalized.branches ?? [],
       messages: normalized.messages ?? [],
+      records: Array.isArray(detailRecord?.records) ? detailRecord.records as ConversationDetail["records"] : [],
       runs: Array.isArray(detailRecord?.runs) ? detailRecord.runs as ConversationDetail["runs"] : [],
       tasks: Array.isArray(detailRecord?.tasks) ? detailRecord.tasks as ConversationDetail["tasks"] : [],
       outputs: Array.isArray(detailRecord?.outputs) ? detailRecord.outputs as ConversationDetail["outputs"] : [],

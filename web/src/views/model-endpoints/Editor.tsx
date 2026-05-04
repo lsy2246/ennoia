@@ -22,6 +22,7 @@ const EMPTY_CHANNEL: ModelEndpointConfig = {
   base_url: "",
   api_key: "",
   api_key_env: "",
+  request_timeout_ms: null,
   default_model: "",
   available_models: [],
   model_discovery: {
@@ -131,6 +132,7 @@ function applyTemplateToDraft(
     base_url: template?.base_url ?? base.base_url,
     api_key: base.api_key,
     api_key_env: template?.api_key_env ?? base.api_key_env,
+    request_timeout_ms: template?.request_timeout_ms ?? base.request_timeout_ms,
     default_model: defaultModel,
     available_models: models,
     model_discovery: modelDiscovery,
@@ -375,8 +377,16 @@ export function ModelEndpointEditorView({ modelEndpointId, panelId }: { modelEnd
     setSuccess(null);
 
     try {
+      const normalizedRequestTimeoutMs =
+        typeof form.request_timeout_ms === "number" && Number.isFinite(form.request_timeout_ms)
+          ? form.request_timeout_ms
+          : null;
       const payload = {
         ...form,
+        request_timeout_ms:
+          normalizedRequestTimeoutMs == null || normalizedRequestTimeoutMs <= 0
+            ? null
+            : normalizedRequestTimeoutMs,
         available_models: serializeModelEntries(modelEntries),
       };
       payload.kind = (payload.kind ?? "").trim();
@@ -713,6 +723,22 @@ export function ModelEndpointEditorView({ modelEndpointId, panelId }: { modelEnd
               ? t("web.model_endpoints.api_key_env_help_openai", "OpenAI 默认读取 OPENAI_API_KEY；这里填写服务进程里的环境变量名。")
               : t("web.model_endpoints.api_key_env_help", "这里填写服务进程里的环境变量名。")}
           </p>
+        </label>
+        <label>
+          请求超时毫秒
+          <input
+            value={form.request_timeout_ms ?? ""}
+            placeholder="留空则跟随全局默认值"
+            onChange={(event) =>
+              setForm({
+                ...form,
+                request_timeout_ms: event.target.value.trim()
+                  ? Number(event.target.value)
+                  : null,
+              })
+            }
+          />
+          <p className="helper-text">留空表示沿用系统里的上游默认超时；填写后只覆盖当前接入实例。</p>
         </label>
         <div className="form-grid">
           <label>

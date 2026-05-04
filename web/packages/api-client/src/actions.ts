@@ -1,4 +1,4 @@
-﻿import { fetchJson } from "./core";
+import { fetchJson, type FetchJsonInit } from "./core";
 import type {
   ExtensionActionContribution,
   ExtensionScheduleActionContribution,
@@ -20,8 +20,10 @@ export async function listActionStatus() {
 export async function dispatchAction<T>(
   action: string,
   params?: Record<string, unknown> | null,
+  init?: FetchJsonInit,
 ) {
   return fetchJson<T>(`/api/actions/${encodeURIComponent(action)}`, {
+    ...init,
     method: "POST",
     body: JSON.stringify(params ?? {}),
   });

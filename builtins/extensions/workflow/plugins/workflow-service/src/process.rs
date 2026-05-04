@@ -22,6 +22,7 @@ use crate::conversation_hooks::{
 };
 use crate::orchestrator::OrchestratorService;
 use crate::pipeline::{run_behavior, WorkflowRuntime};
+use crate::planning::PlanSpec;
 use crate::runtime::{
     builtin_pipeline, initialize_workflow_schema, PolicyStageMachine, RuntimeStore,
     SqliteRuntimeStore,
@@ -94,6 +95,8 @@ struct WorkflowWorkspaceSummary {
 #[derive(Debug, Serialize)]
 struct WorkflowRunDetail {
     run: RunSpec,
+    #[serde(default)]
+    plan: Option<PlanSpec>,
     #[serde(default)]
     tasks: Vec<TaskSpec>,
     #[serde(default)]
@@ -205,7 +208,13 @@ async fn handle_invocation(
         | "workflow/runs/create"
         | "workflow/schedules/run" => match parse_run_request(invocation.params) {
             Ok(payload) => match run_behavior(&state.runtime, payload).await {
-                Ok(response) => ExtensionRpcResponse::success(serde_json::json!(response)),
+                Ok(response) => match load_run_detail(&state.store, &response.run.id).await {
+                    Ok(Some(detail)) => ExtensionRpcResponse::success(serde_json::json!(detail)),
+                    Ok(None) => ExtensionRpcResponse::success(serde_json::json!(response)),
+                    Err(error) => {
+                        ExtensionRpcResponse::failure("workflow_run_failed", error.to_string())
+                    }
+                },
                 Err(error) => ExtensionRpcResponse::failure("workflow_run_failed", error),
             },
             Err(error) => error,
@@ -328,6 +337,7 @@ async fn load_run_detail(
     let Some(run) = store.get_run(run_id).await? else {
         return Ok(None);
     };
+    let plan = store.get_plan(run_id).await?;
     let tasks = store.list_tasks_for_run(run_id).await?;
     let artifacts = store.list_artifacts_for_run(run_id).await?;
     let handoffs = store.list_handoffs_for_run(run_id).await?;
@@ -342,6 +352,7 @@ async fn load_run_detail(
 
     Ok(Some(WorkflowRunDetail {
         run,
+        plan,
         tasks,
         artifacts,
         handoffs,

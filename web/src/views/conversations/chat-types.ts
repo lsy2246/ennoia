@@ -1,4 +1,5 @@
-import type { PermissionApprovalRecord } from "@ennoia/api-client";
+import type { ExtensionRecordEntry, PermissionApprovalRecord } from "@ennoia/api-client";
+import type { ConversationFailureSource } from "./error-classification";
 
 export type LocalMessageStatus = "queued" | "sending" | "failed";
 
@@ -52,7 +53,7 @@ export type ChatEntryRecipient = {
 type ChatEntryBase = {
   id: string;
   role: "operator" | "agent" | "system" | "tool";
-  kind: "message" | "error" | "system" | "status" | "tool_result" | "approval";
+  kind: "message" | "error" | "system" | "status" | "tool_result" | "approval" | "record";
   format: ChatEntryFormat;
   state: ChatEntryState;
   sender?: string;
@@ -74,6 +75,7 @@ export type ConversationMessageEntry = ChatEntryBase & {
   localStatus?: LocalMessageStatus;
   localError?: string;
   failureCode?: string;
+  failureSource?: ConversationFailureSource;
   failureSummary?: string;
   failureDetail?: string;
 };
@@ -114,10 +116,17 @@ export type ChatApprovalEntry = ChatEntryBase & {
   agentLabel: string;
 };
 
+export type ChatRecordEntry = ChatEntryBase & {
+  kind: "record";
+  record: ExtensionRecordEntry;
+  relatedMessageId?: string;
+};
+
 export type ChatEntryViewModel =
   | ConversationMessageEntry
   | ChatErrorEntry
   | ChatSystemEntry
   | ChatStatusEntry
   | ChatToolResultEntry
-  | ChatApprovalEntry;
+  | ChatApprovalEntry
+  | ChatRecordEntry;
