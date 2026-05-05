@@ -266,9 +266,6 @@ async fn run_dev_supervisor(
         server_config.dev_supervisor.child_startup_grace_ms,
     );
     dev_processes.build_extension_ui_once(&repo_root, &paths)?;
-    dev_processes.start_web(&paths, &server_config)?;
-    dev_processes.start_extension_ui_watch(&repo_root, &paths)?;
-    dev_processes.report_extension_ui_sources(&paths)?;
 
     let mut api = ApiDevProcess::new(
         repo_root.clone(),
@@ -277,6 +274,9 @@ async fn run_dev_supervisor(
         console_config.clone(),
     );
     api.start_initial().await?;
+    dev_processes.start_web(&paths, &server_config)?;
+    dev_processes.start_extension_ui_watch(&repo_root, &paths)?;
+    dev_processes.report_extension_ui_sources(&paths)?;
 
     let (watch_tx, watch_rx) = mpsc::channel();
     let _watcher = start_host_watcher(&repo_root, watch_tx)?;
@@ -494,12 +494,27 @@ impl ApiDevProcess {
 
         if !self.unhealthy_reported {
             eprintln!(
-                "api health probe timed out for more than {}s; keeping current snapshot alive and retrying",
+                "api health probe timed out for more than {}s; restarting current snapshot",
                 Duration::from_millis(self.server_config.dev_supervisor.api_healthcheck_grace_ms)
                     .as_secs()
             );
             self.unhealthy_reported = true;
         }
+        let snapshot = self
+            .current
+            .as_ref()
+            .map(|child| child.snapshot_path.clone())
+            .ok_or_else(|| {
+                io::Error::other("current API snapshot missing during health recovery")
+            })?;
+        if let Some(child) = self.current.as_mut() {
+            child.stop();
+        }
+        self.current = None;
+        self.wait_for_api_port_release().await?;
+        self.current = Some(self.launch_snapshot(snapshot.clone()).await?);
+        self.reset_health_watch();
+        println!("restarted unhealthy api from {}", snapshot.display());
         Ok(())
     }
 

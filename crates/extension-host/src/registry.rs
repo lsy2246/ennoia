@@ -321,13 +321,15 @@ impl ExtensionRuntime {
     pub fn refresh_from_disk(&self, summary: &str) -> io::Result<Option<ExtensionRuntimeSnapshot>> {
         let current = self.snapshot();
         let next = build_snapshot(&self.config, current.generation + 1)?;
-        let mut state = self.state.write().expect("extension runtime write lock");
         if equivalent_snapshots(&current, &next) {
             return Ok(None);
         }
 
+        // Worker invalidation may need to wait for an in-flight process worker call.
+        // Keep that wait outside the runtime write lock so snapshot readers do not stall.
         self.worker_runtime
             .invalidate_missing_or_changed(&next.extensions);
+        let mut state = self.state.write().expect("extension runtime write lock");
         state.push_replace(next.clone(), summary);
         Ok(Some(next))
     }

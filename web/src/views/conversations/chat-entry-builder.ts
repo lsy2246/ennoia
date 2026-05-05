@@ -75,6 +75,21 @@ function parseToolPayload(body: string) {
   }
 }
 
+function readReasoningContent(body: string) {
+  const payload = parseToolPayload(body);
+  if (payload?.kind !== "ennoia.reasoning") {
+    return null;
+  }
+  const content = typeof payload.content === "string" ? payload.content.trim() : "";
+  if (!content) {
+    return null;
+  }
+  return {
+    content,
+    format: typeof payload.format === "string" ? payload.format.trim() : "",
+  };
+}
+
 function readToolName(body: string) {
   const payload = parseToolPayload(body);
   const tool = payload?.tool_name ?? payload?.tool;
@@ -199,6 +214,24 @@ export function buildChatEntries(params: {
     }
 
     if (message.role === "system") {
+      const reasoning = readReasoningContent(message.body);
+      if (reasoning) {
+        entries.push({
+          order: order++,
+          entry: {
+            ...base,
+            kind: "reasoning",
+            role: "agent",
+            sender: message.sender,
+            body: reasoning.content,
+            format: reasoning.format === "plain" ? "plain" : detectMessageFormat(reasoning.content),
+            relatedMessageId: message.parent_message_id ?? undefined,
+            actorSender: message.sender,
+          },
+        });
+        continue;
+      }
+
       entries.push({
         order: order++,
         entry: {
@@ -294,6 +327,7 @@ export function buildChatEntries(params: {
       mentions: draft.explicitMentions ?? [],
       source: "local",
       localStatus: draft.status,
+      dispatchMode: draft.dispatchMode,
       localError: draft.error,
     };
     entries.push({ order: order++, entry: messageEntry });

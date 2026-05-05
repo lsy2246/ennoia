@@ -33,10 +33,13 @@ import { buildChatEntries, buildStatusEntries } from "./chat-entry-builder";
 import type {
   ComposerSegment,
   LocalMessageDraft,
+  LocalMessageDispatchMode,
   PendingReplyMarker,
 } from "./chat-types";
 
-type ComposerPickerMode = "mention" | "skill";
+type ComposerPickerMode = "mention" | "slash";
+
+type ComposerPaletteGroup = "chat" | "skill" | "memory" | "extension";
 
 type ComposerPickerState = {
   open: boolean;
@@ -45,13 +48,24 @@ type ComposerPickerState = {
   selectedIndex: number;
 };
 
-type ComposerPickerOption = {
-  kind: ComposerPickerMode;
+type ComposerPickerTokenKind = "mention" | "skill" | "dispatch";
+
+type ComposerPickerOptionBase = {
   id: string;
+  group: ComposerPaletteGroup;
+  title: string;
+  description: string;
+  priority: number;
+  secondaryLabel?: string;
+};
+
+type ComposerPickerTokenOption = ComposerPickerOptionBase & {
+  kind: ComposerPickerTokenKind;
   displayLabel: string;
   insertLabel: string;
-  secondaryLabel: string;
 };
+
+type ComposerPickerOption = ComposerPickerTokenOption;
 
 type ComposerSnapshot = {
   body: string;
@@ -97,6 +111,13 @@ const DEFAULT_CHAT_VISIBILITY: ChatVisibilityPreferences = {
   showToolCalls: true,
 };
 
+const COMPOSER_GROUP_PRIORITY: Record<ComposerPaletteGroup, number> = {
+  chat: 0,
+  skill: 1,
+  memory: 2,
+  extension: 3,
+};
+
 function uniqueStrings(values: string[]) {
   return [...new Set(values.map((item) => item.trim()).filter(Boolean))];
 }
@@ -105,9 +126,40 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+function buildComposerSnapshotFromSegments(segments: ComposerSegment[]): ComposerSnapshot {
+  const addressedAgents = uniqueStrings(
+    segments
+      .filter((segment): segment is Extract<ComposerSegment, { kind: "mention" }> => segment.kind === "mention")
+      .map((segment) => segment.agentId),
+  );
+  const body = segments
+    .map((segment) => {
+      if (segment.kind === "text") {
+        return segment.value;
+      }
+      if (segment.kind === "mention") {
+        return `@${segment.label}`;
+      }
+      if (segment.kind === "skill") {
+        return `/${segment.skillId}`;
+      }
+      return "";
+    })
+    .join("")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return {
+    body,
+    addressedAgents,
+    explicitMentions: addressedAgents,
+    segments,
+  };
+}
+
 function createLocalDraft(
   snapshot: ComposerSnapshot,
   mode: ComposerModeState,
+  dispatchMode: LocalMessageDispatchMode,
   activeBranchId?: string | null,
 ): LocalMessageDraft {
   return {
@@ -118,6 +170,7 @@ function createLocalDraft(
     segments: snapshot.segments,
     createdAt: nowIso(),
     status: "queued",
+    dispatchMode,
     branchId: mode.kind === "normal"
       ? activeBranchId ?? undefined
       : mode.sourceBranchId,
@@ -127,13 +180,17 @@ function createLocalDraft(
 }
 
 function createComposerTokenNode(
-  kind: ComposerPickerMode,
+  kind: ComposerPickerTokenKind,
   id: string,
   displayLabel: string,
   insertLabel: string,
 ) {
   const node = document.createElement("span");
-  node.className = kind === "mention" ? "composer-mention" : "composer-skill";
+  node.className = kind === "mention"
+    ? "composer-mention"
+    : kind === "dispatch"
+      ? "composer-dispatch"
+      : "composer-skill";
   node.contentEditable = "false";
   node.dataset.tokenKind = kind;
   node.dataset.tokenId = id;
@@ -141,6 +198,19 @@ function createComposerTokenNode(
   node.dataset.tokenDisplayLabel = displayLabel;
   node.textContent = `${kind === "mention" ? "@" : "/"}${displayLabel}`;
   return node;
+}
+
+function getComposerDispatchMode(snapshot: Pick<ComposerSnapshot, "segments">): LocalMessageDispatchMode {
+  return snapshot.segments.some(
+    (segment): segment is Extract<ComposerSegment, { kind: "dispatch"; mode: "insert" }> =>
+      segment.kind === "dispatch" && segment.mode === "insert",
+  )
+    ? "insert"
+    : "queue";
+}
+
+function isComposerSnapshotVisuallyEmpty(snapshot: Pick<ComposerSnapshot, "segments">) {
+  return snapshot.segments.every((segment) => segment.kind === "text" && segment.value.trim().length === 0);
 }
 
 function appendTextSegment(segments: ComposerSegment[], value: string) {
@@ -201,6 +271,19 @@ function readComposerSnapshot(root: HTMLElement | null): ComposerSnapshot {
       return;
     }
 
+    if (node.dataset.tokenKind === "dispatch") {
+      const mode = node.dataset.tokenId === "insert" ? "insert" : null;
+      if (!mode) {
+        return;
+      }
+      segments.push({
+        kind: "dispatch",
+        mode,
+        label: node.dataset.tokenDisplayLabel ?? node.dataset.tokenLabel ?? "插入",
+      });
+      return;
+    }
+
     if (node.tagName === "BR") {
       appendTextSegment(segments, "\n");
       return;
@@ -226,24 +309,9 @@ function readComposerSnapshot(root: HTMLElement | null): ComposerSnapshot {
     walk(child);
   }
 
-  const body = segments
-    .map((segment) => {
-      if (segment.kind === "text") {
-        return segment.value;
-      }
-      if (segment.kind === "mention") {
-        return `@${segment.label}`;
-      }
-      return `/${segment.skillId}`;
-    })
-    .join("")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-
   return {
-    body,
+    ...buildComposerSnapshotFromSegments(segments),
     addressedAgents: uniqueStrings(addressedAgents),
-    segments,
   };
 }
 
@@ -298,10 +366,14 @@ function writeComposerSnapshot(root: HTMLElement | null, snapshot: ComposerSnaps
       root.appendChild(createComposerTokenNode("mention", segment.agentId, segment.label, segment.label));
       continue;
     }
-    root.appendChild(createComposerTokenNode("skill", segment.skillId, segment.label, segment.skillId));
+    if (segment.kind === "skill") {
+      root.appendChild(createComposerTokenNode("skill", segment.skillId, segment.label, segment.skillId));
+      continue;
+    }
+    root.appendChild(createComposerTokenNode("dispatch", segment.mode, segment.label, segment.mode));
   }
 
-  root.dataset.empty = String(snapshot.body.length === 0);
+  root.dataset.empty = String(isComposerSnapshotVisuallyEmpty(snapshot));
 }
 
 function isSelectionInside(root: HTMLElement | null, node: Node | null) {
@@ -347,7 +419,7 @@ function extractComposerTrigger(root: HTMLElement | null) {
 
   return {
     textNode: anchorNode,
-    kind: trigger === "@" ? "mention" : "skill",
+    kind: trigger === "@" ? "mention" : "slash",
     trigger,
     atIndex,
     offset,
@@ -355,7 +427,7 @@ function extractComposerTrigger(root: HTMLElement | null) {
   };
 }
 
-function replaceComposerTriggerAtCaret(root: HTMLElement | null, option: ComposerPickerOption) {
+function replaceComposerTriggerAtCaret(root: HTMLElement | null, option: ComposerPickerTokenOption) {
   const context = extractComposerTrigger(root);
   if (!root || !context || typeof window === "undefined") {
     return false;
@@ -416,7 +488,7 @@ function handleComposerTokenBackspace(root: HTMLElement | null) {
     const previous = anchorNode.previousSibling;
     if (previous instanceof HTMLElement && previous.dataset.tokenKind) {
       previous.remove();
-      root.dataset.empty = String(readComposerSnapshot(root).body.length === 0);
+      root.dataset.empty = String(isComposerSnapshotVisuallyEmpty(readComposerSnapshot(root)));
       return true;
     }
   }
@@ -425,7 +497,7 @@ function handleComposerTokenBackspace(root: HTMLElement | null) {
     const previous = anchorNode.childNodes[selection.anchorOffset - 1];
     if (previous instanceof HTMLElement && previous.dataset.tokenKind) {
       previous.remove();
-      root.dataset.empty = String(readComposerSnapshot(root).body.length === 0);
+      root.dataset.empty = String(isComposerSnapshotVisuallyEmpty(readComposerSnapshot(root)));
       return true;
     }
   }
@@ -555,7 +627,34 @@ function loadPersistedDrafts(sessionId: string): LocalMessageDraft[] {
       return [];
     }
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed as LocalMessageDraft[] : [];
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed.flatMap((item) => {
+      if (!item || typeof item !== "object") {
+        return [];
+      }
+      const record = item as Partial<LocalMessageDraft>;
+      if (
+        typeof record.clientId !== "string"
+        || typeof record.body !== "string"
+        || !Array.isArray(record.addressedAgents)
+        || !Array.isArray(record.segments)
+      ) {
+        return [];
+      }
+      return [{
+        ...record,
+        clientId: record.clientId,
+        body: record.body,
+        addressedAgents: record.addressedAgents,
+        segments: record.segments,
+        explicitMentions: Array.isArray(record.explicitMentions) ? record.explicitMentions : record.addressedAgents,
+        createdAt: typeof record.createdAt === "string" ? record.createdAt : nowIso(),
+        status: record.status === "sending" || record.status === "failed" ? record.status : "queued",
+        dispatchMode: record.dispatchMode === "insert" ? "insert" : "queue",
+      } satisfies LocalMessageDraft];
+    });
   } catch {
     return [];
   }
@@ -1092,17 +1191,13 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
   const syncComposerState = useCallback(() => {
     const snapshot = readComposerSnapshot(editorRef.current);
     setComposerSnapshot(snapshot);
-    editorRef.current?.setAttribute("data-empty", String(snapshot.body.length === 0));
+    editorRef.current?.setAttribute("data-empty", String(isComposerSnapshotVisuallyEmpty(snapshot)));
     const context = extractComposerTrigger(editorRef.current);
     if (!context) {
       setPickerState(EMPTY_PICKER_STATE);
       return;
     }
     if (context.kind === "mention" && !canMention) {
-      setPickerState(EMPTY_PICKER_STATE);
-      return;
-    }
-    if (context.kind === "skill" && !canUseSkills) {
       setPickerState(EMPTY_PICKER_STATE);
       return;
     }
@@ -1113,7 +1208,7 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
       query: context.query,
       selectedIndex: current.mode === mode ? current.selectedIndex : 0,
     }));
-  }, [canMention, canUseSkills]);
+  }, [canMention]);
 
   useEffect(() => {
     syncComposerState();
@@ -1145,56 +1240,95 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
         })
         .map<ComposerPickerOption>((agent) => ({
           kind: "mention",
+          group: "chat",
           id: agent.id,
+          title: agent.display_name,
+          description: t("web.conversations.palette_agent_direct", "把这条消息定向给这个 Agent。"),
+          priority: 200,
+          secondaryLabel: agent.id,
           displayLabel: agent.display_name,
           insertLabel: agent.display_name,
-          secondaryLabel: agent.id,
         }));
     }
 
-    if (!canUseSkills) {
-      return [];
+    const options: ComposerPickerOption[] = [];
+
+    if (pendingReplies.length > 0) {
+      const hasInsertDispatch = composerSnapshot.segments.some(
+        (segment): segment is Extract<ComposerSegment, { kind: "dispatch"; mode: "insert" }> =>
+          segment.kind === "dispatch" && segment.mode === "insert",
+      );
+      if (!hasInsertDispatch) {
+        options.push({
+          kind: "dispatch",
+          group: "chat",
+          id: "insert",
+          title: t("web.conversations.palette_insert_current", "插入到当前执行"),
+          description: t(
+            "web.conversations.palette_insert_current_desc",
+            "下一条消息会按当前路由立即写入，不等待前端发送队列。",
+          ),
+          priority: 240,
+          displayLabel: t("web.conversations.insert_badge", "插入"),
+          insertLabel: "insert",
+        });
+      }
     }
 
-    const selectedSkillIds = new Set(
-      composerSnapshot.segments
-        .filter((segment): segment is Extract<ComposerSegment, { kind: "skill" }> => segment.kind === "skill")
-        .map((segment) => segment.skillId),
-    );
+    if (canUseSkills) {
+      const selectedSkillIds = new Set(
+        composerSnapshot.segments
+          .filter((segment): segment is Extract<ComposerSegment, { kind: "skill" }> => segment.kind === "skill")
+          .map((segment) => segment.skillId),
+      );
 
-    return enabledSkills
-      .filter((skill) => {
-        if (selectedSkillIds.has(skill.id)) {
-          return false;
-        }
+      options.push(
+        ...enabledSkills
+          .filter((skill) => !selectedSkillIds.has(skill.id))
+          .map<ComposerPickerOption>((skill) => ({
+            kind: "skill",
+            group: "skill",
+            id: skill.id,
+            title: skill.display_name,
+            description: skill.description?.trim()
+              || t("web.conversations.palette_skill_desc_fallback", "把这个技能片段插入到当前输入中。"),
+            priority: 120,
+            secondaryLabel: skill.id,
+            displayLabel: skill.display_name,
+            insertLabel: skill.id,
+          })),
+      );
+    }
+
+    return options
+      .filter((option) => {
         if (!query) {
           return true;
         }
         const haystacks = [
-          skill.id.toLowerCase(),
-          skill.display_name.toLowerCase(),
-          skill.display_name.toLowerCase().replace(/\s+/g, "-"),
-          ...skill.keywords.map((tag) => tag.toLowerCase()),
+          option.title.toLowerCase(),
+          option.description.toLowerCase(),
+          option.secondaryLabel?.toLowerCase() ?? "",
+          ...(option.kind === "mention" ? [] : [option.insertLabel.toLowerCase()]),
         ];
         return haystacks.some((item) => item.includes(query));
       })
-      .map<ComposerPickerOption>((skill) => ({
-        kind: "skill",
-        id: skill.id,
-        displayLabel: skill.display_name,
-        insertLabel: skill.id,
-        secondaryLabel: skill.id,
-      }));
+      .sort((left, right) =>
+        COMPOSER_GROUP_PRIORITY[left.group] - COMPOSER_GROUP_PRIORITY[right.group]
+        || right.priority - left.priority
+        || left.title.localeCompare(right.title));
   }, [
     activeAgents,
     canMention,
     canUseSkills,
+    pendingReplies.length,
     composerSnapshot.addressedAgents,
     composerSnapshot.segments,
     enabledSkills,
     pickerState.mode,
     pickerState.open,
     pickerState.query,
+    t,
   ]);
 
   useEffect(() => {
@@ -1211,7 +1345,7 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
   }, [pickerOptions.length, pickerState.open, pickerState.selectedIndex]);
 
   const waitingItems = useMemo(
-    () => localDrafts.filter((item) => item.status === "queued"),
+    () => localDrafts.filter((item) => item.status === "queued" && item.dispatchMode === "queue"),
     [localDrafts],
   );
 
@@ -1357,39 +1491,27 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
   }, [failedItems.length, sendingItem, t, waitingItems.length]);
 
   const composerPlaceholder = useMemo(() => {
-    if (canMention && canUseSkills) {
+    if (canMention) {
       return t(
         "web.conversations.composer_placeholder_with_skill",
-        "输入消息。使用 @ 选择 Agent，使用 / 选择技能；不 @ 时默认投递给会话内 Agent。",
-      );
-    }
-    if (canUseSkills) {
-      return t(
-        "web.conversations.composer_placeholder_skill_only",
-        "输入消息。使用 / 选择技能；消息默认投递给当前会话内 Agent。",
+        "输入消息。使用 @ 选择 Agent，使用 / 打开操作面板；不 @ 时默认投递给会话内 Agent。",
       );
     }
     return t(
-      "web.conversations.composer_placeholder",
-      "输入消息。使用 @coder / @planner 定向提问；不 @ 时默认投递给会话内 Agent。",
+      "web.conversations.composer_placeholder_skill_only",
+      "输入消息。使用 / 打开操作面板；消息默认投递给当前会话内 Agent。",
     );
-  }, [canMention, canUseSkills, t]);
+  }, [canMention, t]);
 
   const composerHint = useMemo(() => {
-    if (canMention && canUseSkills) {
+    if (canMention) {
       return t(
-        "web.conversations.mention_and_skill_hint",
-        "输入 @ 可选择会话内 Agent，输入 / 可选择技能。",
+        "web.conversations.mention_and_palette_hint",
+        "输入 @ 可选择会话内 Agent，输入 / 可打开技能、记忆与更多能力面板。",
       );
     }
-    if (canMention) {
-      return t("web.conversations.mention_hint", "输入 @ 可选择当前会话中的 Agent。");
-    }
-    if (canUseSkills) {
-      return t("web.conversations.skill_hint", "输入 / 可选择当前可用的技能。");
-    }
-    return t("web.conversations.skill_disabled", "当前没有可用技能候选。");
-  }, [canMention, canUseSkills, t]);
+    return t("web.conversations.palette_hint", "输入 / 可打开技能、记忆与更多能力面板。");
+  }, [canMention, t]);
 
   const resetComposer = useCallback(() => {
     clearComposer(editorRef.current);
@@ -1417,7 +1539,93 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
     focusComposerEnd(editorRef.current);
   }, [syncComposerState]);
 
-  const enqueueCurrentMessage = useCallback(() => {
+  const submitDraft = useCallback(async (draft: LocalMessageDraft, alreadySending = false) => {
+    if (!conversation) {
+      return;
+    }
+    inFlightDraftIdRef.current = draft.clientId;
+    if (!alreadySending) {
+      setLocalDrafts((current) =>
+        current.map((item) => item.clientId === draft.clientId ? { ...item, status: "sending", error: undefined } : item),
+      );
+    }
+
+    try {
+      const response = await appendConversationMessage(conversation.id, {
+        lane_id: draft.branchId ?? conversation.default_lane_id ?? undefined,
+        branch_id: draft.branchId ?? conversation.active_branch_id ?? undefined,
+        body: draft.body,
+        addressed_agents: draft.addressedAgents,
+        mentions: draft.explicitMentions,
+        fork_from_message_id: draft.forkFromMessageId,
+        rewrite_from_message_id: draft.rewriteFromMessageId,
+        branch_name: draft.branchName,
+      });
+      if (!isMountedRef.current) {
+        return;
+      }
+      setLocalDrafts((current) => current.filter((item) => item.clientId !== draft.clientId));
+      setPendingReplies((current) => upsertPendingReplyMarkers(
+        current,
+        draft.addressedAgents.map((agentId) => ({
+          id: `${response.message.id}:${agentId}`,
+          agentId,
+          createdAt: response.message.created_at,
+          sourceMessageId: response.message.id,
+        })),
+      ));
+      const switchedBranch = response.conversation.active_branch_id !== conversation.active_branch_id;
+      if (switchedBranch) {
+        conversationUpdatedAtRef.current = response.conversation.updated_at;
+        setDetail((current) => current ? {
+          ...current,
+          conversation: response.conversation,
+        } : current);
+        notifyChanged();
+        await refreshThread();
+        return;
+      }
+      conversationUpdatedAtRef.current = response.conversation.updated_at;
+      setDetail((current) => {
+        if (!current) {
+          return current;
+        }
+        const nextLane = response.lane;
+        const nextBranch = response.branch;
+        const nextMessages = current.messages.some((message) => message.id === response.message.id)
+          ? current.messages
+          : [...current.messages, response.message].sort((left, right) =>
+            left.created_at.localeCompare(right.created_at));
+        return {
+          ...current,
+          conversation: response.conversation,
+          lanes: current.lanes.some((lane) => lane.id === nextLane.id)
+            ? current.lanes.map((lane) => lane.id === nextLane.id ? nextLane : lane)
+            : [...current.lanes, nextLane],
+          branches: current.branches.some((branch) => branch.id === nextBranch.id)
+            ? current.branches.map((branch) => branch.id === nextBranch.id ? nextBranch : branch)
+            : [...current.branches, nextBranch],
+          messages: nextMessages,
+        };
+      });
+      notifyChanged();
+    } catch (err) {
+      if (isMountedRef.current) {
+        setLocalDrafts((current) =>
+          current.map((item) => item.clientId === draft.clientId
+            ? { ...item, status: "failed", error: String(err) }
+            : item),
+        );
+        setError(String(err));
+      }
+    } finally {
+      if (inFlightDraftIdRef.current === draft.clientId) {
+        inFlightDraftIdRef.current = null;
+      }
+    }
+  }, [conversation, notifyChanged, refreshThread]);
+
+  const dispatchCurrentMessage = useCallback(() => {
     if (!conversation) {
       return;
     }
@@ -1428,15 +1636,40 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
     const recipients = snapshot.addressedAgents.length > 0
       ? snapshot.addressedAgents
       : activeAgents.map((agent) => agent.id);
-    const queued = createLocalDraft({
+    const dispatchMode = getComposerDispatchMode(snapshot);
+    const nextDraft = createLocalDraft({
       body: snapshot.body.trim(),
       addressedAgents: recipients,
       explicitMentions: snapshot.addressedAgents,
       segments: snapshot.segments,
-    }, composerMode, activeBranch?.id ?? conversation.active_branch_id);
-    setLocalDrafts((current) => [...current, queued]);
+    }, composerMode, dispatchMode, activeBranch?.id ?? conversation.active_branch_id);
+
+    if (dispatchMode === "insert") {
+      if (inFlightDraftIdRef.current) {
+        setError(t("web.conversations.insert_busy", "当前有消息正在写入会话，请稍后再试。"));
+        return;
+      }
+      const immediateDraft: LocalMessageDraft = {
+        ...nextDraft,
+        status: "sending",
+      };
+      setLocalDrafts((current) => [...current, immediateDraft]);
+      resetComposer();
+      void submitDraft(immediateDraft, true);
+      return;
+    }
+
+    setLocalDrafts((current) => [...current, nextDraft]);
     resetComposer();
-  }, [activeAgents, activeBranch?.id, composerMode, conversation, resetComposer]);
+  }, [
+    activeAgents,
+    activeBranch?.id,
+    composerMode,
+    conversation,
+    resetComposer,
+    submitDraft,
+    t,
+  ]);
 
   useEffect(() => {
     if (!conversation || sendingItem || inFlightDraftIdRef.current) {
@@ -1448,91 +1681,11 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
       return;
     }
 
-    inFlightDraftIdRef.current = next.clientId;
-    setLocalDrafts((current) =>
-      current.map((item) => item.clientId === next.clientId ? { ...item, status: "sending", error: undefined } : item),
-    );
-
-    void (async () => {
-      try {
-        const response = await appendConversationMessage(conversation.id, {
-          lane_id: next.branchId ?? conversation.default_lane_id ?? undefined,
-          branch_id: next.branchId ?? conversation.active_branch_id ?? undefined,
-          body: next.body,
-          addressed_agents: next.addressedAgents,
-          mentions: next.explicitMentions,
-          fork_from_message_id: next.forkFromMessageId,
-          rewrite_from_message_id: next.rewriteFromMessageId,
-          branch_name: next.branchName,
-        });
-        if (!isMountedRef.current) {
-          return;
-        }
-        setLocalDrafts((current) => current.filter((item) => item.clientId !== next.clientId));
-        setPendingReplies((current) => upsertPendingReplyMarkers(
-          current,
-          next.addressedAgents.map((agentId) => ({
-            id: `${response.message.id}:${agentId}`,
-            agentId,
-            createdAt: response.message.created_at,
-            sourceMessageId: response.message.id,
-          })),
-        ));
-        const switchedBranch = response.conversation.active_branch_id !== conversation.active_branch_id;
-        if (switchedBranch) {
-          conversationUpdatedAtRef.current = response.conversation.updated_at;
-          setDetail((current) => current ? {
-            ...current,
-            conversation: response.conversation,
-          } : current);
-          notifyChanged();
-          await refreshThread();
-          return;
-        }
-        conversationUpdatedAtRef.current = response.conversation.updated_at;
-        setDetail((current) => {
-          if (!current) {
-            return current;
-          }
-          const nextLane = response.lane;
-          const nextBranch = response.branch;
-          const nextMessages = current.messages.some((message) => message.id === response.message.id)
-            ? current.messages
-            : [...current.messages, response.message].sort((left, right) =>
-              left.created_at.localeCompare(right.created_at));
-          return {
-            ...current,
-            conversation: response.conversation,
-            lanes: current.lanes.some((lane) => lane.id === nextLane.id)
-              ? current.lanes.map((lane) => lane.id === nextLane.id ? nextLane : lane)
-              : [...current.lanes, nextLane],
-            branches: current.branches.some((branch) => branch.id === nextBranch.id)
-              ? current.branches.map((branch) => branch.id === nextBranch.id ? nextBranch : branch)
-              : [...current.branches, nextBranch],
-            messages: nextMessages,
-          };
-        });
-        notifyChanged();
-      } catch (err) {
-        if (isMountedRef.current) {
-          setLocalDrafts((current) =>
-            current.map((item) => item.clientId === next.clientId
-              ? { ...item, status: "failed", error: String(err) }
-              : item),
-          );
-          setError(String(err));
-        }
-      } finally {
-        if (inFlightDraftIdRef.current === next.clientId) {
-          inFlightDraftIdRef.current = null;
-        }
-      }
-    })();
+    void submitDraft(next);
   }, [
     conversation,
-    notifyChanged,
-    refreshThread,
     sendingItem,
+    submitDraft,
     waitingItems,
   ]);
 
@@ -1764,6 +1917,21 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
     setPickerState(EMPTY_PICKER_STATE);
   }, [syncComposerState]);
 
+  const paletteGroupLabel = useCallback((group: ComposerPaletteGroup) => {
+    switch (group) {
+      case "chat":
+        return t("web.conversations.palette_group_chat", "聊天");
+      case "skill":
+        return t("web.conversations.palette_group_skill", "技能");
+      case "memory":
+        return t("web.conversations.palette_group_memory", "记忆");
+      case "extension":
+        return t("web.conversations.palette_group_extension", "扩展");
+      default:
+        return group;
+    }
+  }, [t]);
+
   useEffect(() => {
     if (!panelId || !conversation) {
       return;
@@ -1817,6 +1985,11 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
       }
     }
 
+    if (pickerState.open && (event.key === "Enter" || event.key === "Tab")) {
+      event.preventDefault();
+      return;
+    }
+
     if (pickerState.open && event.key === "Escape") {
       event.preventDefault();
       setPickerState(EMPTY_PICKER_STATE);
@@ -1831,11 +2004,11 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
 
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-      enqueueCurrentMessage();
+      dispatchCurrentMessage();
     }
   }, [
     choosePickerOption,
-    enqueueCurrentMessage,
+    dispatchCurrentMessage,
     pickerOptions,
     pickerState.open,
     pickerState.selectedIndex,
@@ -2003,7 +2176,7 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
 
             <form className="composer composer--chat" onSubmit={(event) => {
               event.preventDefault();
-              enqueueCurrentMessage();
+              dispatchCurrentMessage();
             }}>
               <div className="composer-editor-wrap">
                 <div
@@ -2026,22 +2199,53 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
                     syncComposerState();
                   }}
                 />
-                {pickerState.open && pickerOptions.length > 0 ? (
-                  <div className="mention-picker">
-                    {pickerOptions.map((option, index) => (
-                      <button
-                        key={`${option.kind}:${option.id}`}
-                        type="button"
-                        className={index === pickerState.selectedIndex ? "mention-picker__item mention-picker__item--active" : "mention-picker__item"}
-                        onMouseDown={(event) => {
-                          event.preventDefault();
-                          choosePickerOption(option);
-                        }}
-                      >
-                        <strong>{option.kind === "mention" ? "@" : "/"}{option.displayLabel}</strong>
-                        <span>{option.secondaryLabel}</span>
-                      </button>
-                    ))}
+                {pickerState.open && (pickerOptions.length > 0 || pickerState.mode === "slash") ? (
+                  <div className="composer-palette">
+                    {pickerOptions.length > 0 ? (
+                      pickerOptions.map((option, index) => {
+                        const previous = pickerOptions[index - 1];
+                        const showGroupHeader = pickerState.mode === "slash"
+                          && (!previous || previous.group !== option.group);
+                        return (
+                          <div key={`${option.kind}:${option.id}`} className="composer-palette__row">
+                            {showGroupHeader ? (
+                              <div className="composer-palette__group">
+                                {paletteGroupLabel(option.group)}
+                              </div>
+                            ) : null}
+                            <button
+                              type="button"
+                              className={index === pickerState.selectedIndex
+                                ? "composer-palette__item composer-palette__item--active"
+                                : "composer-palette__item"}
+                              onMouseDown={(event) => {
+                                event.preventDefault();
+                                choosePickerOption(option);
+                              }}
+                            >
+                              <span className="composer-palette__copy">
+                                <strong>
+                                  {option.kind === "mention"
+                                    ? `@${option.title}`
+                                    : option.title}
+                                </strong>
+                                <small>{option.description}</small>
+                              </span>
+                              {option.secondaryLabel ? (
+                                <span className="composer-palette__meta">{option.secondaryLabel}</span>
+                              ) : pickerState.mode === "slash" ? (
+                                <span className="composer-palette__meta">{paletteGroupLabel(option.group)}</span>
+                              ) : null}
+                            </button>
+                          </div>
+                        );
+                      })
+                    ) : pickerState.mode === "slash" ? (
+                      <div className="composer-palette__empty">
+                        <strong>{t("web.conversations.palette_empty", "没有匹配的操作。")}</strong>
+                        <span>{t("web.conversations.palette_empty_hint", "换个关键词试试，或者先输入消息正文。")}</span>
+                      </div>
+                    ) : null}
                   </div>
                 ) : null}
               </div>

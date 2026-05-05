@@ -74,9 +74,10 @@ export async function generate(request = {}) {
   });
   const data = await response.json();
   const text = collectChatCompletionText(data);
+  const reasoning = collectChatCompletionReasoning(data);
   const toolCalls = collectChatCompletionToolCalls(data);
 
-  if (!text && toolCalls.length === 0) {
+  if (!text && !reasoning && toolCalls.length === 0) {
     throw new Error(describeEmptyChatCompletion(data, model));
   }
 
@@ -84,6 +85,7 @@ export async function generate(request = {}) {
     id: data.id,
     model: data.model ?? model,
     text,
+    reasoning,
     tool_calls: toolCalls,
     raw: data,
   };
@@ -104,6 +106,7 @@ async function generateByChatCompletionStream(config, fallbackModel, payload) {
       id: data.id,
       model: data.model ?? fallbackModel,
       text: "",
+      reasoning: data.reasoning ?? "",
       tool_calls: [],
       raw: data.raw,
     };
@@ -112,6 +115,7 @@ async function generateByChatCompletionStream(config, fallbackModel, payload) {
     id: data.id,
     model: data.model ?? fallbackModel,
     text,
+    reasoning: data.reasoning ?? "",
     tool_calls: [],
     raw: data.raw,
   };
@@ -246,6 +250,7 @@ async function collectChatCompletionStream(response, fallbackModel) {
   const decoder = new TextDecoder();
   let buffered = "";
   let text = "";
+  let reasoning = "";
   let responseId = "";
   let model = fallbackModel ?? "";
   let finishReason = "";
@@ -283,17 +288,14 @@ async function collectChatCompletionStream(response, fallbackModel) {
       }
       for (const choice of parsed?.choices ?? []) {
         const delta = choice?.delta;
-        if (typeof delta?.content === "string") {
-          text += delta.content;
-        } else if (Array.isArray(delta?.content)) {
-          for (const item of delta.content) {
-            if (typeof item?.text === "string") {
-              text += item.text;
-            } else if (typeof item?.content === "string") {
-              text += item.content;
-            }
-          }
-        }
+        collectCompletionDeltaText(delta, {
+          onText: (chunk) => {
+            text += chunk;
+          },
+          onReasoning: (chunk) => {
+            reasoning += chunk;
+          },
+        });
         if (typeof choice?.finish_reason === "string" && choice.finish_reason.trim()) {
           finishReason = choice.finish_reason;
         }
@@ -320,9 +322,14 @@ async function collectChatCompletionStream(response, fallbackModel) {
         }
         for (const choice of parsed?.choices ?? []) {
           const delta = choice?.delta;
-          if (typeof delta?.content === "string") {
-            text += delta.content;
-          }
+          collectCompletionDeltaText(delta, {
+            onText: (chunk) => {
+              text += chunk;
+            },
+            onReasoning: (chunk) => {
+              reasoning += chunk;
+            },
+          });
           if (typeof choice?.finish_reason === "string" && choice.finish_reason.trim()) {
             finishReason = choice.finish_reason;
           }
@@ -337,6 +344,7 @@ async function collectChatCompletionStream(response, fallbackModel) {
     id: responseId || "unknown",
     model: model || fallbackModel || DEFAULT_MODEL,
     text,
+    reasoning,
     finish_reason: finishReason || "unknown",
     raw: {
       object: "chat.completion.stream",
@@ -561,7 +569,6 @@ function collectChatCompletionText(response) {
 
   for (const choice of response.choices ?? []) {
     pushTextCandidate(texts, choice?.message?.content);
-    pushTextCandidate(texts, choice?.message?.reasoning_content);
     pushTextCandidate(texts, choice?.message?.text);
     pushTextCandidate(texts, choice?.message?.refusal);
     pushTextCandidate(texts, choice?.text);
@@ -569,6 +576,32 @@ function collectChatCompletionText(response) {
 
   pushTextCandidate(texts, response?.output_text);
   pushTextCandidate(texts, response?.output);
+
+  return texts
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0)
+    .join("\n");
+}
+
+function collectChatCompletionReasoning(response) {
+  const texts = [];
+
+  for (const choice of response.choices ?? []) {
+    pushReasoningCandidate(texts, choice?.message?.reasoning_content);
+    pushReasoningCandidate(texts, choice?.message?.reasoning);
+    if (choice?.message?.content && typeof choice.message.content === "object") {
+      pushReasoningCandidate(texts, choice.message.content);
+    }
+    if (choice?.message?.text && typeof choice.message.text === "object") {
+      pushReasoningCandidate(texts, choice.message.text);
+    }
+  }
+
+  pushReasoningCandidate(texts, response?.reasoning_content);
+  pushReasoningCandidate(texts, response?.reasoning);
+  if (response?.output && typeof response.output === "object") {
+    pushReasoningCandidate(texts, response.output);
+  }
 
   return texts
     .map((item) => item.trim())
@@ -611,9 +644,6 @@ function pushTextCandidate(target, value) {
   if (typeof value.refusal === "string") {
     pushTextCandidate(target, value.refusal);
   }
-  if (typeof value.reasoning_content === "string") {
-    pushTextCandidate(target, value.reasoning_content);
-  }
   if (typeof value.value === "string") {
     pushTextCandidate(target, value.value);
   }
@@ -633,7 +663,6 @@ function pushTextCandidate(target, value) {
   if (value.message && typeof value.message === "object") {
     pushTextCandidate(target, value.message.content);
     pushTextCandidate(target, value.message.text);
-    pushTextCandidate(target, value.message.reasoning_content);
     pushTextCandidate(target, value.message.refusal);
   }
 
@@ -643,6 +672,131 @@ function pushTextCandidate(target, value) {
 
   if (Array.isArray(value.output)) {
     pushTextCandidate(target, value.output);
+  }
+}
+
+function pushReasoningCandidate(target, value) {
+  if (value == null) {
+    return;
+  }
+
+  if (typeof value === "string") {
+    if (value.trim()) {
+      target.push(value);
+    }
+    return;
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      pushReasoningCandidate(target, item);
+    }
+    return;
+  }
+
+  if (typeof value !== "object") {
+    return;
+  }
+
+  if (typeof value.reasoning_content === "string") {
+    pushReasoningCandidate(target, value.reasoning_content);
+  }
+  if (typeof value.reasoning === "string") {
+    pushReasoningCandidate(target, value.reasoning);
+  }
+  if (typeof value.thought === "string") {
+    pushReasoningCandidate(target, value.thought);
+  }
+  if (typeof value.value === "string" && value.type === "reasoning") {
+    pushReasoningCandidate(target, value.value);
+  }
+  if (typeof value.text === "string" && value.type === "reasoning") {
+    pushReasoningCandidate(target, value.text);
+  }
+  if (typeof value.content === "string" && value.type === "reasoning") {
+    pushReasoningCandidate(target, value.content);
+  }
+
+  if (value.text && typeof value.text === "object" && value.type === "reasoning") {
+    pushReasoningCandidate(target, value.text.value);
+    pushReasoningCandidate(target, value.text.content);
+    pushReasoningCandidate(target, value.text.text);
+  }
+
+  if (value.content && typeof value.content === "object" && value.type === "reasoning") {
+    pushReasoningCandidate(target, value.content.value);
+    pushReasoningCandidate(target, value.content.text);
+    pushReasoningCandidate(target, value.content.content);
+  }
+
+  if (value.message && typeof value.message === "object") {
+    pushReasoningCandidate(target, value.message.reasoning_content);
+    pushReasoningCandidate(target, value.message.reasoning);
+  }
+
+  if (Array.isArray(value.content_parts)) {
+    for (const item of value.content_parts) {
+      if (item && typeof item === "object" && item.type === "reasoning") {
+        pushReasoningCandidate(target, item.text ?? item.content ?? item.value);
+      }
+    }
+  }
+
+  if (Array.isArray(value.output)) {
+    pushReasoningCandidate(target, value.output);
+  }
+}
+
+function collectCompletionDeltaText(delta, handlers) {
+  if (!delta || typeof delta !== "object") {
+    return;
+  }
+
+  if (typeof delta.content === "string") {
+    handlers.onText(delta.content);
+  } else if (Array.isArray(delta.content)) {
+    for (const item of delta.content) {
+      if (typeof item?.type === "string" && item.type.toLowerCase().includes("reason")) {
+        const chunk = item.text ?? item.content ?? item.value;
+        if (typeof chunk === "string" && chunk.length > 0) {
+          handlers.onReasoning(chunk);
+        }
+        continue;
+      }
+      if (typeof item?.text === "string") {
+        handlers.onText(item.text);
+      } else if (typeof item?.content === "string") {
+        handlers.onText(item.content);
+      }
+    }
+  }
+
+  if (typeof delta.reasoning_content === "string") {
+    handlers.onReasoning(delta.reasoning_content);
+  } else if (Array.isArray(delta.reasoning_content)) {
+    for (const item of delta.reasoning_content) {
+      if (typeof item === "string") {
+        handlers.onReasoning(item);
+      } else if (typeof item?.text === "string") {
+        handlers.onReasoning(item.text);
+      } else if (typeof item?.content === "string") {
+        handlers.onReasoning(item.content);
+      }
+    }
+  }
+
+  if (typeof delta.reasoning === "string") {
+    handlers.onReasoning(delta.reasoning);
+  } else if (Array.isArray(delta.reasoning)) {
+    for (const item of delta.reasoning) {
+      if (typeof item === "string") {
+        handlers.onReasoning(item);
+      } else if (typeof item?.text === "string") {
+        handlers.onReasoning(item.text);
+      } else if (typeof item?.content === "string") {
+        handlers.onReasoning(item.content);
+      }
+    }
   }
 }
 

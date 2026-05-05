@@ -1,5 +1,6 @@
 use std::fs;
 use std::sync::Arc;
+use std::time::Duration;
 
 use chrono::Utc;
 use ennoia_contract::behavior::{BehaviorRunRequest, BehaviorSourceRef, BehaviorTrigger};
@@ -25,6 +26,7 @@ use crate::runtime::{RuntimeStore, SqliteRuntimeStore};
 struct HostApiClient {
     client: reqwest::Client,
     base_url: String,
+    processing_stale_after_ms: u64,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -65,6 +67,13 @@ struct ToolMessageError {
     code: String,
     message: String,
     details: JsonValue,
+}
+
+#[derive(Debug, Serialize)]
+struct ReasoningMessageEnvelope {
+    kind: &'static str,
+    format: &'static str,
+    content: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -132,11 +141,25 @@ impl HostApiClient {
     fn new(runtime_paths: &Arc<RuntimePaths>) -> Result<Self, String> {
         let server_config = read_server_config(runtime_paths)?;
         let host = normalize_loopback_host(&server_config.host);
+        let request_timeout_ms = server_config.timeout.default_ms.max(1_000);
+        let processing_stale_after_ms = [
+            request_timeout_ms,
+            server_config.extension_runtime.timeout_ms,
+            server_config.operations.command.max_timeout_ms,
+            server_config.operations.net.max_timeout_ms,
+        ]
+        .into_iter()
+        .max()
+        .unwrap_or(30_000)
+        .saturating_mul(2);
         Ok(Self {
             client: reqwest::Client::builder()
+                .connect_timeout(Duration::from_millis(request_timeout_ms))
+                .timeout(Duration::from_millis(request_timeout_ms))
                 .build()
                 .map_err(|error| error.to_string())?,
             base_url: format!("http://{}:{}", host, server_config.port),
+            processing_stale_after_ms,
         })
     }
 
@@ -514,183 +537,119 @@ async fn generate_conversation_agent_reply(
                 &conversation_id,
                 message_id.as_deref(),
                 agent_id,
+                client.processing_stale_after_ms,
             )
             .await?
         {
             continue;
         }
-        let conversation_messages = client
-            .dispatch_action(
-                "message.list",
-                serde_json::json!({ "conversation_id": conversation_id }),
+        if workflow_resume_run_id.is_none() {
+            mark_conversation_message_receipt_status(
+                store,
+                &conversation_id,
+                message_id.as_deref(),
+                agent_id,
+                "running",
+            )
+            .await?;
+        }
+        let agent_result: Result<(), String> = async {
+            let conversation_messages = client
+                .dispatch_action(
+                    "message.list",
+                    serde_json::json!({ "conversation_id": conversation_id }),
+                    permission_actor_context(
+                        agent_id,
+                        "workflow.conversation_to_run",
+                        Some(&conversation_id),
+                        None,
+                        message_id.as_deref(),
+                    ),
+                )
+                .await
+                .map_err(|error| error.to_string())?;
+            let memory_context = assemble_memory_context(
+                client,
+                &owner,
+                &conversation_id,
+                visible_recent_messages(&conversation_messages, agent_id),
                 permission_actor_context(
                     agent_id,
-                    "workflow.conversation_to_run",
+                    "workflow.memory_context",
                     Some(&conversation_id),
                     None,
                     message_id.as_deref(),
                 ),
             )
-            .await
-            .map_err(|error| error.to_string())?;
-        let memory_context = assemble_memory_context(
-            client,
-            &owner,
-            &conversation_id,
-            visible_recent_messages(&conversation_messages, agent_id),
-            permission_actor_context(
-                agent_id,
-                "workflow.memory_context",
-                Some(&conversation_id),
-                None,
-                message_id.as_deref(),
-            ),
-        )
-        .await;
-        let metadata = serde_json::json!({
-            "origin": "workflow.conversation_message.created",
-            "message_id": message_id,
-        });
+            .await;
+            let metadata = serde_json::json!({
+                "origin": "workflow.conversation_message.created",
+                "message_id": message_id,
+            });
 
-        if let Some(run_id) = workflow_resume_run_id.as_deref() {
-            if let Some(run_response) =
-                load_run_response_for_agent(store, &conversation_id, agent_id, run_id).await?
-            {
-                execute_workflow_run(
-                    client,
-                    runtime,
-                    store,
-                    &agents,
-                    &model_endpoints,
-                    &conversation_id,
-                    lane_id.as_deref(),
-                    message_id.as_deref(),
-                    &conversation_messages,
-                    &run_response,
-                    agent_id,
-                    true,
-                )
-                .await?;
-            } else if run_id.starts_with("direct-") {
-                execute_direct_reply(
-                    client,
-                    &runtime.runtime_paths,
-                    &agents,
-                    &model_endpoints,
-                    &conversation_id,
-                    lane_id.as_deref(),
-                    message_id.as_deref(),
-                    &conversation_messages,
-                    agent_id,
-                    run_id,
-                )
-                .await?;
-            } else {
-                return Err(format!("workflow run '{run_id}' not found for agent"));
+            if let Some(run_id) = workflow_resume_run_id.as_deref() {
+                if let Some(run_response) =
+                    load_run_response_for_agent(store, &conversation_id, agent_id, run_id).await?
+                {
+                    execute_workflow_run(
+                        client,
+                        runtime,
+                        store,
+                        &agents,
+                        &model_endpoints,
+                        &conversation_id,
+                        lane_id.as_deref(),
+                        message_id.as_deref(),
+                        &conversation_messages,
+                        &run_response,
+                        agent_id,
+                        true,
+                    )
+                    .await?;
+                } else if run_id.starts_with("direct-") {
+                    execute_direct_reply(
+                        client,
+                        &runtime.runtime_paths,
+                        &agents,
+                        &model_endpoints,
+                        &conversation_id,
+                        lane_id.as_deref(),
+                        message_id.as_deref(),
+                        &conversation_messages,
+                        agent_id,
+                        run_id,
+                    )
+                    .await?;
+                } else {
+                    return Err(format!("workflow run '{run_id}' not found for agent"));
+                }
+                return Ok(());
             }
-            continue;
-        }
 
-        let mut active_session = load_active_workflow_session(client, &conversation_id, agent_id)
-            .await
-            .map_err(|error| error.to_string())?;
+            let mut active_session =
+                load_active_workflow_session(client, &conversation_id, agent_id)
+                    .await
+                    .map_err(|error| error.to_string())?;
 
-        if active_session.is_some() && is_explicit_new_topic(&body) {
-            abandon_active_workflow_session(
-                client,
-                store,
-                &conversation_id,
-                agent_id,
-                active_session.as_ref(),
-            )
-            .await
-            .map_err(|error| error.to_string())?;
-            active_session = None;
-        }
-
-        if is_workflow_execution_confirmation(&body) {
-            if let Some(run_response) = resume_pending_workflow_run(
-                client,
-                runtime,
-                store,
-                &owner,
-                &agents,
-                &model_endpoints,
-                &conversation_id,
-                lane_id.as_deref(),
-                message_id.as_deref(),
-                &conversation_messages,
-                agent_id,
-                memory_context.clone(),
-                metadata.clone(),
-                active_session.as_ref(),
-            )
-            .await?
-            {
-                execute_workflow_run(
+            if active_session.is_some() && is_explicit_new_topic(&body) {
+                abandon_active_workflow_session(
                     client,
-                    runtime,
                     store,
-                    &agents,
-                    &model_endpoints,
                     &conversation_id,
-                    lane_id.as_deref(),
-                    message_id.as_deref(),
-                    &conversation_messages,
-                    &run_response,
-                    agent_id,
-                    false,
-                )
-                .await?;
-            } else {
-                append_agent_conversation_reply(
-                    client,
-                    &conversation_id,
-                    lane_id.as_deref(),
-                    message_id.as_deref(),
-                    agent_id,
-                    None,
-                    "当前没有可直接继续执行的复杂任务。你可以继续补充要求，或者直接让我处理一个具体操作。",
-                )
-                .await?;
-            }
-            continue;
-        }
-
-        match decide_conversation_route(&body, active_session.as_ref()) {
-            ConversationRoute::ManagedDiscussion => {
-                let discussion_reply = upsert_managed_discussion(
-                    client,
-                    runtime,
-                    store,
-                    &agents,
-                    &model_endpoints,
-                    &conversation_id,
-                    lane_id.as_deref(),
-                    message_id.as_deref(),
-                    &conversation_messages,
-                    &body,
                     agent_id,
                     active_session.as_ref(),
                 )
                 .await
                 .map_err(|error| error.to_string())?;
-                append_agent_conversation_reply(
-                    client,
-                    &conversation_id,
-                    lane_id.as_deref(),
-                    message_id.as_deref(),
-                    agent_id,
-                    None,
-                    &discussion_reply,
-                )
-                .await?;
+                active_session = None;
             }
-            ConversationRoute::DirectReply => {
-                let direct_run_id = synthetic_direct_run_id(agent_id, message_id.as_deref());
-                execute_direct_reply(
+
+            if is_workflow_execution_confirmation(&body) {
+                if let Some(run_response) = resume_pending_workflow_run(
                     client,
-                    &runtime.runtime_paths,
+                    runtime,
+                    store,
+                    &owner,
                     &agents,
                     &model_endpoints,
                     &conversation_id,
@@ -698,21 +657,107 @@ async fn generate_conversation_agent_reply(
                     message_id.as_deref(),
                     &conversation_messages,
                     agent_id,
-                    &direct_run_id,
+                    memory_context.clone(),
+                    metadata.clone(),
+                    active_session.as_ref(),
                 )
-                .await?;
+                .await?
+                {
+                    execute_workflow_run(
+                        client,
+                        runtime,
+                        store,
+                        &agents,
+                        &model_endpoints,
+                        &conversation_id,
+                        lane_id.as_deref(),
+                        message_id.as_deref(),
+                        &conversation_messages,
+                        &run_response,
+                        agent_id,
+                        false,
+                    )
+                    .await?;
+                } else {
+                    append_agent_conversation_reply(
+                        client,
+                        &conversation_id,
+                        lane_id.as_deref(),
+                        message_id.as_deref(),
+                        agent_id,
+                        None,
+                        "当前没有可直接继续执行的复杂任务。你可以继续补充要求，或者直接让我处理一个具体操作。",
+                    )
+                    .await?;
+                }
+                return Ok(());
             }
-        }
 
+            match decide_conversation_route(&body, active_session.as_ref()) {
+                ConversationRoute::ManagedDiscussion => {
+                    let discussion_reply = upsert_managed_discussion(
+                        client,
+                        runtime,
+                        store,
+                        &agents,
+                        &model_endpoints,
+                        &conversation_id,
+                        lane_id.as_deref(),
+                        message_id.as_deref(),
+                        &conversation_messages,
+                        &body,
+                        agent_id,
+                        active_session.as_ref(),
+                    )
+                    .await
+                    .map_err(|error| error.to_string())?;
+                    append_agent_conversation_reply(
+                        client,
+                        &conversation_id,
+                        lane_id.as_deref(),
+                        message_id.as_deref(),
+                        agent_id,
+                        None,
+                        &discussion_reply,
+                    )
+                    .await?;
+                }
+                ConversationRoute::DirectReply => {
+                    let direct_run_id = synthetic_direct_run_id(agent_id, message_id.as_deref());
+                    execute_direct_reply(
+                        client,
+                        &runtime.runtime_paths,
+                        &agents,
+                        &model_endpoints,
+                        &conversation_id,
+                        lane_id.as_deref(),
+                        message_id.as_deref(),
+                        &conversation_messages,
+                        agent_id,
+                        &direct_run_id,
+                    )
+                    .await?;
+                }
+            }
+
+            Ok(())
+        }
+        .await;
         if workflow_resume_run_id.is_none() {
-            mark_conversation_message_processed(
+            mark_conversation_message_receipt_status(
                 store,
                 &conversation_id,
                 message_id.as_deref(),
                 agent_id,
+                if agent_result.is_ok() {
+                    "completed"
+                } else {
+                    "failed"
+                },
             )
             .await?;
         }
+        agent_result?;
     }
 
     Ok(())
@@ -902,12 +947,13 @@ async fn already_processed_conversation_message(
     conversation_id: &str,
     message_id: Option<&str>,
     agent_id: &str,
+    stale_after_ms: u64,
 ) -> Result<bool, String> {
     let Some(message_id) = message_id.map(str::trim).filter(|value| !value.is_empty()) else {
         return Ok(false);
     };
     let row = sqlx::query(
-        "SELECT status
+        "SELECT status, updated_at
          FROM conversation_message_receipts
          WHERE conversation_id = ?1 AND message_id = ?2 AND agent_id = ?3
          LIMIT 1",
@@ -918,14 +964,25 @@ async fn already_processed_conversation_message(
     .fetch_optional(store.pool())
     .await
     .map_err(|error| format!("load conversation message receipt failed: {error}"))?;
-    Ok(row.is_some_and(|item| item.get::<String, _>("status") == "completed"))
+    Ok(row.is_some_and(|item| {
+        let status = item.get::<String, _>("status");
+        if status == "completed" {
+            return true;
+        }
+        if status != "running" {
+            return false;
+        }
+        let updated_at = item.get::<String, _>("updated_at");
+        is_recent_receipt_timestamp(&updated_at, stale_after_ms)
+    }))
 }
 
-async fn mark_conversation_message_processed(
+async fn mark_conversation_message_receipt_status(
     store: &SqliteRuntimeStore,
     conversation_id: &str,
     message_id: Option<&str>,
     agent_id: &str,
+    status: &str,
 ) -> Result<(), String> {
     let Some(message_id) = message_id.map(str::trim).filter(|value| !value.is_empty()) else {
         return Ok(());
@@ -934,7 +991,7 @@ async fn mark_conversation_message_processed(
     sqlx::query(
         "INSERT INTO conversation_message_receipts
          (conversation_id, message_id, agent_id, status, created_at, updated_at)
-         VALUES (?1, ?2, ?3, 'completed', ?4, ?4)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?5)
          ON CONFLICT(conversation_id, message_id, agent_id) DO UPDATE SET
            status = excluded.status,
            updated_at = excluded.updated_at",
@@ -942,6 +999,7 @@ async fn mark_conversation_message_processed(
     .bind(conversation_id)
     .bind(message_id)
     .bind(agent_id)
+    .bind(status)
     .bind(&now)
     .execute(store.pool())
     .await
@@ -1289,6 +1347,18 @@ async fn generate_draft_plan(
                 ),
             )
             .await?;
+        if let Some(reasoning) = read_provider_reasoning(&response) {
+            append_reasoning_message(
+                client,
+                conversation_id,
+                lane_id,
+                message_id,
+                agent_id,
+                Some(&draft_run_id),
+                &reasoning,
+            )
+            .await?;
+        }
         let text = response
             .get("text")
             .and_then(JsonValue::as_str)
@@ -1786,6 +1856,7 @@ async fn generate_agent_reply(
         "agent_display_name": agent.display_name,
     });
 
+    let mut last_process_text: Option<String> = None;
     for _ in 0..6 {
         let response = client
             .provider_generate(
@@ -1817,6 +1888,19 @@ async fn generate_agent_reply(
             .map(str::trim)
             .filter(|item| !item.is_empty())
             .map(ToOwned::to_owned);
+        let reasoning = read_provider_reasoning(&response);
+        if let Some(reasoning) = reasoning.as_deref() {
+            let _ = append_reasoning_message(
+                client,
+                conversation_id,
+                lane_id,
+                message_id,
+                agent_id,
+                Some(run_id),
+                reasoning,
+            )
+            .await;
+        }
         let tool_calls = response
             .get("tool_calls")
             .cloned()
@@ -1826,6 +1910,24 @@ async fn generate_agent_reply(
             .unwrap_or_default();
         if tool_calls.is_empty() {
             return text.ok_or_else(|| internal_error("provider returned empty text"));
+        }
+        if let Some(progress_text) = text.as_deref() {
+            let normalized_progress = progress_text.trim();
+            if !normalized_progress.is_empty()
+                && last_process_text.as_deref() != Some(normalized_progress)
+            {
+                let _ = append_agent_process_message(
+                    client,
+                    conversation_id,
+                    lane_id,
+                    message_id,
+                    agent_id,
+                    Some(run_id),
+                    normalized_progress,
+                )
+                .await;
+                last_process_text = Some(normalized_progress.to_string());
+            }
         }
         messages.push(serde_json::json!({
             "role": "assistant",
@@ -1849,16 +1951,19 @@ async fn generate_agent_reply(
             .await
             {
                 Ok(result) => {
-                    let body = append_tool_result_message(
+                    let body = serialize_tool_message_envelope(&tool_call, Ok(result.clone()))
+                        .map_err(|error| {
+                            internal_error(format!("serialize tool message failed: {error}"))
+                        })?;
+                    let _ = append_tool_result_message(
                         client,
                         conversation_id,
                         lane_id,
                         message_id,
                         agent_id,
-                        &tool_call,
-                        Ok(result),
+                        &body,
                     )
-                    .await?;
+                    .await;
                     messages.push(serde_json::json!({
                         "role": "tool",
                         "tool_call_id": tool_call.id,
@@ -1866,16 +1971,22 @@ async fn generate_agent_reply(
                     }));
                 }
                 Err(error) => {
-                    let body = append_tool_result_message(
+                    let body = serialize_tool_message_envelope(&tool_call, Err(&error)).map_err(
+                        |serialize_error| {
+                            internal_error(format!(
+                                "serialize tool message failed: {serialize_error}"
+                            ))
+                        },
+                    )?;
+                    let _ = append_tool_result_message(
                         client,
                         conversation_id,
                         lane_id,
                         message_id,
                         agent_id,
-                        &tool_call,
-                        Err(&error),
+                        &body,
                     )
-                    .await?;
+                    .await;
                     if error.is_permission_approval() {
                         return Err(error);
                     }
@@ -1998,11 +2109,8 @@ async fn append_tool_result_message(
     lane_id: Option<&str>,
     parent_message_id: Option<&str>,
     agent_id: &str,
-    tool_call: &AgentToolCall,
-    outcome: Result<JsonValue, &HostApiError>,
-) -> Result<String, HostApiError> {
-    let body = serialize_tool_message_envelope(tool_call, outcome)
-        .map_err(|error| internal_error(format!("serialize tool message failed: {error}")))?;
+    body: &str,
+) -> Result<(), HostApiError> {
     client
         .dispatch_action(
             "message.append",
@@ -2026,7 +2134,79 @@ async fn append_tool_result_message(
             ),
         )
         .await?;
-    Ok(body)
+    Ok(())
+}
+
+async fn append_agent_process_message(
+    client: &HostApiClient,
+    conversation_id: &str,
+    lane_id: Option<&str>,
+    parent_message_id: Option<&str>,
+    agent_id: &str,
+    run_id: Option<&str>,
+    body: &str,
+) -> Result<(), HostApiError> {
+    client
+        .dispatch_action(
+            "message.append",
+            serde_json::json!({
+                "conversation_id": conversation_id,
+                "message": {
+                    "body": body,
+                    "lane_id": lane_id,
+                    "sender": agent_id,
+                    "role": "agent",
+                    "parent_message_id": parent_message_id,
+                    "addressed_agents": ["operator"],
+                }
+            }),
+            permission_actor_context(
+                agent_id,
+                "workflow.process_message",
+                Some(conversation_id),
+                run_id,
+                parent_message_id,
+            ),
+        )
+        .await
+        .map(|_| ())
+}
+
+async fn append_reasoning_message(
+    client: &HostApiClient,
+    conversation_id: &str,
+    lane_id: Option<&str>,
+    parent_message_id: Option<&str>,
+    agent_id: &str,
+    run_id: Option<&str>,
+    reasoning: &str,
+) -> Result<(), HostApiError> {
+    let body = serialize_reasoning_message_envelope(reasoning)
+        .map_err(|error| internal_error(format!("serialize reasoning message failed: {error}")))?;
+    client
+        .dispatch_action(
+            "message.append",
+            serde_json::json!({
+                "conversation_id": conversation_id,
+                "message": {
+                    "body": body,
+                    "lane_id": lane_id,
+                    "sender": agent_id,
+                    "role": "system",
+                    "parent_message_id": parent_message_id,
+                    "addressed_agents": [agent_id],
+                }
+            }),
+            permission_actor_context(
+                agent_id,
+                "workflow.reasoning_result",
+                Some(conversation_id),
+                run_id,
+                parent_message_id,
+            ),
+        )
+        .await
+        .map(|_| ())
 }
 
 async fn assemble_memory_context(
@@ -2630,6 +2810,33 @@ fn serialize_tool_message_envelope(
         },
     };
     serde_json::to_string(&envelope)
+}
+
+fn serialize_reasoning_message_envelope(reasoning: &str) -> Result<String, serde_json::Error> {
+    serde_json::to_string(&ReasoningMessageEnvelope {
+        kind: "ennoia.reasoning",
+        format: "markdown",
+        content: reasoning.trim().to_string(),
+    })
+}
+
+fn is_recent_receipt_timestamp(updated_at: &str, stale_after_ms: u64) -> bool {
+    let Ok(updated_at) = chrono::DateTime::parse_from_rfc3339(updated_at) else {
+        return false;
+    };
+    let age_ms = Utc::now()
+        .signed_duration_since(updated_at.with_timezone(&Utc))
+        .num_milliseconds();
+    age_ms >= 0 && age_ms < stale_after_ms.min(i64::MAX as u64) as i64
+}
+
+fn read_provider_reasoning(response: &JsonValue) -> Option<String> {
+    response
+        .get("reasoning")
+        .and_then(JsonValue::as_str)
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+        .map(ToOwned::to_owned)
 }
 
 fn model_endpoint_runtime_request_config(model_endpoint: &ModelEndpointConfig) -> JsonValue {

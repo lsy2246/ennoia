@@ -16,13 +16,20 @@ import type {
   ChatEntryViewModel,
   ChatErrorEntry,
   ChatRecordEntry,
+  ChatReasoningEntry,
   ChatStatusEntry,
   ChatSystemEntry,
   ChatToolResultEntry,
   ConversationMessageEntry,
 } from "./chat-types";
 
-type ChatAccessoryEntry = ChatErrorEntry | ChatStatusEntry | ChatSystemEntry | ChatToolResultEntry | ChatRecordEntry;
+type ChatAccessoryEntry =
+  | ChatErrorEntry
+  | ChatStatusEntry
+  | ChatReasoningEntry
+  | ChatSystemEntry
+  | ChatToolResultEntry
+  | ChatRecordEntry;
 
 type ChatGroup =
   | {
@@ -157,7 +164,7 @@ function buildChatGroups(entries: ChatEntryViewModel[], _runs: ExecutionRun[]) {
       continue;
     }
 
-    if (entry.kind === "status") {
+    if (entry.kind === "status" || entry.kind === "reasoning") {
       groups.push({
         id: `group:standalone:${entry.id}`,
         order: order++,
@@ -305,6 +312,15 @@ function asNonEmptyString(value: unknown) {
 
 function shortenInline(value: string, limit = 96) {
   return value.length > limit ? `${value.slice(0, Math.max(0, limit - 1))}…` : value;
+}
+
+function summarizeAccessoryText(value: string, limit = 96) {
+  const summary = value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find(Boolean)
+    ?? value.trim();
+  return shortenInline(summary, limit);
 }
 
 type StructuredToolEnvelope = {
@@ -463,6 +479,9 @@ function resolveTurnAgentSender(turn: ChatTurn) {
       if (accessory.kind === "tool_result" && accessory.actorSender?.trim()) {
         return accessory.actorSender.trim();
       }
+      if (accessory.kind === "reasoning" && accessory.actorSender?.trim()) {
+        return accessory.actorSender.trim();
+      }
     }
   }
 
@@ -491,8 +510,10 @@ function summarizeProcess(groups: ChatGroup[]) {
           approvalCount += 1;
         }
       }
-      if (entry.kind === "status") {
-        statusCount += 1;
+      if (entry.kind === "status" || entry.kind === "reasoning") {
+        if (entry.kind === "status") {
+          statusCount += 1;
+        }
         thinkingCount += 1;
       }
     }
@@ -1052,6 +1073,24 @@ function AccessoryBlock({
     );
   }
 
+  if (entry.kind === "reasoning") {
+    const summary = summarizeAccessoryText(entry.body);
+    return (
+      <details className="message-accessory message-accessory--reasoning" open>
+        <summary>
+          <span className="message-accessory__summary-main">
+            <strong>{t("web.conversations.thinking_title", "思考")}</strong>
+            <span>{senderLabel ? `${senderLabel} · ${summary}` : summary}</span>
+          </span>
+          <small>{absoluteAt}</small>
+        </summary>
+        <div className="message-accessory__body">
+          <ChatContent body={entry.body} format={entry.format} agents={agents} skills={skills} />
+        </div>
+      </details>
+    );
+  }
+
   if (entry.kind === "error") {
     return (
       <details className="message-accessory message-accessory--error" open>
@@ -1185,7 +1224,7 @@ function MessageGroup({
   const absoluteAt = formatAbsoluteDateTime(anchor.createdAt);
   const showSenderLabel = !isOperator && Boolean(senderLabel);
   const visibleAccessories = group.accessories.filter((entry) => {
-    if (entry.kind === "status") {
+    if (entry.kind === "status" || entry.kind === "reasoning") {
       return showThinking;
     }
     if (entry.kind === "tool_result") {
@@ -1225,6 +1264,9 @@ function MessageGroup({
                   ? t("web.conversations.message_status_queued", "排队中")
                   : t("web.conversations.message_status_failed", "发送失败")}
             </span>
+          ) : null}
+          {anchor.source === "local" && anchor.dispatchMode === "insert" ? (
+            <span className="chat-unit__tag">{t("web.conversations.insert_badge", "插入")}</span>
           ) : null}
           <span className="chat-unit__time">{absoluteAt}</span>
           {isOperator
@@ -1369,7 +1411,7 @@ function StandaloneGroup({
   conversationId: string;
 }) {
   const visibleAccessories = group.accessories.filter((entry) => {
-    if (entry.kind === "status") {
+    if (entry.kind === "status" || entry.kind === "reasoning") {
       return showThinking;
     }
     if (entry.kind === "tool_result") {

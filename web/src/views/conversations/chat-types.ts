@@ -2,6 +2,7 @@ import type { ExtensionRecordEntry, PermissionApprovalRecord } from "@ennoia/api
 import type { ConversationFailureSource } from "./error-classification";
 
 export type LocalMessageStatus = "queued" | "sending" | "failed";
+export type LocalMessageDispatchMode = "queue" | "insert";
 
 export type ComposerSegment =
   | {
@@ -17,6 +18,11 @@ export type ComposerSegment =
       kind: "skill";
       skillId: string;
       label: string;
+    }
+  | {
+      kind: "dispatch";
+      mode: "insert";
+      label: string;
     };
 
 export type LocalMessageDraft = {
@@ -27,6 +33,7 @@ export type LocalMessageDraft = {
   segments: ComposerSegment[];
   createdAt: string;
   status: LocalMessageStatus;
+  dispatchMode: LocalMessageDispatchMode;
   branchId?: string;
   forkFromMessageId?: string;
   rewriteFromMessageId?: string;
@@ -53,7 +60,7 @@ export type ChatEntryRecipient = {
 type ChatEntryBase = {
   id: string;
   role: "operator" | "agent" | "system" | "tool";
-  kind: "message" | "error" | "system" | "status" | "tool_result" | "approval" | "record";
+  kind: "message" | "error" | "system" | "status" | "reasoning" | "tool_result" | "approval" | "record";
   format: ChatEntryFormat;
   state: ChatEntryState;
   sender?: string;
@@ -73,6 +80,7 @@ export type ConversationMessageEntry = ChatEntryBase & {
   mentions: string[];
   source: "remote" | "local";
   localStatus?: LocalMessageStatus;
+  dispatchMode?: LocalMessageDispatchMode;
   localError?: string;
   failureCode?: string;
   failureSource?: ConversationFailureSource;
@@ -104,6 +112,12 @@ export type ChatStatusEntry = ChatEntryBase & {
   live?: boolean;
 };
 
+export type ChatReasoningEntry = ChatEntryBase & {
+  kind: "reasoning";
+  relatedMessageId?: string;
+  actorSender?: string;
+};
+
 export type ChatToolResultEntry = ChatEntryBase & {
   kind: "tool_result";
   relatedMessageId?: string;
@@ -127,6 +141,7 @@ export type ChatEntryViewModel =
   | ChatErrorEntry
   | ChatSystemEntry
   | ChatStatusEntry
+  | ChatReasoningEntry
   | ChatToolResultEntry
   | ChatApprovalEntry
   | ChatRecordEntry;
