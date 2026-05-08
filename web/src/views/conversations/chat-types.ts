@@ -44,6 +44,7 @@ export type LocalMessageDraft = {
 export type PendingReplyMarker = {
   id: string;
   agentId: string;
+  branchId: string;
   createdAt: string;
   sourceMessageId: string;
 };
@@ -105,6 +106,7 @@ export type ChatSystemEntry = ChatEntryBase & {
 export type ChatStatusEntry = ChatEntryBase & {
   kind: "status";
   label: string;
+  branchId?: string;
   detail?: string;
   animation: "typing";
   relatedMessageId?: string;

@@ -115,6 +115,23 @@ fn parse_action_dispatch_payload(payload: JsonValue) -> (JsonValue, JsonValue) {
     (payload, JsonValue::Null)
 }
 
+fn extension_rpc_error_message(error: &ennoia_kernel::ExtensionRpcError) -> String {
+    format!("{}: {}", error.code, error.message)
+}
+
+fn extension_rpc_error_to_api_error(error: ennoia_kernel::ExtensionRpcError) -> ApiError {
+    let message = extension_rpc_error_message(&error);
+    if extension_rpc_error_is_not_found(&error.code) {
+        ApiError::not_found(message)
+    } else {
+        ApiError::bad_request(message)
+    }
+}
+
+fn extension_rpc_error_is_not_found(code: &str) -> bool {
+    code.trim().eq_ignore_ascii_case("not_found") || code.trim().ends_with("_not_found")
+}
+
 pub(crate) async fn dispatch_action_rule_execute(
     state: &AppState,
     request: &RequestContext,
@@ -214,10 +231,16 @@ pub(crate) async fn dispatch_action_rule_execute(
         return Ok(response.data);
     }
 
-    let error = response
-        .error
-        .map(|item| format!("{}: {}", item.code, item.message))
-        .unwrap_or_else(|| format!("action '{key}' failed"));
+    let (api_error, error) = match response.error {
+        Some(item) => {
+            let error = extension_rpc_error_message(&item);
+            (extension_rpc_error_to_api_error(item), error)
+        }
+        None => {
+            let error = format!("action '{key}' failed");
+            (ApiError::bad_request(error.clone()), error)
+        }
+    };
     record_trace_span(
         state,
         LogTraceWrite {
@@ -240,7 +263,7 @@ pub(crate) async fn dispatch_action_rule_execute(
             duration_ms: started.elapsed().as_millis() as i64,
         },
     );
-    Err(scoped(ApiError::bad_request(error), request))
+    Err(scoped(api_error, request))
 }
 
 fn authorize_action_dispatch(
@@ -736,4 +759,37 @@ fn payload_owner(payload: &JsonValue) -> Option<OwnerRef> {
                 .cloned()
         })
         .and_then(|value| serde_json::from_value(value).ok())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn maps_not_found_extension_errors_to_not_found_api_errors() {
+        let error = extension_rpc_error_to_api_error(ennoia_kernel::ExtensionRpcError {
+            code: "conversation_not_found".to_string(),
+            message: "conversation not found".to_string(),
+        });
+
+        assert_eq!(error.code(), ennoia_contract::ErrorCode::NotFound);
+        assert_eq!(
+            error.message(),
+            "conversation_not_found: conversation not found"
+        );
+    }
+
+    #[test]
+    fn keeps_other_extension_errors_as_bad_request() {
+        let error = extension_rpc_error_to_api_error(ennoia_kernel::ExtensionRpcError {
+            code: "invalid_params".to_string(),
+            message: "conversation_id is required".to_string(),
+        });
+
+        assert_eq!(error.code(), ennoia_contract::ErrorCode::BadRequest);
+        assert_eq!(
+            error.message(),
+            "invalid_params: conversation_id is required"
+        );
+    }
 }

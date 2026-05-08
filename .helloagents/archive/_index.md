@@ -2,6 +2,7 @@
 
 | 时间 | 方案包 | 类型 | 结果 |
 |------|--------|------|------|
+| 202605071634 | conversation-not-found-fix | - | - | - | ✅完成 |
 | 202604291106 | docker-api-build-fix | - | - | - | ✅完成 |
 | 202604231111 | wasm-extension-runtime | - | - | - | ✅完成 |
 | 2026-04-22 10:33 | `202604221033_web-name-refactor` | implementation | completed |

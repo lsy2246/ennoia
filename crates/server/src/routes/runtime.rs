@@ -1,7 +1,8 @@
 use super::*;
 use crate::app::{live_server_config, live_ui_config};
 
-use crate::runtime_bridge::{execute_runtime_operation, RuntimeOperationRequest};
+use crate::runtime_bridge::execute_runtime_operation;
+use ennoia_kernel::RuntimeOperationRequest;
 
 pub(super) async fn runtime_operation_invoke(
     State(state): State<AppState>,

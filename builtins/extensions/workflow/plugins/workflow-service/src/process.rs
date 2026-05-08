@@ -1,7 +1,8 @@
 use std::collections::BTreeMap;
 use std::error::Error;
-use std::io::{self, BufRead, BufReader, Write};
+use std::io::{self, BufRead, BufReader};
 use std::sync::Arc;
+use std::thread;
 
 use ennoia_contract::behavior::{
     BehaviorRunRequest, BehaviorSourceRef, BehaviorStatusResponse, BehaviorTrigger,
@@ -16,10 +17,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::{Row, SqlitePool};
+use tokio::sync::mpsc;
 
 use crate::conversation_hooks::{
     handle_conversation_message_created, handle_permission_approval_resolved,
 };
+use crate::host_bridge::HostBridge;
 use crate::orchestrator::OrchestratorService;
 use crate::pipeline::{run_behavior, WorkflowRuntime};
 use crate::planning::PlanSpec;
@@ -118,6 +121,11 @@ struct WorkflowServiceState {
     pool: SqlitePool,
 }
 
+enum StdinEvent {
+    Invocation(String),
+    Fatal(io::Error),
+}
+
 pub async fn run() -> Result<(), Box<dyn Error + Send + Sync>> {
     let runtime_paths = Arc::new(RuntimePaths::resolve(None));
     runtime_paths.ensure_layout()?;
@@ -155,30 +163,59 @@ pub async fn run() -> Result<(), Box<dyn Error + Send + Sync>> {
         pool,
     };
 
-    let stdin = io::stdin();
-    let stdout = io::stdout();
-    let mut reader = BufReader::new(stdin.lock());
-    let mut writer = stdout.lock();
-    let mut line = String::new();
+    let bridge = HostBridge::install();
+    let mut stdin_events = spawn_stdin_pump(bridge.clone());
 
-    loop {
-        line.clear();
-        let read = reader.read_line(&mut line)?;
-        if read == 0 {
-            break;
-        }
-
-        let response = match serde_json::from_str::<Invocation>(line.trim_end()) {
+    while let Some(event) = stdin_events.recv().await {
+        let line = match event {
+            StdinEvent::Invocation(line) => line,
+            StdinEvent::Fatal(error) => return Err(Box::new(error)),
+        };
+        let response = match serde_json::from_str::<Invocation>(&line) {
             Ok(invocation) => handle_invocation(&state, invocation).await,
             Err(error) => ExtensionRpcResponse::failure("invalid_request", error.to_string()),
         };
 
-        serde_json::to_writer(&mut writer, &response)?;
-        writer.write_all(b"\n")?;
-        writer.flush()?;
+        bridge.write_rpc_response(&response)?;
     }
 
     Ok(())
+}
+
+fn spawn_stdin_pump(bridge: Arc<HostBridge>) -> mpsc::UnboundedReceiver<StdinEvent> {
+    let (tx, rx) = mpsc::unbounded_channel();
+    thread::spawn(move || {
+        let stdin = io::stdin();
+        let mut reader = BufReader::new(stdin.lock());
+        let mut line = String::new();
+
+        loop {
+            line.clear();
+            let read = match reader.read_line(&mut line) {
+                Ok(read) => read,
+                Err(error) => {
+                    let _ = tx.send(StdinEvent::Fatal(error));
+                    break;
+                }
+            };
+            if read == 0 {
+                break;
+            }
+            let line = line.trim_end_matches(['\r', '\n']);
+            match bridge.try_resolve_control_line(line) {
+                Ok(true) => continue,
+                Ok(false) => {}
+                Err(error) => {
+                    let _ = tx.send(StdinEvent::Fatal(error));
+                    break;
+                }
+            }
+            if tx.send(StdinEvent::Invocation(line.to_string())).is_err() {
+                break;
+            }
+        }
+    });
+    rx
 }
 
 async fn handle_invocation(

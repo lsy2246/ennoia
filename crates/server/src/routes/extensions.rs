@@ -683,6 +683,18 @@ pub(super) async fn extension_provider_invoke(
     Path((provider_kind, method)): Path<(String, String)>,
     Json(payload): Json<ExtensionRpcRequest>,
 ) -> ApiResult<JsonValue> {
+    invoke_provider_json_with_request(&state, &request, &provider_kind, &method, payload)
+        .await
+        .map(Json)
+}
+
+pub(crate) async fn invoke_provider_json_with_request(
+    state: &AppState,
+    request: &RequestContext,
+    provider_kind: &str,
+    method: &str,
+    payload: ExtensionRpcRequest,
+) -> Result<JsonValue, ApiError> {
     let contribution = resolve_provider_contribution(&state, &provider_kind, &method).ok_or_else(
         || {
             scoped(
@@ -767,7 +779,7 @@ pub(super) async fn extension_provider_invoke(
                 level: "error".to_string(),
                 component: LOGS_COMPONENT_EXTENSION_HOST.to_string(),
                 source_kind: "provider".to_string(),
-                source_id: Some(provider_kind.clone()),
+                source_id: Some(provider_kind.to_string()),
                 message: "provider runtime invoke failed".to_string(),
                 attributes: serde_json::json!({
                     "method": method,
@@ -789,7 +801,7 @@ pub(super) async fn extension_provider_invoke(
         )
     })?;
 
-    Ok(Json(response.get("result").cloned().unwrap_or(response)))
+    Ok(response.get("result").cloned().unwrap_or(response))
 }
 
 fn provider_permission_actor_from_context(

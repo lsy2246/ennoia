@@ -13,6 +13,7 @@ Web
       -> Kernel / Contract / Paths / Logs
       -> Extension Host / Wasm Worker
       -> Extension Host / Process Worker
+        -> Host Capability Dispatcher
       -> Logs Store
       -> Event Bus
       -> Agent Permission Store
@@ -29,7 +30,7 @@ Web
 - `config/server.toml`：系统级唯一宿主配置入口，统一承载 API 绑定地址、前端开发地址、宿主中间件配置、内置工具默认值、provider 默认值、流式轮询节奏、后台循环节奏、调度默认值和开发态 supervisor 参数；CLI、Server、Worker 桥接和 Web dev 都只消费这份配置，不再各自维护运行时常量。
 - `Contract`：定义跨边界 DTO；当前保留 `behavior` 与 `memory` 兼容协议响应结构。
 - `Paths`：统一解析运行目录，所有运行时文件位置都通过 `RuntimePaths` 推导。
-- `Extension Host`：负责扩展扫描、attach / detach、reload / restart、诊断、Worker 解析和 Worker RPC 分发；Worker 可以是 Wasm，也可以是进程型 stdio RPC。
+- `Extension Host`：负责扩展扫描、attach / detach、reload / restart、诊断、Worker 解析和 Worker RPC 分发；Worker 可以是 Wasm，也可以是进程型 stdio RPC。对于进程型 Worker，宿主还负责当前 RPC 会话内的 `plugin -> host capability` 反向调用分发。
 - `Server`：负责 HTTP API、定时调度、Worker RPC 路由、日志、事件总线和系统内置组件装配。
 - `Pipeline Runtime`：负责稳定 action 的规则收集、阶段执行和结果收敛。它不拥有 conversation、memory、workflow 的主数据。
 - `Extension Runtime Store`：提供扩展可复用的宿主级轻量状态与记录原语，只负责通用 state/record 持久化，不承担 workflow draft、memory graph、conversation message 等业务语义。
@@ -140,6 +141,7 @@ Web
 - `settings` 表达扩展级配置字段；主壳按声明渲染表单，实际值保存在扩展私有数据目录，不上浮为系统级配置模型。
 - `workflow` 和 `memory` 都只是内置扩展实现；系统依赖接口键和动作 ID，不反向依赖具体扩展。
 - 扩展不自行开放端口；Provider、Behavior、Memory、Hook、Action 和 Schedule Action 的执行统一走宿主 Worker RPC，Worker 通过 Wasm ABI 或进程 stdio 协议接入。
+- 进程型 Worker 不再通过 localhost HTTP 回环访问宿主能力；统一通过 process stdio 控制消息发起平台级 host capability 调用，宿主复用既有 action、provider、runtime operation、extension state / record 与权限链路完成分发。
 - Provider 模型发现也不再挂在 `/api/model-endpoints/*/models` 这类产品路由下，而是走宿主提供的通用 provider runtime 代理。
 - 扩展 UI、语言、主题和业务配置归扩展自身所有；Web 主壳只按 runtime snapshot 发现并挂载，不在系统前端包中静态注册某个扩展页面或文案。
 - 扩展 UI 通过独立 ESM bundle 动态加载；主壳只导入 `/api/extensions/{extension_id}/ui/module` 暴露的模块包装器，再按 mount id 调用扩展自己的 `mount/unmount`。

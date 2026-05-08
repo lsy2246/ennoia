@@ -5,6 +5,7 @@ pub mod app;
 pub mod event_bus;
 pub mod execution;
 pub mod extension_runtime;
+pub mod host_capabilities;
 pub mod logs_store;
 pub mod middleware;
 pub mod pipeline;

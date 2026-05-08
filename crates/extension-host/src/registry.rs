@@ -296,6 +296,7 @@ impl ExtensionRuntime {
         extension_id: &str,
         method: &str,
         request: ExtensionRpcRequest,
+        host_dispatcher: Option<&dyn crate::worker::HostCapabilityDispatcher>,
     ) -> io::Result<ExtensionRpcResponse> {
         let extension = self.get(extension_id).ok_or_else(|| {
             io::Error::new(
@@ -303,7 +304,8 @@ impl ExtensionRuntime {
                 format!("extension {extension_id} not found"),
             )
         })?;
-        self.worker_runtime.dispatch(&extension, method, request)
+        self.worker_runtime
+            .dispatch(&extension, method, request, host_dispatcher)
     }
 
     pub fn terminate_worker(&self, extension_id: &str) {

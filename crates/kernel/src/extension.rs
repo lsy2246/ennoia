@@ -774,6 +774,165 @@ pub struct ExtensionRpcError {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ExtensionStateGetQuery {
+    pub extension_id: String,
+    pub namespace: String,
+    pub scope_type: String,
+    pub scope_id: String,
+    pub key: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ExtensionStateListQuery {
+    #[serde(default)]
+    pub extension_id: Option<String>,
+    #[serde(default)]
+    pub namespace: Option<String>,
+    #[serde(default)]
+    pub scope_type: Option<String>,
+    #[serde(default)]
+    pub scope_id: Option<String>,
+    #[serde(default)]
+    pub key: Option<String>,
+    #[serde(default)]
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ExtensionStatePut {
+    pub extension_id: String,
+    pub namespace: String,
+    pub scope_type: String,
+    pub scope_id: String,
+    pub key: String,
+    pub value: JsonValue,
+    #[serde(default)]
+    pub expires_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ExtensionRecordAppend {
+    pub extension_id: String,
+    pub namespace: String,
+    pub scope_type: String,
+    pub scope_id: String,
+    pub kind: String,
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub summary: Option<String>,
+    #[serde(default)]
+    pub payload: JsonValue,
+    #[serde(default)]
+    pub related_message_id: Option<String>,
+    #[serde(default)]
+    pub parent_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ExtensionRecordUpdate {
+    pub id: String,
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub summary: Option<String>,
+    #[serde(default)]
+    pub payload: Option<JsonValue>,
+    #[serde(default)]
+    pub related_message_id: Option<Option<String>>,
+    #[serde(default)]
+    pub parent_id: Option<Option<String>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ExtensionRecordListQuery {
+    #[serde(default)]
+    pub extension_id: Option<String>,
+    #[serde(default)]
+    pub namespace: Option<String>,
+    #[serde(default)]
+    pub scope_type: Option<String>,
+    #[serde(default)]
+    pub scope_id: Option<String>,
+    #[serde(default)]
+    pub kind: Option<String>,
+    #[serde(default)]
+    pub related_message_id: Option<String>,
+    #[serde(default)]
+    pub open_only: Option<bool>,
+    #[serde(default)]
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RuntimeOperationRequest {
+    pub agent_id: String,
+    pub conversation_id: String,
+    pub run_id: String,
+    #[serde(default)]
+    pub message_id: Option<String>,
+    #[serde(default)]
+    pub arguments: JsonValue,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ExtensionHostCapabilityRequest {
+    ExtensionsRuntimeSnapshot,
+    ActionDispatch {
+        action: String,
+        #[serde(default)]
+        params: JsonValue,
+        #[serde(default)]
+        context: JsonValue,
+    },
+    ProviderInvoke {
+        provider_kind: String,
+        method: String,
+        payload: ExtensionRpcRequest,
+    },
+    RuntimeOperation {
+        operation: String,
+        payload: RuntimeOperationRequest,
+    },
+    ExtensionStateGet {
+        query: ExtensionStateGetQuery,
+    },
+    ExtensionStatePut {
+        payload: ExtensionStatePut,
+    },
+    ExtensionStateDelete {
+        query: ExtensionStateGetQuery,
+    },
+    ExtensionRecordAppend {
+        payload: ExtensionRecordAppend,
+    },
+    ExtensionRecordUpdate {
+        payload: ExtensionRecordUpdate,
+    },
+    ExtensionRecordClose {
+        record_id: String,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ProcessWorkerControlMessage {
+    HostCall {
+        call_id: String,
+        request: ExtensionHostCapabilityRequest,
+    },
+    HostResult {
+        call_id: String,
+        response: ExtensionRpcResponse,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ExtensionDiagnostic {
     pub level: String,
     pub summary: String,

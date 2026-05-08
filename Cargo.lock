@@ -849,7 +849,6 @@ dependencies = [
  "ennoia-kernel",
  "ennoia-paths",
  "ennoia-policy",
- "reqwest",
  "sea-query",
  "sea-query-binder",
  "serde",

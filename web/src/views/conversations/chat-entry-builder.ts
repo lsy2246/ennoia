@@ -362,6 +362,7 @@ export function buildStatusEntries(params: {
       sender: agent?.display_name ?? marker.agentId,
       title: params.texts.typingLabel,
       label: params.texts.typingLabel,
+      branchId: marker.branchId,
       detail: params.texts.typingDetail,
       animation: "typing",
       body: params.texts.typingDetail,

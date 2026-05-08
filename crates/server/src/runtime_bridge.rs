@@ -8,10 +8,10 @@ use ennoia_error_utils::normalize_error_message;
 use ennoia_extension_host::RegisteredProviderContribution;
 use ennoia_kernel::{
     AgentConfig, ModelEndpointConfig, PermissionRequest, PermissionScope, PermissionTarget,
-    PermissionTrigger,
+    PermissionTrigger, RuntimeOperationRequest,
 };
 use ennoia_logs::RequestContext;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use serde_json::Value as JsonValue;
 use tokio::io::AsyncWriteExt;
 
@@ -45,17 +45,6 @@ process.stdout.write(JSON.stringify({ ok: true, result }));
 pub struct RuntimeOperationResult {
     pub operation: String,
     pub content: JsonValue,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct RuntimeOperationRequest {
-    pub agent_id: String,
-    pub conversation_id: String,
-    pub run_id: String,
-    #[serde(default)]
-    pub message_id: Option<String>,
-    #[serde(default)]
-    pub arguments: JsonValue,
 }
 
 pub fn model_endpoint_runtime_request_config(model_endpoint: &ModelEndpointConfig) -> JsonValue {

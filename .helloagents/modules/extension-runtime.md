@@ -22,6 +22,7 @@
 - Worker runtime 使用 `wasmtime` 装载 `ennoia.worker.v1`，缓存 Module，每次 RPC 新建实例
 - `.wasm` mtime 或大小变化会让 Module 缓存失效，下一次 RPC 自动重新编译
 - Host 默认不注入 WASI/import，按贡献 `entry` / `handler` / `method` 前缀校验 RPC 方法，并使用 `runtime.memory_limit_mb` 与 `runtime.timeout_ms` 约束执行
+- process worker 支持在当前 RPC 会话内通过 stdio 控制消息向宿主发起统一 host capability 调用，避免插件自行请求 localhost HTTP
 - 内置 `memory` 与 `workflow` 都有 `worker/` crate；`bun run build:workers` 编译并复制 `memory.wasm` / `workflow.wasm`
 
 ## 依赖关系

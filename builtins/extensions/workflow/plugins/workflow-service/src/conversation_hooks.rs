@@ -1,14 +1,16 @@
 use std::fs;
 use std::sync::Arc;
-use std::time::Duration;
 
 use chrono::Utc;
 use ennoia_contract::behavior::{BehaviorRunRequest, BehaviorSourceRef, BehaviorTrigger};
 use ennoia_contract::{ApiErrorBody, ErrorCode};
 use ennoia_kernel::{
-    AgentConfig, AgentDocument, DecisionSnapshot, ExtensionRecordEntry, ExtensionRpcRequest,
-    HookDispatchResponse, HookEventEnvelope, ModelEndpointConfig, NextAction, OwnerKind, OwnerRef,
-    PermissionApprovalRecord, RunContext, RunStage, RunStageEvent, ServerConfig,
+    AgentConfig, AgentDocument, DecisionSnapshot, ExtensionHostCapabilityRequest,
+    ExtensionRecordAppend, ExtensionRecordEntry, ExtensionRecordUpdate, ExtensionRpcRequest,
+    ExtensionStateEntry, ExtensionStateGetQuery, ExtensionStatePut, HookDispatchResponse,
+    HookEventEnvelope, ModelEndpointConfig, NextAction, OwnerKind, OwnerRef,
+    PermissionApprovalRecord, RunContext, RunStage, RunStageEvent, RuntimeOperationRequest,
+    ServerConfig,
 };
 use ennoia_paths::RuntimePaths;
 use serde::{Deserialize, Serialize};
@@ -16,6 +18,7 @@ use serde_json::Value as JsonValue;
 use sqlx::Row;
 use uuid::Uuid;
 
+use crate::host_bridge::HostBridge;
 use crate::pipeline::{run_behavior, WorkflowRuntime};
 use crate::planning::{
     build_planning_prompt, parse_plan_from_text, summarize_plan_steps, validate_plan, PlanSpec,
@@ -24,8 +27,6 @@ use crate::runtime::{RuntimeStore, SqliteRuntimeStore};
 
 #[derive(Debug)]
 struct HostApiClient {
-    client: reqwest::Client,
-    base_url: String,
     processing_stale_after_ms: u64,
 }
 
@@ -80,6 +81,7 @@ struct ReasoningMessageEnvelope {
 struct ActiveWorkflowSession {
     draft_id: String,
     record_id: String,
+    branch_scope: String,
     status: String,
     revision: i64,
 }
@@ -140,7 +142,6 @@ impl HostApiError {
 impl HostApiClient {
     fn new(runtime_paths: &Arc<RuntimePaths>) -> Result<Self, String> {
         let server_config = read_server_config(runtime_paths)?;
-        let host = normalize_loopback_host(&server_config.host);
         let request_timeout_ms = server_config.timeout.default_ms.max(1_000);
         let processing_stale_after_ms = [
             request_timeout_ms,
@@ -153,12 +154,6 @@ impl HostApiClient {
         .unwrap_or(30_000)
         .saturating_mul(2);
         Ok(Self {
-            client: reqwest::Client::builder()
-                .connect_timeout(Duration::from_millis(request_timeout_ms))
-                .timeout(Duration::from_millis(request_timeout_ms))
-                .build()
-                .map_err(|error| error.to_string())?,
-            base_url: format!("http://{}:{}", host, server_config.port),
             processing_stale_after_ms,
         })
     }
@@ -169,13 +164,11 @@ impl HostApiClient {
         params: JsonValue,
         context: JsonValue,
     ) -> Result<JsonValue, HostApiError> {
-        self.post_json(
-            &format!("/api/actions/{action}"),
-            &serde_json::json!({
-                "params": params,
-                "context": context,
-            }),
-        )
+        self.call_json(ExtensionHostCapabilityRequest::ActionDispatch {
+            action: action.to_string(),
+            params,
+            context,
+        })
         .await
     }
 
@@ -185,13 +178,14 @@ impl HostApiClient {
         payload: JsonValue,
         context: JsonValue,
     ) -> Result<JsonValue, HostApiError> {
-        self.post_json(
-            &format!("/api/extensions/providers/{provider_kind}/generate"),
-            &ExtensionRpcRequest {
+        self.call_json(ExtensionHostCapabilityRequest::ProviderInvoke {
+            provider_kind: provider_kind.to_string(),
+            method: "generate".to_string(),
+            payload: ExtensionRpcRequest {
                 params: payload,
                 context,
             },
-        )
+        })
         .await
     }
 
@@ -204,72 +198,17 @@ impl HostApiClient {
         message_id: Option<&str>,
         arguments: JsonValue,
     ) -> Result<JsonValue, HostApiError> {
-        self.post_json(
-            &format!("/api/runtime/operations/{operation}"),
-            &serde_json::json!({
-                "agent_id": agent_id,
-                "conversation_id": conversation_id,
-                "run_id": run_id,
-                "message_id": message_id,
-                "arguments": arguments,
-            }),
-        )
+        self.call_json(ExtensionHostCapabilityRequest::RuntimeOperation {
+            operation: operation.to_string(),
+            payload: RuntimeOperationRequest {
+                agent_id: agent_id.to_string(),
+                conversation_id: conversation_id.to_string(),
+                run_id: run_id.to_string(),
+                message_id: message_id.map(str::to_string),
+                arguments,
+            },
+        })
         .await
-    }
-
-    async fn get_json(&self, path: &str) -> Result<JsonValue, HostApiError> {
-        let response = self
-            .client
-            .get(format!("{}{}", self.base_url, path))
-            .send()
-            .await
-            .map_err(internal_http_error)?;
-        self.read_response(response).await
-    }
-
-    async fn post_json<T: Serialize + ?Sized>(
-        &self,
-        path: &str,
-        body: &T,
-    ) -> Result<JsonValue, HostApiError> {
-        let response = self
-            .client
-            .post(format!("{}{}", self.base_url, path))
-            .json(body)
-            .send()
-            .await
-            .map_err(internal_http_error)?;
-        self.read_response(response).await
-    }
-
-    async fn read_response(&self, response: reqwest::Response) -> Result<JsonValue, HostApiError> {
-        let status = response.status();
-        let bytes = response.bytes().await.map_err(internal_http_error)?;
-        if status.is_success() {
-            serde_json::from_slice::<JsonValue>(&bytes).map_err(|error| HostApiError {
-                body: ApiErrorBody {
-                    code: ErrorCode::Internal,
-                    message: format!("parse host response failed: {error}"),
-                    request_id: None,
-                    trace_id: None,
-                    details: JsonValue::Null,
-                    retryable: true,
-                },
-            })
-        } else {
-            let body =
-                serde_json::from_slice::<ApiErrorBody>(&bytes).map_err(|error| HostApiError {
-                    body: ApiErrorBody {
-                        code: ErrorCode::Internal,
-                        message: format!("parse host error failed: {error}"),
-                        request_id: None,
-                        trace_id: None,
-                        details: JsonValue::String(String::from_utf8_lossy(&bytes).to_string()),
-                        retryable: false,
-                    },
-                })?;
-            Err(HostApiError { body })
-        }
     }
 
     async fn get_extension_state(
@@ -280,16 +219,21 @@ impl HostApiClient {
         scope_id: &str,
         key: &str,
     ) -> Result<Option<JsonValue>, HostApiError> {
-        let path = format!(
-            "/api/extensions/state/item?extension_id={}&namespace={}&scope_type={}&scope_id={}&key={}",
-            encode_url_component(extension_id),
-            encode_url_component(namespace),
-            encode_url_component(scope_type),
-            encode_url_component(scope_id),
-            encode_url_component(key),
-        );
-        match self.get_json(&path).await {
-            Ok(value) => Ok(value.get("value").cloned()),
+        match self
+            .call_json(ExtensionHostCapabilityRequest::ExtensionStateGet {
+                query: ExtensionStateGetQuery {
+                    extension_id: extension_id.to_string(),
+                    namespace: namespace.to_string(),
+                    scope_type: scope_type.to_string(),
+                    scope_id: scope_id.to_string(),
+                    key: key.to_string(),
+                },
+            })
+            .await
+        {
+            Ok(value) => serde_json::from_value::<ExtensionStateEntry>(value)
+                .map(|entry| Some(entry.value))
+                .map_err(|error| internal_error(format!("parse extension state failed: {error}"))),
             Err(error) if error.code() == ErrorCode::NotFound => Ok(None),
             Err(error) => Err(error),
         }
@@ -304,17 +248,17 @@ impl HostApiClient {
         key: &str,
         value: JsonValue,
     ) -> Result<JsonValue, HostApiError> {
-        self.post_json(
-            "/api/extensions/state",
-            &serde_json::json!({
-                "extension_id": extension_id,
-                "namespace": namespace,
-                "scope_type": scope_type,
-                "scope_id": scope_id,
-                "key": key,
-                "value": value,
-            }),
-        )
+        self.call_json(ExtensionHostCapabilityRequest::ExtensionStatePut {
+            payload: ExtensionStatePut {
+                extension_id: extension_id.to_string(),
+                namespace: namespace.to_string(),
+                scope_type: scope_type.to_string(),
+                scope_id: scope_id.to_string(),
+                key: key.to_string(),
+                value,
+                expires_at: None,
+            },
+        })
         .await
     }
 
@@ -326,28 +270,34 @@ impl HostApiClient {
         scope_id: &str,
         key: &str,
     ) -> Result<(), HostApiError> {
-        let path = format!(
-            "/api/extensions/state?extension_id={}&namespace={}&scope_type={}&scope_id={}&key={}",
-            encode_url_component(extension_id),
-            encode_url_component(namespace),
-            encode_url_component(scope_type),
-            encode_url_component(scope_id),
-            encode_url_component(key),
-        );
-        let response = self
-            .client
-            .delete(format!("{}{}", self.base_url, path))
-            .send()
-            .await
-            .map_err(internal_http_error)?;
-        self.read_response(response).await.map(|_| ())
+        self.call_json(ExtensionHostCapabilityRequest::ExtensionStateDelete {
+            query: ExtensionStateGetQuery {
+                extension_id: extension_id.to_string(),
+                namespace: namespace.to_string(),
+                scope_type: scope_type.to_string(),
+                scope_id: scope_id.to_string(),
+                key: key.to_string(),
+            },
+        })
+        .await
+        .map(|_| ())
     }
 
     async fn append_extension_record(
         &self,
         payload: JsonValue,
     ) -> Result<ExtensionRecordEntry, HostApiError> {
-        let value = self.post_json("/api/extensions/records", &payload).await?;
+        let value = self
+            .call_json(ExtensionHostCapabilityRequest::ExtensionRecordAppend {
+                payload: serde_json::from_value::<ExtensionRecordAppend>(payload).map_err(
+                    |error| {
+                        internal_error(format!(
+                            "parse extension record append request failed: {error}"
+                        ))
+                    },
+                )?,
+            })
+            .await?;
         serde_json::from_value(value).map_err(|error| {
             internal_error(format!(
                 "parse extension record append response failed: {error}"
@@ -360,7 +310,15 @@ impl HostApiClient {
         payload: JsonValue,
     ) -> Result<ExtensionRecordEntry, HostApiError> {
         let value = self
-            .post_json_with_method("/api/extensions/records", "PUT", &payload)
+            .call_json(ExtensionHostCapabilityRequest::ExtensionRecordUpdate {
+                payload: serde_json::from_value::<ExtensionRecordUpdate>(payload).map_err(
+                    |error| {
+                        internal_error(format!(
+                            "parse extension record update request failed: {error}"
+                        ))
+                    },
+                )?,
+            })
             .await?;
         serde_json::from_value(value).map_err(|error| {
             internal_error(format!(
@@ -374,13 +332,9 @@ impl HostApiClient {
         record_id: &str,
     ) -> Result<ExtensionRecordEntry, HostApiError> {
         let value = self
-            .post_json(
-                &format!(
-                    "/api/extensions/records/{}/close",
-                    encode_url_component(record_id)
-                ),
-                &serde_json::json!({}),
-            )
+            .call_json(ExtensionHostCapabilityRequest::ExtensionRecordClose {
+                record_id: record_id.to_string(),
+            })
             .await?;
         serde_json::from_value(value).map_err(|error| {
             internal_error(format!(
@@ -389,24 +343,17 @@ impl HostApiClient {
         })
     }
 
-    async fn post_json_with_method<T: Serialize + ?Sized>(
+    async fn call_json(
         &self,
-        path: &str,
-        method: &str,
-        body: &T,
+        request: ExtensionHostCapabilityRequest,
     ) -> Result<JsonValue, HostApiError> {
-        let response = self
-            .client
-            .request(
-                reqwest::Method::from_bytes(method.as_bytes())
-                    .map_err(|error| internal_error(format!("invalid method {method}: {error}")))?,
-                format!("{}{}", self.base_url, path),
-            )
-            .json(body)
-            .send()
-            .await
-            .map_err(internal_http_error)?;
-        self.read_response(response).await
+        let bridge = HostBridge::global().map_err(internal_error)?;
+        let response = bridge.call(request).await.map_err(internal_error)?;
+        if response.ok {
+            Ok(response.data)
+        } else {
+            Err(host_response_error(response))
+        }
     }
 }
 
@@ -506,8 +453,11 @@ async fn generate_conversation_agent_reply(
     let conversation_id = payload_string_field(payload, &["conversation", "id"])
         .or_else(|| payload_string_field(payload, &["message", "conversation_id"]))
         .ok_or_else(|| "conversation id missing".to_string())?;
+    let branch_id = payload_string_field(payload, &["branch", "id"])
+        .or_else(|| payload_string_field(payload, &["message", "branch_id"]));
     let lane_id = payload_string_field(payload, &["lane", "id"])
         .or_else(|| payload_string_field(payload, &["message", "lane_id"]));
+    let branch_scope = workflow_branch_scope_id(branch_id.as_deref(), lane_id.as_deref());
     let body = payload_string_field(payload, &["message", "body"])
         .unwrap_or_default()
         .trim()
@@ -627,7 +577,7 @@ async fn generate_conversation_agent_reply(
             }
 
             let mut active_session =
-                load_active_workflow_session(client, &conversation_id, agent_id)
+                load_active_workflow_session(client, &conversation_id, agent_id, &branch_scope)
                     .await
                     .map_err(|error| error.to_string())?;
 
@@ -707,6 +657,7 @@ async fn generate_conversation_agent_reply(
                         &conversation_messages,
                         &body,
                         agent_id,
+                        &branch_scope,
                         active_session.as_ref(),
                     )
                     .await
@@ -767,14 +718,24 @@ fn workflow_session_namespace() -> &'static str {
     "workflow.session"
 }
 
-fn workflow_session_state_key(agent_id: &str) -> String {
-    format!("agent:{agent_id}:active")
+fn workflow_branch_scope_id(branch_id: Option<&str>, lane_id: Option<&str>) -> String {
+    branch_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .or_else(|| lane_id.map(str::trim).filter(|value| !value.is_empty()))
+        .unwrap_or("default")
+        .to_string()
+}
+
+fn workflow_session_state_key(agent_id: &str, branch_scope: &str) -> String {
+    format!("agent:{agent_id}:branch:{branch_scope}:active")
 }
 
 async fn load_active_workflow_session(
     client: &HostApiClient,
     conversation_id: &str,
     agent_id: &str,
+    branch_scope: &str,
 ) -> Result<Option<ActiveWorkflowSession>, HostApiError> {
     let Some(value) = client
         .get_extension_state(
@@ -782,7 +743,7 @@ async fn load_active_workflow_session(
             workflow_session_namespace(),
             "conversation",
             conversation_id,
-            &workflow_session_state_key(agent_id),
+            &workflow_session_state_key(agent_id, branch_scope),
         )
         .await?
     else {
@@ -797,6 +758,7 @@ async fn save_active_workflow_session(
     client: &HostApiClient,
     conversation_id: &str,
     agent_id: &str,
+    branch_scope: &str,
     session: &ActiveWorkflowSession,
 ) -> Result<(), HostApiError> {
     client
@@ -805,7 +767,7 @@ async fn save_active_workflow_session(
             workflow_session_namespace(),
             "conversation",
             conversation_id,
-            &workflow_session_state_key(agent_id),
+            &workflow_session_state_key(agent_id, branch_scope),
             serde_json::to_value(session).map_err(|error| {
                 internal_error(format!("serialize active workflow session failed: {error}"))
             })?,
@@ -818,6 +780,7 @@ async fn clear_active_workflow_session(
     client: &HostApiClient,
     conversation_id: &str,
     agent_id: &str,
+    branch_scope: &str,
 ) -> Result<(), HostApiError> {
     client
         .delete_extension_state(
@@ -825,7 +788,7 @@ async fn clear_active_workflow_session(
             workflow_session_namespace(),
             "conversation",
             conversation_id,
-            &workflow_session_state_key(agent_id),
+            &workflow_session_state_key(agent_id, branch_scope),
         )
         .await
 }
@@ -849,7 +812,7 @@ async fn abandon_active_workflow_session(
         }))
         .await;
     let _ = client.close_extension_record(&session.record_id).await;
-    clear_active_workflow_session(client, conversation_id, agent_id).await
+    clear_active_workflow_session(client, conversation_id, agent_id, &session.branch_scope).await
 }
 
 fn is_explicit_new_topic(body: &str) -> bool {
@@ -1126,6 +1089,7 @@ async fn upsert_managed_discussion(
     conversation_messages: &JsonValue,
     body: &str,
     agent_id: &str,
+    branch_scope: &str,
     active_session: Option<&ActiveWorkflowSession>,
 ) -> Result<String, HostApiError> {
     let current = if let Some(session) = active_session {
@@ -1221,9 +1185,11 @@ async fn upsert_managed_discussion(
         client,
         conversation_id,
         agent_id,
+        branch_scope,
         &ActiveWorkflowSession {
             draft_id: draft.id,
             record_id: record.id,
+            branch_scope: branch_scope.to_string(),
             status: "ready".to_string(),
             revision: draft.latest_revision,
         },
@@ -1491,14 +1457,14 @@ async fn resume_pending_workflow_run(
             .await;
         let _ = client.close_extension_record(&session.record_id).await;
         let _ = update_workflow_draft_status(store, &draft.id, "running").await;
-        clear_active_workflow_session(client, conversation_id, agent_id)
+        clear_active_workflow_session(client, conversation_id, agent_id, &session.branch_scope)
             .await
             .map_err(|error| error.to_string())?;
         let _ = (agents, model_endpoints, conversation_messages);
         return Ok(Some(run_response));
     }
 
-    load_latest_pending_run_for_agent(store, conversation_id, message_id, agent_id).await
+    load_latest_pending_run_for_agent(store, conversation_id, message_id, lane_id, agent_id).await
 }
 
 async fn execute_workflow_run(
@@ -2316,6 +2282,7 @@ async fn load_latest_pending_run_for_agent(
     store: &SqliteRuntimeStore,
     conversation_id: &str,
     message_id: Option<&str>,
+    lane_id: Option<&str>,
     agent_id: &str,
 ) -> Result<Option<JsonValue>, String> {
     for run in list_recent_message_runs(store, conversation_id, 12).await? {
@@ -2330,6 +2297,9 @@ async fn load_latest_pending_run_for_agent(
         if !run_stage_can_be_resumed(stage) {
             continue;
         }
+        if !workflow_run_matches_lane(run.lane_id.as_deref(), lane_id) {
+            continue;
+        }
         if let Some(detail) =
             load_run_response_for_agent(store, conversation_id, agent_id, &run.id).await?
         {
@@ -2337,6 +2307,21 @@ async fn load_latest_pending_run_for_agent(
         }
     }
     Ok(None)
+}
+
+fn workflow_run_matches_lane(run_lane_id: Option<&str>, current_lane_id: Option<&str>) -> bool {
+    match current_lane_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        Some(current_lane_id) => {
+            run_lane_id.map(str::trim).filter(|value| !value.is_empty()) == Some(current_lane_id)
+        }
+        None => run_lane_id
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .is_none(),
+    }
 }
 
 async fn load_run_response_for_agent(
@@ -2635,7 +2620,7 @@ async fn build_agent_provider_context(
     plan: Option<&JsonValue>,
 ) -> JsonValue {
     let extensions_runtime = client
-        .get_json("/api/extensions/runtime")
+        .call_json(ExtensionHostCapabilityRequest::ExtensionsRuntimeSnapshot)
         .await
         .unwrap_or(JsonValue::Null);
     let plan_context = plan
@@ -3169,18 +3154,6 @@ fn payload_string_field(payload: &JsonValue, path: &[&str]) -> Option<String> {
     current.as_str().map(str::to_string)
 }
 
-fn encode_url_component(value: &str) -> String {
-    value
-        .bytes()
-        .flat_map(|byte| match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                vec![byte as char]
-            }
-            _ => format!("%{byte:02X}").chars().collect::<Vec<_>>(),
-        })
-        .collect()
-}
-
 fn payload_string_array_field(payload: &JsonValue, path: &[&str]) -> Vec<String> {
     let mut current = payload;
     for segment in path {
@@ -3323,13 +3296,6 @@ fn load_model_endpoint_configs(
     Ok(items)
 }
 
-fn normalize_loopback_host(host: &str) -> String {
-    match host.trim() {
-        "" | "0.0.0.0" | "::" | "[::]" => "127.0.0.1".to_string(),
-        value => value.to_string(),
-    }
-}
-
 fn normalize_display_dir(value: &str, fallback: String) -> String {
     if value.trim().is_empty() {
         fallback
@@ -3344,10 +3310,6 @@ fn normalize_unknown(value: &str) -> String {
     } else {
         value.trim().to_string()
     }
-}
-
-fn internal_http_error(error: reqwest::Error) -> HostApiError {
-    internal_error(format!("host request failed: {error}"))
 }
 
 fn format_host_api_error_for_conversation(error: &HostApiError) -> String {
@@ -3416,6 +3378,39 @@ fn internal_error(message: impl Into<String>) -> HostApiError {
             details: JsonValue::Null,
             retryable: true,
         },
+    }
+}
+
+fn host_response_error(response: ennoia_kernel::ExtensionRpcResponse) -> HostApiError {
+    let Some(error) = response.error else {
+        return internal_error("host capability returned failure without error payload");
+    };
+    HostApiError {
+        body: ApiErrorBody {
+            code: parse_host_error_code(&error.code),
+            message: error.message,
+            request_id: None,
+            trace_id: None,
+            details: JsonValue::Null,
+            retryable: matches!(
+                parse_host_error_code(&error.code),
+                ErrorCode::Internal | ErrorCode::Timeout | ErrorCode::RateLimited
+            ),
+        },
+    }
+}
+
+fn parse_host_error_code(code: &str) -> ErrorCode {
+    match code.trim().to_ascii_lowercase().as_str() {
+        "bad_request" => ErrorCode::BadRequest,
+        "unauthorized" => ErrorCode::Unauthorized,
+        "forbidden" => ErrorCode::Forbidden,
+        "not_found" => ErrorCode::NotFound,
+        "conflict" => ErrorCode::Conflict,
+        "rate_limited" => ErrorCode::RateLimited,
+        "timeout" => ErrorCode::Timeout,
+        "payload_too_large" => ErrorCode::PayloadTooLarge,
+        _ => ErrorCode::Internal,
     }
 }
 

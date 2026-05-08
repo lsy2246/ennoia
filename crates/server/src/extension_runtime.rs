@@ -1,11 +1,12 @@
 use std::path::PathBuf;
 
 use chrono::Utc;
-use ennoia_kernel::{ExtensionRecordEntry, ExtensionStateEntry};
+pub use ennoia_kernel::{
+    ExtensionRecordAppend, ExtensionRecordEntry, ExtensionRecordListQuery, ExtensionRecordUpdate,
+    ExtensionStateEntry, ExtensionStateGetQuery, ExtensionStateListQuery, ExtensionStatePut,
+};
 use ennoia_paths::RuntimePaths;
 use rusqlite::{params, Connection, OptionalExtension};
-use serde::{Deserialize, Serialize};
-use serde_json::Value as JsonValue;
 use uuid::Uuid;
 
 const EXTENSION_RUNTIME_SCHEMA_SQL: &str = r#"
@@ -46,101 +47,6 @@ CREATE INDEX IF NOT EXISTS idx_extension_records_scope
 CREATE INDEX IF NOT EXISTS idx_extension_records_related_message
   ON extension_record_entries(related_message_id, created_at DESC);
 "#;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ExtensionStatePut {
-    pub extension_id: String,
-    pub namespace: String,
-    pub scope_type: String,
-    pub scope_id: String,
-    pub key: String,
-    pub value: JsonValue,
-    #[serde(default)]
-    pub expires_at: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct ExtensionStateGetQuery {
-    pub extension_id: String,
-    pub namespace: String,
-    pub scope_type: String,
-    pub scope_id: String,
-    pub key: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct ExtensionStateListQuery {
-    #[serde(default)]
-    pub extension_id: Option<String>,
-    #[serde(default)]
-    pub namespace: Option<String>,
-    #[serde(default)]
-    pub scope_type: Option<String>,
-    #[serde(default)]
-    pub scope_id: Option<String>,
-    #[serde(default)]
-    pub key: Option<String>,
-    #[serde(default)]
-    pub limit: Option<u32>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct ExtensionRecordAppend {
-    pub extension_id: String,
-    pub namespace: String,
-    pub scope_type: String,
-    pub scope_id: String,
-    pub kind: String,
-    #[serde(default)]
-    pub status: Option<String>,
-    #[serde(default)]
-    pub title: Option<String>,
-    #[serde(default)]
-    pub summary: Option<String>,
-    #[serde(default)]
-    pub payload: JsonValue,
-    #[serde(default)]
-    pub related_message_id: Option<String>,
-    #[serde(default)]
-    pub parent_id: Option<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct ExtensionRecordUpdate {
-    pub id: String,
-    #[serde(default)]
-    pub status: Option<String>,
-    #[serde(default)]
-    pub title: Option<String>,
-    #[serde(default)]
-    pub summary: Option<String>,
-    #[serde(default)]
-    pub payload: Option<JsonValue>,
-    #[serde(default)]
-    pub related_message_id: Option<Option<String>>,
-    #[serde(default)]
-    pub parent_id: Option<Option<String>>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct ExtensionRecordListQuery {
-    #[serde(default)]
-    pub extension_id: Option<String>,
-    #[serde(default)]
-    pub namespace: Option<String>,
-    #[serde(default)]
-    pub scope_type: Option<String>,
-    #[serde(default)]
-    pub scope_id: Option<String>,
-    #[serde(default)]
-    pub kind: Option<String>,
-    #[serde(default)]
-    pub related_message_id: Option<String>,
-    #[serde(default)]
-    pub open_only: Option<bool>,
-    #[serde(default)]
-    pub limit: Option<u32>,
-}
 
 #[derive(Debug, Clone)]
 pub struct ExtensionRuntimeStore {

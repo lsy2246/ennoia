@@ -46,7 +46,7 @@ use crate::middleware::{
 
 pub(crate) mod actions;
 mod behavior;
-mod extensions;
+pub(crate) mod extensions;
 mod logs;
 mod logs_runtime;
 mod memory;

@@ -23,6 +23,7 @@
 - 定时器视图位于 `web/src/pages/schedules.tsx`，依赖 `listScheduleActions` / `listSchedules` 等 API client 方法；创建时支持“交给 AI 执行”和“直接运行命令”
 - 工作台支持 `@agent` 消息路由，不再使用“目标”输入框
 - 内置前端 i18n namespace 使用 `web`
+- `SessionView` 对失效会话采用“业务错误语义优先，HTTP 状态码兜底”的回收策略；当 action/stream 返回 `conversation_not_found` 或 `NOT_FOUND` 时，会自动关闭 stale 会话面板，而不是把底层错误直接展示给用户
 - 扩展 UI 模块加载使用 `/api/extensions/{extension_id}/ui/module`
 - Docker Web 运行时通过 nginx 同源反代 `/api/*` 到 `api:3710`，其中 `/api/extensions/events/stream` 关闭 buffering 以保证 SSE 实时性
 - Docker API 镜像在构建时会先产出 Linux 版内置 process worker，并覆盖 `builtins/extensions/*/bin/` 的运行时入口，避免扩展详情页因宿主平台 `.exe` 资产被误打包而出现 `has no worker`

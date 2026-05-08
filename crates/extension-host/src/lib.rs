@@ -13,6 +13,7 @@ pub use registry::{
     RegisteredSubscriptionContribution, RegisteredSurfaceContribution, RegisteredThemeContribution,
     ResolvedExtensionSnapshot,
 };
+pub use worker::HostCapabilityDispatcher;
 
 /// Returns the current extension host module name.
 pub fn module_name() -> &'static str {

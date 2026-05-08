@@ -1,5 +1,19 @@
 # 变更日志
 
+## [0.2.3] - 2026-05-08
+
+### 重构
+- **[extension-runtime]**: 为 process worker 引入平台级 `plugin -> host capability` 通道，宿主现在可在同一条 Worker RPC 会话内统一处理 action、provider、runtime operation、extension state / record 和扩展运行时快照请求；`workflow-service` 也已移除 localhost HTTP 回环依赖 — by Codex
+  - 方案: [202605081521_plugin-host-capability-rpc](plan/202605081521_plugin-host-capability-rpc/)
+  - 决策: plugin-host-capability-rpc#D001(以平台级 host capability 协议替代插件 localhost HTTP 回环)
+
+## [0.2.2] - 2026-05-07
+
+### 修复
+- **[web]**: 修复会话页遇到失效 conversation 时直接展示 `conversation_not_found` 的问题；动作分发层现在会把扩展返回的 `*_not_found` 保留为 `NOT_FOUND` 语义，`SessionView` 也会优先按业务错误语义回收 stale 会话面板 — by lsy
+  - 方案: [202605071634_conversation-not-found-fix](archive/2026-05/202605071634_conversation-not-found-fix/)
+  - 决策: conversation-not-found-fix#D001(业务错误语义优先于单纯 HTTP 状态判断)
+
 ## [0.2.1] - 2026-04-29
 
 ### 修复

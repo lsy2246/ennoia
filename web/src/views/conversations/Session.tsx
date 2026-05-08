@@ -617,6 +617,16 @@ function pendingReplyStorageKey(sessionId: string) {
   return `${PENDING_REPLY_STORAGE_PREFIX}:${sessionId}`;
 }
 
+function normalizeConversationBranchId(...candidates: Array<string | null | undefined>) {
+  for (const candidate of candidates) {
+    const normalized = typeof candidate === "string" ? candidate.trim() : "";
+    if (normalized) {
+      return normalized;
+    }
+  }
+  return undefined;
+}
+
 function loadPersistedDrafts(sessionId: string): LocalMessageDraft[] {
   if (typeof window === "undefined") {
     return [];
@@ -685,10 +695,11 @@ function loadPersistedPendingReplies(sessionId: string): PendingReplyMarker[] {
         const sourceMessageId = typeof record.sourceMessageId === "string"
           ? record.sourceMessageId.trim()
           : "";
-        if (!id || !agentId || !createdAt || !sourceMessageId) {
+        const branchId = typeof record.branchId === "string" ? record.branchId.trim() : "";
+        if (!id || !agentId || !createdAt || !sourceMessageId || !branchId) {
           return [];
         }
-        return [{ id, agentId, createdAt, sourceMessageId }];
+        return [{ id, agentId, branchId, createdAt, sourceMessageId }];
       });
   } catch {
     return [];
@@ -828,25 +839,46 @@ function reconcilePendingRepliesWithRemote(
   messages: ConversationMessage[],
   approvals: PermissionApprovalRecord[],
 ) {
-  if (pendingReplies.length === 0 || messages.length === 0) {
-    return pendingReplies.filter((marker) =>
-      !approvals.some((approval) =>
-        approval.agent_id === marker.agentId
-        && approval.scope.message_id === marker.sourceMessageId
-        && approval.created_at >= marker.createdAt),
-    );
+  if (pendingReplies.length === 0) {
+    return pendingReplies;
   }
+
+  const messageBranchById = new Map(
+    messages.map((message) => [
+      message.id,
+      normalizeConversationBranchId(message.branch_id, message.lane_id),
+    ]),
+  );
 
   return pendingReplies.filter((marker) =>
     !messages.some((message) =>
       message.role === "agent"
       && message.sender === marker.agentId
-      && message.created_at >= marker.createdAt)
+      && message.created_at >= marker.createdAt
+      && normalizeConversationBranchId(message.branch_id, message.lane_id) === marker.branchId)
     && !approvals.some((approval) =>
       approval.agent_id === marker.agentId
       && approval.scope.message_id === marker.sourceMessageId
-      && approval.created_at >= marker.createdAt),
+      && approval.created_at >= marker.createdAt
+      && (messageBranchById.get(marker.sourceMessageId) ?? marker.branchId) === marker.branchId),
   );
+}
+
+function hasConversationNotFoundText(value: string) {
+  const normalized = value.trim().toLowerCase();
+  return normalized.includes("conversation_not_found") || normalized.includes("conversation not found");
+}
+
+function isConversationMissingError(error: unknown) {
+  if (error instanceof ApiError) {
+    return error.code === "NOT_FOUND"
+      || error.status === 404
+      || hasConversationNotFoundText(error.message);
+  }
+  if (error instanceof Error) {
+    return hasConversationNotFoundText(error.message);
+  }
+  return typeof error === "string" && hasConversationNotFoundText(error);
 }
 
 export function SessionView({ conversationId, panelId }: { conversationId: string; panelId?: string }) {
@@ -858,6 +890,7 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
   const unregisterSessionCommands = useSessionCommandsStore((state) => state.unregister);
   const deletedSessionMark = useConversationsStore((state) => state.deletedSessionMarks[sessionId]);
   const notifyChanged = useConversationsStore((state) => state.notifyChanged);
+  const notifyDeleted = useConversationsStore((state) => state.notifyDeleted);
   const [agents, setAgents] = useState<AgentProfile[]>([]);
   const [skills, setSkills] = useState<SkillConfig[]>([]);
   const [detail, setDetail] = useState<ConversationDetail | null>(null);
@@ -888,6 +921,16 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
     "web.conversations.stream_disconnected",
     "会话同步暂时受阻，正在自动重试。",
   );
+  const handleConversationMissing = useCallback((err: unknown) => {
+    if (!isConversationMissingError(err)) {
+      return false;
+    }
+    notifyDeleted(sessionId);
+    if (panelId) {
+      closeView(panelId);
+    }
+    return true;
+  }, [closeView, notifyDeleted, panelId, sessionId]);
 
   const activeAgents = useMemo(() => {
     const ids = new Set(detail?.conversation?.participants?.filter((item) => item !== "operator") ?? []);
@@ -897,6 +940,10 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
   const activeBranch = useMemo(
     () => detail?.branches.find((branch) => branch.id === detail.conversation.active_branch_id) ?? detail?.branches[0] ?? null,
     [detail],
+  );
+  const activeConversationBranchId = useMemo(
+    () => normalizeConversationBranchId(activeBranch?.id, conversation?.active_branch_id),
+    [activeBranch?.id, conversation?.active_branch_id],
   );
   const branchManagerTree = useMemo(
     () => {
@@ -997,15 +1044,14 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
       setGrants(nextGrants);
       conversationUpdatedAtRef.current = nextDetail.conversation.updated_at;
     } catch (err) {
-      if (err instanceof ApiError && err.status === 404 && panelId) {
-        closeView(panelId);
+      if (handleConversationMissing(err)) {
         return;
       }
       if (isMountedRef.current) {
         setError(String(err));
       }
     }
-  }, [closeView, panelId, sessionId]);
+  }, [handleConversationMissing, sessionId]);
 
   const hydrate = useCallback(async () => {
     setError(null);
@@ -1029,15 +1075,14 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
       setStreamNeedsResync(false);
       conversationUpdatedAtRef.current = nextDetail.conversation.updated_at;
     } catch (err) {
-      if (err instanceof ApiError && err.status === 404 && panelId) {
-        closeView(panelId);
+      if (handleConversationMissing(err)) {
         return;
       }
       if (isMountedRef.current) {
         setError(String(err));
       }
     }
-  }, [closeView, panelId, sessionId]);
+  }, [handleConversationMissing, sessionId]);
 
   useEffect(() => {
     void hydrate();
@@ -1154,6 +1199,9 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
       }
       try {
         const payload = JSON.parse(event.data) as { message?: string };
+        if (handleConversationMissing(payload.message?.trim() ?? "")) {
+          return;
+        }
         if (isMountedRef.current) {
           setStreamNeedsResync(true);
           setError(payload.message?.trim() || streamDisconnectedMessage);
@@ -1186,7 +1234,7 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
       stream.removeEventListener("conversation.error", handleStreamError);
       stream.close();
     };
-  }, [notifyChanged, sessionId, streamDisconnectedMessage]);
+  }, [handleConversationMissing, notifyChanged, sessionId, streamDisconnectedMessage]);
 
   const syncComposerState = useCallback(() => {
     const snapshot = readComposerSnapshot(editorRef.current);
@@ -1415,15 +1463,19 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
     localDrafts,
     resolveRecipients,
   }), [detail?.messages, detail?.records, localDrafts, resolveRecipients]);
+  const visiblePendingReplies = useMemo(
+    () => pendingReplies.filter((marker) => marker.branchId === activeConversationBranchId),
+    [activeConversationBranchId, pendingReplies],
+  );
 
   const statusEntries = useMemo(() => buildStatusEntries({
-    pendingReplies,
+    pendingReplies: visiblePendingReplies,
     resolveAgent: (agentId) => agentMap.get(agentId),
     texts: {
       typingLabel: t("web.conversations.status_ai_thinking", "思考中"),
       typingDetail: t("web.conversations.status_ai_thinking_detail", "Agent 已接到消息，正在组织回复与处理工具步骤。"),
     },
-  }), [agentMap, pendingReplies, t]);
+  }), [agentMap, t, visiblePendingReplies]);
 
   const streamEntries = useMemo(
     () => [...chatEntries, ...statusEntries],
@@ -1564,15 +1616,24 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
       if (!isMountedRef.current) {
         return;
       }
+      const responseBranchId = normalizeConversationBranchId(
+        response.message.branch_id,
+        response.message.lane_id,
+        response.branch.id,
+        response.lane.id,
+        response.conversation.active_branch_id,
+        draft.branchId,
+      );
       setLocalDrafts((current) => current.filter((item) => item.clientId !== draft.clientId));
       setPendingReplies((current) => upsertPendingReplyMarkers(
         current,
-        draft.addressedAgents.map((agentId) => ({
+        draft.addressedAgents.flatMap((agentId) => responseBranchId ? [{
           id: `${response.message.id}:${agentId}`,
           agentId,
+          branchId: responseBranchId,
           createdAt: response.message.created_at,
           sourceMessageId: response.message.id,
-        })),
+        }] : []),
       ));
       const switchedBranch = response.conversation.active_branch_id !== conversation.active_branch_id;
       if (switchedBranch) {
@@ -1611,6 +1672,10 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
       notifyChanged();
     } catch (err) {
       if (isMountedRef.current) {
+        if (handleConversationMissing(err)) {
+          setLocalDrafts((current) => current.filter((item) => item.clientId !== draft.clientId));
+          return;
+        }
         setLocalDrafts((current) =>
           current.map((item) => item.clientId === draft.clientId
             ? { ...item, status: "failed", error: String(err) }
@@ -1623,7 +1688,7 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
         inFlightDraftIdRef.current = null;
       }
     }
-  }, [conversation, notifyChanged, refreshThread]);
+  }, [conversation, handleConversationMissing, notifyChanged, refreshThread]);
 
   const dispatchCurrentMessage = useCallback(() => {
     if (!conversation) {
@@ -1708,10 +1773,19 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
     try {
       await resolvePermissionApproval(approvalId, resolution);
       const approvalMessageId = approval?.scope.message_id ?? null;
-      if (approval && resolution !== "deny" && approvalMessageId) {
+      const approvalSourceMessage = approvalMessageId
+        ? findMessageById(detail?.messages ?? [], approvalMessageId)
+        : null;
+      const approvalBranchId = normalizeConversationBranchId(
+        approvalSourceMessage?.branch_id,
+        approvalSourceMessage?.lane_id,
+        activeConversationBranchId,
+      );
+      if (approval && resolution !== "deny" && approvalMessageId && approvalBranchId) {
         setPendingReplies((current) => upsertPendingReplyMarkers(current, [{
           id: `approval:${approval.approval_id}`,
           agentId: approval.agent_id,
+          branchId: approvalBranchId,
           createdAt: new Date().toISOString(),
           sourceMessageId: approvalMessageId,
         }]));
@@ -1730,7 +1804,7 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
         setError(String(err));
       }
     }
-  }, [approvals, refreshThread, t]);
+  }, [activeConversationBranchId, approvals, detail?.messages, refreshThread, t]);
 
   const approvalReplyActionLabel = useCallback((approval: PermissionApprovalRecord) => {
     if (approval.action === "command.exec") {
@@ -1818,10 +1892,13 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
       setComposerMode({ kind: "normal" });
     } catch (err) {
       if (isMountedRef.current) {
+        if (handleConversationMissing(err)) {
+          return;
+        }
         setError(String(err));
       }
     }
-  }, [conversation]);
+  }, [conversation, handleConversationMissing]);
 
   const startRenameBranch = useCallback((branch: ConversationBranch) => {
     setEditingBranchId(branch.id);
@@ -1860,6 +1937,9 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
       cancelRenameBranch();
     } catch (err) {
       if (isMountedRef.current) {
+        if (handleConversationMissing(err)) {
+          return;
+        }
         setError(String(err));
       }
     } finally {
@@ -1867,7 +1947,7 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
         setBranchBusyId(null);
       }
     }
-  }, [cancelRenameBranch, conversation, editingBranchName, t]);
+  }, [cancelRenameBranch, conversation, editingBranchName, handleConversationMissing, t]);
 
   const removeBranch = useCallback(async (
     branch: ConversationBranch,
@@ -1901,6 +1981,9 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
       notifyChanged();
     } catch (err) {
       if (isMountedRef.current) {
+        if (handleConversationMissing(err)) {
+          return;
+        }
         setError(String(err));
       }
     } finally {
@@ -1908,7 +1991,7 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
         setBranchBusyId(null);
       }
     }
-  }, [cancelRenameBranch, conversation, notifyChanged, t]);
+  }, [cancelRenameBranch, conversation, handleConversationMissing, notifyChanged, t]);
 
   const choosePickerOption = useCallback((option: ComposerPickerOption) => {
     if (replaceComposerTriggerAtCaret(editorRef.current, option)) {

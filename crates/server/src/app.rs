@@ -20,6 +20,7 @@ use tracing::info;
 use crate::agent_permissions::AgentPermissionStore;
 use crate::event_bus::EventBusStore;
 use crate::extension_runtime::ExtensionRuntimeStore;
+use crate::host_capabilities::ServerHostCapabilityDispatcher;
 use crate::logs_store::{
     LogEntryWrite, LogTraceLinkWrite, LogTraceWrite, LogsStore, LOGS_COMPONENT_EVENT_BUS,
     LOGS_COMPONENT_EXTENSION_HOST, LOGS_COMPONENT_HOST,
@@ -407,13 +408,22 @@ pub async fn dispatch_extension_rpc(
         .get(extension_id)
         .map(|extension| extension.runtime.timeout_ms)
         .unwrap_or_else(|| live_server_config(state).extension_runtime.timeout_ms);
+    let runtime_handle = tokio::runtime::Handle::current();
     let extensions = state.extensions.clone();
+    let state_for_dispatcher = state.clone();
     let extension_id_owned = extension_id.to_string();
     let method_owned = method.to_string();
     let response = tokio::time::timeout(
         Duration::from_millis(timeout_ms),
         tokio::task::spawn_blocking(move || {
-            extensions.dispatch_rpc(&extension_id_owned, &method_owned, request)
+            let dispatcher =
+                ServerHostCapabilityDispatcher::new(state_for_dispatcher, runtime_handle);
+            extensions.dispatch_rpc(
+                &extension_id_owned,
+                &method_owned,
+                request,
+                Some(&dispatcher),
+            )
         }),
     )
     .await;
