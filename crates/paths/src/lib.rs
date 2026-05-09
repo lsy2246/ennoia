@@ -128,6 +128,10 @@ impl RuntimePaths {
         self.system_sqlite_dir().join("permissions.db")
     }
 
+    pub fn operations_db(&self) -> PathBuf {
+        self.system_sqlite_dir().join("operations.db")
+    }
+
     pub fn extensions_runtime_db(&self) -> PathBuf {
         self.system_sqlite_dir().join("extensions.db")
     }

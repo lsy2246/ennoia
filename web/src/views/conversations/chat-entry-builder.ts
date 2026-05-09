@@ -1,10 +1,9 @@
-import type { AgentProfile, ConversationMessage } from "@ennoia/api-client";
+import type { AgentProfile, ConversationMessage, OperationRecord } from "@ennoia/api-client";
 
 import type {
   ChatEntryRecipient,
   ChatEntryViewModel,
   LocalMessageDraft,
-  PendingReplyMarker,
 } from "./chat-types";
 import { classifyConversationFailure, isLikelyFailureMessage } from "./error-classification";
 
@@ -12,6 +11,25 @@ type StatusTexts = {
   typingLabel: string;
   typingDetail: string;
 };
+
+function describeOperationStep(operation: OperationRecord) {
+  if (operation.kind === "provider" && operation.name === "generate") {
+    return "正在生成回复。";
+  }
+  if (operation.kind === "runtime" && operation.name === "command.exec") {
+    return "正在执行命令。";
+  }
+  if (operation.kind === "runtime" && operation.name === "fs.write") {
+    return "正在写入文件。";
+  }
+  if (operation.kind === "runtime" && operation.name === "fs.read") {
+    return "正在读取文件。";
+  }
+  if (operation.kind === "runtime" && operation.name === "net.fetch") {
+    return "正在请求网络资源。";
+  }
+  return undefined;
+}
 
 function detectMessageFormat(body: string) {
   const trimmed = body.trim();
@@ -35,6 +53,12 @@ function detectMessageFormat(body: string) {
 function isLikelyErrorMessage(role: ConversationMessage["role"], body: string) {
   if (role === "operator") {
     return false;
+  }
+  if (role === "tool") {
+    const payload = parseToolPayload(body);
+    if (payload?.kind === "ennoia.tool_call") {
+      return false;
+    }
   }
   return isLikelyFailureMessage(body);
 }
@@ -345,31 +369,34 @@ export function buildChatEntries(params: {
 }
 
 export function buildStatusEntries(params: {
-  pendingReplies: PendingReplyMarker[];
+  operations: OperationRecord[];
   resolveAgent: (agentId: string) => AgentProfile | undefined;
   texts: StatusTexts;
 }): ChatEntryViewModel[] {
   const entries: ChatEntryViewModel[] = [];
 
-  for (const marker of params.pendingReplies) {
-    const agent = params.resolveAgent(marker.agentId);
+  for (const operation of params.operations) {
+    if (!["queued", "running"].includes(operation.status)) {
+      continue;
+    }
+    const agent = params.resolveAgent(operation.agent_id);
     entries.push({
-      id: `typing:${marker.id}`,
+      id: `status:${operation.id}`,
       role: "agent",
       kind: "status",
       format: "plain",
       state: "streaming",
-      sender: agent?.display_name ?? marker.agentId,
+      sender: agent?.display_name ?? operation.agent_id,
       title: params.texts.typingLabel,
       label: params.texts.typingLabel,
-      branchId: marker.branchId,
-      detail: params.texts.typingDetail,
+      branchId: operation.branch_id ?? operation.lane_id ?? undefined,
+      detail: describeOperationStep(operation) ?? params.texts.typingDetail,
       animation: "typing",
       body: params.texts.typingDetail,
-      createdAt: marker.createdAt,
-      relatedMessageId: marker.sourceMessageId,
-      sourceMessageId: marker.sourceMessageId,
+      createdAt: operation.updated_at,
+      sourceMessageId: operation.message_id ?? undefined,
       live: true,
+      operationId: operation.id,
     });
   }
 

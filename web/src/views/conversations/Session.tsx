@@ -837,6 +837,7 @@ function reconcileDraftsWithRemote(
 function reconcilePendingRepliesWithRemote(
   pendingReplies: PendingReplyMarker[],
   messages: ConversationMessage[],
+  records: ConversationDetail["records"],
   approvals: PermissionApprovalRecord[],
 ) {
   if (pendingReplies.length === 0) {
@@ -851,16 +852,29 @@ function reconcilePendingRepliesWithRemote(
   );
 
   return pendingReplies.filter((marker) =>
-    !messages.some((message) =>
-      message.role === "agent"
-      && message.sender === marker.agentId
-      && message.created_at >= marker.createdAt
-      && normalizeConversationBranchId(message.branch_id, message.lane_id) === marker.branchId)
-    && !approvals.some((approval) =>
+    !approvals.some((approval) =>
       approval.agent_id === marker.agentId
       && approval.scope.message_id === marker.sourceMessageId
       && approval.created_at >= marker.createdAt
-      && (messageBranchById.get(marker.sourceMessageId) ?? marker.branchId) === marker.branchId),
+      && (messageBranchById.get(marker.sourceMessageId) ?? marker.branchId) === marker.branchId)
+    && !messages.some((message) => {
+      if (message.id === marker.sourceMessageId || message.created_at < marker.createdAt) {
+        return false;
+      }
+      const messageBranchId = normalizeConversationBranchId(message.branch_id, message.lane_id);
+      if (messageBranchId !== (messageBranchById.get(marker.sourceMessageId) ?? marker.branchId)) {
+        return false;
+      }
+      if (message.role === "agent" && message.sender === marker.agentId) {
+        return true;
+      }
+      return message.parent_message_id === marker.sourceMessageId
+        || message.reply_to_message_id === marker.sourceMessageId
+        || message.rewrite_from_message_id === marker.sourceMessageId;
+    })
+    && !(records ?? []).some((record) =>
+      record.related_message_id === marker.sourceMessageId
+      && record.created_at >= marker.createdAt),
   );
 }
 
@@ -1156,8 +1170,8 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
     }
     setLocalDrafts((current) => reconcileDraftsWithRemote(current, detail.messages));
     setPendingReplies((current) =>
-      reconcilePendingRepliesWithRemote(current, detail.messages, approvals));
-  }, [approvals, detail?.messages]);
+      reconcilePendingRepliesWithRemote(current, detail.messages, detail.records, approvals));
+  }, [approvals, detail?.messages, detail?.records]);
 
   useEffect(() => {
     if (typeof EventSource === "undefined") {
@@ -1463,19 +1477,20 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
     localDrafts,
     resolveRecipients,
   }), [detail?.messages, detail?.records, localDrafts, resolveRecipients]);
-  const visiblePendingReplies = useMemo(
-    () => pendingReplies.filter((marker) => marker.branchId === activeConversationBranchId),
-    [activeConversationBranchId, pendingReplies],
+  const visibleOperations = useMemo(
+    () => (detail?.operations ?? []).filter((operation) =>
+      normalizeConversationBranchId(operation.branch_id, operation.lane_id) === activeConversationBranchId),
+    [activeConversationBranchId, detail?.operations],
   );
 
   const statusEntries = useMemo(() => buildStatusEntries({
-    pendingReplies: visiblePendingReplies,
+    operations: visibleOperations,
     resolveAgent: (agentId) => agentMap.get(agentId),
     texts: {
       typingLabel: t("web.conversations.status_ai_thinking", "思考中"),
       typingDetail: t("web.conversations.status_ai_thinking_detail", "Agent 已接到消息，正在组织回复与处理工具步骤。"),
     },
-  }), [agentMap, t, visiblePendingReplies]);
+  }), [agentMap, t, visibleOperations]);
 
   const streamEntries = useMemo(
     () => [...chatEntries, ...statusEntries],
@@ -1769,27 +1784,8 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
     resolution: "allow_once" | "allow_reply_action" | "allow_conversation_all" | "deny",
   ) => {
     setError(null);
-    const approval = approvals.find((item) => item.approval_id === approvalId) ?? null;
     try {
       await resolvePermissionApproval(approvalId, resolution);
-      const approvalMessageId = approval?.scope.message_id ?? null;
-      const approvalSourceMessage = approvalMessageId
-        ? findMessageById(detail?.messages ?? [], approvalMessageId)
-        : null;
-      const approvalBranchId = normalizeConversationBranchId(
-        approvalSourceMessage?.branch_id,
-        approvalSourceMessage?.lane_id,
-        activeConversationBranchId,
-      );
-      if (approval && resolution !== "deny" && approvalMessageId && approvalBranchId) {
-        setPendingReplies((current) => upsertPendingReplyMarkers(current, [{
-          id: `approval:${approval.approval_id}`,
-          agentId: approval.agent_id,
-          branchId: approvalBranchId,
-          createdAt: new Date().toISOString(),
-          sourceMessageId: approvalMessageId,
-        }]));
-      }
       await refreshThread();
       if (resolution !== "deny") {
         setApprovalManagerOpen(false);
@@ -1804,7 +1800,7 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
         setError(String(err));
       }
     }
-  }, [activeConversationBranchId, approvals, detail?.messages, refreshThread, t]);
+  }, [refreshThread, t]);
 
   const approvalReplyActionLabel = useCallback((approval: PermissionApprovalRecord) => {
     if (approval.action === "command.exec") {

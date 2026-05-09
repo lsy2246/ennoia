@@ -84,11 +84,11 @@ metadata = { schedule_action = { id = "workflow.run" } }
 
 ## 开发热加载
 
-- CLI 开发模式监听 `crates/`、`assets/`、`Cargo.toml` 和 `Cargo.lock`；扩展 UI 由独立 watcher 构建，不再因为 UI 资源变化而重编译 API 二进制。
+- CLI 开发模式监听 `crates/`、`assets/`、`Cargo.toml` 和 `Cargo.lock`，命中后重建并重启 API；内置扩展后端源码由独立 watcher 监听 `builtins/extensions/*/(data|plugins|worker)/`，命中后重建并复制 builtin worker，不再把这类改动混进 API 热重载。
 - `node scripts/build-extension-ui.mjs --watch` 会把 `builtins/extensions/*/ui/entry.*` 构建到各自的 `ui/dist/entry.js`。
 - Server 运行时按 2 秒轮询刷新扩展注册表和 manifest；UI bundle 文件版本变化会更新 runtime snapshot。
 - Worker runtime 会缓存编译后的 Wasm Module，并在 `.wasm` mtime 或文件大小变化时自动重新编译。
-- Process Worker 会按扩展维度常驻并在异常退出后自动重启。
+- Process Worker 会按扩展维度常驻，并在异常退出或目标二进制时间戳/大小变化后自动换新实例。
 - 每次 Wasm RPC 调用创建新的 Wasm 实例，避免跨请求共享线性内存状态。
 
 ## Worker ABI
@@ -134,7 +134,7 @@ metadata = { schedule_action = { id = "workflow.run" } }
 
 宿主当前会在跨边界调用上写入 trace 上下文。Process Worker 和 Wasm Worker 都只消费 `context.trace` 这组普通 JSON 字段；链路追踪落库、查询和采样由宿主负责。
 
-内置 `conversation` 与 `memory` 当前都采用 `jsonrpc-stdio` process Worker；内置 `workflow` 仍提供 `ennoia.worker` Wasm Worker。执行 `bun run build:workers` 会构建两个 release 进程 Worker 和一个 release Wasm Worker，并复制到各自 manifest 声明的位置。
+内置 `conversation`、`memory` 与 `workflow` 当前都采用 `jsonrpc-stdio` process Worker；`workflow` 仍保留 `ennoia.worker` Wasm Worker 构建产物，供独立 Wasm 场景复用。执行 `bun run build:workers` 会构建三个 release 进程 Worker 和一个 release Wasm Worker，并复制到各自目标位置。
 
 ## 沙箱与权限
 

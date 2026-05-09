@@ -75,7 +75,7 @@ Web
 - `memory` 只暴露 `memory.*` 动作键，不再保留 `/api/memory/*` 核心包装入口。
 - `conversation` 不直接调用 `memory` 或 `workflow`；它只维护会话事实并发出事实事件。
 - `memory` 不直接读取 `conversation.db`，也不再镜像保存整段会话消息或 shadow session state。
-- `workflow` 不假设自己一定挂在 conversation 上；会话事实是否进入 workflow、何时回写 conversation / memory，由 workflow 扩展自己订阅 `conversation.message.created`、`permission.approval.resolved` 等事件后决定。
+- `workflow` 不假设自己一定挂在 conversation 上；会话事实是否进入 workflow、何时回写 conversation / memory，由 workflow 扩展自己订阅 `conversation.message.created`、`operation.updated` 等事实事件后决定。
 - 宿主允许扩展通过通用 `extension.state` / `extension.record` 原语保存跨刷新轻量状态和会话可视记录；这些条目只表达扩展自己的运行事实，不提升为系统业务模型。
 - Conversation、Message、Memory Graph、Review 等业务数据组织属于扩展私有责任，不属于日志主数据。
 
@@ -127,7 +127,7 @@ Web
 ## Hook 边界
 
 - Hook 保留为扩展订阅系统事件的方式，但事件先进入宿主持久化事件总线，不做同步强耦合调用。
-- 动作管道在完成会话创建、消息追加、审批解析等动作后，把 `conversation.created`、`conversation.message.created`、`permission.approval.resolved` 等事件写入 `events.db`。
+- 动作管道在完成会话创建、消息追加、operation 生命周期推进等动作后，把 `conversation.created`、`conversation.message.created`、`operation.updated` 等事件写入 `events.db`。
 - 事件总线异步把事件投递给已注册 Hook；扩展临时离线不会阻塞会话写入。
 - 系统不要求 memory / workflow 必须通过 Hook 互相耦合；跨域组合统一走事件链和宿主中立 runtime bridge（action、provider、runtime operation、permission）。
 

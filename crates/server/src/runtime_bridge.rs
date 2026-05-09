@@ -7,8 +7,9 @@ use ennoia_contract::ApiError;
 use ennoia_error_utils::normalize_error_message;
 use ennoia_extension_host::RegisteredProviderContribution;
 use ennoia_kernel::{
-    AgentConfig, ModelEndpointConfig, PermissionRequest, PermissionScope, PermissionTarget,
-    PermissionTrigger, RuntimeOperationRequest,
+    AgentConfig, ModelEndpointConfig, OperationPerformRequest, OperationPerformResponse,
+    OperationRecord, OperationStatus, PermissionRequest, PermissionScope, PermissionTarget,
+    PermissionTrigger, RuntimeOperationRequest, RuntimeOperationTimeoutConfig,
 };
 use ennoia_logs::RequestContext;
 use serde::Serialize;
@@ -20,8 +21,13 @@ use crate::execution::{
     execute_native_operation, resolve_agent_tool_path, resolve_command_cwd, AgentExecutionPaths,
     SandboxOperation,
 };
+use crate::logs_store::{LogEntryWrite, LOGS_COMPONENT_HOST};
 use crate::realtime::RealtimeEvent;
+use crate::routes::actions::dispatch_hook_event;
+use crate::routes::extensions::invoke_provider_json_with_request;
 use crate::routes::scoped;
+
+const MIN_COMMAND_TIMEOUT_MS: u64 = 120_000;
 
 const PROVIDER_NODE_RUNNER: &str = r#"
 import { pathToFileURL } from 'node:url';
@@ -238,6 +244,525 @@ pub async fn execute_runtime_operation(
         operation: operation.to_string(),
         content,
     })
+}
+
+pub async fn perform_operation(
+    state: &AppState,
+    request: &RequestContext,
+    extension_id: &str,
+    payload: OperationPerformRequest,
+) -> Result<OperationPerformResponse, ApiError> {
+    let queued = state
+        .operations
+        .create_operation(extension_id, &payload)
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), request))?;
+    publish_operation_update(state, request, &queued);
+    let running = state
+        .operations
+        .update_operation(&queued.id, OperationStatus::Running, None, None)
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), request))?;
+    publish_operation_update(state, request, &running);
+    log_operation_event(
+        state,
+        request,
+        "runtime.operation.started",
+        "info",
+        &queued.id,
+        "runtime operation started",
+        serde_json::json!({
+            "extension_id": extension_id,
+            "status": running.status.as_str(),
+            "kind": payload.kind,
+            "name": payload.name,
+            "agent_id": payload.agent_id,
+            "conversation_id": payload.conversation_id,
+            "branch_id": payload.branch_id,
+            "lane_id": payload.lane_id,
+            "run_id": payload.run_id,
+            "message_id": payload.message_id,
+            "input": payload.input,
+        }),
+    );
+
+    if payload.deferred {
+        let state_for_task = state.clone();
+        let request_for_task = request.clone();
+        let payload_for_task = payload.clone();
+        let operation_id = queued.id.clone();
+        tokio::spawn(async move {
+            let _ = complete_operation_execution(
+                &state_for_task,
+                &request_for_task,
+                &operation_id,
+                &payload_for_task,
+            )
+            .await;
+        });
+        return Ok(OperationPerformResponse {
+            operation: running,
+            content: JsonValue::Null,
+        });
+    }
+
+    complete_operation_execution(state, request, &queued.id, &payload).await
+}
+
+pub async fn resume_operation_after_approval(
+    state: &AppState,
+    request: &RequestContext,
+    approval_id: &str,
+) -> Result<Option<OperationRecord>, ApiError> {
+    let Some(target) = state
+        .operations
+        .find_resume_target_by_approval(approval_id)
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), request))?
+    else {
+        return Ok(None);
+    };
+    let payload = OperationPerformRequest {
+        agent_id: target.operation.agent_id.clone(),
+        conversation_id: target.operation.conversation_id.clone(),
+        run_id: target.operation.run_id.clone(),
+        branch_id: target.operation.branch_id.clone(),
+        lane_id: target.operation.lane_id.clone(),
+        message_id: target.operation.message_id.clone(),
+        kind: target.operation.kind.clone(),
+        name: target.operation.name.clone(),
+        deferred: false,
+        input: target.operation.input.clone(),
+    };
+    let running = state
+        .operations
+        .update_operation(&target.operation.id, OperationStatus::Running, None, None)
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), request))?;
+    publish_operation_update(state, request, &running);
+    log_operation_event(
+        state,
+        request,
+        "runtime.operation.resumed",
+        "info",
+        &running.id,
+        "runtime operation resumed after approval",
+        serde_json::json!({
+            "status": running.status.as_str(),
+            "kind": running.kind,
+            "name": running.name,
+            "agent_id": running.agent_id,
+            "conversation_id": running.conversation_id,
+            "branch_id": running.branch_id,
+            "lane_id": running.lane_id,
+            "run_id": running.run_id,
+            "message_id": running.message_id,
+            "approval_id": approval_id,
+        }),
+    );
+    match execute_operation_payload(state, request, &payload).await {
+        Ok(content) => {
+            let operation = state
+                .operations
+                .update_operation(
+                    &target.operation.id,
+                    OperationStatus::Succeeded,
+                    Some(content),
+                    None,
+                )
+                .map_err(|error| scoped(ApiError::internal(error.to_string()), request))?;
+            publish_operation_update(state, request, &operation);
+            log_operation_event(
+                state,
+                request,
+                "runtime.operation.succeeded",
+                "info",
+                &operation.id,
+                "runtime operation completed",
+                serde_json::json!({
+                    "status": operation.status.as_str(),
+                    "kind": operation.kind,
+                    "name": operation.name,
+                    "agent_id": operation.agent_id,
+                    "conversation_id": operation.conversation_id,
+                    "branch_id": operation.branch_id,
+                    "lane_id": operation.lane_id,
+                    "run_id": operation.run_id,
+                    "message_id": operation.message_id,
+                }),
+            );
+            Ok(Some(operation))
+        }
+        Err(error) => {
+            let status = if is_permission_approval_error(&error) {
+                OperationStatus::Blocked
+            } else if error.code() == ennoia_contract::ErrorCode::Forbidden {
+                OperationStatus::Cancelled
+            } else {
+                OperationStatus::Failed
+            };
+            let operation = state
+                .operations
+                .update_operation(
+                    &target.operation.id,
+                    status.clone(),
+                    None,
+                    Some(operation_error_details(&error, &target.operation.id)),
+                )
+                .map_err(|store_error| {
+                    scoped(ApiError::internal(store_error.to_string()), request)
+                })?;
+            if let Some(next_approval_id) = error
+                .details()
+                .get("approval_id")
+                .and_then(JsonValue::as_str)
+            {
+                state
+                    .operations
+                    .link_approval(&target.operation.id, next_approval_id)
+                    .map_err(|store_error| {
+                        scoped(ApiError::internal(store_error.to_string()), request)
+                    })?;
+            }
+            publish_operation_update(state, request, &operation);
+            log_operation_event(
+                state,
+                request,
+                "runtime.operation.failed",
+                if status == OperationStatus::Blocked {
+                    "warn"
+                } else {
+                    "error"
+                },
+                &operation.id,
+                "runtime operation failed",
+                serde_json::json!({
+                    "status": operation.status.as_str(),
+                    "kind": operation.kind,
+                    "name": operation.name,
+                    "agent_id": operation.agent_id,
+                    "conversation_id": operation.conversation_id,
+                    "branch_id": operation.branch_id,
+                    "lane_id": operation.lane_id,
+                    "run_id": operation.run_id,
+                    "message_id": operation.message_id,
+                    "error": operation.error,
+                }),
+            );
+            Ok(Some(operation))
+        }
+    }
+}
+
+async fn complete_operation_execution(
+    state: &AppState,
+    request: &RequestContext,
+    operation_id: &str,
+    payload: &OperationPerformRequest,
+) -> Result<OperationPerformResponse, ApiError> {
+    let result = execute_operation_payload(state, request, payload).await;
+    match result {
+        Ok(content) => {
+            let operation = state
+                .operations
+                .update_operation(
+                    operation_id,
+                    OperationStatus::Succeeded,
+                    Some(content.clone()),
+                    None,
+                )
+                .map_err(|error| scoped(ApiError::internal(error.to_string()), request))?;
+            publish_operation_update(state, request, &operation);
+            log_operation_event(
+                state,
+                request,
+                "runtime.operation.succeeded",
+                "info",
+                &operation.id,
+                "runtime operation completed",
+                serde_json::json!({
+                    "status": operation.status.as_str(),
+                    "kind": operation.kind,
+                    "name": operation.name,
+                    "agent_id": operation.agent_id,
+                    "conversation_id": operation.conversation_id,
+                    "branch_id": operation.branch_id,
+                    "lane_id": operation.lane_id,
+                    "run_id": operation.run_id,
+                    "message_id": operation.message_id,
+                }),
+            );
+            Ok(OperationPerformResponse { operation, content })
+        }
+        Err(error) => {
+            let error_details = operation_error_details(&error, operation_id);
+            let merged_error_details = match error.details() {
+                JsonValue::Object(existing) => {
+                    let mut merged = existing.clone();
+                    merged.insert(
+                        "operation_id".to_string(),
+                        JsonValue::String(operation_id.to_string()),
+                    );
+                    JsonValue::Object(merged)
+                }
+                _ => serde_json::json!({ "operation_id": operation_id }),
+            };
+            let approval_id = error
+                .details()
+                .get("approval_id")
+                .and_then(JsonValue::as_str)
+                .map(str::to_string);
+            let status = if is_permission_approval_error(&error) {
+                OperationStatus::Blocked
+            } else if error.code() == ennoia_contract::ErrorCode::Forbidden {
+                OperationStatus::Cancelled
+            } else {
+                OperationStatus::Failed
+            };
+            let operation = state
+                .operations
+                .update_operation(
+                    operation_id,
+                    status.clone(),
+                    None,
+                    Some(error_details.clone()),
+                )
+                .map_err(|store_error| {
+                    scoped(ApiError::internal(store_error.to_string()), request)
+                })?;
+            if let Some(approval_id) = approval_id.as_deref() {
+                state
+                    .operations
+                    .link_approval(operation_id, approval_id)
+                    .map_err(|store_error| {
+                        scoped(ApiError::internal(store_error.to_string()), request)
+                    })?;
+            }
+            publish_operation_update(state, request, &operation);
+            log_operation_event(
+                state,
+                request,
+                "runtime.operation.failed",
+                if status == OperationStatus::Blocked {
+                    "warn"
+                } else {
+                    "error"
+                },
+                &operation.id,
+                "runtime operation failed",
+                serde_json::json!({
+                    "status": operation.status.as_str(),
+                    "kind": operation.kind,
+                    "name": operation.name,
+                    "agent_id": operation.agent_id,
+                    "conversation_id": operation.conversation_id,
+                    "branch_id": operation.branch_id,
+                    "lane_id": operation.lane_id,
+                    "run_id": operation.run_id,
+                    "message_id": operation.message_id,
+                    "error": error_details,
+                }),
+            );
+            Err(error.with_details(merged_error_details))
+        }
+    }
+}
+
+async fn execute_operation_payload(
+    state: &AppState,
+    request: &RequestContext,
+    payload: &OperationPerformRequest,
+) -> Result<JsonValue, ApiError> {
+    match (payload.kind.as_str(), payload.name.as_str()) {
+        ("provider", "generate") => {
+            execute_provider_generate_operation(state, request, payload).await
+        }
+        ("runtime", "fs.read")
+        | ("runtime", "fs.write")
+        | ("runtime", "command.exec")
+        | ("runtime", "net.fetch") => {
+            let result = execute_runtime_operation(
+                state,
+                request,
+                payload.name.as_str(),
+                RuntimeOperationRequest {
+                    agent_id: payload.agent_id.clone(),
+                    conversation_id: payload.conversation_id.clone(),
+                    run_id: payload.run_id.clone(),
+                    message_id: payload.message_id.clone(),
+                    arguments: payload.input.clone(),
+                },
+            )
+            .await?;
+            Ok(result.content)
+        }
+        _ => Err(scoped(
+            ApiError::bad_request(format!(
+                "unsupported operation '{}:{}'",
+                payload.kind, payload.name
+            )),
+            request,
+        )),
+    }
+}
+
+async fn execute_provider_generate_operation(
+    state: &AppState,
+    request: &RequestContext,
+    payload: &OperationPerformRequest,
+) -> Result<JsonValue, ApiError> {
+    let provider_kind = payload
+        .input
+        .get("provider_kind")
+        .and_then(JsonValue::as_str)
+        .ok_or_else(|| {
+            scoped(
+                ApiError::bad_request("provider operation missing provider_kind"),
+                request,
+            )
+        })?;
+    let params = payload
+        .input
+        .get("params")
+        .cloned()
+        .unwrap_or(JsonValue::Null);
+    invoke_provider_json_with_request(
+        state,
+        request,
+        provider_kind,
+        "generate",
+        ennoia_kernel::ExtensionRpcRequest {
+            params,
+            context: serde_json::json!({
+                "permission_actor": {
+                    "agent_id": payload.agent_id,
+                    "kind": "operation.provider.generate",
+                    "conversation_id": payload.conversation_id,
+                    "run_id": payload.run_id,
+                    "message_id": payload.message_id,
+                }
+            }),
+        },
+    )
+    .await
+}
+
+pub(crate) fn publish_operation_update(
+    state: &AppState,
+    request: &RequestContext,
+    operation: &OperationRecord,
+) {
+    dispatch_hook_event(
+        state,
+        request,
+        ennoia_kernel::HOOK_EVENT_OPERATION_UPDATED,
+        "operation",
+        &operation.id,
+        serde_json::json!({
+            "operation": operation,
+            "conversation_id": operation.conversation_id,
+            "run_id": operation.run_id,
+            "message_id": operation.message_id,
+            "lane_id": operation.lane_id,
+        }),
+    );
+    state.realtime.publish(RealtimeEvent::ConversationChanged {
+        conversation_id: operation.conversation_id.clone(),
+    });
+}
+
+fn is_permission_approval_error(error: &ApiError) -> bool {
+    error.code() == ennoia_contract::ErrorCode::Forbidden
+        && error.details().get("decision").and_then(JsonValue::as_str) == Some("ask")
+}
+
+fn operation_error_details(error: &ApiError, operation_id: &str) -> JsonValue {
+    match error.details() {
+        JsonValue::Object(existing) => {
+            let mut merged = existing.clone();
+            merged.insert(
+                "operation_id".to_string(),
+                JsonValue::String(operation_id.to_string()),
+            );
+            merged.insert(
+                "message".to_string(),
+                JsonValue::String(error.message().to_string()),
+            );
+            JsonValue::Object(merged)
+        }
+        _ => serde_json::json!({
+            "operation_id": operation_id,
+            "message": error.message(),
+        }),
+    }
+}
+
+fn log_operation_event(
+    state: &AppState,
+    request: &RequestContext,
+    event: &str,
+    level: &str,
+    operation_id: &str,
+    message: &str,
+    attributes: JsonValue,
+) {
+    let _ = state.logs.append_log_scoped(
+        LogEntryWrite {
+            event: event.to_string(),
+            level: level.to_string(),
+            component: LOGS_COMPONENT_HOST.to_string(),
+            source_kind: "operation".to_string(),
+            source_id: Some(operation_id.to_string()),
+            message: message.to_string(),
+            attributes,
+            created_at: None,
+        },
+        Some(&request.trace_context()),
+    );
+}
+
+fn resolve_runtime_timeout_ms(
+    arguments: &JsonValue,
+    config: &RuntimeOperationTimeoutConfig,
+) -> u64 {
+    integer_argument(arguments, "timeout_ms")
+        .unwrap_or(config.default_timeout_ms as i64)
+        .clamp(
+            config.default_timeout_ms as i64,
+            config.max_timeout_ms as i64,
+        ) as u64
+}
+
+fn resolve_command_timeout_ms(
+    arguments: &JsonValue,
+    config: &RuntimeOperationTimeoutConfig,
+) -> u64 {
+    integer_argument(arguments, "timeout_ms")
+        .unwrap_or(config.default_timeout_ms as i64)
+        .clamp(
+            config.default_timeout_ms.max(MIN_COMMAND_TIMEOUT_MS) as i64,
+            config.max_timeout_ms.max(MIN_COMMAND_TIMEOUT_MS) as i64,
+        ) as u64
+}
+
+fn normalize_command_exec_invocation(
+    command: &str,
+    args: &[String],
+) -> (String, Vec<String>, bool) {
+    if cfg!(windows)
+        && (command.eq_ignore_ascii_case("cmd") || command.eq_ignore_ascii_case("cmd.exe"))
+    {
+        let has_mode_flag = args
+            .first()
+            .map(|value| {
+                let normalized = value.trim().to_ascii_lowercase();
+                normalized == "/c" || normalized == "/k"
+            })
+            .unwrap_or(false);
+        if !has_mode_flag && !args.is_empty() {
+            let mut normalized_args = Vec::with_capacity(args.len() + 1);
+            normalized_args.push("/c".to_string());
+            normalized_args.extend(args.iter().cloned());
+            return (command.to_string(), normalized_args, true);
+        }
+    }
+    (command.to_string(), args.to_vec(), false)
 }
 
 fn authorize_permission_request(
@@ -480,7 +1005,9 @@ async fn execute_command_exec(
 ) -> Result<JsonValue, ApiError> {
     let server_config = live_server_config(state);
     let command_name = required_string_argument(&payload.arguments, "command", request)?;
-    let args = string_array_argument(&payload.arguments, "args");
+    let requested_args = string_array_argument(&payload.arguments, "args");
+    let (effective_command_name, effective_args, invocation_normalized) =
+        normalize_command_exec_invocation(&command_name, &requested_args);
     let cwd_value = string_argument(&payload.arguments, "cwd");
     let execution_paths = AgentExecutionPaths::for_agent(state, agent, &payload.run_id);
     let cwd = resolve_command_cwd(
@@ -490,12 +1017,13 @@ async fn execute_command_exec(
     )
     .map_err(|error| scoped(error, request))?;
     let operation_config = &server_config.operations.command;
-    let timeout_ms = integer_argument(&payload.arguments, "timeout_ms")
-        .unwrap_or(operation_config.default_timeout_ms as i64)
-        .clamp(
-            operation_config.min_timeout_ms as i64,
-            operation_config.max_timeout_ms as i64,
-        ) as u64;
+    let timeout_ms = resolve_command_timeout_ms(&payload.arguments, operation_config);
+    fs::create_dir_all(&cwd.host_path).map_err(|error| {
+        scoped(
+            ApiError::internal(format!("prepare command working dir failed: {error}")),
+            request,
+        )
+    })?;
     let grant_id = authorize_runtime_operation(
         state,
         request,
@@ -511,38 +1039,71 @@ async fn execute_command_exec(
         "runtime.operation",
     )?;
     consume_runtime_grant(state, request, grant_id)?;
+    let error_details = serde_json::json!({
+        "source": "runtime.operation",
+        "operation": "command.exec",
+        "command": command_name,
+        "args": requested_args,
+        "effective_command": effective_command_name,
+        "effective_args": effective_args,
+        "cwd": cwd.display_path,
+        "timeout_ms": timeout_ms,
+        "sandbox_enabled": agent.execution_environment.sandbox_enabled,
+        "invocation_normalized": invocation_normalized,
+        "agent_id": agent.id,
+        "conversation_id": payload.conversation_id,
+        "run_id": payload.run_id,
+        "message_id": payload.message_id,
+    });
     let content = if agent.execution_environment.sandbox_enabled {
         execute_native_operation(
             agent,
             &execution_paths,
             true,
             SandboxOperation::CommandExec {
-                command: command_name.clone(),
-                args: args.clone(),
+                command: effective_command_name.clone(),
+                args: effective_args.clone(),
                 cwd_host_path: cwd.host_path.to_string_lossy().to_string(),
                 cwd_display_path: cwd.display_path.clone(),
                 timeout_ms,
             },
         )
         .await
-        .map_err(|error| scoped(error, request))?
+        .map_err(|error| {
+            let message = error.message().to_string();
+            let api_error = if message.contains("timed out") {
+                ApiError::timeout(message)
+            } else {
+                ApiError::internal(message)
+            };
+            scoped(api_error.with_details(error_details.clone()), request)
+        })?
     } else {
-        let mut command = tokio::process::Command::new(&command_name);
-        command.args(&args).current_dir(cwd.host_path.clone());
+        let mut command = tokio::process::Command::new(&effective_command_name);
+        command
+            .args(&effective_args)
+            .current_dir(cwd.host_path.clone());
         let output = tokio::time::timeout(Duration::from_millis(timeout_ms), command.output())
             .await
-            .map_err(|_| scoped(ApiError::internal("command exec timed out"), request))?
+            .map_err(|_| {
+                scoped(
+                    ApiError::timeout(format!("command exec timed out after {timeout_ms}ms"))
+                        .with_details(error_details.clone()),
+                    request,
+                )
+            })?
             .map_err(|error| {
                 scoped(
-                    ApiError::internal(format!("spawn command failed: {error}")),
+                    ApiError::internal(format!("spawn command failed: {error}"))
+                        .with_details(error_details.clone()),
                     request,
                 )
             })?;
         serde_json::json!({
             "ok": output.status.success(),
             "tool": "command.exec",
-            "command": command_name,
-            "args": args,
+            "command": effective_command_name,
+            "args": effective_args,
             "cwd": cwd.display_path,
             "status": output.status.code(),
             "stdout": String::from_utf8_lossy(&output.stdout).to_string(),
@@ -564,12 +1125,7 @@ async fn execute_net_fetch(
     let method = string_argument(&payload.arguments, "method").unwrap_or_else(|| "GET".to_string());
     let body = string_argument(&payload.arguments, "body");
     let operation_config = &server_config.operations.net;
-    let timeout_ms = integer_argument(&payload.arguments, "timeout_ms")
-        .unwrap_or(operation_config.default_timeout_ms as i64)
-        .clamp(
-            operation_config.min_timeout_ms as i64,
-            operation_config.max_timeout_ms as i64,
-        ) as u64;
+    let timeout_ms = resolve_runtime_timeout_ms(&payload.arguments, operation_config);
     let host = reqwest::Url::parse(&url)
         .ok()
         .and_then(|parsed| parsed.host_str().map(str::to_string));

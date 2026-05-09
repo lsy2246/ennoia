@@ -57,6 +57,7 @@ type ChatTurn = {
   operatorGroup: ChatMessageGroup;
   processGroups: ChatGroup[];
   finalReplyGroup?: ChatMessageGroup;
+  postReplyGroups: ChatGroup[];
   timestamp: string;
 };
 
@@ -139,6 +140,13 @@ function accessoryRelatedMessageId(entry: ChatAccessoryEntry) {
   return undefined;
 }
 
+function accessorySourceMessageId(entry: ChatAccessoryEntry) {
+  if (entry.kind === "status") {
+    return entry.relatedMessageId ?? entry.sourceMessageId;
+  }
+  return accessoryRelatedMessageId(entry);
+}
+
 function buildChatGroups(entries: ChatEntryViewModel[], _runs: ExecutionRun[]) {
   const groups: ChatGroup[] = [];
   const groupsByMessageId = new Map<string, ChatMessageGroup>();
@@ -164,18 +172,6 @@ function buildChatGroups(entries: ChatEntryViewModel[], _runs: ExecutionRun[]) {
       continue;
     }
 
-    if (entry.kind === "status" || entry.kind === "reasoning") {
-      groups.push({
-        id: `group:standalone:${entry.id}`,
-        order: order++,
-        anchor: null,
-        accessories: [entry],
-        relatedRuns: [],
-        timestamp: entry.createdAt,
-      });
-      continue;
-    }
-
     if (entry.kind === "tool_result") {
       const operationKey = buildToolOperationKey(entry);
       const existingGroup = toolGroupsByOperationKey.get(operationKey);
@@ -197,7 +193,7 @@ function buildChatGroups(entries: ChatEntryViewModel[], _runs: ExecutionRun[]) {
       continue;
     }
 
-    const relatedMessageId = accessoryRelatedMessageId(entry);
+    const relatedMessageId = accessorySourceMessageId(entry);
     if (relatedMessageId && groupsByMessageId.has(relatedMessageId)) {
       groupsByMessageId.get(relatedMessageId)!.accessories.push(entry);
       continue;
@@ -232,21 +228,27 @@ function buildChatTurns(groups: ChatGroup[]) {
       return;
     }
     let finalReplyGroup: Extract<ChatGroup, { anchor: ConversationMessageEntry }> | undefined;
+    let finalReplyIndex = -1;
     for (let index = trailingGroups.length - 1; index >= 0; index -= 1) {
       const candidate = trailingGroups[index];
       if (candidate.anchor?.role === "agent") {
         finalReplyGroup = candidate as ChatMessageGroup;
+        finalReplyIndex = index;
         break;
       }
     }
     const processGroups = finalReplyGroup
-      ? trailingGroups.filter((group) => group.id !== finalReplyGroup?.id)
+      ? trailingGroups.slice(0, finalReplyIndex)
       : [...trailingGroups];
+    const postReplyGroups = finalReplyGroup
+      ? trailingGroups.slice(finalReplyIndex + 1)
+      : [];
     const turn: ChatTurn = {
       id: `turn:${currentOperatorGroup.anchor.messageId}`,
       operatorGroup: currentOperatorGroup,
       processGroups,
       finalReplyGroup,
+      postReplyGroups,
       timestamp: currentOperatorGroup.timestamp,
     };
     blocks.push({
@@ -282,6 +284,25 @@ function buildChatTurns(groups: ChatGroup[]) {
 
   pushCurrentTurn();
   return blocks;
+}
+
+function buildStandaloneAccessoryGroup(params: {
+  id: string;
+  accessories: ChatAccessoryEntry[];
+  timestamp: string;
+}): ChatStandaloneGroup | null {
+  if (params.accessories.length === 0) {
+    return null;
+  }
+
+  return {
+    id: params.id,
+    order: -1,
+    anchor: null,
+    accessories: params.accessories,
+    relatedRuns: [],
+    timestamp: params.timestamp,
+  };
 }
 
 function TypingGlyph() {
@@ -528,6 +549,20 @@ function summarizeProcess(groups: ChatGroup[]) {
   };
 }
 
+function countMeaningfulProcessEntries(groups: ChatGroup[]) {
+  let count = 0;
+
+  for (const group of groups) {
+    if (group.anchor) {
+      count += 1;
+    }
+    const visibleAccessories = collapseSupersededAccessories(group.accessories);
+    count += visibleAccessories.filter((entry) => entry.kind !== "status").length;
+  }
+
+  return count;
+}
+
 function toolLabel(toolName: string | undefined, t: (key: string, fallback: string) => string) {
   switch (toolName) {
     case "fs.read":
@@ -576,6 +611,9 @@ function resolveToolResultPresentation(
     if (envelope.status === "succeeded") {
       badgeLabel = t("web.common.success", "成功");
       badgeClassName = "badge--accent";
+    } else if (envelope.status === "blocked") {
+      badgeLabel = t("web.conversations.permission_approval_title", "等待审批");
+      badgeClassName = "badge--warn";
     } else if (approvalStatus === "approved") {
       badgeLabel = t("web.permissions.status_approved", "已批准");
       badgeClassName = "badge--accent";
@@ -695,6 +733,17 @@ function resolveFailurePresentation(
     };
   }
 
+  if (source === "approval") {
+    return {
+      kind: "error" as const,
+      variant: "permission" as const,
+      eyebrow: t("web.conversations.permission_approval_title", "等待审批"),
+      title: t("web.conversations.permission_approval_title", "等待审批"),
+      summary: t("web.conversations.permission_approval_summary", "该操作需要审批后才能继续执行。"),
+      detail,
+    };
+  }
+
   if (source === "permission") {
     return {
       kind: "error" as const,
@@ -770,12 +819,22 @@ function renderToolResultBody(
   const classifiedFailure = classifyConversationFailure(errorMessage);
   const approval = approvalId ? approvalsById.get(approvalId) : undefined;
   let headline = t("web.action.failed", "失败");
+  let bodyMessage = errorMessage;
   if (approval?.status === "approved") {
     headline = t("web.permissions.status_approved", "已批准");
+    bodyMessage = t("web.conversations.permission_approval_granted_detail", "审批已通过，任务会继续执行。");
   } else if (approval?.status === "rejected") {
     headline = t("web.permissions.status_denied", "已拒绝");
+    bodyMessage = t("web.conversations.permission_denied_detail", "审批已拒绝，此次工具调用未执行。");
   } else if (approval?.status === "expired") {
     headline = t("web.permissions.status_expired", "已过期");
+    bodyMessage = t("web.conversations.permission_expired_detail", "审批已过期，此次工具调用未执行。");
+  } else if (envelope.status === "blocked" || decision === "ask" || classifiedFailure?.source === "approval") {
+    headline = t("web.conversations.permission_approval_title", "等待审批");
+    bodyMessage = t("web.conversations.permission_approval_summary", "该操作需要审批后才能继续执行。");
+  } else if (decision === "deny") {
+    headline = t("web.conversations.permission_denied_title", "权限已拒绝");
+    bodyMessage = t("web.conversations.permission_denied_detail", "审批已拒绝，此次工具调用未执行。");
   } else if (classifiedFailure?.source === "provider") {
     headline = t("web.conversations.upstream_error_title", "上游模型错误");
   } else if (classifiedFailure?.source === "timeout") {
@@ -790,10 +849,6 @@ function renderToolResultBody(
     headline = t("web.conversations.sandbox_path_error_title", "沙盒路径已拦截");
   } else if (classifiedFailure?.source === "permission") {
     headline = t("web.conversations.permission_error_title", "权限已拒绝");
-  } else if (decision === "ask") {
-    headline = t("web.conversations.permission_approval_title", "等待审批");
-  } else if (decision === "deny") {
-    headline = t("web.conversations.permission_denied_title", "权限已拒绝");
   }
   const detailsJson = errorDetails && JSON.stringify(errorDetails, null, 2) !== "{}"
     ? JSON.stringify(errorDetails, null, 2)
@@ -802,7 +857,7 @@ function renderToolResultBody(
   return (
     <div className="tool-result-error">
       <strong>{headline}</strong>
-      <p>{errorMessage}</p>
+      <p>{bodyMessage}</p>
       {detailsJson ? (
         <details className="tool-result-error__detail">
           <summary>{t("web.conversations.error_detail_toggle", "查看详情")}</summary>
@@ -979,8 +1034,12 @@ function StatusBubble({
         <div className="message-bubble message-bubble--agent message-bubble--typing">
           <div className="message-bubble__body">
             <div className="message-status-bubble__headline">
-              <TypingGlyph />
-              <strong>{t("web.conversations.thinking_title", "思考")}</strong>
+              {entry.animation === "typing" ? <TypingGlyph /> : null}
+              <strong>
+                {entry.animation === "blocked"
+                  ? t("web.conversations.permission_approval_title", "等待审批")
+                  : t("web.conversations.thinking_title", "思考")}
+              </strong>
               <span>{entry.label}</span>
             </div>
             {entry.detail ? <p className="typing-detail">{entry.detail}</p> : null}
@@ -1188,6 +1247,7 @@ function MessageGroup({
   onRetry,
   onRemove,
   showActions = true,
+  hideAccessories = false,
   conversationId,
 }: {
   group: Extract<ChatGroup, { anchor: ConversationMessageEntry }>;
@@ -1203,6 +1263,7 @@ function MessageGroup({
   onRetry: (id: string) => void;
   onRemove: (id: string) => void;
   showActions?: boolean;
+  hideAccessories?: boolean;
   conversationId: string;
 }) {
   const { anchor } = group;
@@ -1232,7 +1293,9 @@ function MessageGroup({
     }
     return true;
   });
-  const mergedAccessories = collapseSupersededAccessories(visibleAccessories);
+  const mergedAccessories = hideAccessories
+    ? []
+    : collapseSupersededAccessories(visibleAccessories);
   const failurePresentation = !isOperator && anchor.state === "failed"
     ? resolveFailurePresentation(anchor, t)
     : null;
@@ -1491,8 +1554,7 @@ function hasCollapsibleProcess(turn: ChatTurn) {
   if (!turn.finalReplyGroup || turn.processGroups.length === 0) {
     return false;
   }
-  return turn.processGroups.some((group) =>
-    collectGroupEntries(group).some((entry) => entry.kind !== "status"));
+  return countMeaningfulProcessEntries(turn.processGroups) > 1;
 }
 
 function ProcessGroupList({
@@ -1653,6 +1715,12 @@ function TurnBlock({
   onRemove: (id: string) => void;
   conversationId: string;
 }) {
+  const operatorAccessoryGroup = buildStandaloneAccessoryGroup({
+    id: `group:operator-accessories:${turn.operatorGroup.anchor.messageId}`,
+    accessories: turn.operatorGroup.accessories,
+    timestamp: turn.operatorGroup.timestamp,
+  });
+
   return (
     <section className="chat-turn">
       <MessageGroup
@@ -1668,9 +1736,22 @@ function TurnBlock({
         onEditAndResend={onEditAndResend}
         onRetry={onRetry}
         onRemove={onRemove}
+        hideAccessories
         conversationId={conversationId}
       />
       <div className="chat-turn__agent-side">
+        {operatorAccessoryGroup ? (
+          <StandaloneGroup
+            group={operatorAccessoryGroup}
+            agents={agents}
+            skills={skills}
+            approvalsById={approvalsById}
+            t={t}
+            showThinking={showThinking}
+            showToolCalls={showToolCalls}
+            conversationId={conversationId}
+          />
+        ) : null}
         {turn.finalReplyGroup ? (
           <TurnProcessPanel
             turn={turn}
@@ -1713,6 +1794,23 @@ function TurnBlock({
             t={t}
             showThinking={false}
             showToolCalls={false}
+            onCopy={onCopy}
+            onBranchFrom={onBranchFrom}
+            onEditAndResend={onEditAndResend}
+            onRetry={onRetry}
+            onRemove={onRemove}
+            conversationId={conversationId}
+          />
+        ) : null}
+        {turn.postReplyGroups.length > 0 ? (
+          <ProcessGroupList
+            groups={turn.postReplyGroups}
+            agents={agents}
+            skills={skills}
+            approvalsById={approvalsById}
+            t={t}
+            showThinking={showThinking}
+            showToolCalls={showToolCalls}
             onCopy={onCopy}
             onBranchFrom={onBranchFrom}
             onEditAndResend={onEditAndResend}

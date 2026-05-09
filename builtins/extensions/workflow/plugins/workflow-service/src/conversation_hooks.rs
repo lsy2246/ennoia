@@ -1,16 +1,16 @@
 use std::fs;
 use std::sync::Arc;
+use std::time::Instant;
 
 use chrono::Utc;
 use ennoia_contract::behavior::{BehaviorRunRequest, BehaviorSourceRef, BehaviorTrigger};
 use ennoia_contract::{ApiErrorBody, ErrorCode};
 use ennoia_kernel::{
     AgentConfig, AgentDocument, DecisionSnapshot, ExtensionHostCapabilityRequest,
-    ExtensionRecordAppend, ExtensionRecordEntry, ExtensionRecordUpdate, ExtensionRpcRequest,
-    ExtensionStateEntry, ExtensionStateGetQuery, ExtensionStatePut, HookDispatchResponse,
-    HookEventEnvelope, ModelEndpointConfig, NextAction, OwnerKind, OwnerRef,
-    PermissionApprovalRecord, RunContext, RunStage, RunStageEvent, RuntimeOperationRequest,
-    ServerConfig,
+    ExtensionRecordAppend, ExtensionRecordEntry, ExtensionRecordUpdate, ExtensionStateEntry,
+    ExtensionStateGetQuery, ExtensionStatePut, HookDispatchResponse, HookEventEnvelope,
+    ModelEndpointConfig, NextAction, OperationPerformRequest, OperationPerformResponse,
+    OperationRecord, OwnerKind, OwnerRef, RunContext, RunStage, RunStageEvent, ServerConfig,
 };
 use ennoia_paths::RuntimePaths;
 use serde::{Deserialize, Serialize};
@@ -30,6 +30,28 @@ struct HostApiClient {
     processing_stale_after_ms: u64,
 }
 
+fn workflow_trace(
+    phase: &str,
+    conversation_id: &str,
+    message_id: Option<&str>,
+    agent_id: &str,
+    detail: impl AsRef<str>,
+) {
+    eprintln!(
+        "[workflow][{phase}] conv={} msg={} agent={} {}",
+        conversation_id,
+        message_id.unwrap_or("-"),
+        agent_id,
+        detail.as_ref()
+    );
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum AgentReplyProgress {
+    Completed(String),
+    Pending,
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 struct ToolSpec {
     name: String,
@@ -42,12 +64,39 @@ struct ProviderInstructions {
     base: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct AgentToolCall {
     id: String,
     name: String,
     #[serde(default)]
     arguments: JsonValue,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct DirectReplyState {
+    run_id: String,
+    conversation_id: String,
+    lane_id: Option<String>,
+    message_id: Option<String>,
+    agent_id: String,
+    messages: Vec<JsonValue>,
+    pending_tool_calls: Vec<AgentToolCall>,
+    pending_operation_id: Option<String>,
+    pending_operation_kind: Option<String>,
+    next_iteration: usize,
+    last_process_text: Option<String>,
+    created_at: String,
+    updated_at: String,
+}
+
+#[derive(Debug, Clone)]
+struct AgentReplyLoopState {
+    messages: Vec<JsonValue>,
+    pending_tool_calls: Vec<AgentToolCall>,
+    pending_operation_id: Option<String>,
+    pending_operation_kind: Option<String>,
+    next_iteration: usize,
+    last_process_text: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -176,39 +225,94 @@ impl HostApiClient {
         &self,
         provider_kind: &str,
         payload: JsonValue,
-        context: JsonValue,
+        agent_id: &str,
+        conversation_id: &str,
+        lane_id: Option<&str>,
+        run_id: &str,
+        message_id: Option<&str>,
     ) -> Result<JsonValue, HostApiError> {
-        self.call_json(ExtensionHostCapabilityRequest::ProviderInvoke {
-            provider_kind: provider_kind.to_string(),
-            method: "generate".to_string(),
-            payload: ExtensionRpcRequest {
-                params: payload,
-                context,
-            },
+        let response = self
+            .perform_operation(OperationPerformRequest {
+                agent_id: agent_id.to_string(),
+                conversation_id: conversation_id.to_string(),
+                run_id: run_id.to_string(),
+                branch_id: None,
+                lane_id: lane_id.map(str::to_string),
+                message_id: message_id.map(str::to_string),
+                kind: "provider".to_string(),
+                name: "generate".to_string(),
+                deferred: false,
+                input: serde_json::json!({
+                    "provider_kind": provider_kind,
+                    "params": payload,
+                }),
+            })
+            .await?;
+        Ok(response.content)
+    }
+
+    async fn provider_generate_deferred(
+        &self,
+        provider_kind: &str,
+        payload: JsonValue,
+        agent_id: &str,
+        conversation_id: &str,
+        lane_id: Option<&str>,
+        run_id: &str,
+        message_id: Option<&str>,
+    ) -> Result<OperationPerformResponse, HostApiError> {
+        self.perform_operation(OperationPerformRequest {
+            agent_id: agent_id.to_string(),
+            conversation_id: conversation_id.to_string(),
+            run_id: run_id.to_string(),
+            branch_id: None,
+            lane_id: lane_id.map(str::to_string),
+            message_id: message_id.map(str::to_string),
+            kind: "provider".to_string(),
+            name: "generate".to_string(),
+            deferred: true,
+            input: serde_json::json!({
+                "provider_kind": provider_kind,
+                "params": payload,
+            }),
         })
         .await
     }
 
-    async fn execute_operation(
+    async fn execute_operation_deferred(
         &self,
         operation: &str,
         agent_id: &str,
         conversation_id: &str,
+        lane_id: Option<&str>,
         run_id: &str,
         message_id: Option<&str>,
         arguments: JsonValue,
-    ) -> Result<JsonValue, HostApiError> {
-        self.call_json(ExtensionHostCapabilityRequest::RuntimeOperation {
-            operation: operation.to_string(),
-            payload: RuntimeOperationRequest {
-                agent_id: agent_id.to_string(),
-                conversation_id: conversation_id.to_string(),
-                run_id: run_id.to_string(),
-                message_id: message_id.map(str::to_string),
-                arguments,
-            },
+    ) -> Result<OperationPerformResponse, HostApiError> {
+        self.perform_operation(OperationPerformRequest {
+            agent_id: agent_id.to_string(),
+            conversation_id: conversation_id.to_string(),
+            run_id: run_id.to_string(),
+            branch_id: None,
+            lane_id: lane_id.map(str::to_string),
+            message_id: message_id.map(str::to_string),
+            kind: "runtime".to_string(),
+            name: operation.to_string(),
+            deferred: true,
+            input: arguments,
         })
         .await
+    }
+
+    async fn perform_operation(
+        &self,
+        payload: OperationPerformRequest,
+    ) -> Result<OperationPerformResponse, HostApiError> {
+        let value = self
+            .call_json(ExtensionHostCapabilityRequest::OperationPerform { payload })
+            .await?;
+        serde_json::from_value::<OperationPerformResponse>(value)
+            .map_err(|error| internal_error(format!("parse operation response failed: {error}")))
     }
 
     async fn get_extension_state(
@@ -371,72 +475,245 @@ pub async fn handle_conversation_message_created(
     })
 }
 
-pub async fn handle_permission_approval_resolved(
+pub async fn handle_operation_updated(
     runtime: &WorkflowRuntime,
     store: &SqliteRuntimeStore,
     envelope: HookEventEnvelope,
 ) -> Result<HookDispatchResponse, String> {
-    let approval: PermissionApprovalRecord = serde_json::from_value(
+    let operation: OperationRecord = serde_json::from_value(
         envelope
             .payload
-            .get("approval")
+            .get("operation")
             .cloned()
             .unwrap_or(JsonValue::Null),
     )
-    .map_err(|error| format!("parse permission approval payload failed: {error}"))?;
-    if approval.status != "approved" {
+    .map_err(|error| format!("parse operation payload failed: {error}"))?;
+    workflow_trace(
+        "operation.updated",
+        &operation.conversation_id,
+        operation.message_id.as_deref(),
+        &operation.agent_id,
+        format!(
+            "operation_id={} kind={}.{} status={:?}",
+            operation.id, operation.kind, operation.name, operation.status
+        ),
+    );
+    if !matches!(
+        operation.status,
+        ennoia_kernel::OperationStatus::Succeeded
+            | ennoia_kernel::OperationStatus::Failed
+            | ennoia_kernel::OperationStatus::Cancelled
+    ) {
         return Ok(HookDispatchResponse {
             handled: true,
             result: None,
             message: None,
         });
     }
-    let Some(conversation_id) = approval.scope.conversation_id.clone() else {
+    let Some(direct_state) = load_direct_reply_state(store, &operation.run_id).await? else {
         return Ok(HookDispatchResponse {
             handled: true,
             result: None,
             message: None,
         });
     };
-    let Some(message_id) = approval.scope.message_id.clone() else {
+    if direct_state.pending_operation_id.as_deref() != Some(operation.id.as_str()) {
         return Ok(HookDispatchResponse {
             handled: true,
             result: None,
             message: None,
         });
-    };
+    }
     let client = HostApiClient::new(&runtime.runtime_paths)?;
-    let messages = client
+    let agents = load_agent_configs(&runtime.runtime_paths)?;
+    let model_endpoints = load_model_endpoint_configs(&runtime.runtime_paths)?;
+    let conversation_messages = client
         .dispatch_action(
             "message.list",
-            serde_json::json!({ "conversation_id": conversation_id }),
+            serde_json::json!({ "conversation_id": operation.conversation_id }),
             JsonValue::Null,
         )
         .await
         .map_err(|error| error.to_string())?;
-    let Some(message) = messages.as_array().and_then(|items| {
-        items
-            .iter()
-            .find(|item| item.get("id").and_then(JsonValue::as_str) == Some(message_id.as_str()))
-    }) else {
-        return Ok(HookDispatchResponse {
-            handled: true,
-            result: None,
-            message: Some("message missing for approval resume".to_string()),
-        });
+    let loop_state = AgentReplyLoopState {
+        messages: direct_state.messages,
+        pending_tool_calls: direct_state.pending_tool_calls,
+        pending_operation_id: direct_state.pending_operation_id,
+        pending_operation_kind: direct_state.pending_operation_kind,
+        next_iteration: direct_state.next_iteration,
+        last_process_text: direct_state.last_process_text,
     };
-    let payload = serde_json::json!({
-        "conversation": { "id": conversation_id },
-        "message": message,
-        "addressed_agents": [approval.agent_id],
-        "workflow_resume_run_id": approval.scope.run_id,
-    });
-    generate_conversation_agent_reply(&client, runtime, store, &payload).await?;
+    match continue_agent_reply_from_state(
+        &client,
+        &runtime.runtime_paths,
+        &agents,
+        &model_endpoints,
+        &operation.conversation_id,
+        direct_state.lane_id.as_deref(),
+        direct_state.message_id.as_deref(),
+        &conversation_messages,
+        None,
+        &operation.run_id,
+        &operation.agent_id,
+        loop_state,
+        Some(store),
+        Some(operation.clone()),
+    )
+    .await
+    {
+        Ok(AgentReplyProgress::Completed(reply_body)) => {
+            append_agent_conversation_reply(
+                &client,
+                &operation.conversation_id,
+                direct_state.lane_id.as_deref(),
+                direct_state.message_id.as_deref(),
+                &operation.agent_id,
+                if operation.run_id.starts_with("direct-") {
+                    None
+                } else {
+                    Some(operation.run_id.as_str())
+                },
+                &reply_body,
+            )
+            .await?;
+        }
+        Ok(AgentReplyProgress::Pending) => {}
+        Err(error) if error.is_permission_approval() => {}
+        Err(error) => {
+            append_agent_conversation_reply(
+                &client,
+                &operation.conversation_id,
+                direct_state.lane_id.as_deref(),
+                direct_state.message_id.as_deref(),
+                &operation.agent_id,
+                if operation.run_id.starts_with("direct-") {
+                    None
+                } else {
+                    Some(operation.run_id.as_str())
+                },
+                &format_host_api_error_for_conversation(&error),
+            )
+            .await?;
+        }
+    }
     Ok(HookDispatchResponse {
         handled: true,
         result: None,
         message: None,
     })
+}
+
+pub async fn recover_stale_conversation_receipts(
+    runtime: &WorkflowRuntime,
+    store: &SqliteRuntimeStore,
+) -> Result<(), String> {
+    let client = HostApiClient::new(&runtime.runtime_paths)?;
+    let rows = sqlx::query(
+        "SELECT conversation_id, message_id, agent_id, updated_at
+         FROM conversation_message_receipts
+         WHERE status = 'running'
+         ORDER BY updated_at ASC",
+    )
+    .fetch_all(store.pool())
+    .await
+    .map_err(|error| format!("load running conversation receipts failed: {error}"))?;
+    let row_count = rows.len();
+
+    if row_count > 0 {
+        eprintln!(
+            "[workflow] recovering {} orphaned conversation receipt(s)",
+            row_count
+        );
+    }
+
+    for row in rows {
+        let conversation_id = row.get::<String, _>("conversation_id");
+        let message_id = row.get::<String, _>("message_id");
+        let agent_id = row.get::<String, _>("agent_id");
+        let result: Result<(), String> = async {
+            let messages = client
+                .dispatch_action(
+                    "message.list",
+                    serde_json::json!({ "conversation_id": conversation_id }),
+                    JsonValue::Null,
+                )
+                .await
+                .map_err(|error| error.to_string())?;
+            let Some(message_list) = messages.as_array() else {
+                return Err("conversation message list payload is not an array".to_string());
+            };
+            let Some(source_message) = message_list.iter().find(|item| {
+                item.get("id").and_then(JsonValue::as_str) == Some(message_id.as_str())
+            }) else {
+                mark_conversation_message_receipt_status(
+                    store,
+                    &conversation_id,
+                    Some(&message_id),
+                    &agent_id,
+                    "failed",
+                )
+                .await?;
+                return Ok(());
+            };
+
+            let source_branch_scope = workflow_branch_scope_id(
+                payload_string_field(source_message, &["branch_id"]).as_deref(),
+                payload_string_field(source_message, &["lane_id"]).as_deref(),
+            );
+            let source_created_at =
+                payload_string_field(source_message, &["created_at"]).unwrap_or_default();
+            let already_replied = message_list.iter().any(|item| {
+                payload_string_field(item, &["role"]).as_deref() == Some("agent")
+                    && payload_string_field(item, &["sender"]).as_deref() == Some(agent_id.as_str())
+                    && payload_string_field(item, &["created_at"])
+                        .is_some_and(|created_at| created_at >= source_created_at)
+                    && workflow_branch_scope_id(
+                        payload_string_field(item, &["branch_id"]).as_deref(),
+                        payload_string_field(item, &["lane_id"]).as_deref(),
+                    ) == source_branch_scope
+            });
+            if already_replied {
+                mark_conversation_message_receipt_status(
+                    store,
+                    &conversation_id,
+                    Some(&message_id),
+                    &agent_id,
+                    "completed",
+                )
+                .await?;
+                return Ok(());
+            }
+
+            let payload = serde_json::json!({
+                "conversation": { "id": conversation_id },
+                "message": source_message,
+                "addressed_agents": [agent_id],
+                "workflow_receipt_recovery": true,
+            });
+            generate_conversation_agent_reply(&client, runtime, store, &payload).await
+        }
+        .await;
+
+        if let Err(error) = result {
+            eprintln!(
+                "[workflow] conversation receipt recovery failed: conversation_id={conversation_id} message_id={message_id} agent_id={agent_id} error={error}"
+            );
+            let _ = mark_conversation_message_receipt_status(
+                store,
+                &conversation_id,
+                Some(&message_id),
+                &agent_id,
+                "failed",
+            )
+            .await;
+        }
+    }
+
+    if row_count > 0 {
+        eprintln!("[workflow] orphaned conversation receipt recovery finished");
+    }
+
+    Ok(())
 }
 
 async fn generate_conversation_agent_reply(
@@ -463,7 +740,10 @@ async fn generate_conversation_agent_reply(
         .trim()
         .to_string();
     let message_id = payload_string_field(payload, &["message", "id"]);
-    let workflow_resume_run_id = payload_string_field(payload, &["workflow_resume_run_id"]);
+    let workflow_receipt_recovery = payload
+        .get("workflow_receipt_recovery")
+        .and_then(JsonValue::as_bool)
+        .unwrap_or(false);
     let addressed_agents = {
         let explicit = payload_string_array_field(payload, &["addressed_agents"]);
         if explicit.is_empty() {
@@ -481,8 +761,32 @@ async fn generate_conversation_agent_reply(
     let owner = payload_owner(payload).unwrap_or_else(|| OwnerRef::global("runtime"));
 
     for agent_id in &addressed_agents {
-        if workflow_resume_run_id.is_none()
-            && already_processed_conversation_message(
+        workflow_trace(
+            "conversation.start",
+            &conversation_id,
+            message_id.as_deref(),
+            agent_id,
+            format!(
+                "body_len={} recovery={} branch_scope={}",
+                body.len(),
+                workflow_receipt_recovery,
+                branch_scope
+            ),
+        );
+        let claimed = if workflow_receipt_recovery {
+            if let Some(message_id) = message_id.as_deref() {
+                mark_conversation_message_receipt_status(
+                    store,
+                    &conversation_id,
+                    Some(message_id),
+                    agent_id,
+                    "running",
+                )
+                .await?;
+            }
+            true
+        } else {
+            claim_conversation_message_receipt(
                 store,
                 &conversation_id,
                 message_id.as_deref(),
@@ -490,20 +794,26 @@ async fn generate_conversation_agent_reply(
                 client.processing_stale_after_ms,
             )
             .await?
-        {
-            continue;
-        }
-        if workflow_resume_run_id.is_none() {
-            mark_conversation_message_receipt_status(
-                store,
+        };
+        if !claimed {
+            workflow_trace(
+                "conversation.skip",
                 &conversation_id,
                 message_id.as_deref(),
                 agent_id,
-                "running",
-            )
-            .await?;
+                "receipt already claimed",
+            );
+            continue;
         }
         let agent_result: Result<(), String> = async {
+            let started = Instant::now();
+            workflow_trace(
+                "message.list.start",
+                &conversation_id,
+                message_id.as_deref(),
+                agent_id,
+                "loading conversation messages",
+            );
             let conversation_messages = client
                 .dispatch_action(
                     "message.list",
@@ -518,6 +828,25 @@ async fn generate_conversation_agent_reply(
                 )
                 .await
                 .map_err(|error| error.to_string())?;
+            workflow_trace(
+                "message.list.done",
+                &conversation_id,
+                message_id.as_deref(),
+                agent_id,
+                format!(
+                    "elapsed_ms={} count={}",
+                    started.elapsed().as_millis(),
+                    conversation_messages.as_array().map(|items| items.len()).unwrap_or(0)
+                ),
+            );
+            let memory_started = Instant::now();
+            workflow_trace(
+                "memory.start",
+                &conversation_id,
+                message_id.as_deref(),
+                agent_id,
+                "assembling memory context",
+            );
             let memory_context = assemble_memory_context(
                 client,
                 &owner,
@@ -532,54 +861,45 @@ async fn generate_conversation_agent_reply(
                 ),
             )
             .await;
+            workflow_trace(
+                "memory.done",
+                &conversation_id,
+                message_id.as_deref(),
+                agent_id,
+                format!(
+                    "elapsed_ms={} has_context={}",
+                    memory_started.elapsed().as_millis(),
+                    memory_context.is_some()
+                ),
+            );
             let metadata = serde_json::json!({
                 "origin": "workflow.conversation_message.created",
                 "message_id": message_id,
             });
 
-            if let Some(run_id) = workflow_resume_run_id.as_deref() {
-                if let Some(run_response) =
-                    load_run_response_for_agent(store, &conversation_id, agent_id, run_id).await?
-                {
-                    execute_workflow_run(
-                        client,
-                        runtime,
-                        store,
-                        &agents,
-                        &model_endpoints,
-                        &conversation_id,
-                        lane_id.as_deref(),
-                        message_id.as_deref(),
-                        &conversation_messages,
-                        &run_response,
-                        agent_id,
-                        true,
-                    )
-                    .await?;
-                } else if run_id.starts_with("direct-") {
-                    execute_direct_reply(
-                        client,
-                        &runtime.runtime_paths,
-                        &agents,
-                        &model_endpoints,
-                        &conversation_id,
-                        lane_id.as_deref(),
-                        message_id.as_deref(),
-                        &conversation_messages,
-                        agent_id,
-                        run_id,
-                    )
-                    .await?;
-                } else {
-                    return Err(format!("workflow run '{run_id}' not found for agent"));
-                }
-                return Ok(());
-            }
-
+            let session_started = Instant::now();
+            workflow_trace(
+                "session.start",
+                &conversation_id,
+                message_id.as_deref(),
+                agent_id,
+                "loading active workflow session",
+            );
             let mut active_session =
                 load_active_workflow_session(client, &conversation_id, agent_id, &branch_scope)
                     .await
                     .map_err(|error| error.to_string())?;
+            workflow_trace(
+                "session.done",
+                &conversation_id,
+                message_id.as_deref(),
+                agent_id,
+                format!(
+                    "elapsed_ms={} active={}",
+                    session_started.elapsed().as_millis(),
+                    active_session.is_some()
+                ),
+            );
 
             if active_session.is_some() && is_explicit_new_topic(&body) {
                 abandon_active_workflow_session(
@@ -645,6 +965,13 @@ async fn generate_conversation_agent_reply(
 
             match decide_conversation_route(&body, active_session.as_ref()) {
                 ConversationRoute::ManagedDiscussion => {
+                    workflow_trace(
+                        "route",
+                        &conversation_id,
+                        message_id.as_deref(),
+                        agent_id,
+                        "managed_discussion",
+                    );
                     let discussion_reply = upsert_managed_discussion(
                         client,
                         runtime,
@@ -675,8 +1002,16 @@ async fn generate_conversation_agent_reply(
                 }
                 ConversationRoute::DirectReply => {
                     let direct_run_id = synthetic_direct_run_id(agent_id, message_id.as_deref());
+                    workflow_trace(
+                        "route",
+                        &conversation_id,
+                        message_id.as_deref(),
+                        agent_id,
+                        format!("direct_reply run_id={direct_run_id}"),
+                    );
                     execute_direct_reply(
                         client,
+                        store,
                         &runtime.runtime_paths,
                         &agents,
                         &model_endpoints,
@@ -688,26 +1023,38 @@ async fn generate_conversation_agent_reply(
                         &direct_run_id,
                     )
                     .await?;
+                    workflow_trace(
+                        "direct.done",
+                        &conversation_id,
+                        message_id.as_deref(),
+                        agent_id,
+                        "execute_direct_reply returned",
+                    );
                 }
             }
 
             Ok(())
         }
         .await;
-        if workflow_resume_run_id.is_none() {
-            mark_conversation_message_receipt_status(
-                store,
-                &conversation_id,
-                message_id.as_deref(),
-                agent_id,
-                if agent_result.is_ok() {
-                    "completed"
-                } else {
-                    "failed"
-                },
-            )
-            .await?;
-        }
+        workflow_trace(
+            "conversation.finish",
+            &conversation_id,
+            message_id.as_deref(),
+            agent_id,
+            if agent_result.is_ok() { "ok" } else { "error" },
+        );
+        mark_conversation_message_receipt_status(
+            store,
+            &conversation_id,
+            message_id.as_deref(),
+            agent_id,
+            if agent_result.is_ok() {
+                "completed"
+            } else {
+                "failed"
+            },
+        )
+        .await?;
         agent_result?;
     }
 
@@ -905,7 +1252,7 @@ async fn load_workflow_draft(
     map_workflow_draft_row(row)
 }
 
-async fn already_processed_conversation_message(
+async fn claim_conversation_message_receipt(
     store: &SqliteRuntimeStore,
     conversation_id: &str,
     message_id: Option<&str>,
@@ -915,6 +1262,10 @@ async fn already_processed_conversation_message(
     let Some(message_id) = message_id.map(str::trim).filter(|value| !value.is_empty()) else {
         return Ok(false);
     };
+    let mut transaction =
+        store.pool().begin().await.map_err(|error| {
+            format!("begin conversation receipt claim transaction failed: {error}")
+        })?;
     let row = sqlx::query(
         "SELECT status, updated_at
          FROM conversation_message_receipts
@@ -924,20 +1275,46 @@ async fn already_processed_conversation_message(
     .bind(conversation_id)
     .bind(message_id)
     .bind(agent_id)
-    .fetch_optional(store.pool())
+    .fetch_optional(&mut *transaction)
     .await
     .map_err(|error| format!("load conversation message receipt failed: {error}"))?;
-    Ok(row.is_some_and(|item| {
-        let status = item.get::<String, _>("status");
-        if status == "completed" {
-            return true;
+    let now = Utc::now().to_rfc3339();
+    let should_claim = match row {
+        Some(item) => {
+            let status = item.get::<String, _>("status");
+            if status == "completed" {
+                false
+            } else if status == "running" {
+                let updated_at = item.get::<String, _>("updated_at");
+                !is_recent_receipt_timestamp(&updated_at, stale_after_ms)
+            } else {
+                true
+            }
         }
-        if status != "running" {
-            return false;
-        }
-        let updated_at = item.get::<String, _>("updated_at");
-        is_recent_receipt_timestamp(&updated_at, stale_after_ms)
-    }))
+        None => true,
+    };
+    if should_claim {
+        sqlx::query(
+            "INSERT INTO conversation_message_receipts
+             (conversation_id, message_id, agent_id, status, created_at, updated_at)
+             VALUES (?1, ?2, ?3, 'running', ?4, ?4)
+             ON CONFLICT(conversation_id, message_id, agent_id) DO UPDATE SET
+               status = 'running',
+               updated_at = excluded.updated_at",
+        )
+        .bind(conversation_id)
+        .bind(message_id)
+        .bind(agent_id)
+        .bind(&now)
+        .execute(&mut *transaction)
+        .await
+        .map_err(|error| format!("claim conversation message receipt failed: {error}"))?;
+    }
+    transaction
+        .commit()
+        .await
+        .map_err(|error| format!("commit conversation receipt claim failed: {error}"))?;
+    Ok(should_claim)
 }
 
 async fn mark_conversation_message_receipt_status(
@@ -968,6 +1345,139 @@ async fn mark_conversation_message_receipt_status(
     .await
     .map(|_| ())
     .map_err(|error| format!("save conversation message receipt failed: {error}"))
+}
+
+async fn load_direct_reply_state(
+    store: &SqliteRuntimeStore,
+    run_id: &str,
+) -> Result<Option<DirectReplyState>, String> {
+    let row = sqlx::query(
+        "SELECT run_id, conversation_id, lane_id, message_id, agent_id, messages_json,
+                pending_tool_calls_json, pending_operation_id, pending_operation_kind,
+                next_iteration, last_process_text, created_at, updated_at
+         FROM direct_reply_states
+         WHERE run_id = ?1
+         LIMIT 1",
+    )
+    .bind(run_id)
+    .fetch_optional(store.pool())
+    .await
+    .map_err(|error| format!("load direct reply state failed: {error}"))?;
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    let messages = serde_json::from_str::<Vec<JsonValue>>(&row.get::<String, _>("messages_json"))
+        .map_err(|error| format!("parse direct reply messages failed: {error}"))?;
+    let pending_tool_calls = serde_json::from_str::<Vec<AgentToolCall>>(
+        &row.get::<String, _>("pending_tool_calls_json"),
+    )
+    .map_err(|error| format!("parse direct reply tool calls failed: {error}"))?;
+    Ok(Some(DirectReplyState {
+        run_id: row.get("run_id"),
+        conversation_id: row.get("conversation_id"),
+        lane_id: row.get("lane_id"),
+        message_id: row.get("message_id"),
+        agent_id: row.get("agent_id"),
+        messages,
+        pending_tool_calls,
+        pending_operation_id: row.get("pending_operation_id"),
+        pending_operation_kind: row.get("pending_operation_kind"),
+        next_iteration: row.get::<i64, _>("next_iteration") as usize,
+        last_process_text: row.get("last_process_text"),
+        created_at: row.get("created_at"),
+        updated_at: row.get("updated_at"),
+    }))
+}
+
+async fn save_direct_reply_state(
+    store: &SqliteRuntimeStore,
+    state: &DirectReplyState,
+) -> Result<(), String> {
+    let messages_json =
+        serde_json::to_string(&state.messages).map_err(|error| error.to_string())?;
+    let pending_tool_calls_json =
+        serde_json::to_string(&state.pending_tool_calls).map_err(|error| error.to_string())?;
+    sqlx::query(
+        "INSERT INTO direct_reply_states
+         (run_id, conversation_id, lane_id, message_id, agent_id, messages_json,
+          pending_tool_calls_json, pending_operation_id, pending_operation_kind,
+          next_iteration, last_process_text, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+         ON CONFLICT(run_id) DO UPDATE SET
+           conversation_id = excluded.conversation_id,
+           lane_id = excluded.lane_id,
+           message_id = excluded.message_id,
+           agent_id = excluded.agent_id,
+           messages_json = excluded.messages_json,
+           pending_tool_calls_json = excluded.pending_tool_calls_json,
+           pending_operation_id = excluded.pending_operation_id,
+           pending_operation_kind = excluded.pending_operation_kind,
+           next_iteration = excluded.next_iteration,
+           last_process_text = excluded.last_process_text,
+           updated_at = excluded.updated_at",
+    )
+    .bind(&state.run_id)
+    .bind(&state.conversation_id)
+    .bind(&state.lane_id)
+    .bind(&state.message_id)
+    .bind(&state.agent_id)
+    .bind(messages_json)
+    .bind(pending_tool_calls_json)
+    .bind(&state.pending_operation_id)
+    .bind(&state.pending_operation_kind)
+    .bind(state.next_iteration as i64)
+    .bind(&state.last_process_text)
+    .bind(&state.created_at)
+    .bind(&state.updated_at)
+    .execute(store.pool())
+    .await
+    .map(|_| ())
+    .map_err(|error| format!("save direct reply state failed: {error}"))
+}
+
+async fn delete_direct_reply_state(store: &SqliteRuntimeStore, run_id: &str) -> Result<(), String> {
+    sqlx::query("DELETE FROM direct_reply_states WHERE run_id = ?1")
+        .bind(run_id)
+        .execute(store.pool())
+        .await
+        .map(|_| ())
+        .map_err(|error| format!("delete direct reply state failed: {error}"))
+}
+
+async fn persist_direct_reply_loop_state(
+    store: &SqliteRuntimeStore,
+    conversation_id: &str,
+    lane_id: Option<&str>,
+    message_id: Option<&str>,
+    agent_id: &str,
+    run_id: &str,
+    state: &AgentReplyLoopState,
+) -> Result<(), String> {
+    let existing = load_direct_reply_state(store, run_id).await?;
+    let now = Utc::now().to_rfc3339();
+    let created_at = existing
+        .as_ref()
+        .map(|item| item.created_at.clone())
+        .unwrap_or_else(|| now.clone());
+    save_direct_reply_state(
+        store,
+        &DirectReplyState {
+            run_id: run_id.to_string(),
+            conversation_id: conversation_id.to_string(),
+            lane_id: lane_id.map(str::to_string),
+            message_id: message_id.map(str::to_string),
+            agent_id: agent_id.to_string(),
+            messages: state.messages.clone(),
+            pending_tool_calls: state.pending_tool_calls.clone(),
+            pending_operation_id: state.pending_operation_id.clone(),
+            pending_operation_kind: state.pending_operation_kind.clone(),
+            next_iteration: state.next_iteration,
+            last_process_text: state.last_process_text.clone(),
+            created_at,
+            updated_at: now,
+        },
+    )
+    .await
 }
 
 async fn save_workflow_draft(
@@ -1304,13 +1814,11 @@ async fn generate_draft_plan(
                     "tools": [],
                     "metadata": metadata,
                 }),
-                permission_actor_context(
-                    agent_id,
-                    "workflow.provider_generate",
-                    Some(conversation_id),
-                    Some(&draft_run_id),
-                    message_id,
-                ),
+                agent_id,
+                conversation_id,
+                lane_id,
+                &draft_run_id,
+                message_id,
             )
             .await?;
         if let Some(reasoning) = read_provider_reasoning(&response) {
@@ -1511,7 +2019,7 @@ async fn execute_workflow_run(
         Some(run_stage_label(&run_response)),
     )
     .await;
-    let reply_body = match generate_real_agent_reply(
+    let reply_progress = match generate_real_agent_reply(
         client,
         store,
         &runtime.runtime_paths,
@@ -1526,7 +2034,7 @@ async fn execute_workflow_run(
     )
     .await
     {
-        Ok(reply) => {
+        Ok(AgentReplyProgress::Completed(reply)) => {
             let _ = transition_workflow_run_stage(
                 store,
                 run_response_id(&run_response).unwrap_or_default(),
@@ -1546,6 +2054,7 @@ async fn execute_workflow_run(
             .await;
             reply
         }
+        Ok(AgentReplyProgress::Pending) => return Ok(()),
         Err(error) if error.is_permission_approval() => {
             let _ = transition_workflow_run_stage(
                 store,
@@ -1594,7 +2103,7 @@ async fn execute_workflow_run(
         message_id,
         agent_id,
         run_response_id(&run_response),
-        &reply_body,
+        &reply_progress,
     )
     .await
 }
@@ -1672,6 +2181,7 @@ fn merge_json_objects(left: JsonValue, right: JsonValue) -> JsonValue {
 
 async fn execute_direct_reply(
     client: &HostApiClient,
+    store: &SqliteRuntimeStore,
     runtime_paths: &Arc<RuntimePaths>,
     agents: &[AgentConfig],
     model_endpoints: &[ModelEndpointConfig],
@@ -1682,7 +2192,53 @@ async fn execute_direct_reply(
     agent_id: &str,
     run_id: &str,
 ) -> Result<(), String> {
-    match generate_agent_reply(
+    let initial_state = AgentReplyLoopState {
+        messages: normalize_conversation_messages_for_provider(conversation_messages, agent_id),
+        pending_tool_calls: Vec::new(),
+        pending_operation_id: None,
+        pending_operation_kind: None,
+        next_iteration: 0,
+        last_process_text: None,
+    };
+    drive_direct_reply(
+        client,
+        store,
+        runtime_paths,
+        agents,
+        model_endpoints,
+        conversation_id,
+        lane_id,
+        message_id,
+        conversation_messages,
+        agent_id,
+        run_id,
+        initial_state,
+    )
+    .await
+}
+
+async fn drive_direct_reply(
+    client: &HostApiClient,
+    store: &SqliteRuntimeStore,
+    runtime_paths: &Arc<RuntimePaths>,
+    agents: &[AgentConfig],
+    model_endpoints: &[ModelEndpointConfig],
+    conversation_id: &str,
+    lane_id: Option<&str>,
+    message_id: Option<&str>,
+    conversation_messages: &JsonValue,
+    agent_id: &str,
+    run_id: &str,
+    initial_state: AgentReplyLoopState,
+) -> Result<(), String> {
+    workflow_trace(
+        "direct.drive.start",
+        conversation_id,
+        message_id,
+        agent_id,
+        format!("run_id={run_id}"),
+    );
+    match continue_agent_reply_from_state(
         client,
         runtime_paths,
         agents,
@@ -1694,10 +2250,20 @@ async fn execute_direct_reply(
         None,
         run_id,
         agent_id,
+        initial_state,
+        Some(store),
+        None,
     )
     .await
     {
-        Ok(reply_body) => {
+        Ok(AgentReplyProgress::Completed(reply_body)) => {
+            workflow_trace(
+                "direct.drive.completed",
+                conversation_id,
+                message_id,
+                agent_id,
+                format!("run_id={run_id} reply_len={}", reply_body.len()),
+            );
             append_agent_conversation_reply(
                 client,
                 conversation_id,
@@ -1709,8 +2275,35 @@ async fn execute_direct_reply(
             )
             .await
         }
-        Err(error) if error.is_permission_approval() => Ok(()),
+        Ok(AgentReplyProgress::Pending) => {
+            workflow_trace(
+                "direct.drive.pending",
+                conversation_id,
+                message_id,
+                agent_id,
+                format!("run_id={run_id}"),
+            );
+            Ok(())
+        }
+        Err(error) if error.is_permission_approval() => {
+            workflow_trace(
+                "direct.drive.blocked",
+                conversation_id,
+                message_id,
+                agent_id,
+                format!("run_id={run_id} error={}", error.message()),
+            );
+            Ok(())
+        }
         Err(error) => {
+            workflow_trace(
+                "direct.drive.failed",
+                conversation_id,
+                message_id,
+                agent_id,
+                format!("run_id={run_id} error={}", error.message()),
+            );
+            let _ = delete_direct_reply_state(store, run_id).await;
             append_agent_conversation_reply(
                 client,
                 conversation_id,
@@ -1727,7 +2320,7 @@ async fn execute_direct_reply(
 
 async fn generate_real_agent_reply(
     client: &HostApiClient,
-    _store: &SqliteRuntimeStore,
+    store: &SqliteRuntimeStore,
     runtime_paths: &Arc<RuntimePaths>,
     agents: &[AgentConfig],
     model_endpoints: &[ModelEndpointConfig],
@@ -1737,11 +2330,11 @@ async fn generate_real_agent_reply(
     conversation_messages: &JsonValue,
     run_response: &JsonValue,
     agent_id: &str,
-) -> Result<String, HostApiError> {
+) -> Result<AgentReplyProgress, HostApiError> {
     let run_id = run_response_id(run_response)
         .unwrap_or_default()
         .to_string();
-    generate_agent_reply(
+    continue_agent_reply_from_state(
         client,
         runtime_paths,
         agents,
@@ -1753,11 +2346,21 @@ async fn generate_real_agent_reply(
         run_response.get("plan"),
         &run_id,
         agent_id,
+        AgentReplyLoopState {
+            messages: normalize_conversation_messages_for_provider(conversation_messages, agent_id),
+            pending_tool_calls: Vec::new(),
+            pending_operation_id: None,
+            pending_operation_kind: None,
+            next_iteration: 0,
+            last_process_text: None,
+        },
+        Some(store),
+        None,
     )
     .await
 }
 
-async fn generate_agent_reply(
+async fn continue_agent_reply_from_state(
     client: &HostApiClient,
     runtime_paths: &Arc<RuntimePaths>,
     agents: &[AgentConfig],
@@ -1765,11 +2368,28 @@ async fn generate_agent_reply(
     conversation_id: &str,
     lane_id: Option<&str>,
     message_id: Option<&str>,
-    conversation_messages: &JsonValue,
+    _conversation_messages: &JsonValue,
     plan: Option<&JsonValue>,
     run_id: &str,
     agent_id: &str,
-) -> Result<String, HostApiError> {
+    mut state: AgentReplyLoopState,
+    direct_state_store: Option<&SqliteRuntimeStore>,
+    resumed_operation: Option<OperationRecord>,
+) -> Result<AgentReplyProgress, HostApiError> {
+    workflow_trace(
+        "reply.loop.start",
+        conversation_id,
+        message_id,
+        agent_id,
+        format!(
+            "run_id={} iteration={} pending_op={:?} pending_kind={:?} pending_tools={}",
+            run_id,
+            state.next_iteration,
+            state.pending_operation_id,
+            state.pending_operation_kind,
+            state.pending_tool_calls.len()
+        ),
+    );
     let agent = agents
         .iter()
         .find(|item| item.id == agent_id)
@@ -1795,8 +2415,6 @@ async fn generate_agent_reply(
         )));
     }
 
-    let mut messages =
-        normalize_conversation_messages_for_provider(conversation_messages, agent_id);
     let tools = build_agent_builtin_tool_specs(agent);
     let context = build_agent_provider_context(
         client,
@@ -1821,90 +2439,107 @@ async fn generate_agent_reply(
         "agent_id": agent.id,
         "agent_display_name": agent.display_name,
     });
+    let mut resumed_operation = resumed_operation;
 
-    let mut last_process_text: Option<String> = None;
-    for _ in 0..6 {
-        let response = client
-            .provider_generate(
-                &model_endpoint.kind,
-                serde_json::json!({
-                    "model_endpoint": model_endpoint_runtime_request_config(model_endpoint),
-                    "model": model_id,
-                    "instructions": instructions,
-                    "system_prompt": build_agent_runtime_prompt(agent, run_id),
-                    "context": context,
-                    "messages": messages,
-                    "generation_options": agent.generation_options,
-                    "tools": tools,
-                    "tool_choice": "auto",
-                    "metadata": metadata,
-                }),
-                permission_actor_context(
-                    agent_id,
-                    "workflow.provider_generate",
-                    Some(conversation_id),
-                    Some(run_id),
-                    message_id,
-                ),
-            )
-            .await?;
-        let text = response
-            .get("text")
-            .and_then(JsonValue::as_str)
-            .map(str::trim)
-            .filter(|item| !item.is_empty())
-            .map(ToOwned::to_owned);
-        let reasoning = read_provider_reasoning(&response);
-        if let Some(reasoning) = reasoning.as_deref() {
-            let _ = append_reasoning_message(
-                client,
+    loop {
+        if let Some(operation) = resumed_operation.take() {
+            workflow_trace(
+                "reply.loop.resume",
                 conversation_id,
-                lane_id,
                 message_id,
                 agent_id,
-                Some(run_id),
-                reasoning,
-            )
-            .await;
-        }
-        let tool_calls = response
-            .get("tool_calls")
-            .cloned()
-            .map(serde_json::from_value::<Vec<AgentToolCall>>)
-            .transpose()
-            .map_err(|error| internal_error(format!("parse agent tool calls failed: {error}")))?
-            .unwrap_or_default();
-        if tool_calls.is_empty() {
-            return text.ok_or_else(|| internal_error("provider returned empty text"));
-        }
-        if let Some(progress_text) = text.as_deref() {
-            let normalized_progress = progress_text.trim();
-            if !normalized_progress.is_empty()
-                && last_process_text.as_deref() != Some(normalized_progress)
-            {
-                let _ = append_agent_process_message(
-                    client,
-                    conversation_id,
-                    lane_id,
-                    message_id,
-                    agent_id,
-                    Some(run_id),
-                    normalized_progress,
-                )
-                .await;
-                last_process_text = Some(normalized_progress.to_string());
+                format!(
+                    "run_id={} operation_id={} status={:?} pending_kind={:?}",
+                    run_id, operation.id, operation.status, state.pending_operation_kind
+                ),
+            );
+            if state.pending_operation_id.as_deref() == Some(operation.id.as_str()) {
+                if state.pending_operation_kind.as_deref() == Some("provider.generate") {
+                    state.pending_operation_id = None;
+                    state.pending_operation_kind = None;
+                    if let Some(response) = operation.output.clone() {
+                        if let Some(reply) = apply_provider_response(
+                            client,
+                            conversation_id,
+                            lane_id,
+                            message_id,
+                            agent_id,
+                            run_id,
+                            &mut state,
+                            &response,
+                            direct_state_store,
+                        )
+                        .await?
+                        {
+                            return Ok(AgentReplyProgress::Completed(reply));
+                        }
+                    } else {
+                        return Err(internal_error(operation_error_message(&operation)));
+                    }
+                } else if state
+                    .pending_operation_kind
+                    .as_deref()
+                    .is_some_and(|value| value.starts_with("runtime."))
+                {
+                    let tool_call = state.pending_tool_calls.first().cloned().ok_or_else(|| {
+                        internal_error("missing pending tool call for resumed operation")
+                    })?;
+                    state.pending_operation_id = None;
+                    state.pending_operation_kind = None;
+                    if operation.status == ennoia_kernel::OperationStatus::Succeeded {
+                        let result = operation.output.clone().ok_or_else(|| {
+                            internal_error("resumed tool operation returned no output")
+                        })?;
+                        let body = serialize_tool_message_envelope(&tool_call, Ok(result.clone()))
+                            .map_err(|error| {
+                                internal_error(format!("serialize tool message failed: {error}"))
+                            })?;
+                        let _ = append_tool_result_message(
+                            client,
+                            conversation_id,
+                            lane_id,
+                            message_id,
+                            agent_id,
+                            &body,
+                        )
+                        .await;
+                        state.pending_tool_calls.remove(0);
+                        state.messages.push(serde_json::json!({
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "content": body,
+                        }));
+                        if let Some(store) = direct_state_store {
+                            persist_direct_reply_loop_state(
+                                store,
+                                conversation_id,
+                                lane_id,
+                                message_id,
+                                agent_id,
+                                run_id,
+                                &state,
+                            )
+                            .await
+                            .map_err(internal_error)?;
+                        }
+                    } else {
+                        return Err(internal_error(operation_error_message(&operation)));
+                    }
+                }
             }
         }
-        messages.push(serde_json::json!({
-            "role": "assistant",
-            "content": text.unwrap_or_default(),
-            "tool_calls": tool_calls.iter().map(|call| serde_json::json!({
-                "id": call.id,
-                "name": call.name,
-                "arguments": call.arguments,
-            })).collect::<Vec<_>>(),
-        }));
-        for tool_call in tool_calls {
+
+        if let Some(tool_call) = state.pending_tool_calls.first().cloned() {
+            workflow_trace(
+                "tool.start",
+                conversation_id,
+                message_id,
+                agent_id,
+                format!(
+                    "run_id={} tool={} tool_call_id={}",
+                    run_id, tool_call.name, tool_call.id
+                ),
+            );
             match execute_builtin_tool(
                 client,
                 agent_id,
@@ -1916,7 +2551,25 @@ async fn generate_agent_reply(
             )
             .await
             {
-                Ok(result) => {
+                Ok(response)
+                    if response.operation.status == ennoia_kernel::OperationStatus::Succeeded =>
+                {
+                    workflow_trace(
+                        "tool.done",
+                        conversation_id,
+                        message_id,
+                        agent_id,
+                        format!(
+                            "run_id={} tool={} operation_id={} status={:?}",
+                            run_id,
+                            tool_call.name,
+                            response.operation.id,
+                            response.operation.status
+                        ),
+                    );
+                    let result = operation_response_output_or_content(response);
+                    state.pending_operation_id = None;
+                    state.pending_operation_kind = None;
                     let body = serialize_tool_message_envelope(&tool_call, Ok(result.clone()))
                         .map_err(|error| {
                             internal_error(format!("serialize tool message failed: {error}"))
@@ -1930,44 +2583,281 @@ async fn generate_agent_reply(
                         &body,
                     )
                     .await;
-                    messages.push(serde_json::json!({
+                    state.pending_tool_calls.remove(0);
+                    state.messages.push(serde_json::json!({
                         "role": "tool",
                         "tool_call_id": tool_call.id,
                         "content": body,
                     }));
+                    if let Some(store) = direct_state_store {
+                        persist_direct_reply_loop_state(
+                            store,
+                            conversation_id,
+                            lane_id,
+                            message_id,
+                            agent_id,
+                            run_id,
+                            &state,
+                        )
+                        .await
+                        .map_err(internal_error)?;
+                    }
+                    continue;
+                }
+                Ok(response) => {
+                    workflow_trace(
+                        "tool.pending",
+                        conversation_id,
+                        message_id,
+                        agent_id,
+                        format!(
+                            "run_id={} tool={} operation_id={} status={:?}",
+                            run_id,
+                            tool_call.name,
+                            response.operation.id,
+                            response.operation.status
+                        ),
+                    );
+                    state.pending_operation_id = Some(response.operation.id);
+                    state.pending_operation_kind = Some(format!(
+                        "runtime.{}",
+                        tool_call.name.trim().replace('_', ".")
+                    ));
+                    if let Some(store) = direct_state_store {
+                        persist_direct_reply_loop_state(
+                            store,
+                            conversation_id,
+                            lane_id,
+                            message_id,
+                            agent_id,
+                            run_id,
+                            &state,
+                        )
+                        .await
+                        .map_err(internal_error)?;
+                    }
+                    return Ok(AgentReplyProgress::Pending);
                 }
                 Err(error) => {
-                    let body = serialize_tool_message_envelope(&tool_call, Err(&error)).map_err(
-                        |serialize_error| {
-                            internal_error(format!(
-                                "serialize tool message failed: {serialize_error}"
-                            ))
-                        },
-                    )?;
-                    let _ = append_tool_result_message(
-                        client,
+                    workflow_trace(
+                        "tool.error",
+                        conversation_id,
+                        message_id,
+                        agent_id,
+                        format!(
+                            "run_id={} tool={} error={}",
+                            run_id,
+                            tool_call.name,
+                            error.message()
+                        ),
+                    );
+                    return Err(error);
+                }
+            }
+        }
+
+        if state.next_iteration >= 6 {
+            if let Some(store) = direct_state_store {
+                let _ = delete_direct_reply_state(store, run_id).await;
+            }
+            return Err(internal_error(
+                "agent tool loop exceeded maximum iterations",
+            ));
+        }
+
+        workflow_trace(
+            "provider.start",
+            conversation_id,
+            message_id,
+            agent_id,
+            format!("run_id={} iteration={}", run_id, state.next_iteration),
+        );
+        let response = client
+            .provider_generate_deferred(
+                &model_endpoint.kind,
+                serde_json::json!({
+                    "model_endpoint": model_endpoint_runtime_request_config(model_endpoint),
+                    "model": model_id,
+                    "instructions": instructions,
+                    "system_prompt": build_agent_runtime_prompt(agent, run_id),
+                    "context": context,
+                    "messages": state.messages,
+                    "generation_options": agent.generation_options,
+                    "tools": tools,
+                    "tool_choice": "auto",
+                    "metadata": metadata,
+                }),
+                agent_id,
+                conversation_id,
+                lane_id,
+                run_id,
+                message_id,
+            )
+            .await;
+        let response = match response {
+            Ok(response)
+                if response.operation.status == ennoia_kernel::OperationStatus::Succeeded =>
+            {
+                workflow_trace(
+                    "provider.done",
+                    conversation_id,
+                    message_id,
+                    agent_id,
+                    format!(
+                        "run_id={} operation_id={} status={:?}",
+                        run_id, response.operation.id, response.operation.status
+                    ),
+                );
+                let response = operation_response_output_or_content(response);
+                state.pending_operation_id = None;
+                state.pending_operation_kind = None;
+                response
+            }
+            Ok(response) => {
+                workflow_trace(
+                    "provider.pending",
+                    conversation_id,
+                    message_id,
+                    agent_id,
+                    format!(
+                        "run_id={} operation_id={} status={:?}",
+                        run_id, response.operation.id, response.operation.status
+                    ),
+                );
+                state.pending_operation_id = Some(response.operation.id);
+                state.pending_operation_kind = Some("provider.generate".to_string());
+                if let Some(store) = direct_state_store {
+                    persist_direct_reply_loop_state(
+                        store,
                         conversation_id,
                         lane_id,
                         message_id,
                         agent_id,
-                        &body,
+                        run_id,
+                        &state,
                     )
-                    .await;
-                    if error.is_permission_approval() {
-                        return Err(error);
-                    }
-                    messages.push(serde_json::json!({
-                        "role": "tool",
-                        "tool_call_id": tool_call.id,
-                        "content": body,
-                    }));
+                    .await
+                    .map_err(internal_error)?;
                 }
+                return Ok(AgentReplyProgress::Pending);
             }
+            Err(error) => {
+                workflow_trace(
+                    "provider.error",
+                    conversation_id,
+                    message_id,
+                    agent_id,
+                    format!("run_id={} error={}", run_id, error.message()),
+                );
+                return Err(error);
+            }
+        };
+        if let Some(reply) = apply_provider_response(
+            client,
+            conversation_id,
+            lane_id,
+            message_id,
+            agent_id,
+            run_id,
+            &mut state,
+            &response,
+            direct_state_store,
+        )
+        .await?
+        {
+            return Ok(AgentReplyProgress::Completed(reply));
         }
     }
-    Err(internal_error(
-        "agent tool loop exceeded maximum iterations",
-    ))
+}
+
+async fn apply_provider_response(
+    client: &HostApiClient,
+    conversation_id: &str,
+    lane_id: Option<&str>,
+    message_id: Option<&str>,
+    agent_id: &str,
+    run_id: &str,
+    state: &mut AgentReplyLoopState,
+    response: &JsonValue,
+    direct_state_store: Option<&SqliteRuntimeStore>,
+) -> Result<Option<String>, HostApiError> {
+    state.next_iteration += 1;
+    let text = response
+        .get("text")
+        .and_then(JsonValue::as_str)
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+        .map(ToOwned::to_owned);
+    let reasoning = read_provider_reasoning(response);
+    if let Some(reasoning) = reasoning.as_deref() {
+        let _ = append_reasoning_message(
+            client,
+            conversation_id,
+            lane_id,
+            message_id,
+            agent_id,
+            Some(run_id),
+            reasoning,
+        )
+        .await;
+    }
+    let tool_calls = response
+        .get("tool_calls")
+        .cloned()
+        .map(serde_json::from_value::<Vec<AgentToolCall>>)
+        .transpose()
+        .map_err(|error| internal_error(format!("parse agent tool calls failed: {error}")))?
+        .unwrap_or_default();
+    if tool_calls.is_empty() {
+        if let Some(store) = direct_state_store {
+            let _ = delete_direct_reply_state(store, run_id).await;
+        }
+        return Ok(Some(
+            text.ok_or_else(|| internal_error("provider returned empty text"))?,
+        ));
+    }
+    if let Some(progress_text) = text.as_deref() {
+        let normalized_progress = progress_text.trim();
+        if !normalized_progress.is_empty()
+            && state.last_process_text.as_deref() != Some(normalized_progress)
+        {
+            let _ = append_agent_process_message(
+                client,
+                conversation_id,
+                lane_id,
+                message_id,
+                agent_id,
+                Some(run_id),
+                normalized_progress,
+            )
+            .await;
+            state.last_process_text = Some(normalized_progress.to_string());
+        }
+    }
+    state.messages.push(serde_json::json!({
+        "role": "assistant",
+        "content": text.unwrap_or_default(),
+        "tool_calls": tool_calls.iter().map(|call| serde_json::json!({
+            "id": call.id,
+            "name": call.name,
+            "arguments": call.arguments,
+        })).collect::<Vec<_>>(),
+    }));
+    state.pending_tool_calls = tool_calls;
+    if let Some(store) = direct_state_store {
+        persist_direct_reply_loop_state(
+            store,
+            conversation_id,
+            lane_id,
+            message_id,
+            agent_id,
+            run_id,
+            state,
+        )
+        .await
+        .map_err(internal_error)?;
+    }
+    Ok(None)
 }
 
 async fn execute_builtin_tool(
@@ -1978,14 +2868,15 @@ async fn execute_builtin_tool(
     message_id: Option<&str>,
     run_id: &str,
     tool_call: &AgentToolCall,
-) -> Result<JsonValue, HostApiError> {
+) -> Result<OperationPerformResponse, HostApiError> {
     match tool_call.name.as_str() {
         "fs_read" => {
             client
-                .execute_operation(
+                .execute_operation_deferred(
                     "fs.read",
                     agent_id,
                     conversation_id,
+                    _lane_id,
                     run_id,
                     message_id,
                     tool_call.arguments.clone(),
@@ -1994,10 +2885,11 @@ async fn execute_builtin_tool(
         }
         "fs_write" => {
             client
-                .execute_operation(
+                .execute_operation_deferred(
                     "fs.write",
                     agent_id,
                     conversation_id,
+                    _lane_id,
                     run_id,
                     message_id,
                     tool_call.arguments.clone(),
@@ -2006,10 +2898,11 @@ async fn execute_builtin_tool(
         }
         "command_exec" => {
             client
-                .execute_operation(
+                .execute_operation_deferred(
                     "command.exec",
                     agent_id,
                     conversation_id,
+                    _lane_id,
                     run_id,
                     message_id,
                     tool_call.arguments.clone(),
@@ -2018,10 +2911,11 @@ async fn execute_builtin_tool(
         }
         "net_fetch" => {
             client
-                .execute_operation(
+                .execute_operation_deferred(
                     "net.fetch",
                     agent_id,
                     conversation_id,
+                    _lane_id,
                     run_id,
                     message_id,
                     tool_call.arguments.clone(),
@@ -2326,13 +3220,13 @@ fn workflow_run_matches_lane(run_lane_id: Option<&str>, current_lane_id: Option<
 
 async fn load_run_response_for_agent(
     store: &SqliteRuntimeStore,
-    conversation_id: &str,
+    _conversation_id: &str,
     agent_id: &str,
     run_id: &str,
 ) -> Result<Option<JsonValue>, String> {
-    let detail = load_run_detail_json(store, run_id).await?.ok_or_else(|| {
-        format!("workflow run '{run_id}' not found for conversation '{conversation_id}'")
-    })?;
+    let Some(detail) = load_run_detail_json(store, run_id).await? else {
+        return Ok(None);
+    };
     Ok(run_response_has_assigned_agent(&detail, agent_id).then_some(detail))
 }
 
@@ -2780,19 +3674,30 @@ fn serialize_tool_message_envelope(
             result: Some(result),
             error: None,
         },
-        Err(error) => ToolMessageEnvelope {
-            kind: "ennoia.tool_call",
-            tool_call_id: tool_call.id.clone(),
-            tool_name: tool_call.name.trim().replace('_', "."),
-            status: "failed".to_string(),
-            arguments: tool_call.arguments.clone(),
-            result: None,
-            error: Some(ToolMessageError {
-                code: error_code_string(error.code()),
-                message: error.message().to_string(),
-                details: error.details().clone(),
-            }),
-        },
+        Err(error) => {
+            let error_details = error.details().clone();
+            let error_status = if error.code() == ErrorCode::Forbidden
+                && (error_details.get("decision").and_then(JsonValue::as_str) == Some("ask")
+                    || error.is_permission_approval())
+            {
+                "blocked"
+            } else {
+                "failed"
+            };
+            ToolMessageEnvelope {
+                kind: "ennoia.tool_call",
+                tool_call_id: tool_call.id.clone(),
+                tool_name: tool_call.name.trim().replace('_', "."),
+                status: error_status.to_string(),
+                arguments: tool_call.arguments.clone(),
+                result: None,
+                error: Some(ToolMessageError {
+                    code: error_code_string(error.code()),
+                    message: error.message().to_string(),
+                    details: error_details,
+                }),
+            }
+        }
     };
     serde_json::to_string(&envelope)
 }
@@ -3209,6 +4114,10 @@ fn humanize_agent_tool_summary(id: &str, kind: &str, contract: &str) -> String {
     }
 }
 
+fn operation_response_output_or_content(response: OperationPerformResponse) -> JsonValue {
+    response.operation.output.unwrap_or(response.content)
+}
+
 fn read_server_config(runtime_paths: &Arc<RuntimePaths>) -> Result<ServerConfig, String> {
     let contents = fs::read_to_string(runtime_paths.server_config_file())
         .map_err(|error| format!("read server config failed: {error}"))?;
@@ -3368,6 +4277,18 @@ fn format_host_api_error_for_conversation(error: &HostApiError) -> String {
     format!("{heading}\n{message}")
 }
 
+fn operation_error_message(operation: &OperationRecord) -> String {
+    operation
+        .error
+        .as_ref()
+        .and_then(|value| value.get("message"))
+        .and_then(JsonValue::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("operation failed")
+        .to_string()
+}
+
 fn internal_error(message: impl Into<String>) -> HostApiError {
     HostApiError {
         body: ApiErrorBody {
@@ -3385,15 +4306,16 @@ fn host_response_error(response: ennoia_kernel::ExtensionRpcResponse) -> HostApi
     let Some(error) = response.error else {
         return internal_error("host capability returned failure without error payload");
     };
+    let code = parse_host_error_code(&error.code);
     HostApiError {
         body: ApiErrorBody {
-            code: parse_host_error_code(&error.code),
+            code,
             message: error.message,
             request_id: None,
             trace_id: None,
-            details: JsonValue::Null,
+            details: error.details.unwrap_or(JsonValue::Null),
             retryable: matches!(
-                parse_host_error_code(&error.code),
+                code,
                 ErrorCode::Internal | ErrorCode::Timeout | ErrorCode::RateLimited
             ),
         },
@@ -3453,4 +4375,144 @@ fn error_code_string(code: ErrorCode) -> String {
         ErrorCode::Internal => "internal",
     }
     .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::runtime::sqlite_store::initialize_workflow_schema;
+    use sqlx::SqlitePool;
+
+    #[test]
+    fn host_response_error_preserves_structured_details() {
+        let error = host_response_error(ennoia_kernel::ExtensionRpcResponse::failure_with_details(
+            "forbidden",
+            "approval required: action=command.exec, approval_id=apr-1",
+            Some(serde_json::json!({
+                "decision": "ask",
+                "approval_id": "apr-1",
+            })),
+        ));
+
+        assert_eq!(error.code(), ErrorCode::Forbidden);
+        assert_eq!(
+            error.details(),
+            &serde_json::json!({
+                "decision": "ask",
+                "approval_id": "apr-1",
+            })
+        );
+    }
+
+    #[test]
+    fn approval_required_tool_call_without_details_is_blocked() {
+        let tool_call = AgentToolCall {
+            id: "call-1".to_string(),
+            name: "command_exec".to_string(),
+            arguments: serde_json::json!({
+                "command": "cmd",
+                "args": ["mkdir", "C:/tmp/demo"],
+            }),
+        };
+        let error = HostApiError {
+            body: ApiErrorBody {
+                code: ErrorCode::Forbidden,
+                message: "approval required: action=command.exec, approval_id=apr-1".to_string(),
+                request_id: None,
+                trace_id: None,
+                details: JsonValue::Null,
+                retryable: false,
+            },
+        };
+
+        let serialized =
+            serialize_tool_message_envelope(&tool_call, Err(&error)).expect("serialize envelope");
+        let parsed: JsonValue = serde_json::from_str(&serialized).expect("parse envelope");
+        assert_eq!(
+            parsed.get("status").and_then(JsonValue::as_str),
+            Some("blocked")
+        );
+    }
+
+    #[tokio::test]
+    async fn missing_direct_run_resume_does_not_error() {
+        let pool = SqlitePool::connect("sqlite::memory:")
+            .await
+            .expect("connect sqlite memory");
+        initialize_workflow_schema(&pool)
+            .await
+            .expect("initialize workflow schema");
+        let store = SqliteRuntimeStore::new(pool);
+
+        let detail = load_run_response_for_agent(&store, "conv-demo", "b", "direct-b-msg-demo")
+            .await
+            .expect("load run response");
+
+        assert!(detail.is_none());
+    }
+
+    #[tokio::test]
+    async fn claim_conversation_message_receipt_is_atomic_for_recent_running_entry() {
+        let pool = SqlitePool::connect("sqlite::memory:")
+            .await
+            .expect("connect sqlite memory");
+        initialize_workflow_schema(&pool)
+            .await
+            .expect("initialize workflow schema");
+        let store = SqliteRuntimeStore::new(pool);
+
+        let first =
+            claim_conversation_message_receipt(&store, "conv-1", Some("msg-1"), "b", 60_000)
+                .await
+                .expect("first claim");
+        let second =
+            claim_conversation_message_receipt(&store, "conv-1", Some("msg-1"), "b", 60_000)
+                .await
+                .expect("second claim");
+
+        assert!(first);
+        assert!(!second);
+
+        let row = sqlx::query(
+            "SELECT status FROM conversation_message_receipts
+             WHERE conversation_id = ?1 AND message_id = ?2 AND agent_id = ?3",
+        )
+        .bind("conv-1")
+        .bind("msg-1")
+        .bind("b")
+        .fetch_one(store.pool())
+        .await
+        .expect("load receipt");
+        assert_eq!(row.get::<String, _>("status"), "running");
+    }
+
+    #[tokio::test]
+    async fn claim_conversation_message_receipt_reclaims_stale_running_entry() {
+        let pool = SqlitePool::connect("sqlite::memory:")
+            .await
+            .expect("connect sqlite memory");
+        initialize_workflow_schema(&pool)
+            .await
+            .expect("initialize workflow schema");
+        let store = SqliteRuntimeStore::new(pool);
+
+        sqlx::query(
+            "INSERT INTO conversation_message_receipts
+             (conversation_id, message_id, agent_id, status, created_at, updated_at)
+             VALUES (?1, ?2, ?3, 'running', ?4, ?4)",
+        )
+        .bind("conv-1")
+        .bind("msg-1")
+        .bind("b")
+        .bind("2026-01-01T00:00:00Z")
+        .execute(store.pool())
+        .await
+        .expect("insert stale receipt");
+
+        let claimed = claim_conversation_message_receipt(&store, "conv-1", Some("msg-1"), "b", 1)
+            .await
+            .expect("reclaim claim");
+
+        assert!(claimed);
+    }
 }

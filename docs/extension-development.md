@@ -277,10 +277,11 @@ export default ui;
 
 ## 开发热加载
 
-- `ennoia dev` 监听 `crates/`、`assets/`、`builtins/extensions/`、`Cargo.toml` 和 `Cargo.lock`。
+- `ennoia dev` 会分别监听三类源码：`crates/`、`assets/`、`Cargo.toml` 与 `Cargo.lock` 用于 API 热重建；`builtins/extensions/*/(data|plugins|worker)/` 用于 builtin worker 热重建；`builtins/extensions/*/ui/entry.*` 用于扩展 UI watcher。
 - `ennoia dev` 会额外启动扩展 UI watcher，自动把 `ui/entry.*` 构建到 `ui/dist/entry.js`。
 - Server 运行时每 2 秒刷新一次扩展注册表与 manifest；UI bundle 版本变化会进入 runtime snapshot，并通过 `/api/extensions/events/stream` 触发 Web 重新加载当前扩展模块。
 - Worker runtime 会缓存编译后的 Wasm Module；`.wasm` mtime 或文件大小变化后，下一次 RPC 调用会自动重新编译。
+- Process Worker 会在目标二进制 mtime 或文件大小变化后，于下一次 RPC 调用自动换新实例。
 - 每次 RPC 调用都会创建新的 Wasm 实例，避免线性内存状态跨请求泄漏。
 
 ## Worker ABI
@@ -316,11 +317,11 @@ export default ui;
 
 `context.trace` 表示当前跨边界调用的链路上下文。扩展不需要理解宿主内部数据库结构，但如果扩展内部还会继续拆子步骤、写自己的日志或继续调用其他能力，应该优先透传这组字段。
 
-内置 `conversation` 与 `memory` 当前都采用 process Worker，`workflow` 仍采用 Wasm Worker。
+内置 `conversation`、`memory` 与 `workflow` 当前都采用 process Worker；`workflow/worker/workflow.wasm` 仍可作为独立 Wasm worker 构建产物存在，但默认运行链路不再直接使用它。
 
 执行 `bun run build:workers` 会：
 
-- 构建 `conversation` 与 `memory` 的 release 进程 Worker，并复制到各自扩展目录下的 `bin/`
+- 构建 `conversation`、`memory` 与 `workflow` 的 release 进程 Worker，并复制到各自扩展目录下的 `bin/`
 - 构建 `workflow` 的 `wasm32-unknown-unknown` release 产物，并复制到 `builtins/extensions/workflow/worker/workflow.wasm`
 
 ## 沙箱与权限

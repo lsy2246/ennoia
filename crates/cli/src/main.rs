@@ -68,22 +68,45 @@ impl ConsoleLogLevel {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let args: Vec<String> = env::args().collect();
-    match args.get(1).map(String::as_str) {
+    let args: Vec<String> = env::args().skip(1).collect();
+    match args.first().map(String::as_str) {
+        None => {
+            print_summary();
+        }
+        Some(flag) if is_help_flag(flag) => {
+            print_summary();
+        }
         Some("internal") => {
-            internal_command(&args[2..]).await?;
+            if args.get(1).is_some_and(|value| is_help_flag(value)) {
+                print_internal_usage();
+            } else {
+                internal_command(&args[1..]).await?;
+            }
         }
         Some("init") => {
-            let paths = RuntimePaths::resolve(args.get(2).map(String::as_str));
+            if args.get(1).is_some_and(|value| is_help_flag(value)) {
+                print_home_command_usage("init");
+                return Ok(());
+            }
+            let paths = RuntimePaths::resolve(parse_optional_home_arg("init", &args[1..])?);
             init_home_template(&paths)?;
             println!("initialized Ennoia home at {}", paths.home().display());
         }
         Some("print-config") => {
+            if args.get(1).is_some_and(|value| is_help_flag(value)) {
+                print_print_config_usage();
+                return Ok(());
+            }
+            ensure_no_args("print-config", &args[1..], &print_config_usage())?;
             print_default_config()?;
         }
         Some("dev") => {
+            if args.get(1).is_some_and(|value| is_help_flag(value)) {
+                print_home_command_usage("dev");
+                return Ok(());
+            }
             let repo_root = env::current_dir()?;
-            let paths = RuntimePaths::resolve(args.get(2).map(String::as_str));
+            let paths = RuntimePaths::resolve(parse_optional_home_arg("dev", &args[1..])?);
             init_home_template(&paths)?;
             let mut server_config: ServerConfig =
                 read_toml_or_default(&paths.server_config_file())?;
@@ -100,43 +123,233 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             run_dev_supervisor(paths, server_config).await?;
         }
         Some("start") | Some("serve") => {
-            let paths = RuntimePaths::resolve(args.get(2).map(String::as_str));
+            let command = args.first().map(String::as_str).unwrap_or("start");
+            if args.get(1).is_some_and(|value| is_help_flag(value)) {
+                print_home_command_usage(command);
+                return Ok(());
+            }
+            let paths = RuntimePaths::resolve(parse_optional_home_arg(command, &args[1..])?);
             init_home_template(&paths)?;
             run_server(paths.home()).await?;
         }
         Some("ext") => {
-            extension_command(&args[2..]).await?;
+            if args.get(1).is_some_and(|value| is_help_flag(value)) {
+                print_extension_usage();
+            } else {
+                extension_command(&args[1..]).await?;
+            }
         }
-        _ => {
-            print_summary();
+        Some(other) => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("unknown command: {other}\n\n{}", summary_text()),
+            )
+            .into());
         }
     }
 
     Ok(())
 }
 
-fn print_summary() {
+fn is_help_flag(value: &str) -> bool {
+    matches!(value, "-h" | "--help")
+}
+
+fn parse_optional_home_arg<'a>(
+    command: &str,
+    args: &'a [String],
+) -> Result<Option<&'a str>, Box<dyn std::error::Error + Send + Sync>> {
+    match args {
+        [] => Ok(None),
+        [value] if value.starts_with('-') => Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "unknown option for 'ennoia {command}': {value}\n\n{}",
+                home_command_usage(command)
+            ),
+        )
+        .into()),
+        [value] => Ok(Some(value.as_str())),
+        _ => Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "too many arguments for 'ennoia {command}'\n\n{}",
+                home_command_usage(command)
+            ),
+        )
+        .into()),
+    }
+}
+
+fn invalid_input_error(message: impl Into<String>) -> Box<dyn std::error::Error + Send + Sync> {
+    io::Error::new(io::ErrorKind::InvalidInput, message.into()).into()
+}
+
+fn ensure_no_args(
+    command: &str,
+    args: &[String],
+    usage: &str,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    match args {
+        [] => Ok(()),
+        [value] => Err(invalid_input_error(format!(
+            "unexpected argument for 'ennoia {command}': {value}\n\n{usage}"
+        ))),
+        _ => Err(invalid_input_error(format!(
+            "too many arguments for 'ennoia {command}'\n\n{usage}"
+        ))),
+    }
+}
+
+fn parse_required_arg<'a>(
+    command: &str,
+    args: &'a [String],
+    usage: &str,
+) -> Result<&'a str, Box<dyn std::error::Error + Send + Sync>> {
+    match args {
+        [value] if value.starts_with('-') => Err(invalid_input_error(format!(
+            "unknown option for 'ennoia {command}': {value}\n\n{usage}"
+        ))),
+        [value] => Ok(value.as_str()),
+        [] => Err(invalid_input_error(usage.to_string())),
+        _ => Err(invalid_input_error(format!(
+            "too many arguments for 'ennoia {command}'\n\n{usage}"
+        ))),
+    }
+}
+
+fn parse_optional_usize_arg(
+    command: &str,
+    args: &[String],
+    usage: &str,
+    default: usize,
+) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
+    match args {
+        [] => Ok(default),
+        [value] if value.starts_with('-') => Err(invalid_input_error(format!(
+            "unknown option for 'ennoia {command}': {value}\n\n{usage}"
+        ))),
+        [value] => value.parse::<usize>().map_err(|_| {
+            invalid_input_error(format!(
+                "invalid numeric argument for 'ennoia {command}': {value}\n\n{usage}"
+            ))
+        }),
+        _ => Err(invalid_input_error(format!(
+            "too many arguments for 'ennoia {command}'\n\n{usage}"
+        ))),
+    }
+}
+
+fn summary_text() -> String {
     let state = default_app_state();
-    println!("{}", state.overview.app_name);
-    println!("modules: {}", state.overview.modules.join(", "));
-    println!(
-        "server: {}:{}",
-        state.server_config.host, state.server_config.port
-    );
-    println!();
-    println!("commands:");
-    println!("  ennoia init [home]");
-    println!("  ennoia dev [home]");
-    println!("  ennoia start [home]");
-    println!("  ennoia ext list");
-    println!("  ennoia ext inspect <id>");
-    println!("  ennoia ext attach <path>");
-    println!("  ennoia ext detach <id>");
-    println!("  ennoia ext reload <id>");
-    println!("  ennoia ext restart <id>");
-    println!("  ennoia ext logs [limit]");
-    println!("  ennoia ext doctor <id>");
-    println!("  ennoia ext graph");
+    [
+        state.overview.app_name,
+        format!("modules: {}", state.overview.modules.join(", ")),
+        format!(
+            "server: {}:{}",
+            state.server_config.host, state.server_config.port
+        ),
+        String::new(),
+        "commands:".to_string(),
+        "  ennoia init [home]".to_string(),
+        "  ennoia dev [home]".to_string(),
+        "  ennoia start [home]".to_string(),
+        "  ennoia serve [home]".to_string(),
+        "  ennoia print-config".to_string(),
+        "  ennoia ext list".to_string(),
+        "  ennoia ext inspect <id>".to_string(),
+        "  ennoia ext attach <path>".to_string(),
+        "  ennoia ext detach <id>".to_string(),
+        "  ennoia ext reload <id>".to_string(),
+        "  ennoia ext restart <id>".to_string(),
+        "  ennoia ext logs [limit]".to_string(),
+        "  ennoia ext doctor <id>".to_string(),
+        "  ennoia ext graph".to_string(),
+        String::new(),
+    ]
+    .join("\n")
+}
+
+fn print_summary() {
+    print!("{}", summary_text());
+}
+
+fn home_command_usage(command: &str) -> String {
+    format!(
+        "usage: ennoia {command} [home]\n\nhome is optional. If omitted, ENNOIA_HOME or the default ~/.ennoia directory is used."
+    )
+}
+
+fn print_home_command_usage(command: &str) {
+    println!("{}", home_command_usage(command));
+}
+
+fn print_extension_usage() {
+    println!("{}", extension_usage());
+}
+
+fn print_internal_usage() {
+    println!("{}", internal_usage());
+}
+
+fn print_print_config_usage() {
+    println!("{}", print_config_usage());
+}
+
+fn print_config_usage() -> String {
+    "usage: ennoia print-config".to_string()
+}
+
+fn extension_usage() -> String {
+    [
+        "usage: ennoia ext <subcommand> [args]".to_string(),
+        String::new(),
+        "subcommands:".to_string(),
+        "  list".to_string(),
+        "  inspect <id>".to_string(),
+        "  attach <path>".to_string(),
+        "  detach <id>".to_string(),
+        "  reload <id>".to_string(),
+        "  restart <id>".to_string(),
+        "  logs [limit]".to_string(),
+        "  doctor <id>".to_string(),
+        "  graph".to_string(),
+    ]
+    .join("\n")
+}
+
+fn extension_subcommand_usage(subcommand: &str) -> String {
+    match subcommand {
+        "list" => "usage: ennoia ext list".to_string(),
+        "inspect" => "usage: ennoia ext inspect <id>".to_string(),
+        "attach" => "usage: ennoia ext attach <path>".to_string(),
+        "detach" => "usage: ennoia ext detach <id>".to_string(),
+        "reload" => "usage: ennoia ext reload <id>".to_string(),
+        "restart" => "usage: ennoia ext restart <id>".to_string(),
+        "logs" => "usage: ennoia ext logs [limit]".to_string(),
+        "doctor" => "usage: ennoia ext doctor <id>".to_string(),
+        "graph" => "usage: ennoia ext graph".to_string(),
+        _ => extension_usage(),
+    }
+}
+
+fn internal_usage() -> String {
+    [
+        "usage: ennoia internal <subcommand> [args]".to_string(),
+        String::new(),
+        "subcommands:".to_string(),
+        "  sandbox-worker <request.json> <response.json>".to_string(),
+    ]
+    .join("\n")
+}
+
+fn internal_subcommand_usage(subcommand: &str) -> String {
+    match subcommand {
+        "sandbox-worker" => {
+            "usage: ennoia internal sandbox-worker <request.json> <response.json>".to_string()
+        }
+        _ => internal_usage(),
+    }
 }
 
 fn print_default_config() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -156,12 +369,32 @@ fn print_default_config() -> Result<(), Box<dyn std::error::Error + Send + Sync>
 async fn extension_command(
     args: &[String],
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    if args.is_empty() {
+        print_extension_usage();
+        return Ok(());
+    }
+
+    let subcommand = args.first().map(String::as_str).unwrap_or_default();
+    let subcommand_args = &args[1..];
+    if subcommand_args
+        .first()
+        .is_some_and(|value| is_help_flag(value))
+    {
+        println!("{}", extension_subcommand_usage(subcommand));
+        return Ok(());
+    }
+
     let paths = RuntimePaths::resolve(None);
     init_home_template(&paths)?;
     let state = bootstrap_app_state(paths.home()).await?;
 
-    match args.first().map(String::as_str).unwrap_or("list") {
+    match subcommand {
         "list" => {
+            ensure_no_args(
+                "ext list",
+                subcommand_args,
+                &extension_subcommand_usage("list"),
+            )?;
             for extension in state.extensions.snapshot().extensions {
                 println!(
                     "{}\t{:?}\t{:?}\t{}",
@@ -170,7 +403,11 @@ async fn extension_command(
             }
         }
         "inspect" | "doctor" => {
-            let id = args.get(1).ok_or("usage: ennoia ext inspect <id>")?;
+            let id = parse_required_arg(
+                &format!("ext {subcommand}"),
+                subcommand_args,
+                &extension_subcommand_usage(subcommand),
+            )?;
             let extension = state
                 .extensions
                 .get(id)
@@ -178,17 +415,29 @@ async fn extension_command(
             println!("{}", serde_json::to_string_pretty(&extension)?);
         }
         "attach" => {
-            let path = args.get(1).ok_or("usage: ennoia ext attach <path>")?;
+            let path = parse_required_arg(
+                "ext attach",
+                subcommand_args,
+                &extension_subcommand_usage("attach"),
+            )?;
             let attached = state.extensions.attach_dev_source(path)?;
             println!("{}", serde_json::to_string_pretty(&attached)?);
         }
         "detach" => {
-            let id = args.get(1).ok_or("usage: ennoia ext detach <id>")?;
+            let id = parse_required_arg(
+                "ext detach",
+                subcommand_args,
+                &extension_subcommand_usage("detach"),
+            )?;
             let detached = state.extensions.detach_dev_source(id)?;
             println!("{}", if detached { "detached" } else { "not-found" });
         }
         "reload" => {
-            let id = args.get(1).ok_or("usage: ennoia ext reload <id>")?;
+            let id = parse_required_arg(
+                "ext reload",
+                subcommand_args,
+                &extension_subcommand_usage("reload"),
+            )?;
             let extension = state
                 .extensions
                 .reload_extension(id)?
@@ -196,7 +445,11 @@ async fn extension_command(
             println!("{}", serde_json::to_string_pretty(&extension)?);
         }
         "restart" => {
-            let id = args.get(1).ok_or("usage: ennoia ext restart <id>")?;
+            let id = parse_required_arg(
+                "ext restart",
+                subcommand_args,
+                &extension_subcommand_usage("restart"),
+            )?;
             let extension = state
                 .extensions
                 .restart_extension(id)?
@@ -204,10 +457,12 @@ async fn extension_command(
             println!("{}", serde_json::to_string_pretty(&extension)?);
         }
         "logs" => {
-            let limit = args
-                .get(1)
-                .and_then(|value| value.parse::<usize>().ok())
-                .unwrap_or(20);
+            let limit = parse_optional_usize_arg(
+                "ext logs",
+                subcommand_args,
+                &extension_subcommand_usage("logs"),
+                20,
+            )?;
             for event in state.extensions.events(limit) {
                 println!(
                     "{}\t{}\t{}\t{}",
@@ -216,14 +471,21 @@ async fn extension_command(
             }
         }
         "graph" => {
+            ensure_no_args(
+                "ext graph",
+                subcommand_args,
+                &extension_subcommand_usage("graph"),
+            )?;
             println!(
                 "{}",
                 serde_json::to_string_pretty(&state.extensions.snapshot())?
             );
         }
         other => {
-            eprintln!("unknown ext subcommand: {other}");
-            std::process::exit(2);
+            return Err(invalid_input_error(format!(
+                "unknown ext subcommand: {other}\n\n{}",
+                extension_usage()
+            )));
         }
     }
 
@@ -231,23 +493,47 @@ async fn extension_command(
 }
 
 async fn internal_command(args: &[String]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    match args.first().map(String::as_str) {
-        Some("sandbox-worker") => {
-            let request_path = args
-                .get(1)
-                .ok_or("usage: ennoia internal sandbox-worker <request.json> <response.json>")?;
-            let response_path = args
-                .get(2)
-                .ok_or("usage: ennoia internal sandbox-worker <request.json> <response.json>")?;
+    if args.is_empty() {
+        print_internal_usage();
+        return Ok(());
+    }
+
+    let subcommand = args.first().map(String::as_str).unwrap_or_default();
+    let subcommand_args = &args[1..];
+    if subcommand_args
+        .first()
+        .is_some_and(|value| is_help_flag(value))
+    {
+        println!("{}", internal_subcommand_usage(subcommand));
+        return Ok(());
+    }
+
+    match subcommand {
+        "sandbox-worker" => {
+            let usage = internal_subcommand_usage("sandbox-worker");
+            let (request_path, response_path) = match subcommand_args {
+                [request_path, response_path] => (request_path.as_str(), response_path.as_str()),
+                [] | [_] => return Err(invalid_input_error(usage)),
+                [value, ..] if value.starts_with('-') => {
+                    return Err(invalid_input_error(format!(
+                        "unknown option for 'ennoia internal sandbox-worker': {value}\n\n{usage}"
+                    )))
+                }
+                _ => {
+                    return Err(invalid_input_error(format!(
+                        "too many arguments for 'ennoia internal sandbox-worker'\n\n{usage}"
+                    )))
+                }
+            };
             execution::run_sandbox_worker(request_path, response_path)
                 .await
                 .map_err(io::Error::other)?;
         }
-        Some(other) => {
-            return Err(format!("unknown internal subcommand: {other}").into());
-        }
-        None => {
-            return Err("usage: ennoia internal <subcommand>".into());
+        other => {
+            return Err(invalid_input_error(format!(
+                "unknown internal subcommand: {other}\n\n{}",
+                internal_usage()
+            )));
         }
     }
     Ok(())
@@ -274,12 +560,23 @@ async fn run_dev_supervisor(
         console_config.clone(),
     );
     api.start_initial().await?;
-    dev_processes.start_web(&paths, &server_config)?;
-    dev_processes.start_extension_ui_watch(&repo_root, &paths)?;
-    dev_processes.report_extension_ui_sources(&paths)?;
+    if let Err(error) = dev_processes.start_web(&paths, &server_config) {
+        api.stop();
+        return Err(error.into());
+    }
+    if let Err(error) = dev_processes.start_extension_ui_watch(&repo_root, &paths) {
+        api.stop();
+        return Err(error.into());
+    }
+    if let Err(error) = dev_processes.report_extension_ui_sources(&paths) {
+        api.stop();
+        return Err(error.into());
+    }
 
-    let (watch_tx, watch_rx) = mpsc::channel();
-    let _watcher = start_host_watcher(&repo_root, watch_tx)?;
+    let (host_watch_tx, host_watch_rx) = mpsc::channel();
+    let _host_watcher = start_host_watcher(&repo_root, host_watch_tx)?;
+    let (builtin_watch_tx, builtin_watch_rx) = mpsc::channel();
+    let _builtin_worker_watcher = start_builtin_worker_watcher(&repo_root, builtin_watch_tx)?;
 
     println!("Ennoia dev runtime starting at {}", paths.home().display());
     println!(
@@ -287,9 +584,8 @@ async fn run_dev_supervisor(
         server_config.web_dev.host, server_config.web_dev.port
     );
     println!("API: http://{}:{}", server_config.host, server_config.port);
-    println!(
-        "Host hot reload: watching crates/, assets/, builtins/extensions/, Cargo.toml and Cargo.lock."
-    );
+    println!("Host hot reload: watching crates/, assets/, Cargo.toml and Cargo.lock.");
+    println!("Builtin worker hot reload: watching builtins/extensions/*/(data|plugins|worker)/.");
     println!(
         "Dev console logs: {} (level >= {}).",
         if console_config.enabled {
@@ -305,6 +601,7 @@ async fn run_dev_supervisor(
         server_config.dev_supervisor.watch_poll_ms,
     ));
     let mut pending_host_change: Option<Instant> = None;
+    let mut pending_builtin_worker_change: Option<Instant> = None;
 
     loop {
         tokio::select! {
@@ -319,11 +616,18 @@ async fn run_dev_supervisor(
                     eprintln!("api health recovery failed: {error}");
                 }
                 let mut saw_change = false;
-                while watch_rx.try_recv().is_ok() {
+                while host_watch_rx.try_recv().is_ok() {
                     saw_change = true;
                 }
                 if saw_change {
                     pending_host_change = Some(Instant::now());
+                }
+                let mut saw_builtin_worker_change = false;
+                while builtin_watch_rx.try_recv().is_ok() {
+                    saw_builtin_worker_change = true;
+                }
+                if saw_builtin_worker_change {
+                    pending_builtin_worker_change = Some(Instant::now());
                 }
                 if pending_host_change
                     .map(|changed_at| {
@@ -337,6 +641,20 @@ async fn run_dev_supervisor(
                     pending_host_change = None;
                     if let Err(error) = api.rebuild_and_restart().await {
                         eprintln!("host hot reload failed: {error}");
+                    }
+                }
+                if pending_builtin_worker_change
+                    .map(|changed_at| {
+                        changed_at.elapsed()
+                            >= Duration::from_millis(
+                                server_config.dev_supervisor.host_reload_debounce_ms,
+                            )
+                    })
+                    .unwrap_or(false)
+                {
+                    pending_builtin_worker_change = None;
+                    if let Err(error) = ensure_builtin_process_workers(&repo_root) {
+                        eprintln!("builtin worker hot reload failed: {error}");
                     }
                 }
             }
@@ -400,6 +718,7 @@ impl ApiDevProcess {
 
     async fn rebuild_and_restart(&mut self) -> io::Result<()> {
         println!("host change detected; rebuilding API...");
+        ensure_builtin_process_workers(&self.repo_root)?;
         let built = match self.build_api_binary() {
             Ok(path) => path,
             Err(error) => {
@@ -579,6 +898,7 @@ impl ApiDevProcess {
             .arg("-p")
             .arg("ennoia-cli")
             .env("CARGO_TARGET_DIR", &self.target_dir)
+            .env("CARGO_INCREMENTAL", "0")
             .current_dir(&self.repo_root);
         let status = run_logged_command(
             "api-build",
@@ -1095,11 +1415,6 @@ fn start_host_watcher(repo_root: &Path, tx: mpsc::Sender<()>) -> io::Result<Reco
     )?;
     watch_if_exists(
         &mut watcher,
-        &repo_root.join("builtins").join("extensions"),
-        RecursiveMode::Recursive,
-    )?;
-    watch_if_exists(
-        &mut watcher,
         &repo_root.join("Cargo.toml"),
         RecursiveMode::NonRecursive,
     )?;
@@ -1107,6 +1422,36 @@ fn start_host_watcher(repo_root: &Path, tx: mpsc::Sender<()>) -> io::Result<Reco
         &mut watcher,
         &repo_root.join("Cargo.lock"),
         RecursiveMode::NonRecursive,
+    )?;
+
+    Ok(watcher)
+}
+
+fn start_builtin_worker_watcher(
+    repo_root: &Path,
+    tx: mpsc::Sender<()>,
+) -> io::Result<RecommendedWatcher> {
+    let filter_root = repo_root.to_path_buf();
+    let mut watcher = RecommendedWatcher::new(
+        move |result: Result<notify::Event, notify::Error>| {
+            if let Ok(event) = result {
+                if event
+                    .paths
+                    .iter()
+                    .any(|path| is_builtin_worker_reload_path(&filter_root, path))
+                {
+                    let _ = tx.send(());
+                }
+            }
+        },
+        NotifyConfig::default(),
+    )
+    .map_err(io::Error::other)?;
+
+    watch_if_exists(
+        &mut watcher,
+        &repo_root.join("builtins").join("extensions"),
+        RecursiveMode::Recursive,
     )?;
 
     Ok(watcher)
@@ -1130,15 +1475,43 @@ fn is_host_reload_path(repo_root: &Path, path: &Path) -> bool {
     if relative.starts_with("target") || relative.starts_with("web") {
         return false;
     }
-    if relative.starts_with(Path::new("builtins").join("extensions")) {
-        return false;
-    }
     if relative == Path::new("Cargo.toml") || relative == Path::new("Cargo.lock") {
         return true;
     }
     if !(relative.starts_with("crates") || relative.starts_with("assets")) {
         return false;
     }
+    has_host_reload_extension(path)
+}
+
+fn is_builtin_worker_reload_path(repo_root: &Path, path: &Path) -> bool {
+    let Ok(relative) = path.strip_prefix(repo_root) else {
+        return false;
+    };
+    if relative.starts_with("target") || relative.starts_with("web") {
+        return false;
+    }
+    if !relative.starts_with(Path::new("builtins").join("extensions")) {
+        return false;
+    }
+    is_builtin_worker_reload_relative_path(relative)
+}
+
+fn is_builtin_worker_reload_relative_path(relative: &Path) -> bool {
+    let mut components = relative.components();
+    let _ = components.next();
+    let _ = components.next();
+    let _ = components.next();
+    let Some(scope) = components.next().and_then(|item| item.as_os_str().to_str()) else {
+        return false;
+    };
+    if !matches!(scope, "data" | "plugins" | "worker") {
+        return false;
+    }
+    has_host_reload_extension(relative)
+}
+
+fn has_host_reload_extension(path: &Path) -> bool {
     match path.extension().and_then(|value| value.to_str()) {
         Some("rs" | "toml" | "sql" | "json" | "js" | "ts" | "css" | "html" | "wasm") => true,
         None => true,
@@ -1729,9 +2102,18 @@ fn should_mark_binary_asset_executable(logical_path: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
+    use std::{fs, path::Path};
 
-    use super::{should_mark_binary_asset_executable, tail_log_file, unique_suffix};
+    use super::{
+        ensure_no_args, extension_subcommand_usage, extension_usage, internal_subcommand_usage,
+        is_builtin_worker_reload_path, is_host_reload_path, parse_optional_home_arg,
+        parse_optional_usize_arg, parse_required_arg, print_config_usage,
+        should_mark_binary_asset_executable, summary_text, tail_log_file, unique_suffix,
+    };
+
+    fn as_args(values: &[&str]) -> Vec<String> {
+        values.iter().map(|value| (*value).to_string()).collect()
+    }
 
     #[test]
     fn marks_builtin_process_worker_paths_as_executable() {
@@ -1762,6 +2144,116 @@ mod tests {
 
         assert_eq!(lines, vec!["line-3".to_string(), "line-4".to_string()]);
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn host_reload_ignores_builtin_extension_sources() {
+        let repo_root = Path::new("C:/repo");
+        assert!(!is_host_reload_path(
+            repo_root,
+            &repo_root.join(
+                "builtins/extensions/workflow/plugins/workflow-service/src/conversation_hooks.rs"
+            )
+        ));
+    }
+
+    #[test]
+    fn builtin_worker_reload_includes_backend_sources() {
+        let repo_root = Path::new("C:/repo");
+        assert!(is_builtin_worker_reload_path(
+            repo_root,
+            &repo_root.join(
+                "builtins/extensions/workflow/plugins/workflow-service/src/conversation_hooks.rs"
+            )
+        ));
+        assert!(is_builtin_worker_reload_path(
+            repo_root,
+            &repo_root.join("builtins/extensions/workflow/data/schema.sql")
+        ));
+        assert!(is_builtin_worker_reload_path(
+            repo_root,
+            &repo_root.join("builtins/extensions/workflow/worker/src/lib.rs")
+        ));
+    }
+
+    #[test]
+    fn builtin_worker_reload_ignores_ui_outputs_and_manifests() {
+        let repo_root = Path::new("C:/repo");
+        assert!(!is_builtin_worker_reload_path(
+            repo_root,
+            &repo_root.join("builtins/extensions/workflow/bin/workflow-service.exe")
+        ));
+        assert!(!is_builtin_worker_reload_path(
+            repo_root,
+            &repo_root.join("builtins/extensions/workflow/ui/page/Page.tsx")
+        ));
+        assert!(!is_builtin_worker_reload_path(
+            repo_root,
+            &repo_root.join("builtins/extensions/workflow/install/data/system/sqlite/logs.db")
+        ));
+        assert!(!is_builtin_worker_reload_path(
+            repo_root,
+            &repo_root.join("builtins/extensions/workflow/extension.toml")
+        ));
+    }
+
+    #[test]
+    fn parse_optional_home_arg_accepts_single_path() {
+        let args = as_args(&["C:/ennoia-home"]);
+        let parsed = parse_optional_home_arg("dev", &args).expect("home path should parse");
+        assert_eq!(parsed, Some("C:/ennoia-home"));
+    }
+
+    #[test]
+    fn parse_optional_home_arg_rejects_flags() {
+        let args = as_args(&["--bad"]);
+        let error = parse_optional_home_arg("dev", &args).expect_err("flag should fail");
+        assert!(error
+            .to_string()
+            .contains("unknown option for 'ennoia dev': --bad"));
+    }
+
+    #[test]
+    fn parse_required_arg_rejects_extra_values() {
+        let args = as_args(&["alpha", "beta"]);
+        let usage = extension_subcommand_usage("attach");
+        let error =
+            parse_required_arg("ext attach", &args, &usage).expect_err("extra args should fail");
+        assert!(error
+            .to_string()
+            .contains("too many arguments for 'ennoia ext attach'"));
+    }
+
+    #[test]
+    fn parse_optional_usize_arg_rejects_invalid_numbers() {
+        let args = as_args(&["oops"]);
+        let usage = extension_subcommand_usage("logs");
+        let error = parse_optional_usize_arg("ext logs", &args, &usage, 20)
+            .expect_err("invalid numeric input should fail");
+        assert!(error
+            .to_string()
+            .contains("invalid numeric argument for 'ennoia ext logs': oops"));
+    }
+
+    #[test]
+    fn ensure_no_args_rejects_unexpected_argument() {
+        let args = as_args(&["unexpected"]);
+        let usage = print_config_usage();
+        let error =
+            ensure_no_args("print-config", &args, &usage).expect_err("unexpected arg should fail");
+        assert!(error
+            .to_string()
+            .contains("unexpected argument for 'ennoia print-config': unexpected"));
+    }
+
+    #[test]
+    fn usage_texts_include_new_commands() {
+        let summary = summary_text();
+        assert!(summary.contains("ennoia serve [home]"));
+        assert!(summary.contains("ennoia print-config"));
+        assert!(extension_usage().contains("usage: ennoia ext <subcommand> [args]"));
+        assert!(internal_subcommand_usage("sandbox-worker")
+            .contains("sandbox-worker <request.json> <response.json>"));
     }
 }
 

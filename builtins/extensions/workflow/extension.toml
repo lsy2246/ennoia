@@ -131,15 +131,15 @@ kind = "event_handler"
 entry = "hooks/conversation-message-created"
 
 [[capabilities]]
-id = "workflow.permission.approval.resolved"
-contract = "hook.permission.approval.resolved"
+id = "workflow.operation.updated"
+contract = "hook.operation.updated"
 kind = "event_handler"
-entry = "hooks/permission-approval-resolved"
+entry = "hooks/operation-updated"
 
 [[subscriptions]]
 event = "conversation.message.created"
 capability = "workflow.conversation.message.created"
 
 [[subscriptions]]
-event = "permission.approval.resolved"
-capability = "workflow.permission.approval.resolved"
+event = "operation.updated"
+capability = "workflow.operation.updated"

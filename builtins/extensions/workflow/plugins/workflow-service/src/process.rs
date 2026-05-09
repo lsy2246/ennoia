@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::io::{self, BufRead, BufReader};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 
@@ -20,7 +21,8 @@ use sqlx::{Row, SqlitePool};
 use tokio::sync::mpsc;
 
 use crate::conversation_hooks::{
-    handle_conversation_message_created, handle_permission_approval_resolved,
+    handle_conversation_message_created, handle_operation_updated,
+    recover_stale_conversation_receipts,
 };
 use crate::host_bridge::HostBridge;
 use crate::orchestrator::OrchestratorService;
@@ -119,6 +121,7 @@ struct WorkflowServiceState {
     runtime: WorkflowRuntime,
     store: SqliteRuntimeStore,
     pool: SqlitePool,
+    startup_conversation_receipts_recovered: Arc<AtomicBool>,
 }
 
 enum StdinEvent {
@@ -161,6 +164,7 @@ pub async fn run() -> Result<(), Box<dyn Error + Send + Sync>> {
         },
         store,
         pool,
+        startup_conversation_receipts_recovered: Arc::new(AtomicBool::new(false)),
     };
 
     let bridge = HostBridge::install();
@@ -222,6 +226,20 @@ async fn handle_invocation(
     state: &WorkflowServiceState,
     invocation: Invocation,
 ) -> ExtensionRpcResponse {
+    if !state
+        .startup_conversation_receipts_recovered
+        .load(Ordering::Acquire)
+    {
+        match recover_stale_conversation_receipts(&state.runtime, &state.store).await {
+            Ok(()) => state
+                .startup_conversation_receipts_recovered
+                .store(true, Ordering::Release),
+            Err(error) => {
+                eprintln!("[workflow] startup conversation receipt recovery failed: {error}");
+            }
+        }
+    }
+
     let path = invocation.method.trim_matches('/');
     let _context = invocation.context;
     match path {
@@ -313,21 +331,31 @@ async fn handle_invocation(
                     match handle_conversation_message_created(&state.runtime, &state.store, payload)
                         .await
                     {
-                        Ok(response) => ExtensionRpcResponse::success(serde_json::json!(response)),
-                        Err(error) => ExtensionRpcResponse::failure("hook_failed", error),
+                        Ok(response) => ExtensionRpcResponse::success(
+                            serde_json::to_value(response).unwrap_or(serde_json::json!({
+                                "handled": true,
+                            })),
+                        ),
+                        Err(error) => {
+                            ExtensionRpcResponse::failure("conversation_message_hook_failed", error)
+                        }
                     }
                 }
                 Err(error) => error,
             }
         }
-        "hooks/permission-approval-resolved" => {
+        "hooks/operation-updated" => {
             match parse_json::<ennoia_kernel::HookEventEnvelope>(invocation.params) {
                 Ok(payload) => {
-                    match handle_permission_approval_resolved(&state.runtime, &state.store, payload)
-                        .await
-                    {
-                        Ok(response) => ExtensionRpcResponse::success(serde_json::json!(response)),
-                        Err(error) => ExtensionRpcResponse::failure("hook_failed", error),
+                    match handle_operation_updated(&state.runtime, &state.store, payload).await {
+                        Ok(response) => ExtensionRpcResponse::success(
+                            serde_json::to_value(response).unwrap_or(serde_json::json!({
+                                "handled": true,
+                            })),
+                        ),
+                        Err(error) => {
+                            ExtensionRpcResponse::failure("operation_updated_hook_failed", error)
+                        }
                     }
                 }
                 Err(error) => error,

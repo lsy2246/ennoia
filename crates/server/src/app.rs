@@ -26,6 +26,7 @@ use crate::logs_store::{
     LOGS_COMPONENT_EXTENSION_HOST, LOGS_COMPONENT_HOST,
 };
 use crate::middleware::RateLimitState;
+use crate::operations::OperationStore;
 use crate::realtime::RealtimeHub;
 use crate::routes::{build_router, run_due_schedules_once};
 
@@ -52,6 +53,7 @@ pub struct AppState {
     pub logs: Arc<LogsStore>,
     pub event_bus: Arc<EventBusStore>,
     pub agent_permissions: Arc<AgentPermissionStore>,
+    pub operations: Arc<OperationStore>,
     pub extension_runtime_store: Arc<ExtensionRuntimeStore>,
     pub realtime: Arc<RealtimeHub>,
     pub logs_guard: Option<Arc<LogsGuard>>,
@@ -70,6 +72,9 @@ pub fn default_app_state() -> AppState {
     let event_bus = Arc::new(EventBusStore::new(&runtime_paths).expect("event bus"));
     let agent_permissions =
         Arc::new(AgentPermissionStore::new(&runtime_paths).expect("agent permissions"));
+    let operations_store = OperationStore::new(&runtime_paths).expect("operations");
+    let _ = operations_store.cancel_abandoned_operations();
+    let operations = Arc::new(operations_store);
     let extension_runtime_store =
         Arc::new(ExtensionRuntimeStore::new(&runtime_paths).expect("extension runtime store"));
     let realtime = Arc::new(RealtimeHub::new());
@@ -89,6 +94,7 @@ pub fn default_app_state() -> AppState {
         logs,
         event_bus,
         agent_permissions,
+        operations,
         extension_runtime_store,
         realtime,
         logs_guard: None,
@@ -122,8 +128,31 @@ pub async fn bootstrap_app_state(home_dir: impl AsRef<Path>) -> Result<AppState,
     let logs = Arc::new(LogsStore::new(&runtime_paths)?);
     let event_bus = Arc::new(EventBusStore::new(&runtime_paths)?);
     let agent_permissions = Arc::new(AgentPermissionStore::new(&runtime_paths)?);
+    let operations_store = OperationStore::new(&runtime_paths)?;
+    let recovered_operations = operations_store.cancel_abandoned_operations()?;
+    let operations = Arc::new(operations_store);
     let extension_runtime_store = Arc::new(ExtensionRuntimeStore::new(&runtime_paths)?);
     let realtime = Arc::new(RealtimeHub::new());
+
+    if !recovered_operations.is_empty() {
+        let recovered_ids = recovered_operations
+            .iter()
+            .map(|operation| operation.id.clone())
+            .collect::<Vec<_>>();
+        let _ = logs.append_log(LogEntryWrite {
+            event: "runtime.operation.recovered".to_string(),
+            level: "warn".to_string(),
+            component: LOGS_COMPONENT_HOST.to_string(),
+            source_kind: "operation".to_string(),
+            source_id: None,
+            message: "cancelled abandoned operations during startup".to_string(),
+            attributes: serde_json::json!({
+                "count": recovered_operations.len(),
+                "operation_ids": recovered_ids,
+            }),
+            created_at: None,
+        });
+    }
 
     Ok(AppState {
         server_config,
@@ -140,6 +169,7 @@ pub async fn bootstrap_app_state(home_dir: impl AsRef<Path>) -> Result<AppState,
         logs,
         event_bus,
         agent_permissions,
+        operations,
         extension_runtime_store,
         realtime,
         logs_guard,

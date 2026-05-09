@@ -362,6 +362,33 @@ export type PermissionGrantRecord = {
   revoked_at?: string | null;
 };
 
+export type OperationStatus =
+  | "queued"
+  | "running"
+  | "blocked"
+  | "succeeded"
+  | "failed"
+  | "cancelled";
+
+export type OperationRecord = {
+  id: string;
+  extension_id: string;
+  agent_id: string;
+  conversation_id: string;
+  branch_id?: string | null;
+  lane_id?: string | null;
+  run_id: string;
+  message_id?: string | null;
+  kind: string;
+  name: string;
+  status: OperationStatus;
+  input: unknown;
+  output?: unknown;
+  error?: unknown;
+  created_at: string;
+  updated_at: string;
+};
+
 export type ConversationSummary = {
   id: string;
   topology: "direct" | "group";
@@ -466,6 +493,7 @@ export type ConversationDetail = {
   branches: ConversationBranch[];
   messages: ConversationMessage[];
   records: ExtensionRecordEntry[];
+  operations: OperationRecord[];
   runs: ExecutionRun[];
   tasks: ExecutionStep[];
   outputs: RunOutput[];
@@ -474,6 +502,7 @@ export type ConversationDetail = {
 export type ConversationStreamSnapshot = {
   detail: ConversationDetail;
   approvals: PermissionApprovalRecord[];
+  operations: OperationRecord[];
 };
 
 export type ConversationMessageAppendResponse = {

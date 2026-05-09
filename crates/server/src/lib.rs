@@ -8,6 +8,7 @@ pub mod extension_runtime;
 pub mod host_capabilities;
 pub mod logs_store;
 pub mod middleware;
+pub mod operations;
 pub mod pipeline;
 pub mod realtime;
 pub mod routes;

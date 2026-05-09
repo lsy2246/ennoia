@@ -395,6 +395,7 @@ pub struct ExtensionSettingFieldSpec {
 
 pub const HOOK_EVENT_CONVERSATION_CREATED: &str = "conversation.created";
 pub const HOOK_EVENT_CONVERSATION_MESSAGE_CREATED: &str = "conversation.message.created";
+pub const HOOK_EVENT_OPERATION_UPDATED: &str = "operation.updated";
 pub const HOOK_EVENT_PERMISSION_APPROVAL_RESOLVED: &str = "permission.approval.resolved";
 pub const HOOK_EVENT_RUN_REQUESTED: &str = "run.requested";
 pub const HOOK_EVENT_RUN_STAGE_CHANGED: &str = "run.stage.changed";
@@ -756,12 +757,21 @@ impl ExtensionRpcResponse {
     }
 
     pub fn failure(code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self::failure_with_details(code, message, None)
+    }
+
+    pub fn failure_with_details(
+        code: impl Into<String>,
+        message: impl Into<String>,
+        details: Option<JsonValue>,
+    ) -> Self {
         Self {
             ok: false,
             data: JsonValue::Null,
             error: Some(ExtensionRpcError {
                 code: code.into(),
                 message: normalize_error_message(message.into()),
+                details,
             }),
         }
     }
@@ -771,6 +781,8 @@ impl ExtensionRpcResponse {
 pub struct ExtensionRpcError {
     pub code: String,
     pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub details: Option<JsonValue>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -879,6 +891,112 @@ pub struct RuntimeOperationRequest {
     pub arguments: JsonValue,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum OperationStatus {
+    Queued,
+    Running,
+    Blocked,
+    Succeeded,
+    Failed,
+    Cancelled,
+}
+
+impl OperationStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Queued => "queued",
+            Self::Running => "running",
+            Self::Blocked => "blocked",
+            Self::Succeeded => "succeeded",
+            Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct OperationPerformRequest {
+    pub agent_id: String,
+    pub conversation_id: String,
+    pub run_id: String,
+    #[serde(default)]
+    pub branch_id: Option<String>,
+    #[serde(default)]
+    pub lane_id: Option<String>,
+    #[serde(default)]
+    pub message_id: Option<String>,
+    pub kind: String,
+    pub name: String,
+    #[serde(default)]
+    pub deferred: bool,
+    #[serde(default)]
+    pub input: JsonValue,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct OperationRecord {
+    pub id: String,
+    pub extension_id: String,
+    pub agent_id: String,
+    pub conversation_id: String,
+    #[serde(default)]
+    pub branch_id: Option<String>,
+    #[serde(default)]
+    pub lane_id: Option<String>,
+    pub run_id: String,
+    #[serde(default)]
+    pub message_id: Option<String>,
+    pub kind: String,
+    pub name: String,
+    pub status: OperationStatus,
+    #[serde(default)]
+    pub input: JsonValue,
+    #[serde(default)]
+    pub output: Option<JsonValue>,
+    #[serde(default)]
+    pub error: Option<JsonValue>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct OperationEventRecord {
+    pub id: String,
+    pub operation_id: String,
+    pub conversation_id: String,
+    pub event: String,
+    #[serde(default)]
+    pub payload: JsonValue,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct OperationApprovalLink {
+    pub operation_id: String,
+    pub approval_id: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct OperationListQuery {
+    #[serde(default)]
+    pub conversation_id: Option<String>,
+    #[serde(default)]
+    pub run_id: Option<String>,
+    #[serde(default)]
+    pub message_id: Option<String>,
+    #[serde(default)]
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct OperationPerformResponse {
+    pub operation: OperationRecord,
+    #[serde(default)]
+    pub content: JsonValue,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ExtensionHostCapabilityRequest {
@@ -898,6 +1016,9 @@ pub enum ExtensionHostCapabilityRequest {
     RuntimeOperation {
         operation: String,
         payload: RuntimeOperationRequest,
+    },
+    OperationPerform {
+        payload: OperationPerformRequest,
     },
     ExtensionStateGet {
         query: ExtensionStateGetQuery,

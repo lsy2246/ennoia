@@ -1,5 +1,6 @@
 const DEFAULT_BASE_URL = "https://api.openai.com/v1";
 const DEFAULT_MODEL = "gpt-5.4";
+const MIN_PROVIDER_TIMEOUT_MS = 300000;
 const MODEL_BUDGETS = new Map();
 
 export const provider = {
@@ -146,9 +147,9 @@ function normalizeModelEndpointConfig(config) {
 function normalizeTimeoutMs(value) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) {
-    return null;
+    return MIN_PROVIDER_TIMEOUT_MS;
   }
-  return Math.max(1000, Math.trunc(parsed));
+  return Math.max(MIN_PROVIDER_TIMEOUT_MS, Math.trunc(parsed));
 }
 
 function isLikelyEnvName(value) {

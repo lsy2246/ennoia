@@ -37,6 +37,7 @@ pub(super) async fn conversation_stream(
         let mut first = true;
         let mut last_event_seq = state.event_bus.latest_conversation_seq(&conversation_id).unwrap_or(0);
         let mut last_approval_seq = state.agent_permissions.latest_conversation_approval_seq(&conversation_id).unwrap_or(0);
+        let mut last_operation_seq = state.operations.latest_conversation_seq(&conversation_id).unwrap_or(0);
 
         loop {
             if first {
@@ -47,11 +48,13 @@ pub(super) async fn conversation_stream(
                 )).await;
                 let next_event_seq = state.event_bus.latest_conversation_seq(&conversation_id).unwrap_or(last_event_seq);
                 let next_approval_seq = state.agent_permissions.latest_conversation_approval_seq(&conversation_id).unwrap_or(last_approval_seq);
-                if next_event_seq == last_event_seq && next_approval_seq == last_approval_seq {
+                let next_operation_seq = state.operations.latest_conversation_seq(&conversation_id).unwrap_or(last_operation_seq);
+                if next_event_seq == last_event_seq && next_approval_seq == last_approval_seq && next_operation_seq == last_operation_seq {
                     continue;
                 }
                 last_event_seq = next_event_seq;
                 last_approval_seq = next_approval_seq;
+                last_operation_seq = next_operation_seq;
             }
 
             match build_conversation_stream_snapshot(&state, &request, &conversation_id).await {
@@ -200,9 +203,18 @@ async fn build_conversation_stream_snapshot(
             ..PermissionApprovalsQuery::default()
         })
         .map_err(|error| scoped(ApiError::internal(error.to_string()), request))?;
+    let operations = state
+        .operations
+        .list_operations(&ennoia_kernel::OperationListQuery {
+            conversation_id: Some(conversation_id.to_string()),
+            limit: Some(240),
+            ..ennoia_kernel::OperationListQuery::default()
+        })
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), request))?;
     Ok(serde_json::json!({
         "detail": detail,
         "approvals": approvals,
+        "operations": operations,
     })
     .to_string())
 }

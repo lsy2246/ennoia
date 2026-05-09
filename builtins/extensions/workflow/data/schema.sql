@@ -135,3 +135,22 @@ CREATE TABLE IF NOT EXISTS conversation_message_receipts (
 
 CREATE INDEX IF NOT EXISTS idx_workflow_message_receipts_conversation
   ON conversation_message_receipts(conversation_id, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS direct_reply_states (
+  run_id TEXT PRIMARY KEY,
+  conversation_id TEXT NOT NULL,
+  lane_id TEXT,
+  message_id TEXT,
+  agent_id TEXT NOT NULL,
+  messages_json TEXT NOT NULL,
+  pending_tool_calls_json TEXT NOT NULL,
+  pending_operation_id TEXT,
+  pending_operation_kind TEXT,
+  next_iteration INTEGER NOT NULL,
+  last_process_text TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_workflow_direct_reply_states_conversation
+  ON direct_reply_states(conversation_id, updated_at DESC);

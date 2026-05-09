@@ -1,5 +1,5 @@
 import { dispatchAction } from "./actions";
-import { apiUrl } from "./core";
+import { apiUrl, fetchJson } from "./core";
 import type {
   ConversationBranch,
   ConversationLane,
@@ -8,6 +8,7 @@ import type {
   ConversationSummary,
   ConversationDetail,
   ConversationStreamSnapshot,
+  OperationRecord,
   ExecutionRun,
   ExecutionStep,
   ExtensionRecordEntry,
@@ -23,6 +24,7 @@ type ConversationDetailPayload = {
   branches?: ConversationBranch[];
   messages?: ConversationMessage[];
   records?: ExtensionRecordEntry[];
+  operations?: OperationRecord[];
   runs?: ExecutionRun[];
   tasks?: ExecutionStep[];
   outputs?: RunOutput[];
@@ -54,6 +56,7 @@ function normalizeConversationDetailPayload(payload: unknown): ConversationDetai
     branches: Array.isArray(payload.branches) ? payload.branches as ConversationBranch[] : undefined,
     messages: Array.isArray(payload.messages) ? payload.messages as ConversationMessage[] : undefined,
     records: Array.isArray(payload.records) ? payload.records as ExtensionRecordEntry[] : undefined,
+    operations: Array.isArray(payload.operations) ? payload.operations as OperationRecord[] : undefined,
     runs: Array.isArray(payload.runs) ? payload.runs as ExecutionRun[] : undefined,
     tasks: Array.isArray(payload.tasks) ? payload.tasks as ExecutionStep[] : undefined,
     outputs: Array.isArray(payload.outputs) ? payload.outputs as RunOutput[] : undefined,
@@ -71,13 +74,24 @@ async function listConversationRuns(conversationId: string, init?: FetchJsonInit
   }
 }
 
+async function listConversationOperations(conversationId: string, init?: FetchJsonInit) {
+  try {
+    return await fetchJson<OperationRecord[]>(
+      apiUrl(`/api/operations?conversation_id=${encodeURIComponent(conversationId)}&limit=240`),
+      init,
+    );
+  } catch {
+    return [];
+  }
+}
+
 async function hydrateConversationDetail(
   conversationId: string,
   payload: unknown,
   init?: FetchJsonInit,
 ): Promise<ConversationDetail> {
   const normalized = normalizeConversationDetailPayload(payload);
-  const [lanes, branches, messages, records, runs] = await Promise.all([
+  const [lanes, branches, messages, records, operations, runs] = await Promise.all([
     normalized.lanes
       ? Promise.resolve(normalized.lanes)
       : dispatchAction<ConversationLane[]>("lane.list", { conversation_id: conversationId }, init),
@@ -90,6 +104,9 @@ async function hydrateConversationDetail(
     normalized.records
       ? Promise.resolve(normalized.records)
       : listConversationExtensionRecords(conversationId, 120, init),
+    normalized.operations
+      ? Promise.resolve(normalized.operations)
+      : listConversationOperations(conversationId, init),
     normalized.runs ? Promise.resolve(normalized.runs) : listConversationRuns(conversationId, init),
   ]);
 
@@ -99,6 +116,7 @@ async function hydrateConversationDetail(
     branches,
     messages,
     records,
+    operations,
     runs,
     tasks: normalized.tasks ?? [],
     outputs: normalized.outputs ?? [],
@@ -239,6 +257,7 @@ export function parseConversationStreamPayload(value: string): ConversationStrea
   const parsed = JSON.parse(value) as {
     detail?: unknown;
     approvals?: unknown;
+    operations?: unknown;
   };
   const detailValue = parsed.detail;
   const normalized = normalizeConversationDetailPayload(detailValue);
@@ -251,6 +270,11 @@ export function parseConversationStreamPayload(value: string): ConversationStrea
       branches: normalized.branches ?? [],
       messages: normalized.messages ?? [],
       records: Array.isArray(detailRecord?.records) ? detailRecord.records as ConversationDetail["records"] : [],
+      operations: Array.isArray(parsed.operations)
+        ? parsed.operations as ConversationDetail["operations"]
+        : Array.isArray(detailRecord?.operations)
+          ? detailRecord.operations as ConversationDetail["operations"]
+          : [],
       runs: Array.isArray(detailRecord?.runs) ? detailRecord.runs as ConversationDetail["runs"] : [],
       tasks: Array.isArray(detailRecord?.tasks) ? detailRecord.tasks as ConversationDetail["tasks"] : [],
       outputs: Array.isArray(detailRecord?.outputs) ? detailRecord.outputs as ConversationDetail["outputs"] : [],
@@ -258,5 +282,10 @@ export function parseConversationStreamPayload(value: string): ConversationStrea
     approvals: Array.isArray(parsed.approvals)
       ? parsed.approvals as PermissionApprovalRecord[]
       : [],
+    operations: Array.isArray(parsed.operations)
+      ? parsed.operations as OperationRecord[]
+      : Array.isArray(detailRecord?.operations)
+        ? detailRecord.operations as OperationRecord[]
+        : [],
   };
 }

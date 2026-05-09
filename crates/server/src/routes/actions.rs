@@ -121,10 +121,14 @@ fn extension_rpc_error_message(error: &ennoia_kernel::ExtensionRpcError) -> Stri
 
 fn extension_rpc_error_to_api_error(error: ennoia_kernel::ExtensionRpcError) -> ApiError {
     let message = extension_rpc_error_message(&error);
-    if extension_rpc_error_is_not_found(&error.code) {
+    let api_error = if extension_rpc_error_is_not_found(&error.code) {
         ApiError::not_found(message)
     } else {
         ApiError::bad_request(message)
+    };
+    match error.details {
+        Some(details) => api_error.with_details(details),
+        None => api_error,
     }
 }
 
@@ -770,6 +774,7 @@ mod tests {
         let error = extension_rpc_error_to_api_error(ennoia_kernel::ExtensionRpcError {
             code: "conversation_not_found".to_string(),
             message: "conversation not found".to_string(),
+            details: None,
         });
 
         assert_eq!(error.code(), ennoia_contract::ErrorCode::NotFound);
@@ -784,12 +789,33 @@ mod tests {
         let error = extension_rpc_error_to_api_error(ennoia_kernel::ExtensionRpcError {
             code: "invalid_params".to_string(),
             message: "conversation_id is required".to_string(),
+            details: None,
         });
 
         assert_eq!(error.code(), ennoia_contract::ErrorCode::BadRequest);
         assert_eq!(
             error.message(),
             "invalid_params: conversation_id is required"
+        );
+    }
+
+    #[test]
+    fn preserves_extension_error_details() {
+        let error = extension_rpc_error_to_api_error(ennoia_kernel::ExtensionRpcError {
+            code: "forbidden".to_string(),
+            message: "approval required".to_string(),
+            details: Some(serde_json::json!({
+                "decision": "ask",
+                "approval_id": "apr-1",
+            })),
+        });
+
+        assert_eq!(
+            error.details(),
+            &serde_json::json!({
+                "decision": "ask",
+                "approval_id": "apr-1",
+            })
         );
     }
 }

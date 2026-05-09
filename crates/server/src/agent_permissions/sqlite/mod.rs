@@ -25,7 +25,6 @@ use super::{
 };
 
 const APPROVAL_TTL_MINUTES: i64 = 15;
-const GRANT_ONCE_TTL_MINUTES: i64 = 10;
 const SQLITE_PRAGMAS: &[&str] = &["PRAGMA journal_mode=WAL;", "PRAGMA synchronous=NORMAL;"];
 
 #[derive(Debug, Clone)]
@@ -412,11 +411,7 @@ impl AgentPermissionStore {
                     mode,
                     serde_json::to_string(&request).map_err(std::io::Error::other)?,
                     Option::<String>::None,
-                    if mode == "once" {
-                        Some((Utc::now() + Duration::minutes(GRANT_ONCE_TTL_MINUTES)).to_rfc3339())
-                    } else {
-                        None
-                    },
+                    None::<String>,
                     Option::<String>::None,
                     now_iso(),
                 ],
@@ -539,10 +534,8 @@ impl AgentPermissionStore {
             if grant.revoked_at.is_some() {
                 continue;
             }
-            if let Some(expires_at) = &grant.expires_at {
-                if is_expired_iso(expires_at) {
-                    continue;
-                }
+            if grant_is_expired(&grant) {
+                continue;
             }
             if grant_matches(&grant, request) {
                 return Ok(Some(grant));
@@ -631,8 +624,31 @@ impl AgentPermissionStore {
                 .execute_batch(&statement)
                 .map_err(std::io::Error::other)?;
         }
+        clear_legacy_once_grant_expirations(&connection)?;
         Ok(())
     }
+}
+
+fn grant_is_expired(grant: &PermissionGrantRecord) -> bool {
+    if grant.mode == "once" {
+        return false;
+    }
+    grant.expires_at.as_deref().is_some_and(is_expired_iso)
+}
+
+fn clear_legacy_once_grant_expirations(connection: &Connection) -> std::io::Result<()> {
+    connection
+        .execute(
+            "UPDATE permission_grants
+             SET expires_at = NULL
+             WHERE mode = 'once'
+               AND consumed_at IS NULL
+               AND revoked_at IS NULL
+               AND expires_at IS NOT NULL",
+            [],
+        )
+        .map(|_| ())
+        .map_err(std::io::Error::other)
 }
 
 fn build_permission_events_query(query: &PermissionEventsQuery) -> SelectQuery {
@@ -815,6 +831,96 @@ fn map_permission_approval(row: &rusqlite::Row<'_>) -> rusqlite::Result<Permissi
         resolved_at: row.get(PermissionApprovalsSchema::RESOLVED_AT)?,
         resolution: row.get(PermissionApprovalsSchema::RESOLUTION)?,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ennoia_kernel::{PermissionScope, PermissionTarget, PermissionTrigger};
+    use ennoia_paths::RuntimePaths;
+    use rusqlite::params;
+    use tempfile::tempdir;
+
+    fn sample_request() -> PermissionRequest {
+        PermissionRequest {
+            agent_id: "b".to_string(),
+            action: "command.exec".to_string(),
+            target: PermissionTarget {
+                kind: "command".to_string(),
+                id: "cmd".to_string(),
+                conversation_id: Some("conv-1".to_string()),
+                run_id: Some("run-1".to_string()),
+                path: Some("/workspace".to_string()),
+                host: None,
+            },
+            scope: PermissionScope {
+                conversation_id: Some("conv-1".to_string()),
+                run_id: Some("run-1".to_string()),
+                message_id: Some("msg-1".to_string()),
+                extension_id: Some("runtime".to_string()),
+                path: Some("/workspace".to_string()),
+                host: None,
+            },
+            trigger: PermissionTrigger {
+                kind: "runtime.operation".to_string(),
+                user_initiated: true,
+            },
+        }
+    }
+
+    fn sample_grant(mode: &str, expires_at: Option<&str>) -> PermissionGrantRecord {
+        PermissionGrantRecord {
+            grant_id: "grant-1".to_string(),
+            approval_id: "apr-1".to_string(),
+            agent_id: "b".to_string(),
+            mode: mode.to_string(),
+            request: sample_request(),
+            consumed_at: None,
+            expires_at: expires_at.map(str::to_string),
+            revoked_at: None,
+        }
+    }
+
+    #[test]
+    fn once_grant_never_expires_after_approval() {
+        let expired_once = sample_grant("once", Some("2000-01-01T00:00:00Z"));
+        assert!(!grant_is_expired(&expired_once));
+
+        let expired_conversation = sample_grant("conversation_all", Some("2000-01-01T00:00:00Z"));
+        assert!(grant_is_expired(&expired_conversation));
+    }
+
+    #[test]
+    fn ensure_schema_clears_legacy_once_grant_expiration() {
+        let temp = tempdir().expect("create temp dir");
+        let paths = RuntimePaths::new(temp.path());
+        let store = AgentPermissionStore::new(&paths).expect("create store");
+        let connection = store.open().expect("open sqlite");
+        let request = serde_json::to_string(&sample_request()).expect("serialize request");
+        connection
+            .execute(
+                &PermissionGrantsSchema::insert_statement(),
+                params![
+                    "grant-legacy",
+                    "apr-legacy",
+                    "b",
+                    "once",
+                    request,
+                    Option::<String>::None,
+                    Some("2000-01-01T00:00:00Z".to_string()),
+                    Option::<String>::None,
+                    now_iso(),
+                ],
+            )
+            .expect("insert legacy grant");
+
+        store.ensure_schema().expect("rerun schema migration");
+        let grant = store
+            .get_grant("grant-legacy")
+            .expect("load grant")
+            .expect("grant exists");
+        assert_eq!(grant.expires_at, None);
+    }
 }
 
 fn ensure_columns(

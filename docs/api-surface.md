@@ -114,12 +114,14 @@
 
 ## Runtime Bridge
 
+- `GET /api/operations`
 - `POST /api/runtime/operations/{operation}`
 - `POST /api/extensions/providers/{provider_kind}/{method}`
 
 宿主只保留中立 runtime bridge，不再把 workflow / memory / conversation 的产品编排写死在核心里。
 
 - `runtime/operations/{operation}`：供扩展或宿主内部 Agent 通过统一入口执行 `fs.read`、`fs.write`、`command.exec`、`net.fetch`，并在入口处统一走 permission + sandbox。
+- `GET /api/operations`：按 `conversation_id`、`run_id`、`message_id` 查询宿主持久化的 operation 快照，供会话页直接渲染运行态、阻塞态和恢复态。
 - `extensions/providers/{provider_kind}/{method}`：供扩展按 provider kind 调用上游 runtime；当 `context.permission_actor` 存在且 `method == generate` 时，宿主会在真正发起上游请求前统一执行 `provider.generate` 权限裁决。
 
 ### Conversation 约定

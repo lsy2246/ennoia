@@ -362,7 +362,12 @@ async fn execute_worker_command_exec(
     child.args(args).current_dir(cwd_host_path);
     let output = tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), child.output())
         .await
-        .map_err(|_| "command exec timed out".to_string())?
+        .map_err(|_| {
+            format!(
+                "sandboxed command exec timed out after {timeout_ms}ms: command={command}, cwd={cwd_display_path}, args={}",
+                serde_json::to_string(args).unwrap_or_else(|_| "[]".to_string())
+            )
+        })?
         .map_err(|error| format!("spawn command failed: {error}"))?;
     Ok(serde_json::json!({
         "ok": output.status.success(),
@@ -675,7 +680,7 @@ fn launch_native_worker(
         }
         return Ok(NativeWorkerLaunchResult {
             success: false,
-            message: "sandbox worker timed out".to_string(),
+            message: "sandbox worker host timed out after 180000ms".to_string(),
         });
     }
 

@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..");
 const args = process.argv.slice(2);
+const wantsHelp = args.includes("--help") || args.includes("-h");
 const isWindows = process.platform === "win32";
 const binaryName = isWindows ? "ennoia.exe" : "ennoia";
 const buildTargetDir = path.join(repoRoot, "target", "ennoia-dev-cli-build");
@@ -16,11 +17,23 @@ const snapshotPath = path.join(
   isWindows ? `ennoia-dev-${Date.now()}.exe` : `ennoia-dev-${Date.now()}`,
 );
 
+if (wantsHelp) {
+  console.log(helpText());
+  process.exit(0);
+}
+
+const validationError = validateArgs(args);
+if (validationError) {
+  console.error(`${validationError}\n\n${helpText()}`);
+  process.exit(1);
+}
+
 const build = spawnSync("cargo", ["build", "-p", "ennoia-cli"], {
   cwd: repoRoot,
   env: {
     ...process.env,
     CARGO_TARGET_DIR: buildTargetDir,
+    CARGO_INCREMENTAL: "0",
   },
   stdio: "inherit",
 });
@@ -85,4 +98,29 @@ function pruneOldSnapshots(dir, keepPath) {
       // ignore stale locked snapshots on Windows
     }
   }
+}
+
+function validateArgs(values) {
+  if (values.length === 0) {
+    return null;
+  }
+  if (values.length > 1) {
+    return "too many arguments for 'bun dev'";
+  }
+  if (values[0].startsWith("-")) {
+    return `unknown option for 'bun dev': ${values[0]}`;
+  }
+  return null;
+}
+
+function helpText() {
+  return `usage: bun dev [home]
+
+Starts the Ennoia dev runtime.
+
+Arguments:
+  home    Optional Ennoia home directory. If omitted, ENNOIA_HOME or ~/.ennoia is used.
+
+This command forwards to:
+  ennoia dev [home]`;
 }

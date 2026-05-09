@@ -20,6 +20,12 @@ pub async fn initialize_workflow_schema(pool: &SqlitePool) -> Result<(), sqlx::E
     {
         sqlx::query(&format!("{statement};")).execute(pool).await?;
     }
+    let _ = sqlx::query("ALTER TABLE direct_reply_states ADD COLUMN pending_operation_id TEXT")
+        .execute(pool)
+        .await;
+    let _ = sqlx::query("ALTER TABLE direct_reply_states ADD COLUMN pending_operation_kind TEXT")
+        .execute(pool)
+        .await;
     Ok(())
 }
 

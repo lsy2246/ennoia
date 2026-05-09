@@ -50,6 +50,7 @@ pub(crate) mod extensions;
 mod logs;
 mod logs_runtime;
 mod memory;
+mod operations;
 mod permissions;
 mod resources;
 mod runtime;
@@ -62,6 +63,7 @@ use extensions::*;
 use logs::*;
 use logs_runtime::*;
 use memory::*;
+use operations::*;
 use permissions::*;
 use resources::*;
 use runtime::*;
@@ -147,6 +149,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/extensions/panels", get(extension_panels))
         .route("/api/extensions/commands", get(extension_commands))
         .route("/api/extensions/providers", get(extension_providers))
+        .route("/api/operations", get(operations_list))
         .route(
             "/api/extensions/providers/{provider_kind}/{*method}",
             post(extension_provider_invoke),

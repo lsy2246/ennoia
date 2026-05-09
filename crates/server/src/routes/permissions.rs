@@ -1,5 +1,6 @@
 use ennoia_kernel::{
-    PermissionApprovalRecord, PermissionEventRecord, HOOK_EVENT_PERMISSION_APPROVAL_RESOLVED,
+    OperationStatus, PermissionApprovalRecord, PermissionEventRecord,
+    HOOK_EVENT_PERMISSION_APPROVAL_RESOLVED,
 };
 
 use crate::agent_permissions::{
@@ -143,6 +144,39 @@ pub(super) async fn permission_approval_resolve(
         state
             .realtime
             .publish(RealtimeEvent::PermissionConversationChanged { conversation_id });
+    }
+    if approval.status == "approved" {
+        let state_for_resume = state.clone();
+        let request_for_resume = request.clone();
+        let approval_id = approval.approval_id.clone();
+        tokio::spawn(async move {
+            let _ = crate::runtime_bridge::resume_operation_after_approval(
+                &state_for_resume,
+                &request_for_resume,
+                &approval_id,
+            )
+            .await;
+        });
+    } else if let Some(target) = state
+        .operations
+        .find_resume_target_by_approval(&approval.approval_id)
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?
+    {
+        let operation = state
+            .operations
+            .update_operation(
+                &target.operation.id,
+                OperationStatus::Cancelled,
+                None,
+                Some(serde_json::json!({
+                    "approval_id": approval.approval_id,
+                    "resolution": approval.resolution,
+                    "status": approval.status,
+                    "message": "operation cancelled because approval was not granted",
+                })),
+            )
+            .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?;
+        crate::runtime_bridge::publish_operation_update(&state, &request, &operation);
     }
     Ok(Json(approval))
 }

@@ -146,9 +146,9 @@ impl RuntimeOperationTimeoutConfig {
 impl Default for RuntimeOperationTimeoutConfig {
     fn default() -> Self {
         Self {
-            default_timeout_ms: 30_000,
+            default_timeout_ms: 120_000,
             min_timeout_ms: 1_000,
-            max_timeout_ms: 120_000,
+            max_timeout_ms: 3_600_000,
         }
     }
 }
@@ -193,7 +193,7 @@ impl ProviderRuntimeConfig {
 impl Default for ProviderRuntimeConfig {
     fn default() -> Self {
         Self {
-            default_request_timeout_ms: 90_000,
+            default_request_timeout_ms: 300_000,
         }
     }
 }

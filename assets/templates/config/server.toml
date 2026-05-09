@@ -22,17 +22,17 @@ default_ms = 30000
 per_path_ms = {}
 
 [operations.command]
-default_timeout_ms = 30000
+default_timeout_ms = 120000
 min_timeout_ms = 1000
-max_timeout_ms = 120000
+max_timeout_ms = 3600000
 
 [operations.net]
-default_timeout_ms = 30000
+default_timeout_ms = 120000
 min_timeout_ms = 1000
-max_timeout_ms = 120000
+max_timeout_ms = 3600000
 
 [providers]
-default_request_timeout_ms = 90000
+default_request_timeout_ms = 300000
 
 [streams]
 conversation_poll_ms = 1000

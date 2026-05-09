@@ -108,10 +108,11 @@ export type ChatStatusEntry = ChatEntryBase & {
   label: string;
   branchId?: string;
   detail?: string;
-  animation: "typing";
+  animation: "typing" | "blocked";
   relatedMessageId?: string;
   sourceMessageId?: string;
   live?: boolean;
+  operationId?: string;
 };
 
 export type ChatReasoningEntry = ChatEntryBase & {

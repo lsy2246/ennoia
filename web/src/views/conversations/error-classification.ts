@@ -1,5 +1,6 @@
 export type ConversationFailureSource =
   | "sandbox"
+  | "approval"
   | "permission"
   | "provider"
   | "timeout"
@@ -56,11 +57,14 @@ const SYSTEM_PATTERNS = [
   "internal server error",
 ];
 
-const PERMISSION_PATTERNS = [
+const APPROVAL_PATTERNS = [
   "approval required:",
+  "等待审批",
+];
+
+const PERMISSION_PATTERNS = [
   "permission denied",
   "权限已拒绝",
-  "等待审批",
 ];
 
 const GENERIC_ERROR_PATTERNS = [
@@ -146,6 +150,14 @@ export function classifyConversationFailure(message: string): ConversationFailur
     return {
       source: "sandbox",
       code: "sandbox_path_restricted",
+      summary: summarizeLines(lines),
+      detail,
+    };
+  }
+
+  if (includesAny(normalized, APPROVAL_PATTERNS)) {
+    return {
+      source: "approval",
       summary: summarizeLines(lines),
       detail,
     };

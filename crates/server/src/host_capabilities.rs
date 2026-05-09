@@ -75,6 +75,21 @@ impl HostCapabilityDispatcher for ServerHostCapabilityDispatcher {
                     payload,
                 )
             }
+            ExtensionHostCapabilityRequest::OperationPerform { payload } => {
+                map_api_result(self.runtime.block_on(async {
+                    runtime_bridge::perform_operation(
+                        &self.state,
+                        &request_context,
+                        &extension.id,
+                        payload,
+                    )
+                    .await
+                    .and_then(|response| {
+                        serde_json::to_value(response)
+                            .map_err(|error| ApiError::internal(error.to_string()))
+                    })
+                }))
+            }
             ExtensionHostCapabilityRequest::ExtensionStateGet { query } => self
                 .state
                 .extension_runtime_store
@@ -151,9 +166,14 @@ fn extension_state_success(entry: ExtensionStateEntry) -> ExtensionRpcResponse {
 fn map_api_result(result: Result<serde_json::Value, ApiError>) -> ExtensionRpcResponse {
     match result {
         Ok(data) => ExtensionRpcResponse::success(data),
-        Err(error) => {
-            ExtensionRpcResponse::failure(error_code_string(error.code()), error.message())
-        }
+        Err(error) => ExtensionRpcResponse::failure_with_details(
+            error_code_string(error.code()),
+            error.message(),
+            match error.details() {
+                serde_json::Value::Null => None,
+                details => Some(details.clone()),
+            },
+        ),
     }
 }
 
@@ -179,5 +199,30 @@ fn error_code_string(code: ErrorCode) -> &'static str {
         ErrorCode::Timeout => "timeout",
         ErrorCode::PayloadTooLarge => "payload_too_large",
         ErrorCode::Internal => "internal",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn map_api_result_preserves_error_details() {
+        let response = map_api_result(Err(ApiError::forbidden("approval required").with_details(
+            serde_json::json!({
+                "decision": "ask",
+                "approval_id": "apr-1",
+            }),
+        )));
+
+        let error = response.error.expect("error");
+        assert_eq!(error.code, "forbidden");
+        assert_eq!(
+            error.details,
+            Some(serde_json::json!({
+                "decision": "ask",
+                "approval_id": "apr-1",
+            }))
+        );
     }
 }
