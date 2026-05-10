@@ -284,7 +284,11 @@
 
 ## Skill 域
 
-`SkillConfig` 字段：`id`、`display_name`、`description`、`source`、`entry`、`docs`、`keywords`、`enabled`。
+`SkillManifest` 字段：`id`、`version`、`description`、`mount.mode`、`actions[]`。
+
+`actions[]` 字段：`id`、`description`、`entry`、`invoke_mode`、`requires[]`。
+
+`SkillConfig` 是运行时返回对象，在 manifest 基础上额外附带：`enabled`、`builtin_sync_blocked`。
 
 ## 模型接入域
 
@@ -304,6 +308,9 @@
 - Agent 权限事件与审批：`~/.ennoia/data/system/sqlite/permissions.db`。
 - 扩展通用运行态 state/record：`~/.ennoia/data/system/sqlite/extensions.db`。
 - 核心前端日志：`~/.ennoia/logs/frontend.jsonl`。
+- 扩展级宿主配置：`~/.ennoia/config/extensions/{extension_id}.toml`。
+- 技能级宿主配置：`~/.ennoia/config/skills/{skill_id}.toml`。
 - 扩展私有数据：`~/.ennoia/data/extensions/{extension_id}/`。
+- 技能私有数据：`~/.ennoia/data/skills/{skill_id}/`。
 - 核心不维护主业务数据库快照。
 - `memory` 不再维护原始会话消息镜像或 session shadow state。

@@ -51,6 +51,23 @@ impl RuntimePaths {
         self.config_dir().join("model-endpoints")
     }
 
+    pub fn skills_config_dir(&self) -> PathBuf {
+        self.config_dir().join("skills")
+    }
+
+    pub fn skill_config_file(&self, skill_id: &str) -> PathBuf {
+        self.skills_config_dir().join(format!("{skill_id}.toml"))
+    }
+
+    pub fn extensions_config_dir(&self) -> PathBuf {
+        self.config_dir().join("extensions")
+    }
+
+    pub fn extension_config_file(&self, extension_id: &str) -> PathBuf {
+        self.extensions_config_dir()
+            .join(format!("{extension_id}.toml"))
+    }
+
     pub fn server_config_file(&self) -> PathBuf {
         self.config_dir().join("server.toml")
     }
@@ -104,6 +121,10 @@ impl RuntimePaths {
         self.state_dir().join("extensions")
     }
 
+    pub fn skills_state_dir(&self) -> PathBuf {
+        self.state_dir().join("skills")
+    }
+
     pub fn schedules_file(&self) -> PathBuf {
         self.system_state_dir().join("schedules.json")
     }
@@ -138,6 +159,10 @@ impl RuntimePaths {
 
     pub fn extension_state_dir(&self, extension_id: &str) -> PathBuf {
         self.extensions_state_dir().join(extension_id)
+    }
+
+    pub fn skill_state_dir(&self, skill_id: &str) -> PathBuf {
+        self.skills_state_dir().join(skill_id)
     }
 
     pub fn extension_sqlite_dir(&self, extension_id: &str) -> PathBuf {
@@ -251,6 +276,8 @@ impl RuntimePaths {
     pub fn ensure_layout(&self) -> io::Result<()> {
         for dir in [
             self.model_endpoints_config_dir(),
+            self.skills_config_dir(),
+            self.extensions_config_dir(),
             self.preferences_dir(),
             self.space_preferences_dir(),
             self.extensions_dir(),
@@ -259,6 +286,7 @@ impl RuntimePaths {
             self.state_runs_dir(),
             self.state_cache_dir(),
             self.extensions_state_dir(),
+            self.skills_state_dir(),
             self.system_sqlite_dir(),
             self.agents_dir(),
             self.server_logs_dir(),

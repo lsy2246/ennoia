@@ -65,7 +65,7 @@ export function Skills() {
   }
 
   const enabledCount = skills.filter((item) => item.enabled).length;
-  const docsCount = skills.filter((item) => Boolean(item.docs)).length;
+  const blockedCount = skills.filter((item) => item.builtin_sync_blocked).length;
   const totalAssignments = [...assignmentMap.values()].reduce((sum, current) => sum + current.length, 0);
 
   return (
@@ -75,8 +75,8 @@ export function Skills() {
         <div className="skills-toolbar__row">
           <div className="page-heading">
             <span>{t("web.skills.eyebrow", "Skill Registry")}</span>
-            <h1>{t("web.skills.title", "技能是工具与用法定义，由具体 Agent 选择启用。")}</h1>
-            <p>{t("web.skills.description", "Web 只负责发现、查看来源、重新扫描和分配给 Agent，不直接编辑技能目录内容。")}</p>
+            <h1>{t("web.skills.title", "技能是标准能力包，由具体 Agent 选择挂载。")}</h1>
+            <p>{t("web.skills.description", "技能页只展示包定义、动作和挂载状态；具体调用说明统一写在 skill 自己的 README.md。")}</p>
           </div>
           <div className="skills-toolbar__actions">
             <button type="button" className="secondary" onClick={() => void refresh()}>
@@ -96,9 +96,9 @@ export function Skills() {
             <small>{t("web.common.enabled", "启用")}</small>
           </article>
           <article className="metric-card skills-metric-card">
-            <span>{t("web.skills.summary_docs", "带文档")}</span>
-            <strong>{docsCount}</strong>
-            <small>{t("web.skills.docs", "文档")}</small>
+            <span>{t("web.skills.summary_docs", "阻止内置同步")}</span>
+            <strong>{blockedCount}</strong>
+            <small>{t("web.skills.docs", "同步拦截")}</small>
           </article>
           <article className="metric-card skills-metric-card">
             <span>{t("web.skills.summary_assignments", "已分配")}</span>
@@ -112,8 +112,8 @@ export function Skills() {
         <div className="skills-section__header">
           <div className="page-heading">
             <span>{t("web.skills.catalog", "技能目录")}</span>
-            <h1>{t("web.skills.catalog_title", "按技能查看来源与分配")}</h1>
-            <p>{t("web.skills.catalog_description", "每个技能展示来源、入口、文档和关键词；你可以直接把它分配给某个 Agent。")}</p>
+            <h1>{t("web.skills.catalog_title", "按技能查看动作与分配")}</h1>
+            <p>{t("web.skills.catalog_description", "每个技能展示版本、挂载模式、动作列表和内置同步状态；你可以直接把它分配给某个 Agent。")}</p>
           </div>
           <span className="skills-catalog-count">{`${skills.length} ${t("web.skills.catalog_count", "项")}`}</span>
         </div>
@@ -129,8 +129,8 @@ export function Skills() {
               <article key={skill.id} className="resource-card skills-card">
                 <div className="skills-card__header">
                   <div className="stack skills-card__title">
-                    <strong>{skill.display_name}</strong>
-                    <small>{skill.id}</small>
+                    <strong>{skill.id}</strong>
+                    <small>{skill.version}</small>
                   </div>
                   <span className={`badge ${skill.enabled ? "badge--success" : "badge--muted"}`}>
                     {skill.enabled ? t("web.common.enabled", "启用") : t("web.common.disabled", "停用")}
@@ -141,27 +141,37 @@ export function Skills() {
 
                 <div className="skills-meta-grid">
                   <div className="skills-meta-item">
-                    <span>{t("web.skills.source", "来源")}</span>
-                    <strong>{formatRelativePath(skill.source)}</strong>
+                    <span>{t("web.skills.source", "挂载模式")}</span>
+                    <strong>{skill.mount.mode}</strong>
                   </div>
                   <div className="skills-meta-item">
-                    <span>{t("web.skills.entry", "入口")}</span>
-                    <strong>{skill.entry ? formatRelativePath(skill.entry) : t("web.common.none", "无")}</strong>
+                    <span>{t("web.skills.entry", "动作数")}</span>
+                    <strong>{skill.actions.length}</strong>
                   </div>
                   <div className="skills-meta-item">
-                    <span>{t("web.skills.docs", "文档")}</span>
-                    <strong>{skill.docs ? formatRelativePath(skill.docs) : t("web.common.none", "无")}</strong>
+                    <span>{t("web.skills.docs", "内置同步")}</span>
+                    <strong>{skill.builtin_sync_blocked ? "blocked" : "follow"}</strong>
                   </div>
                 </div>
 
                 <div className="skills-card__section">
-                  <div className="skills-subtitle">{t("web.skills.keywords", "关键词")}</div>
-                  {skill.keywords.length === 0 ? (
-                    <div className="empty-card skills-inline-empty">{t("web.skills.keywords_empty", "这个技能没有声明路由关键词。")}</div>
+                  <div className="skills-subtitle">Actions</div>
+                  {skill.actions.length === 0 ? (
+                    <div className="empty-card skills-inline-empty">这个技能当前没有声明可执行动作。</div>
                   ) : (
-                    <div className="chip-grid">
-                      {skill.keywords.map((item) => (
-                        <span key={item} className="chip chip--active">{item}</span>
+                    <div className="stack">
+                      {skill.actions.map((action) => (
+                        <div key={action.id} className="resource-card">
+                          <strong>{action.id}</strong>
+                          <p className="helper-text">{action.description || "无说明"}</p>
+                          <div className="chip-grid">
+                            <span className="chip chip--active">{action.invoke_mode}</span>
+                            {action.requires.map((item) => (
+                              <span key={`${action.id}:${item}`} className="chip">{item}</span>
+                            ))}
+                          </div>
+                          <small>{formatRelativePath(action.entry)}</small>
+                        </div>
                       ))}
                     </div>
                   )}

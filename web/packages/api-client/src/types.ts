@@ -235,13 +235,22 @@ export type AgentExecutionEnvironment = {
 
 export type SkillConfig = {
   id: string;
-  display_name: string;
+  version: string;
   description: string;
-  source: string;
-  entry: string;
-  docs?: string | null;
-  keywords: string[];
+  mount: {
+    mode: string;
+  };
+  actions: SkillActionConfig[];
   enabled: boolean;
+  builtin_sync_blocked: boolean;
+};
+
+export type SkillActionConfig = {
+  id: string;
+  description: string;
+  entry: string;
+  invoke_mode: string;
+  requires: string[];
 };
 
 export type ProviderModelDescriptor = {

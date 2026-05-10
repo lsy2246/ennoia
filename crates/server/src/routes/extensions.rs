@@ -329,10 +329,7 @@ pub(super) async fn extension_record_list(
 }
 
 fn extension_settings_path(state: &AppState, extension_id: &str) -> PathBuf {
-    state
-        .runtime_paths
-        .extension_state_dir(extension_id)
-        .join("settings.toml")
+    state.runtime_paths.extension_config_file(extension_id)
 }
 
 fn read_extension_settings_file(path: PathBuf) -> Option<ExtensionSettingsFile> {

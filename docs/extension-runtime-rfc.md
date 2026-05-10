@@ -6,7 +6,11 @@
 
 - 扩展注册表：`<ENNOIA_HOME>/config/extensions.toml`
 - 安装扩展：`<ENNOIA_HOME>/extensions/<extension_id>/`
+- 安装技能：`<ENNOIA_HOME>/skills/<skill_id>/`
+- 扩展级宿主配置：`<ENNOIA_HOME>/config/extensions/<extension_id>.toml`
+- 技能级宿主配置：`<ENNOIA_HOME>/config/skills/<skill_id>.toml`
 - 扩展私有数据：`<ENNOIA_HOME>/data/extensions/<extension_id>/`
+- 技能私有数据：`<ENNOIA_HOME>/data/skills/<skill_id>/`
 
 ## 当前协议
 
@@ -35,25 +39,26 @@ Extension descriptor 包含：
 
 Skill descriptor 包含：
 
+- `id`
+- `version`
 - `description`
-- `docs`
-- `keywords`
-- `entry`
+- `mount.mode`
+- `actions[]`
 
 主声明模型统一只有一层：`resource_types`、`capabilities`、`surfaces`、`locales`、`themes`、`commands`、`subscriptions`。页面、面板、Provider、Behavior、Memory、Action、Hook 和 Schedule Action 都是宿主运行时根据声明派生的视图。
 
 `ui` 是可选界面入口；`worker` 是可选执行单元，可为 Wasm，也可为进程型 stdio RPC。宿主按声明装配能力，不要求扩展同时包含 UI 和 Worker。
 
-Skill 不声明系统能力入口。它只提供最小目录元信息和 `docs` 入口；CLI、参数和完整用法都保留在文档中。
+Skill 不声明系统能力入口。它只声明动作入口；CLI 参数、调用示例、平台限制和常见输入输出统一保留在 skill 目录下的 `README.md` 中。
 
 Extension 默认不进入会话目录。只有显式声明了 `conversation.inject = true` 时，宿主才会把它作为会话可见目录项暴露给模型；`conversation.resource_types` 和 `conversation.capabilities` 用于限定进入会话时附带的资源范围和能力入口。进入会话时复用扩展唯一那份 `description`，`docs` 仍然只作为按需查阅入口。
 
 ## 运行流程
 
 1. CLI 初始化运行目录和默认配置。
-2. CLI 同步内置扩展到 `<ENNOIA_HOME>/extensions/*`，并写入 `config/extensions.toml`。
-3. 开发模式下 CLI 把仓库内 `builtins/extensions/*` 追加为开发来源。
-4. Extension Host 扫描 `config/extensions.toml` 中启用且未移除的扩展来源。
+2. CLI 同步未被 `blocked_builtin_sync` 屏蔽的内置扩展到 `<ENNOIA_HOME>/extensions/*`，并写入 `config/extensions.toml`。
+3. 开发模式下 CLI 把仓库内 `builtins/extensions/*` 追加到 `config/extensions.toml` 的 `dev_sources`。
+4. Extension Host 扫描 `<ENNOIA_HOME>/extensions/*` 中已安装扩展，并叠加 `config/extensions.toml` 的 `enabled` 与 `dev_sources` 状态。
 5. Extension Host 解析 `ui`、`worker`、权限和贡献清单，生成 runtime snapshot。
 6. Server 暴露 runtime snapshot、事件、诊断、日志、资源贡献接口、动作规则视图、scheduler API 和 Worker RPC。
 7. Web 工作台通过 runtime snapshot 动态挂载扩展贡献。

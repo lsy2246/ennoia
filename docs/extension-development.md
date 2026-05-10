@@ -1,5 +1,3 @@
-# Ennoia 扩展开发指南
-
 ## 定位
 
 Extension 负责系统能力，Skill 负责工具与用法。Extension 不再表示“前端 + 独立后端服务”，而是由宿主装配的一组能力声明：`ui`、`worker`、`resource_types`、`capabilities`、`surfaces`、`entrypoints`、`settings`、`themes`、`locales`、`commands`、`subscriptions`。
@@ -9,7 +7,7 @@ Extension 负责系统能力，Skill 负责工具与用法。Extension 不再表
 - 官方内置扩展源码放在 `builtins/extensions/<extension_id>/`
 - 官方内置技能源码放在 `builtins/skills/<skill_id>/`
 - 运行目录里的真实包内容分别落在 `~/.ennoia/extensions/<id>/` 与 `~/.ennoia/skills/<id>/`
-- 是否启用、是否卸载、来源路径统一登记在 `~/.ennoia/config/extensions.toml` 与 `~/.ennoia/config/skills.toml`
+- 是否启用、是否阻止内置同步统一登记在 `~/.ennoia/config/extensions.toml` 与 `~/.ennoia/config/skills.toml`
 
 ## Manifest
 
@@ -132,7 +130,7 @@ Manifest 主声明只有一层：
 - `options`
 - `default_value`
 
-宿主会把扩展配置保存到 `~/.ennoia/data/extensions/{extension_id}/settings.toml`。这个文件属于扩展私有数据，不进入系统级 `config/` 根目录。
+宿主会把扩展配置保存到 `~/.ennoia/config/extensions/{extension_id}.toml`。扩展私有数据库、缓存和业务运行数据仍然保留在 `~/.ennoia/data/extensions/{extension_id}/`。
 
 `themes[]` 是可选主题贡献。扩展主题遵循 `ennoia.theme`，通过 `tokens_entry` 提供 CSS 变量文件，详细 token 规范见 [主题协议](theme-contract.md)。
 
@@ -228,23 +226,36 @@ Skill 目录独立：
 <skill_id>/
 ├─ skill.toml
 ├─ README.md
-├─ entry.js
-└─ schemas/
+├─ package.json      # 可选：skill 私有依赖
+├─ scripts/          # 可选：安装、runner、包装脚本
+├─ references/       # 可选：补充说明与操作约定
+└─ assets/           # 可选：skill 自带资源
 ```
 
-`skill.toml` 推荐额外声明：
+`skill.toml` 现在只保留最小运行字段：
 
-- `docs`
-- `keywords[]`
+- `id`
+- `version`
+- `description`
+- `mount.mode`
+- `actions[]`
 
-其中 `keywords[]` 只用于路由和发现，不承载完整用法；CLI、参数和具体操作流程统一写在 `docs` 中。
+其中 `actions[]` 只声明：
+
+- `id`
+- `description`
+- `entry`
+- `invoke_mode`
+- `requires[]`
+
+Skill 的具体调用方式、常见输入、常见输出和平台限制统一写在 `README.md` 中；不要再把这些内容拆成 `docs`、`keywords` 或额外 schema 目录。
 
 ## 运行链路
 
 1. `cargo run -p ennoia-cli -- dev` 初始化运行目录。
-2. CLI 把内置扩展同步到 `<ENNOIA_HOME>/extensions/<extension_id>/`，并更新 `config/extensions.toml`。
+2. CLI 把未被 `blocked_builtin_sync` 屏蔽的内置扩展同步到 `<ENNOIA_HOME>/extensions/<extension_id>/`，并更新 `config/extensions.toml`。
 3. CLI 扫描内置扩展中的 `model-endpoint-presets/*.toml`，把默认模型接入实例写入 `config/model-endpoints/`。
-4. CLI 把仓库内 `builtins/extensions/*` 追加为开发来源，供开发模式覆盖安装目录。
+4. CLI 把仓库内 `builtins/extensions/*` 追加到 `config/extensions.toml` 的 `dev_sources`，供开发模式覆盖安装目录。
 5. Extension Host 扫描扩展，解析 `ui`、`worker` 和贡献能力，不启动扩展私有进程。
 6. Server 暴露 runtime snapshot、事件流、诊断、日志、资源贡献接口、接口绑定 API、scheduler API，以及 `/api/extensions/{extension_id}/rpc/{method}` Worker RPC 入口。
 7. Core 只维护稳定动作、绑定、计划与 Hook 派发；扩展内部按 Worker ABI 和 capability 组织自己的业务逻辑。

@@ -1,0 +1,24 @@
+{
+  "name": "@ennoia/skill-web-search",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Ennoia built-in web-search skill with bundled agent-browser and Lightpanda tooling",
+  "trustedDependencies": [
+    "@lightpanda/browser",
+    "agent-browser"
+  ],
+  "scripts": {
+    "setup": "node scripts/setup.mjs",
+    "doctor": "node scripts/doctor.mjs",
+    "search": "node scripts/search-runner.mjs",
+    "browse": "node scripts/agent-browser-lightpanda.mjs"
+  },
+  "dependencies": {
+    "@lightpanda/browser": "1.3.1",
+    "@mozilla/readability": "0.6.0",
+    "agent-browser": "0.27.0",
+    "cheerio": "1.2.0",
+    "linkedom": "0.18.12"
+  }
+}

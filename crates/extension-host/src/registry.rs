@@ -7,14 +7,14 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use ennoia_kernel::{
     ActionRule, BehaviorContribution, CapabilityContribution, CommandContribution,
-    ExtensionCapabilities, ExtensionConversationSpec, ExtensionDiagnostic, ExtensionEntrypointKind,
-    ExtensionEntrypointSpec, ExtensionHealth, ExtensionKind, ExtensionManifest,
-    ExtensionPermissionSpec, ExtensionRegistryEntry, ExtensionRegistryFile, ExtensionRpcRequest,
-    ExtensionRpcResponse, ExtensionRuntimeEvent, ExtensionRuntimeSpec, ExtensionSettingFieldSpec,
-    ExtensionSourceMode, ExtensionUiSpec, HookContribution, LocaleContribution, MemoryContribution,
-    PageContribution, PanelContribution, ProviderContribution, ResolvedUiEntry,
-    ResolvedWorkerEntry, ResourceTypeContribution, ScheduleActionContribution,
-    SubscriptionContribution, SurfaceContribution, ThemeContribution,
+    ExtensionCapabilities, ExtensionConversationSpec, ExtensionDevSourceEntry, ExtensionDiagnostic,
+    ExtensionEntrypointKind, ExtensionEntrypointSpec, ExtensionHealth, ExtensionKind,
+    ExtensionManifest, ExtensionPermissionSpec, ExtensionRegistryEntry, ExtensionRegistryFile,
+    ExtensionRpcRequest, ExtensionRpcResponse, ExtensionRuntimeEvent, ExtensionRuntimeSpec,
+    ExtensionSettingFieldSpec, ExtensionSourceMode, ExtensionUiSpec, HookContribution,
+    LocaleContribution, MemoryContribution, PageContribution, PanelContribution,
+    ProviderContribution, ResolvedUiEntry, ResolvedWorkerEntry, ResourceTypeContribution,
+    ScheduleActionContribution, SubscriptionContribution, SurfaceContribution, ThemeContribution,
 };
 use serde::Serialize;
 use serde_json::Value as JsonValue;
@@ -361,17 +361,13 @@ impl ExtensionRuntime {
         let path = canonicalize_or_original(path.as_ref());
         let manifest = read_manifest_from_root(&path)?;
         let mut registry = read_registry_file(&self.config.registry_file)?;
-        registry
-            .extensions
-            .retain(|item| !(item.id == manifest.id && item.source == "dev"));
-        registry.extensions.push(ExtensionRegistryEntry {
+        registry.dev_sources.retain(|item| item.id != manifest.id);
+        registry.dev_sources.push(ExtensionDevSourceEntry {
             id: manifest.id.clone(),
-            source: "dev".to_string(),
-            enabled: true,
-            removed: false,
             path: normalize_display_path(&path),
+            enabled: true,
         });
-        sort_registry_entries(&mut registry.extensions);
+        sort_dev_sources(&mut registry.dev_sources);
         write_registry_file(&self.config.registry_file, &registry)?;
 
         self.refresh_from_disk(&format!("dev source {} attached", manifest.id))?;
@@ -385,15 +381,13 @@ impl ExtensionRuntime {
 
     pub fn detach_dev_source(&self, extension_id: &str) -> io::Result<bool> {
         let mut registry = read_registry_file(&self.config.registry_file)?;
-        let original_len = registry.extensions.len();
-        registry
-            .extensions
-            .retain(|item| !(item.id == extension_id && item.source == "dev"));
-        if registry.extensions.len() == original_len {
+        let original_len = registry.dev_sources.len();
+        registry.dev_sources.retain(|item| item.id != extension_id);
+        if registry.dev_sources.len() == original_len {
             return Ok(false);
         }
 
-        sort_registry_entries(&mut registry.extensions);
+        sort_dev_sources(&mut registry.dev_sources);
         write_registry_file(&self.config.registry_file, &registry)?;
         let _ = self.refresh_from_disk(&format!("dev source {extension_id} detached"))?;
         Ok(true)
@@ -405,7 +399,15 @@ impl ExtensionRuntime {
         for entry in registry
             .extensions
             .iter_mut()
-            .filter(|item| item.id == extension_id && !item.removed)
+            .filter(|item| item.id == extension_id)
+        {
+            entry.enabled = enabled;
+            updated = true;
+        }
+        for entry in registry
+            .dev_sources
+            .iter_mut()
+            .filter(|item| item.id == extension_id)
         {
             entry.enabled = enabled;
             updated = true;
@@ -414,6 +416,7 @@ impl ExtensionRuntime {
             return Ok(false);
         }
         sort_registry_entries(&mut registry.extensions);
+        sort_dev_sources(&mut registry.dev_sources);
         write_registry_file(&self.config.registry_file, &registry)?;
         let summary = if enabled {
             format!("extension {extension_id} enabled")
@@ -761,17 +764,52 @@ fn discover_sources(config: &ExtensionRuntimeConfig) -> io::Result<Vec<RuntimeSo
     let mut ordered = BTreeMap::<String, RuntimeSource>::new();
 
     let registry = read_registry_file(&config.registry_file)?;
-    for item in registry
+    let enabled_by_id = registry
         .extensions
         .into_iter()
-        .filter(|entry| entry.enabled && !entry.removed)
+        .map(|entry| (entry.id, entry.enabled))
+        .collect::<BTreeMap<_, _>>();
+    let blocked_builtin_sync = registry.blocked_builtin_sync;
+
+    let installed_dir = config.home_dir.join("extensions");
+    if installed_dir.exists() {
+        for entry in fs::read_dir(installed_dir)? {
+            let entry = entry?;
+            if !entry.file_type()?.is_dir() {
+                continue;
+            }
+            let root = entry.path();
+            if !root.join("extension.toml").exists() {
+                continue;
+            }
+            let id = entry.file_name().to_string_lossy().to_string();
+            if blocked_builtin_sync.iter().any(|item| item == &id) {
+                continue;
+            }
+            if !enabled_by_id.get(&id).copied().unwrap_or(true) {
+                continue;
+            }
+            ordered.insert(
+                normalize_display_path(&root),
+                RuntimeSource {
+                    root,
+                    source_mode: ExtensionSourceMode::Package,
+                },
+            );
+        }
+    }
+
+    for item in registry
+        .dev_sources
+        .into_iter()
+        .filter(|entry| entry.enabled)
     {
         let root = PathBuf::from(&item.path);
         ordered.insert(
             normalize_display_path(&root),
             RuntimeSource {
                 root,
-                source_mode: registry_source_mode(&item),
+                source_mode: ExtensionSourceMode::Dev,
             },
         );
     }
@@ -1402,18 +1440,14 @@ pub fn write_registry_file(path: &Path, file: &ExtensionRegistryFile) -> io::Res
     )
 }
 
-fn registry_source_mode(entry: &ExtensionRegistryEntry) -> ExtensionSourceMode {
-    match entry.source.as_str() {
-        "dev" => ExtensionSourceMode::Dev,
-        _ => ExtensionSourceMode::Package,
-    }
+fn sort_registry_entries(entries: &mut [ExtensionRegistryEntry]) {
+    entries.sort_by(|left, right| left.id.cmp(&right.id));
 }
 
-fn sort_registry_entries(entries: &mut [ExtensionRegistryEntry]) {
+fn sort_dev_sources(entries: &mut [ExtensionDevSourceEntry]) {
     entries.sort_by(|left, right| {
         left.id
             .cmp(&right.id)
-            .then_with(|| left.source.cmp(&right.source))
             .then_with(|| left.path.cmp(&right.path))
     });
 }
@@ -1536,13 +1570,12 @@ mod tests {
         write_registry_file(
             &config.registry_file,
             &ExtensionRegistryFile {
-                extensions: vec![ExtensionRegistryEntry {
+                dev_sources: vec![ExtensionDevSourceEntry {
                     id: "sample".to_string(),
-                    source: "dev".to_string(),
-                    enabled: true,
-                    removed: false,
                     path: normalize_display_path(&ext_dir),
+                    enabled: true,
                 }],
+                ..ExtensionRegistryFile::default()
             },
         )
         .expect("write registry");

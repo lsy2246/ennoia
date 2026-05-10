@@ -77,7 +77,7 @@
 
 `GET /api/extensions/{extension_id}/settings` 返回扩展当前生效的扩展级配置；宿主会把 manifest 默认值和扩展私有目录中的已保存值合并后返回。
 
-`PUT /api/extensions/{extension_id}/settings` 接收扩展声明过的配置字段值，宿主会按 manifest 做键、类型、必填项和 `select` 值校验，然后写入 `~/.ennoia/data/extensions/{extension_id}/settings.toml`。
+`PUT /api/extensions/{extension_id}/settings` 接收扩展声明过的配置字段值，宿主会按 manifest 做键、类型、必填项和 `select` 值校验，然后写入 `~/.ennoia/config/extensions/{extension_id}.toml`。
 
 ## Action Runtime
 

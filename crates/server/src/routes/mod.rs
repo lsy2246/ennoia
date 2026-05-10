@@ -895,7 +895,7 @@ fn list_extension_workbench_records(state: &AppState) -> Vec<ExtensionWorkbenchR
         .collect::<HashMap<_, _>>();
 
     if let Ok(registry) = read_registry_file(&state.runtime_paths.extensions_registry_file()) {
-        for record in registry.extensions.into_iter().filter(|item| !item.removed) {
+        for record in registry.extensions {
             if by_id.contains_key(&record.id) {
                 continue;
             }
@@ -911,7 +911,31 @@ fn list_extension_workbench_records(state: &AppState) -> Vec<ExtensionWorkbenchR
                         "disabled".to_string()
                     },
                     kind: "extension".to_string(),
-                    source_mode: record.source,
+                    source_mode: "package".to_string(),
+                    install_dir: state
+                        .runtime_paths
+                        .display_for_user(state.runtime_paths.extension_dir(&record.id)),
+                    source_root: state
+                        .runtime_paths
+                        .display_for_user(state.runtime_paths.extension_dir(&record.id)),
+                    diagnostics: Vec::new(),
+                },
+            );
+        }
+        for record in registry.dev_sources {
+            by_id.insert(
+                record.id.clone(),
+                ExtensionWorkbenchRecord {
+                    id: record.id.clone(),
+                    name: record.id.clone(),
+                    enabled: record.enabled,
+                    status: if record.enabled {
+                        "ready".to_string()
+                    } else {
+                        "disabled".to_string()
+                    },
+                    kind: "extension".to_string(),
+                    source_mode: "dev".to_string(),
                     install_dir: record.path.clone(),
                     source_root: record.path,
                     diagnostics: Vec::new(),

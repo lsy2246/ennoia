@@ -154,11 +154,11 @@ Web
 
 ## Skill 模型
 
-- Skill 不负责实现系统能力；它只描述工具与用法。
-- Skill 只保留最小目录元信息与 `docs` 入口；CLI、参数和完整操作流程都放在文档中。
-- Skill 可以声明 `keywords` 供宿主做发现和路由，但不会因为这些字段自动把正文塞进每轮会话。
-- Skill 如果被 Agent 启用，会和扩展目录一样进入结构化 `context.skills`，只暴露目录元信息与文档入口，不自动展开正文。
-- 扩展可以带自己的能力说明文档，但扩展说明不等于 skill；前者回答“系统里这块能力是什么”，后者回答“Agent 怎么使用它”。
+- Skill 是标准能力包，不再承担系统能力声明；系统只关心它有哪些 action、每个 action 的入口在哪、当前是否启用。
+- Skill manifest 只保留 `id`、`version`、`description`、`mount.mode` 与 `actions[]`；具体调用说明统一写在 skill 目录下的 `README.md`。
+- Skill action 的调用协议固定为 `skill_id + action_id + input -> output`；宿主不在 manifest 里强定义输入输出类型。
+- Skill 如果被 Agent 启用，会进入结构化 `context.skills`；模型看到的是 skill 摘要与 action 摘要，需要细看时再去读 `README.md`。
+- 扩展可以带自己的能力说明文档，但扩展说明不等于 skill；前者回答“系统里这块能力是什么”，后者回答“Agent 怎么调用这包里的动作”。
 
 ## 存储划分
 
@@ -170,5 +170,7 @@ Web
 - Agent 基础配置、权限配置与执行环境配置：`~/.ennoia/agents/{agent_id}/agent.toml`
 - 系统定时计划：`~/.ennoia/data/system/schedules.json`
 - 扩展私有数据：`~/.ennoia/data/extensions/{extension_id}/`
-- 扩展私有配置：`~/.ennoia/data/extensions/{extension_id}/` 下由扩展自行定义
+- 扩展级宿主配置：`~/.ennoia/config/extensions/{extension_id}.toml`
+- 技能级宿主配置：`~/.ennoia/config/skills/{skill_id}.toml`
+- 技能私有数据：`~/.ennoia/data/skills/{skill_id}/`
 - 核心不维护主业务总库；会话、运行数据和完整记忆数据都放在各自扩展边界内，例如 `conversation`、`memory`、`workflow` 各自维护自己的数据目录。

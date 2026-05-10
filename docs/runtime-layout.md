@@ -25,8 +25,10 @@
 │  │  ├─ instance.toml         # 实例级 UI 偏好
 │  │  └─ spaces/               # 空间级 UI 偏好
 │  ├─ model-endpoints/               # 模型接入实例配置
-│  ├─ skills.toml              # 技能注册表
-│  └─ extensions.toml          # 扩展注册表
+│  ├─ skills.toml              # 技能运行时覆盖状态
+│  ├─ extensions.toml          # 扩展运行时覆盖状态
+│  ├─ skills/                  # 技能级宿主配置
+│  └─ extensions/              # 扩展级宿主配置
 ├─ agents/
 │  └─ <agent_id>/
 │     ├─ agent.toml            # Agent 基础配置 + 权限配置 + 执行环境配置
@@ -43,7 +45,8 @@
 │  │     ├─ events.db          # 系统事件总线 SQLite
 │  ├─ cache/
 │  │  └─ sandboxes/            # native 执行环境可复用的沙盒缓存目录
-│  └─ extensions/              # 扩展私有运行数据，例如 memory / workflow 的 sqlite
+│  ├─ extensions/              # 扩展私有运行数据，例如 memory / workflow 的 sqlite
+│  └─ skills/                  # 技能私有运行数据
 └─ logs/
    ├─ server/
    ├─ agents/
@@ -55,8 +58,10 @@
 
 - `config/server.toml`：HTTP、中间件、内置工具超时、上游默认超时、流式轮询间隔、后台循环间隔、扩展运行时默认值、调度默认值、开发态 supervisor 参数和 bootstrap 状态等系统配置。
 - `config/ui.toml`：Web 标题、语言主题、默认操作者名、默认时区、本地化默认值、可选的前端 API 默认超时和通知默认行为。
-- `config/extensions.toml`：扩展注册表，记录来源、启用状态、路径和移除意图。
-- `config/skills.toml`：技能注册表，记录来源、启用状态、路径和移除意图。
+- `config/extensions.toml`：扩展运行时覆盖状态，记录 `enabled` 与 `blocked_builtin_sync`，并额外保存开发态 `dev_sources`。
+- `config/skills.toml`：技能运行时覆盖状态，记录 `enabled` 与 `blocked_builtin_sync`。
+- `config/extensions/{extension_id}.toml`：扩展级宿主配置，例如声明过的 `settings[]`。
+- `config/skills/{skill_id}.toml`：技能级宿主配置，供后续技能级设置落盘。
 
 ## 数据职责
 
@@ -64,11 +69,10 @@
 - `data/system/sqlite/events.db`：系统事件总线，记录会话创建、消息追加等稳定系统事件，以及它们到各扩展 Hook 的投递状态。
 - `data/system/schedules.json`：scheduler 计划列表，记录 trigger、executor、delivery、retry、启用状态、最近执行结果和最近运行历史；executor 可以是命令或 Agent。
 - `data/extensions/{extension_id}/`：扩展私有运行数据根目录。
-  - `settings.toml`：可选；由宿主为声明了 `settings[]` 的扩展保存扩展级配置。
-  - 扩展私有配置、数据库、缓存和业务运行态都应保留在自己的扩展目录内，不再上浮到 `config/` 根目录。
   - `conversation` 扩展在自己的目录中维护会话、线路和消息数据。
   - `memory` 扩展在自己的目录中维护完整记忆系统数据。
   - `workflow` 扩展在自己的目录中维护 run / task / artifact / handoff 等运行数据。
+- `data/skills/{skill_id}/`：技能私有运行数据根目录。
 
 ## 目录职责
 
@@ -90,6 +94,6 @@
 
 ## 初始化行为
 
-`cargo run -p ennoia-cli -- init` 会自动创建运行目录、基础配置、扩展与技能注册表、日志目录，并同步未卸载的内置扩展与技能。初始化不会预先写入会话数据、记忆数据、定时计划或运行数据。
+`cargo run -p ennoia-cli -- init` 会自动创建运行目录、基础配置、扩展与技能运行时覆盖文件、日志目录，并同步未被 `blocked_builtin_sync` 屏蔽的内置扩展与技能。初始化不会预先写入会话数据、记忆数据、定时计划或运行数据。
 
 系统配置始终走 TOML；系统日志与系统事件总线都走独立 SQLite；定时计划走 `data/system/schedules.json`；会话、记忆和运行等业务数据始终由扩展实现维护。

@@ -1,22 +1,11 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useUiStore, useUiHelpers } from "@/stores/ui";
-
-export type DockPosition = "left" | "right" | "top" | "bottom" | "floating";
-export const ENNOIA_ROUTE_DRAG_MIME = "application/ennoia-route";
-let activeDraggedNavItem: NavItem | null = null;
-
-export interface NavItem {
-  id: string;
-  href: string;
-  icon: string;
-  label: string;
-  hint: string;
-  source: "builtin" | "extension";
-}
-
-export function getActiveDraggedNavItem() {
-  return activeDraggedNavItem;
-}
+import {
+  ENNOIA_ROUTE_DRAG_MIME,
+  setActiveDraggedNavItem,
+  type DockPosition,
+  type NavItem,
+} from "@/components/layout/omniDockShared";
 
 interface OmniDockProps {
   navItems: NavItem[];
@@ -378,14 +367,14 @@ export function OmniDock({
               onClick={() => onOpenItem(item)}
               draggable="true"
               onDragStart={(e) => {
-                activeDraggedNavItem = item;
+                setActiveDraggedNavItem(item);
                 e.dataTransfer.setData(ENNOIA_ROUTE_DRAG_MIME, JSON.stringify(item));
                 e.dataTransfer.setData("text/plain", item.label);
                 e.dataTransfer.effectAllowed = "copy";
                 setNavDragImage(e, item);
               }}
               onDragEnd={() => {
-                activeDraggedNavItem = null;
+                setActiveDraggedNavItem(null);
               }}
             >
               <span className="dock-icon">{item.icon}</span>

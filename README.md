@@ -7,7 +7,7 @@
 - 工作台：核心只提供宿主、配置、路径、日志、权限、事件总线、动作管道与 Worker RPC；业务能力由扩展提供。
 - Agents：维护协作者档案、模型接入、模型、技能和启用状态。
 - Agent 权限：系统级权限策略、审批和事件记录统一由宿主裁决，扩展只声明能力风险，不直接放权。
-- 技能：Agent 可引用的工具与用法定义，只保留最小目录元信息与文档入口，和扩展严格分离。
+- 技能：Agent 可挂载的标准能力包；skill 负责声明动作入口，具体调用说明写在各自的 `README.md` 中。
 - API 模型接入：Agent 绑定的具体模型访问实例。
 - 扩展：扩展包，manifest 统一声明 `resource_types`、`capabilities`、`surfaces`、`entrypoints`、`settings`、`locales`、`themes`、`commands`、`subscriptions`；如需进入会话目录，再额外声明 `conversation` 规则。宿主把扩展/技能目录整理成结构化 `context` 交给 model provider 渲染，不再把它们直接硬拼进自然语言 prompt，也不自动注入文档正文。
 - 会话：前端通过通用 `/api/actions/{action}` 分发 `conversation.*`、`message.*`、`lane.*` 等动作，底层由内置 `conversation` 扩展实现。
@@ -40,8 +40,8 @@
 
 - `builtins/extensions/*`：官方内置扩展源码
 - `builtins/skills/*`：官方内置技能源码
-- 初始化会把未卸载的内置包同步到 `~/.ennoia/extensions/*` 与 `~/.ennoia/skills/*`
-- 用户安装/启用/卸载登记统一写入 `~/.ennoia/config/extensions.toml` 与 `~/.ennoia/config/skills.toml`
+- 初始化会把未被 `blocked_builtin_sync` 屏蔽的内置包同步到 `~/.ennoia/extensions/*` 与 `~/.ennoia/skills/*`
+- `~/.ennoia/config/extensions.toml` 与 `~/.ennoia/config/skills.toml` 只保存运行时覆盖状态，例如 `enabled` 与 `blocked_builtin_sync`
 
 ## 存储边界
 
@@ -52,7 +52,8 @@
 - 系统日志数据写入 `~/.ennoia/data/system/sqlite/logs.db`，统一承载 logs、traces 和 span links。
 - Agent 基础配置与权限策略统一写入 `~/.ennoia/agents/{agent_id}/agent.toml`，权限事件与审批写入 `~/.ennoia/data/system/sqlite/permissions.db`。
 - 核心日志写入 `~/.ennoia/logs/`。
-- 扩展私有数据写入 `~/.ennoia/data/extensions/{extension_id}/`。
+- 扩展私有数据写入 `~/.ennoia/data/extensions/{extension_id}/`，扩展级宿主配置写入 `~/.ennoia/config/extensions/{extension_id}.toml`。
+- 技能私有数据写入 `~/.ennoia/data/skills/{skill_id}/`，技能级宿主配置写入 `~/.ennoia/config/skills/{skill_id}.toml`。
 - 核心不提供主业务 SQLite，不内建语义记忆、编排、任务或产物索引表。
 
 ## 启动方式

@@ -429,11 +429,15 @@ export function AgentEditorView({
                       type="button"
                       className={form.skills.includes(skill.id) ? "chip chip--active" : "chip"}
                       onClick={() => toggleSkill(skill.id)}
+                      title={`${skill.mount.mode} · ${skill.actions.map((action) => action.id).join(", ")}`}
                     >
-                      {skill.display_name}
+                      {skill.id}
                     </button>
                   ))}
                 </div>
+                <p className="helper-text">
+                  技能是否自动随 Agent 带上由各自的 <code>mount.mode</code> 决定；这里仅管理分配关系。
+                </p>
               </section>
             </div>
 

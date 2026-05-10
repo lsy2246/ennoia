@@ -20,11 +20,13 @@ import { useWorkbenchStore, type WorkbenchViewDescriptor } from "@/stores/workbe
 import { useSessionCommandsStore } from "@/stores/sessionCommands";
 import { CommandPalette, type CommandPaletteAction } from "@/components/layout/CommandPalette";
 import {
-  OmniDock,
   ENNOIA_ROUTE_DRAG_MIME,
   getActiveDraggedNavItem,
   type DockPosition,
   type NavItem,
+} from "@/components/layout/omniDockShared";
+import {
+  OmniDock,
 } from "@/components/layout/OmniDock";
 import { Agents } from "@/pages/agents";
 import { Conversations } from "@/pages/conversations";

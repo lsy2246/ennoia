@@ -12,9 +12,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use ennoia_assets::{builtins, templates};
 use ennoia_kernel::{
-    apply_server_log_env_overrides, ExtensionManifest, ExtensionRegistryEntry,
-    ExtensionRegistryFile, ExtensionSourceMode, LoggingConfig, ServerConfig, SkillRegistryEntry,
-    SkillRegistryFile,
+    apply_server_log_env_overrides, ExtensionDevSourceEntry, ExtensionManifest,
+    ExtensionRegistryEntry, ExtensionRegistryFile, ExtensionSourceMode, LoggingConfig,
+    ServerConfig, SkillRegistryEntry, SkillRegistryFile,
 };
 use ennoia_paths::RuntimePaths;
 use ennoia_server::{bootstrap_app_state, default_app_state, execution, run_server};
@@ -1824,11 +1824,7 @@ fn workflow_service_name() -> &'static str {
 fn attached_dev_source_roots(paths: &RuntimePaths) -> io::Result<Vec<PathBuf>> {
     let mut roots = Vec::new();
     let registry = read_extension_registry(paths)?;
-    for entry in registry
-        .extensions
-        .into_iter()
-        .filter(|item| item.source == "dev" && item.enabled && !item.removed)
-    {
+    for entry in registry.dev_sources.into_iter().filter(|item| item.enabled) {
         roots.push(PathBuf::from(entry.path));
     }
 
@@ -1861,28 +1857,19 @@ fn auto_attach_dev_extensions(paths: &RuntimePaths) -> io::Result<()> {
         }
         let normalized = root.to_string_lossy().replace('\\', "/");
         let id = entry.file_name().to_string_lossy().to_string();
-        let builtin_removed = registry
-            .extensions
-            .iter()
-            .any(|item| item.id == id && item.source == "builtin" && item.removed);
-        if builtin_removed
-            || registry
-                .extensions
-                .iter()
-                .any(|item| item.id == id && item.source == "dev")
+        if registry.blocked_builtin_sync.iter().any(|item| item == &id)
+            || registry.dev_sources.iter().any(|item| item.id == id)
         {
             continue;
         }
-        registry.extensions.push(ExtensionRegistryEntry {
+        registry.dev_sources.push(ExtensionDevSourceEntry {
             id,
-            source: "dev".to_string(),
-            enabled: true,
-            removed: false,
             path: normalized,
+            enabled: true,
         });
     }
 
-    sort_extension_registry_entries(&mut registry.extensions);
+    sort_extension_dev_sources(&mut registry.dev_sources);
     write_extension_registry(paths, &registry)?;
     Ok(())
 }
@@ -1902,21 +1889,17 @@ fn init_home_template(paths: &RuntimePaths) -> io::Result<()> {
 fn sync_builtin_registries(paths: &RuntimePaths) -> io::Result<()> {
     let mut extension_registry = read_extension_registry(paths)?;
     for id in builtin_extension_ids() {
-        let path = builtin_extension_source_dir(&id).unwrap_or_else(|| paths.extension_dir(&id));
-        if let Some(entry) = extension_registry
+        if extension_registry
             .extensions
             .iter_mut()
-            .find(|item| item.id == id && item.source == "builtin")
+            .find(|item| item.id == id)
+            .is_some()
         {
-            entry.path = paths.display_for_user(&path);
             continue;
         }
         extension_registry.extensions.push(ExtensionRegistryEntry {
             id: id.clone(),
-            source: "builtin".to_string(),
             enabled: true,
-            removed: false,
-            path: paths.display_for_user(&path),
         });
     }
     sort_extension_registry_entries(&mut extension_registry.extensions);
@@ -1924,20 +1907,17 @@ fn sync_builtin_registries(paths: &RuntimePaths) -> io::Result<()> {
 
     let mut skill_registry = read_skill_registry(paths)?;
     for id in builtin_skill_ids() {
-        if let Some(entry) = skill_registry
+        if skill_registry
             .skills
             .iter_mut()
-            .find(|item| item.id == id && item.source == "builtin")
+            .find(|item| item.id == id)
+            .is_some()
         {
-            entry.path = paths.display_for_user(paths.skill_dir(&id));
             continue;
         }
         skill_registry.skills.push(SkillRegistryEntry {
             id: id.clone(),
-            source: "builtin".to_string(),
             enabled: true,
-            removed: false,
-            path: paths.display_for_user(paths.skill_dir(&id)),
         });
     }
     sort_skill_registry_entries(&mut skill_registry.skills);
@@ -1952,7 +1932,7 @@ fn materialize_builtin_packages(paths: &RuntimePaths) -> io::Result<()> {
         let Some(id) = builtin_package_id(asset.logical_path) else {
             continue;
         };
-        if is_removed_builtin_extension(&extension_registry, id) {
+        if is_blocked_builtin_extension(&extension_registry, id) {
             continue;
         }
         write_text_asset(paths.home(), asset.logical_path, asset.contents)?;
@@ -1961,7 +1941,7 @@ fn materialize_builtin_packages(paths: &RuntimePaths) -> io::Result<()> {
         let Some(id) = builtin_package_id(asset.logical_path) else {
             continue;
         };
-        if is_removed_builtin_extension(&extension_registry, id) {
+        if is_blocked_builtin_extension(&extension_registry, id) {
             continue;
         }
         write_binary_asset(paths.home(), asset.logical_path, asset.contents)?;
@@ -1971,7 +1951,7 @@ fn materialize_builtin_packages(paths: &RuntimePaths) -> io::Result<()> {
         let Some(id) = builtin_package_id(asset.logical_path) else {
             continue;
         };
-        if is_removed_builtin_skill(&skill_registry, id) {
+        if is_blocked_builtin_skill(&skill_registry, id) {
             continue;
         }
         write_text_asset(paths.home(), asset.logical_path, asset.contents)?;
@@ -1986,9 +1966,12 @@ fn sync_builtin_provider_presets(paths: &RuntimePaths) -> io::Result<()> {
     for entry in extension_registry
         .extensions
         .iter()
-        .filter(|item| item.source == "builtin" && item.enabled && !item.removed)
+        .filter(|item| item.enabled)
     {
-        let root = paths.expand_home_token(&entry.path);
+        if is_blocked_builtin_extension(&extension_registry, &entry.id) {
+            continue;
+        }
+        let root = paths.extension_dir(&entry.id);
         let presets_dir = root.join("model-endpoint-presets");
         if !presets_dir.exists() {
             continue;
@@ -2010,15 +1993,6 @@ fn sync_builtin_provider_presets(paths: &RuntimePaths) -> io::Result<()> {
 
 fn builtin_extension_ids() -> Vec<String> {
     builtin_package_ids_from_assets(builtins::extensions(), "extension.toml")
-}
-
-fn builtin_extension_source_dir(id: &str) -> Option<PathBuf> {
-    let root = env::current_dir()
-        .ok()?
-        .join("builtins")
-        .join("extensions")
-        .join(id);
-    root.join("extension.toml").exists().then_some(root)
 }
 
 fn builtin_skill_ids() -> Vec<String> {
@@ -2045,18 +2019,18 @@ fn builtin_package_id(logical_path: &str) -> Option<&str> {
     parts.next()
 }
 
-fn is_removed_builtin_extension(registry: &ExtensionRegistryFile, id: &str) -> bool {
+fn is_blocked_builtin_extension(registry: &ExtensionRegistryFile, id: &str) -> bool {
     registry
-        .extensions
+        .blocked_builtin_sync
         .iter()
-        .any(|entry| entry.id == id && entry.source == "builtin" && entry.removed)
+        .any(|entry| entry == id)
 }
 
-fn is_removed_builtin_skill(registry: &SkillRegistryFile, id: &str) -> bool {
+fn is_blocked_builtin_skill(registry: &SkillRegistryFile, id: &str) -> bool {
     registry
-        .skills
+        .blocked_builtin_sync
         .iter()
-        .any(|entry| entry.id == id && entry.source == "builtin" && entry.removed)
+        .any(|entry| entry == id)
 }
 
 fn write_text_asset(root: &Path, logical_path: &str, contents: &str) -> io::Result<()> {
@@ -2300,19 +2274,17 @@ fn write_skill_registry(paths: &RuntimePaths, registry: &SkillRegistryFile) -> i
 }
 
 fn sort_extension_registry_entries(entries: &mut [ExtensionRegistryEntry]) {
-    entries.sort_by(|left, right| {
-        left.id
-            .cmp(&right.id)
-            .then_with(|| left.source.cmp(&right.source))
-            .then_with(|| left.path.cmp(&right.path))
-    });
+    entries.sort_by(|left, right| left.id.cmp(&right.id));
 }
 
 fn sort_skill_registry_entries(entries: &mut [SkillRegistryEntry]) {
+    entries.sort_by(|left, right| left.id.cmp(&right.id));
+}
+
+fn sort_extension_dev_sources(entries: &mut [ExtensionDevSourceEntry]) {
     entries.sort_by(|left, right| {
         left.id
             .cmp(&right.id)
-            .then_with(|| left.source.cmp(&right.source))
             .then_with(|| left.path.cmp(&right.path))
     });
 }

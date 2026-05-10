@@ -9,8 +9,8 @@ use ennoia_assets::builtins;
 use ennoia_extension_host::{ExtensionRuntime, ExtensionRuntimeConfig};
 use ennoia_kernel::{
     apply_server_log_env_overrides, AgentConfig, AgentDocument, AgentPermissionProfile,
-    ModelEndpointConfig, PlatformOverview, ServerConfig, SkillConfig, SkillRegistryEntry,
-    SkillRegistryFile, SpaceSpec, UiConfig,
+    ModelEndpointConfig, PlatformOverview, ServerConfig, SkillConfig, SkillManifest,
+    SkillRegistryEntry, SkillRegistryFile, SpaceSpec, UiConfig,
 };
 use ennoia_logs::{self, next_span_id, LogsGuard, TraceContext};
 use ennoia_paths::{default_home_dir, RuntimePaths};
@@ -86,7 +86,7 @@ pub fn default_app_state() -> AppState {
         runtime_paths: runtime_paths.clone(),
         extensions,
         agents: Vec::new(),
-        skills: builtin_skill_configs(),
+        skills: Vec::new(),
         model_endpoints: Vec::new(),
         spaces: default_spaces(),
         rate_limit_state: RateLimitState::new(),
@@ -630,14 +630,40 @@ pub fn delete_agent_config(paths: &RuntimePaths, agent_id: &str) -> Result<bool,
 }
 
 pub fn load_skill_configs(paths: &RuntimePaths) -> Result<Vec<SkillConfig>, AppError> {
-    let mut skills = load_skill_registry(paths)?
+    let registry = load_skill_registry(paths)?;
+    let blocked = registry
+        .blocked_builtin_sync
+        .into_iter()
+        .collect::<std::collections::BTreeSet<_>>();
+    let enabled_by_id = registry
         .skills
         .into_iter()
-        .filter(|entry| entry.enabled && !entry.removed)
-        .filter_map(|entry| load_skill_from_registry_entry(paths, &entry).ok())
-        .collect::<Vec<_>>();
-    if skills.is_empty() {
-        skills = builtin_skill_configs();
+        .map(|entry| (entry.id, entry.enabled))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let mut skills = Vec::new();
+    if paths.skills_dir().exists() {
+        for entry in fs::read_dir(paths.skills_dir())? {
+            let entry = entry?;
+            if !entry.file_type()?.is_dir() {
+                continue;
+            }
+            let root = entry.path();
+            let descriptor_path = root.join("skill.toml");
+            if !descriptor_path.exists() {
+                continue;
+            }
+            let manifest = load_skill_manifest_from_path(&descriptor_path)?;
+            let enabled = enabled_by_id.get(&manifest.id).copied().unwrap_or(true);
+            skills.push(SkillConfig {
+                id: manifest.id.clone(),
+                version: manifest.version,
+                description: manifest.description,
+                mount: manifest.mount,
+                actions: manifest.actions,
+                enabled,
+                builtin_sync_blocked: blocked.contains(&manifest.id),
+            });
+        }
     }
     skills.sort_by(|left, right| left.id.cmp(&right.id));
     Ok(skills)
@@ -709,6 +735,11 @@ where
         items.push(item);
     }
     Ok(items)
+}
+
+fn load_skill_manifest_from_path(path: &Path) -> Result<SkillManifest, AppError> {
+    let contents = fs::read_to_string(path)?;
+    Ok(toml::from_str(&contents)?)
 }
 
 pub fn load_agent_documents(paths: &RuntimePaths) -> Result<Vec<AgentDocument>, AppError> {
@@ -939,91 +970,76 @@ fn extension_runtime_config(
     }
 }
 
-fn builtin_skill_configs() -> Vec<SkillConfig> {
-    let mut skills = builtins::skills()
-        .into_iter()
-        .filter(|asset| asset.logical_path.ends_with("/skill.toml"))
-        .filter_map(|asset| toml::from_str::<SkillConfig>(asset.contents).ok())
-        .collect::<Vec<_>>();
-    skills.sort_by(|left, right| left.id.cmp(&right.id));
-    skills
-}
-
-fn load_skill_from_registry_entry(
-    paths: &RuntimePaths,
-    entry: &SkillRegistryEntry,
-) -> Result<SkillConfig, AppError> {
-    let descriptor_path = resolve_skill_descriptor_path(paths, entry);
-    let mut skill = toml::from_str::<SkillConfig>(&fs::read_to_string(descriptor_path)?)?;
-    if skill.id.is_empty() {
-        skill.id = entry.id.clone();
-    }
-    skill.source = entry.source.clone();
-    skill.enabled = entry.enabled;
-    Ok(skill)
-}
-
-fn resolve_skill_descriptor_path(paths: &RuntimePaths, entry: &SkillRegistryEntry) -> PathBuf {
-    let root = paths.expand_home_token(&entry.path);
-    if root.extension().and_then(|value| value.to_str()) == Some("toml") {
-        root
-    } else {
-        root.join("skill.toml")
-    }
-}
-
 pub fn upsert_skill_package(paths: &RuntimePaths, payload: &SkillConfig) -> Result<(), AppError> {
     let skill_dir = paths.skill_dir(&payload.id);
     fs::create_dir_all(&skill_dir)?;
     fs::write(
         skill_dir.join("skill.toml"),
-        toml::to_string_pretty(payload)?,
+        toml::to_string_pretty(&SkillManifest {
+            id: payload.id.clone(),
+            version: payload.version.clone(),
+            description: payload.description.clone(),
+            mount: payload.mount.clone(),
+            actions: payload.actions.clone(),
+        })?,
     )?;
 
     let mut registry = load_skill_registry(paths)?;
     registry.skills.retain(|item| item.id != payload.id);
     registry.skills.push(SkillRegistryEntry {
         id: payload.id.clone(),
-        source: payload.source.clone(),
         enabled: payload.enabled,
-        removed: false,
-        path: paths.display_for_user(&skill_dir),
     });
+    registry
+        .blocked_builtin_sync
+        .retain(|item| item != &payload.id);
+    if payload.builtin_sync_blocked {
+        registry.blocked_builtin_sync.push(payload.id.clone());
+    }
+    registry.blocked_builtin_sync.sort();
+    registry.blocked_builtin_sync.dedup();
     sort_skill_registry_entries(&mut registry.skills);
     write_skill_registry(paths, &registry)
 }
 
 pub fn delete_skill_package(paths: &RuntimePaths, skill_id: &str) -> Result<bool, AppError> {
     let mut registry = load_skill_registry(paths)?;
-    let Some(index) = registry.skills.iter().position(|item| item.id == skill_id) else {
-        return Ok(false);
-    };
-
-    let entry = registry.skills[index].clone();
-    let skill_root = paths.expand_home_token(&entry.path);
+    let skill_root = paths.skill_dir(skill_id);
+    let existed = skill_root.exists();
     if skill_root.exists() {
         fs::remove_dir_all(&skill_root)?;
     }
-
-    if entry.source == "builtin" {
-        registry.skills[index].enabled = false;
-        registry.skills[index].removed = true;
+    registry.skills.retain(|item| item.id != skill_id);
+    if builtin_skill_ids().iter().any(|id| id == skill_id) {
+        registry
+            .blocked_builtin_sync
+            .retain(|item| item != skill_id);
+        registry.blocked_builtin_sync.push(skill_id.to_string());
+        registry.blocked_builtin_sync.sort();
+        registry.blocked_builtin_sync.dedup();
     } else {
-        registry.skills.remove(index);
+        registry
+            .blocked_builtin_sync
+            .retain(|item| item != skill_id);
     }
-
     sort_skill_registry_entries(&mut registry.skills);
     write_skill_registry(paths, &registry)?;
-    Ok(true)
+    Ok(existed)
 }
 
 fn sort_skill_registry_entries(entries: &mut [SkillRegistryEntry]) {
-    entries.sort_by(|left, right| {
-        left.id
-            .cmp(&right.id)
-            .then_with(|| left.source.cmp(&right.source))
-            .then_with(|| left.path.cmp(&right.path))
-    });
+    entries.sort_by(|left, right| left.id.cmp(&right.id));
+}
+
+fn builtin_skill_ids() -> Vec<String> {
+    let mut ids = builtins::skills()
+        .into_iter()
+        .filter(|asset| asset.logical_path.ends_with("/skill.toml"))
+        .filter_map(|asset| asset.logical_path.split('/').nth(1).map(str::to_string))
+        .collect::<Vec<_>>();
+    ids.sort();
+    ids.dedup();
+    ids
 }
 
 pub(crate) fn record_trace_span(state: &AppState, entry: LogTraceWrite) {

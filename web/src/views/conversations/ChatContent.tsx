@@ -35,9 +35,8 @@ function extractNodeText(node: ReactNode): string {
 function buildSkillMap(skills: SkillConfig[]) {
   const skillMap = new Map<string, string>();
   for (const skill of skills) {
-    skillMap.set(skill.id.toLowerCase(), skill.display_name);
-    skillMap.set(skill.display_name.toLowerCase(), skill.display_name);
-    skillMap.set(skill.display_name.toLowerCase().replace(/\s+/g, "-"), skill.display_name);
+    skillMap.set(skill.id.toLowerCase(), skill.id);
+    skillMap.set(skill.id.toLowerCase().replace(/\s+/g, "-"), skill.id);
   }
   return skillMap;
 }

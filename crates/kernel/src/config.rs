@@ -333,63 +333,108 @@ pub struct AgentDocument {
     pub permission_profile: AgentPermissionProfile,
 }
 
-/// SkillConfig represents one skill descriptor under a registered skill package.
+/// SkillManifest represents one installed skill package manifest.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SkillManifest {
+    pub id: String,
+    #[serde(default = "default_skill_version")]
+    pub version: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub mount: SkillMountConfig,
+    #[serde(default)]
+    pub actions: Vec<SkillActionConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SkillMountConfig {
+    #[serde(default = "default_skill_mount_mode")]
+    pub mode: String,
+}
+
+impl Default for SkillMountConfig {
+    fn default() -> Self {
+        Self {
+            mode: default_skill_mount_mode(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SkillActionConfig {
+    pub id: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub entry: String,
+    #[serde(default = "default_skill_invoke_mode")]
+    pub invoke_mode: String,
+    #[serde(default)]
+    pub requires: Vec<String>,
+}
+
+/// SkillConfig represents one resolved skill returned to the UI/runtime.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SkillConfig {
     pub id: String,
-    pub display_name: String,
+    #[serde(default = "default_skill_version")]
+    pub version: String,
     #[serde(default)]
     pub description: String,
-    #[serde(default = "default_skill_source")]
-    pub source: String,
     #[serde(default)]
-    pub entry: String,
+    pub mount: SkillMountConfig,
     #[serde(default)]
-    pub docs: Option<String>,
-    #[serde(default)]
-    pub keywords: Vec<String>,
+    pub actions: Vec<SkillActionConfig>,
     #[serde(default = "default_enabled")]
     pub enabled: bool,
+    #[serde(default)]
+    pub builtin_sync_blocked: bool,
 }
 
 /// ExtensionRegistryFile stores extension package registration records under `config/extensions.toml`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ExtensionRegistryFile {
     #[serde(default)]
+    pub blocked_builtin_sync: Vec<String>,
+    #[serde(default)]
     pub extensions: Vec<ExtensionRegistryEntry>,
+    #[serde(default)]
+    pub dev_sources: Vec<ExtensionDevSourceEntry>,
 }
 
-/// ExtensionRegistryEntry records one extension source and the user's lifecycle intent.
+/// ExtensionRegistryEntry records one installed extension's runtime state.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ExtensionRegistryEntry {
     pub id: String,
-    #[serde(default = "default_registry_source")]
-    pub source: String,
     #[serde(default = "default_enabled")]
     pub enabled: bool,
-    #[serde(default)]
-    pub removed: bool,
+}
+
+/// ExtensionDevSourceEntry records one attached development source.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ExtensionDevSourceEntry {
+    pub id: String,
     pub path: String,
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
 }
 
 /// SkillRegistryFile stores skill package registration records under `config/skills.toml`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SkillRegistryFile {
     #[serde(default)]
+    pub blocked_builtin_sync: Vec<String>,
+    #[serde(default)]
     pub skills: Vec<SkillRegistryEntry>,
 }
 
-/// SkillRegistryEntry records one skill package source and the user's lifecycle intent.
+/// SkillRegistryEntry records one installed skill's runtime state.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SkillRegistryEntry {
     pub id: String,
-    #[serde(default = "default_registry_source")]
-    pub source: String,
     #[serde(default = "default_enabled")]
     pub enabled: bool,
-    #[serde(default)]
-    pub removed: bool,
-    pub path: String,
 }
 
 /// ModelEndpointConfig represents one file under `config/model-endpoints/*.toml`.
@@ -437,14 +482,6 @@ fn default_agent_kind() -> String {
     "agent".to_string()
 }
 
-fn default_skill_source() -> String {
-    "builtin".to_string()
-}
-
-fn default_registry_source() -> String {
-    "builtin".to_string()
-}
-
 fn default_ui_display_name() -> String {
     "Operator".to_string()
 }
@@ -455,6 +492,18 @@ fn default_ui_time_zone() -> String {
 
 fn default_enabled() -> bool {
     true
+}
+
+fn default_skill_version() -> String {
+    "1.0.0".to_string()
+}
+
+fn default_skill_mount_mode() -> String {
+    "auto".to_string()
+}
+
+fn default_skill_invoke_mode() -> String {
+    "manual".to_string()
 }
 
 #[cfg(test)]

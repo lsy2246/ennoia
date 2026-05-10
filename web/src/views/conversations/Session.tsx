@@ -1034,7 +1034,7 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
   const enabledSkills = useMemo(
     () => skills
       .filter((skill) => skill.enabled)
-      .sort((left, right) => left.display_name.localeCompare(right.display_name)),
+      .sort((left, right) => left.id.localeCompare(right.id)),
     [skills],
   );
   const canUseSkills = enabledSkills.length > 0;
@@ -1351,12 +1351,12 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
             kind: "skill",
             group: "skill",
             id: skill.id,
-            title: skill.display_name,
+            title: skill.id,
             description: skill.description?.trim()
               || t("web.conversations.palette_skill_desc_fallback", "把这个技能片段插入到当前输入中。"),
             priority: 120,
-            secondaryLabel: skill.id,
-            displayLabel: skill.display_name,
+            secondaryLabel: skill.version,
+            displayLabel: skill.id,
             insertLabel: skill.id,
           })),
       );
