@@ -14,7 +14,7 @@
 - 记忆：以内置 `memory` 扩展形式提供记忆、上下文、审查和图谱能力；不再镜像保存原始会话消息。
 - 编排：以内置 `workflow` 扩展承载 run、task、artifact，以及会话触发、审批恢复、结果回写等产品编排；核心只保留动作、事件、provider 和 runtime operation 这些中立桥接能力。
 - 日志：聚合前端日志和扩展运行事件。
-- 设置：通过表单直接编辑 `config/server.toml`、`config/ui.toml`、`config/profile.toml` 和 `config/preferences/*.toml`，其中 `server.toml` 统一承载上游超时、流式轮询节奏和后台循环节奏等运行时默认值；`ui.toml` 只在显式配置时才对前端请求施加默认超时。
+- 设置：通过表单直接编辑 `config/server.toml`、`config/ui.toml`、`config/profile.toml` 和 `config/preferences/*.toml`，其中 `server.toml` 统一承载上游超时、流式轮询节奏和后台循环节奏等运行时默认值；模型接入默认写入 `0`，表示不限制超时；`ui.toml` 只在显式配置时才对前端请求施加默认超时。
 
 ## 技术栈
 

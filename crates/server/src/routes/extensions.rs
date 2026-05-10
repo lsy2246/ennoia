@@ -8,12 +8,13 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::Instant;
 
-use crate::app::{dispatch_extension_rpc, live_server_config, record_trace_span};
+use crate::app::{dispatch_extension_rpc, record_trace_span};
 use crate::extension_runtime::{
     ExtensionRecordAppend, ExtensionRecordListQuery, ExtensionRecordUpdate, ExtensionStateGetQuery,
     ExtensionStateListQuery, ExtensionStatePut,
 };
 use crate::logs_store::{LogEntryWrite, LogTraceWrite, LOGS_COMPONENT_EXTENSION_HOST};
+use crate::routes::resources::validate_model_endpoint_request_timeout_ms;
 use crate::runtime_bridge::{
     authorize_provider_generate, invoke_provider_method, resolve_provider_entry_path,
 };
@@ -705,7 +706,7 @@ pub(crate) async fn invoke_provider_json_with_request(
             )
         },
     )?;
-    let mut model_endpoint: ModelEndpointConfig = serde_json::from_value(
+    let model_endpoint: ModelEndpointConfig = serde_json::from_value(
         payload
             .params
             .get("model_endpoint")
@@ -726,13 +727,8 @@ pub(crate) async fn invoke_provider_json_with_request(
             &request,
         )
     })?;
-    if model_endpoint.request_timeout_ms.is_none() {
-        model_endpoint.request_timeout_ms = Some(
-            live_server_config(&state)
-                .providers
-                .default_request_timeout_ms,
-        );
-    }
+    validate_model_endpoint_request_timeout_ms(model_endpoint.request_timeout_ms)
+        .map_err(|error| scoped(error, &request))?;
     let permission_actor = provider_permission_actor_from_context(&payload.context);
     let grant_id = if method == "generate" {
         permission_actor

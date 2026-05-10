@@ -290,12 +290,41 @@ fn validate_model_endpoint_payload(
     {
         return Err(ApiError::bad_request("默认模型必须存在于模型列表里。"));
     }
-    if let Some(timeout_ms) = payload.request_timeout_ms {
-        if timeout_ms < 1_000 {
-            return Err(ApiError::bad_request("模型接入超时至少需要 1000ms。"));
+    validate_model_endpoint_request_timeout_ms(payload.request_timeout_ms)?;
+    Ok(())
+}
+
+pub(super) fn validate_model_endpoint_request_timeout_ms(
+    request_timeout_ms: Option<u64>,
+) -> Result<(), ApiError> {
+    if let Some(timeout_ms) = request_timeout_ms {
+        if timeout_ms > 0 && timeout_ms < 1_000 {
+            return Err(ApiError::bad_request(
+                "模型接入超时只能填写 0（不限制）或不小于 1000ms 的值。",
+            ));
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_model_endpoint_request_timeout_ms;
+
+    #[test]
+    fn allows_unlimited_model_endpoint_timeout() {
+        assert!(validate_model_endpoint_request_timeout_ms(Some(0)).is_ok());
+    }
+
+    #[test]
+    fn rejects_model_endpoint_timeout_below_minimum_when_non_zero() {
+        assert!(validate_model_endpoint_request_timeout_ms(Some(999)).is_err());
+    }
+
+    #[test]
+    fn allows_model_endpoint_timeout_at_minimum() {
+        assert!(validate_model_endpoint_request_timeout_ms(Some(1_000)).is_ok());
+    }
 }
 
 fn resolve_provider_contribution(
