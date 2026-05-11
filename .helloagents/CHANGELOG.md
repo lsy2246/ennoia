@@ -6,6 +6,9 @@
 - **[extension-runtime]**: 将官方内置扩展与技能源码统一收敛到 `assets/extensions/*` 和 `assets/skills/*`，同时把运行目录初始化模板从 `assets/templates/config/*.toml` 压平为 `assets/templates/*.toml`，并同步更新 CLI、构建脚本、Docker 构建、前端配置与仓库文档 — by lsy
   - 方案: [202605111238_assets-root-reorg](plan/202605111238_assets-root-reorg/)
   - 决策: assets-root-reorg#D001(内置源码根并入 assets)
+- **[runtime-layout]**: 将用户目录重新收敛为 `config/` 与 `data/` 两大边界，文本日志统一进入 `data/system/logs/`，运行态与开发态 pid 文件统一进入 `data/system/pids/`，并同步更新 CLI launcher 与目录文档 — by Codex
+  - 方案: [202605111303_home-layout-data-system](plan/202605111303_home-layout-data-system/)
+  - 决策: home-layout-data-system#D001(logs 与 pid 并入 data/system)
 
 ## [0.2.3] - 2026-05-08
 

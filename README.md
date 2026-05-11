@@ -55,13 +55,15 @@
 
 ## 存储边界
 
+- 运行目录统一分成两类：`config/` 保存声明性配置，`data/` 保存全部运行数据。
 - 运行态核心系统配置走 `~/.ennoia/config/*.toml`；开发态对应配置走仓库 `.dev/config/*.toml`。
 - 系统动作规则来自扩展 manifest；宿主在运行时收集规则、排序并执行。
 - 系统定时计划写入 `~/.ennoia/data/system/schedules.json`，到期后由宿主运行命令或触发 Agent，并可把完整结果、摘要或最终结论投递到会话 / lane。
 - 系统事件总线写入 `~/.ennoia/data/system/sqlite/events.db`，用于持久化会话等系统事件及其 Hook 投递状态。
 - 系统日志数据写入 `~/.ennoia/data/system/sqlite/logs.db`，统一承载 logs、traces 和 span links。
 - Agent 基础配置与权限策略统一写入 `~/.ennoia/agents/{agent_id}/agent.toml`，权限事件与审批写入 `~/.ennoia/data/system/sqlite/permissions.db`。
-- 核心日志写入对应 home 的 `logs/`；开发态默认是仓库 `.dev/logs/`。
+- 核心文本日志与前端日志写入对应 home 的 `data/system/logs/`；开发态默认是仓库 `.dev/data/system/logs/`。
+- 运行态与开发态的 pid 文件统一写入对应 home 的 `data/system/pids/`。
 - 扩展私有数据写入对应 home 的 `data/extensions/{extension_id}/`，扩展级宿主配置写入 `config/extensions/{extension_id}.toml`。
 - 技能私有数据写入对应 home 的 `data/skills/{skill_id}/`，技能级宿主配置写入 `config/skills/{skill_id}.toml`。
 - 核心不提供主业务 SQLite，不内建语义记忆、编排、任务或产物索引表。

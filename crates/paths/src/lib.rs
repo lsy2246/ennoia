@@ -125,20 +125,28 @@ impl RuntimePaths {
         self.state_dir().join("skills")
     }
 
+    pub fn system_state_dir(&self) -> PathBuf {
+        self.state_dir().join("system")
+    }
+
     pub fn schedules_file(&self) -> PathBuf {
         self.system_state_dir().join("schedules.json")
     }
 
+    pub fn system_logs_dir(&self) -> PathBuf {
+        self.system_state_dir().join("logs")
+    }
+
+    pub fn system_pids_dir(&self) -> PathBuf {
+        self.system_state_dir().join("pids")
+    }
+
     pub fn server_pid_file(&self) -> PathBuf {
-        self.system_state_dir().join("server.pid")
+        self.system_pids_dir().join("server.pid")
     }
 
     pub fn dev_pid_file(&self) -> PathBuf {
-        self.system_state_dir().join("dev.pid")
-    }
-
-    pub fn system_state_dir(&self) -> PathBuf {
-        self.state_dir().join("system")
+        self.system_pids_dir().join("dev.pid")
     }
 
     pub fn system_sqlite_dir(&self) -> PathBuf {
@@ -242,7 +250,7 @@ impl RuntimePaths {
     }
 
     pub fn logs_dir(&self) -> PathBuf {
-        self.home.join("logs")
+        self.system_logs_dir()
     }
 
     pub fn server_logs_dir(&self) -> PathBuf {
@@ -295,6 +303,8 @@ impl RuntimePaths {
             self.state_cache_dir(),
             self.extensions_state_dir(),
             self.skills_state_dir(),
+            self.system_logs_dir(),
+            self.system_pids_dir(),
             self.system_sqlite_dir(),
             self.agents_dir(),
             self.server_logs_dir(),
@@ -340,4 +350,57 @@ pub fn default_home_dir() -> PathBuf {
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".ennoia")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn log_and_pid_paths_live_under_data_system() {
+        let paths = RuntimePaths::new("C:/runtime-home");
+
+        assert_eq!(
+            paths.logs_dir(),
+            PathBuf::from("C:/runtime-home/data/system/logs")
+        );
+        assert_eq!(
+            paths.server_logs_dir(),
+            PathBuf::from("C:/runtime-home/data/system/logs/server")
+        );
+        assert_eq!(
+            paths.extensions_logs_dir(),
+            PathBuf::from("C:/runtime-home/data/system/logs/extensions")
+        );
+        assert_eq!(
+            paths.server_pid_file(),
+            PathBuf::from("C:/runtime-home/data/system/pids/server.pid")
+        );
+        assert_eq!(
+            paths.dev_pid_file(),
+            PathBuf::from("C:/runtime-home/data/system/pids/dev.pid")
+        );
+    }
+
+    #[test]
+    fn ensure_layout_creates_system_log_and_pid_directories() {
+        let home = std::env::temp_dir().join(format!(
+            "ennoia-paths-layout-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time")
+                .as_nanos()
+        ));
+        let paths = RuntimePaths::new(&home);
+
+        paths.ensure_layout().expect("ensure layout");
+
+        assert!(paths.system_logs_dir().is_dir());
+        assert!(paths.system_pids_dir().is_dir());
+        assert!(paths.server_logs_dir().is_dir());
+        assert!(paths.agents_logs_dir().is_dir());
+        assert!(!home.join("logs").exists());
+
+        fs::remove_dir_all(home).expect("cleanup temp home");
+    }
 }

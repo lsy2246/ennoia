@@ -302,12 +302,15 @@
 
 ## 存储快照
 
+- `config/` 保存声明性配置；`data/` 保存全部运行数据。
 - 核心系统配置：`~/.ennoia/config/*.toml`。
 - Agent 基础配置、权限配置与执行环境配置：`~/.ennoia/agents/{agent_id}/agent.toml`。
 - 定时计划：`~/.ennoia/data/system/schedules.json`。
 - Agent 权限事件与审批：`~/.ennoia/data/system/sqlite/permissions.db`。
 - 扩展通用运行态 state/record：`~/.ennoia/data/system/sqlite/extensions.db`。
-- 核心前端日志：`~/.ennoia/logs/frontend.jsonl`。
+- 核心前端日志：`~/.ennoia/data/system/logs/frontend.jsonl`。
+- 核心文本日志目录：`~/.ennoia/data/system/logs/`。
+- 运行态与开发态 pid 文件：`~/.ennoia/data/system/pids/*.pid`。
 - 扩展级宿主配置：`~/.ennoia/config/extensions/{extension_id}.toml`。
 - 技能级宿主配置：`~/.ennoia/config/skills/{skill_id}.toml`。
 - 扩展私有数据：`~/.ennoia/data/extensions/{extension_id}/`。

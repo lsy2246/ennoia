@@ -162,7 +162,10 @@ Web
 
 ## 存储划分
 
+- 运行目录按职责分成两类：`config/` 负责声明性配置，`data/` 负责全部运行数据
 - 系统级配置：`~/.ennoia/config/*.toml`
+- 系统文本日志目录：`~/.ennoia/data/system/logs/`
+- 运行态与开发态 pid 目录：`~/.ennoia/data/system/pids/`
 - 系统级日志：`~/.ennoia/data/system/sqlite/logs.db`
 - 系统级事件总线：`~/.ennoia/data/system/sqlite/events.db`
 - Agent 权限事件与审批：`~/.ennoia/data/system/sqlite/permissions.db`

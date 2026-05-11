@@ -123,8 +123,8 @@ function stopRuntime(values) {
   const target = resolveStopTarget(values);
   const pidPath =
     target.kind === "dev"
-      ? path.join(target.home, "data", "system", "dev.pid")
-      : path.join(target.home, "data", "system", "server.pid");
+      ? path.join(target.home, "data", "system", "pids", "dev.pid")
+      : path.join(target.home, "data", "system", "pids", "server.pid");
   const label = target.kind === "dev" ? "dev runtime" : "server runtime";
   const pid = readPidFile(pidPath);
   if (pid === null) {
