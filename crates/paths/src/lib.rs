@@ -129,6 +129,14 @@ impl RuntimePaths {
         self.system_state_dir().join("schedules.json")
     }
 
+    pub fn server_pid_file(&self) -> PathBuf {
+        self.system_state_dir().join("server.pid")
+    }
+
+    pub fn dev_pid_file(&self) -> PathBuf {
+        self.system_state_dir().join("dev.pid")
+    }
+
     pub fn system_state_dir(&self) -> PathBuf {
         self.state_dir().join("system")
     }

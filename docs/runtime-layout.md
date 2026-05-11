@@ -2,7 +2,7 @@
 
 ## 路径解析
 
-运行目录按以下顺序解析：
+运行态目录按以下顺序解析：
 
 - 命令行参数
 - 环境变量 `ENNOIA_HOME`
@@ -13,7 +13,30 @@
 - Windows：`C:/Users/<User>/.ennoia`
 - macOS / Linux：`~/.ennoia`
 
-## 当前落地目录
+开发态目录单独处理：
+
+- `ennoia dev` 固定使用当前仓库根目录下的 `.dev/`
+- 开发态不读取命令行 `home` 参数
+- 开发态不默认读取 `ENNOIA_HOME`
+- 开发态才会读取 `config/extensions.toml` 中的 `dev_sources`
+- `ennoia start` / `ennoia serve` 会忽略 `dev_sources`，只使用运行目录中的安装扩展
+
+## 开发态目录
+
+```text
+<repo>/.dev/
+├─ config/
+├─ extensions/
+├─ skills/
+├─ data/
+└─ logs/
+```
+
+- 开发日志、扩展设置、扩展私有数据、技能私有数据、热加载过程中的运行状态都写入 `.dev/`
+- `.dev/` 属于仓库内开发目录，应由 `.gitignore` 屏蔽
+- `config/extensions.toml` 中的 `dev_sources` 只用于开发态
+
+## 运行态落地目录
 
 ```text
 <ENNOIA_HOME>/
@@ -40,6 +63,8 @@
 ├─ data/
 │  ├─ system/
 │  │  ├─ schedules.json        # 系统 scheduler 的计划记录
+│  │  ├─ server.pid            # 运行态 server 进程 pid
+│  │  ├─ dev.pid               # 开发态 supervisor 进程 pid
 │  │  └─ sqlite/
 │  │     ├─ logs.db            # 系统日志 SQLite（logs / spans / span_links）
 │  │     ├─ events.db          # 系统事件总线 SQLite
@@ -58,7 +83,7 @@
 
 - `config/server.toml`：HTTP、中间件、内置工具超时、上游默认超时、流式轮询间隔、后台循环间隔、扩展运行时默认值、调度默认值、开发态 supervisor 参数和 bootstrap 状态等系统配置。
 - `config/ui.toml`：Web 标题、语言主题、默认操作者名、默认时区、本地化默认值、可选的前端 API 默认超时和通知默认行为。
-- `config/extensions.toml`：扩展运行时覆盖状态，记录 `enabled` 与 `blocked_builtin_sync`，并额外保存开发态 `dev_sources`。
+- `config/extensions.toml`：扩展运行时覆盖状态，记录 `enabled` 与 `blocked_builtin_sync`；开发态目录中额外保存 `dev_sources`。
 - `config/skills.toml`：技能运行时覆盖状态，记录 `enabled` 与 `blocked_builtin_sync`。
 - `config/extensions/{extension_id}.toml`：扩展级宿主配置，例如声明过的 `settings[]`。
 - `config/skills/{skill_id}.toml`：技能级宿主配置，供后续技能级设置落盘。
@@ -68,6 +93,8 @@
 - `data/system/sqlite/logs.db`：系统日志库，统一保存 logs、traces 和 span links；不记录会话 history。
 - `data/system/sqlite/events.db`：系统事件总线，记录会话创建、消息追加等稳定系统事件，以及它们到各扩展 Hook 的投递状态。
 - `data/system/schedules.json`：scheduler 计划列表，记录 trigger、executor、delivery、retry、启用状态、最近执行结果和最近运行历史；executor 可以是命令或 Agent。
+- `data/system/server.pid`：当前运行态 server 的 pid 文件，供 `ennoia stop [home]` 使用。
+- `data/system/dev.pid`：当前开发态 supervisor 的 pid 文件，供 `ennoia stop dev` 使用。
 - `data/extensions/{extension_id}/`：扩展私有运行数据根目录。
   - `conversation` 扩展在自己的目录中维护会话、线路和消息数据。
   - `memory` 扩展在自己的目录中维护完整记忆系统数据。
@@ -95,5 +122,7 @@
 ## 初始化行为
 
 `cargo run -p ennoia-cli -- init` 会自动创建运行目录、基础配置、扩展与技能运行时覆盖文件、日志目录，并同步未被 `blocked_builtin_sync` 屏蔽的内置扩展与技能。初始化不会预先写入会话数据、记忆数据、定时计划或运行数据。
+
+`cargo run -p ennoia-cli -- dev` 会在当前仓库根目录自动创建 `.dev/`，并在该目录下初始化开发态所需的配置、日志和数据目录。开发态的扩展源码覆盖、热加载状态和扩展设置都写入 `.dev/`。
 
 系统配置始终走 TOML；系统日志与系统事件总线都走独立 SQLite；定时计划走 `data/system/schedules.json`；会话、记忆和运行等业务数据始终由扩展实现维护。

@@ -1,6 +1,7 @@
 target/
 node_modules/
 dist/
+.dev/
 .DS_Store
 Thumbs.db
 .idea/

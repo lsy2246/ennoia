@@ -10,18 +10,40 @@ const { default: react } = await import(pathToFileURL(webRequire.resolve("@vitej
 const { build } = await import(pathToFileURL(webRequire.resolve("vite")).href);
 const watch = process.argv.includes("--watch");
 const explicitRoots = process.argv.filter((arg) => !arg.startsWith("--")).slice(2);
+const envRoots = readEnvRoots();
+
+function readEnvRoots() {
+  const raw = process.env.ENNOIA_EXTENSION_UI_ROOTS?.trim();
+  if (!raw) {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed
+      .filter((item) => typeof item === "string" && item.trim().length > 0)
+      .map((item) => resolve(item));
+  } catch {
+    return [];
+  }
+}
 
 function discoverExtensionRoots() {
   if (explicitRoots.length > 0) {
     return explicitRoots.map((item) => resolve(rootDir, item));
   }
+  if (envRoots.length > 0) {
+    return [...new Set(envRoots)];
+  }
   const builtinsDir = resolve(rootDir, "builtins", "extensions");
   if (!existsSync(builtinsDir)) {
     return [];
   }
-  return readdirSync(builtinsDir, { withFileTypes: true })
+  return [...new Set(readdirSync(builtinsDir, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
-    .map((entry) => resolve(builtinsDir, entry.name));
+    .map((entry) => resolve(builtinsDir, entry.name)))];
 }
 
 function discoverEntry(extensionRoot) {

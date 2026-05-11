@@ -24,6 +24,15 @@
 - 包管理：`bun`
 - 发布目标：一个 npm 包 + `~/.ennoia` 运行目录
 
+## 运行态与开发态
+
+- `ennoia start` / `ennoia serve`：运行态，继续使用 `ENNOIA_HOME` 或默认 `~/.ennoia`
+- `ennoia start` / `ennoia serve` 不接收路径参数；运行目录只能通过 `ENNOIA_HOME` 或默认 `~/.ennoia` 决定
+- `ennoia dev` / `npm run dev`：开发态，固定使用仓库根目录下的 `.dev/`
+- `ennoia stop`：停止当前开发态或运行态进程；`ennoia stop dev` 显式停止仓库 `.dev/`，`ennoia stop [home]` 停止指定运行目录
+- 开发态不会默认读写 `~/.ennoia`，开发日志、扩展设置、热加载状态和扩展私有数据都留在仓库内的 `.dev/` 下
+- `start/serve` 不读取 `dev_sources`，只消费运行目录中的已安装扩展；`dev_sources` 仅在 `ennoia dev` 下生效
+
 ## 核心模块
 
 - `crates/kernel`：共享协议、配置和扩展 manifest 模型
@@ -40,20 +49,21 @@
 
 - `builtins/extensions/*`：官方内置扩展源码
 - `builtins/skills/*`：官方内置技能源码
-- 初始化会把未被 `blocked_builtin_sync` 屏蔽的内置包同步到 `~/.ennoia/extensions/*` 与 `~/.ennoia/skills/*`
-- `~/.ennoia/config/extensions.toml` 与 `~/.ennoia/config/skills.toml` 只保存运行时覆盖状态，例如 `enabled` 与 `blocked_builtin_sync`
+- 运行态初始化会把未被 `blocked_builtin_sync` 屏蔽的内置包同步到 `~/.ennoia/extensions/*` 与 `~/.ennoia/skills/*`
+- 开发态会把内置扩展源码挂到仓库 `.dev/config/extensions.toml` 的 `dev_sources`
+- `config/extensions.toml` 与 `config/skills.toml` 保存运行时覆盖状态；其中 `dev_sources` 仅用于开发态
 
 ## 存储边界
 
-- 核心系统配置只走 `~/.ennoia/config/*.toml`。
+- 运行态核心系统配置走 `~/.ennoia/config/*.toml`；开发态对应配置走仓库 `.dev/config/*.toml`。
 - 系统动作规则来自扩展 manifest；宿主在运行时收集规则、排序并执行。
 - 系统定时计划写入 `~/.ennoia/data/system/schedules.json`，到期后由宿主运行命令或触发 Agent，并可把完整结果、摘要或最终结论投递到会话 / lane。
 - 系统事件总线写入 `~/.ennoia/data/system/sqlite/events.db`，用于持久化会话等系统事件及其 Hook 投递状态。
 - 系统日志数据写入 `~/.ennoia/data/system/sqlite/logs.db`，统一承载 logs、traces 和 span links。
 - Agent 基础配置与权限策略统一写入 `~/.ennoia/agents/{agent_id}/agent.toml`，权限事件与审批写入 `~/.ennoia/data/system/sqlite/permissions.db`。
-- 核心日志写入 `~/.ennoia/logs/`。
-- 扩展私有数据写入 `~/.ennoia/data/extensions/{extension_id}/`，扩展级宿主配置写入 `~/.ennoia/config/extensions/{extension_id}.toml`。
-- 技能私有数据写入 `~/.ennoia/data/skills/{skill_id}/`，技能级宿主配置写入 `~/.ennoia/config/skills/{skill_id}.toml`。
+- 核心日志写入对应 home 的 `logs/`；开发态默认是仓库 `.dev/logs/`。
+- 扩展私有数据写入对应 home 的 `data/extensions/{extension_id}/`，扩展级宿主配置写入 `config/extensions/{extension_id}.toml`。
+- 技能私有数据写入对应 home 的 `data/skills/{skill_id}/`，技能级宿主配置写入 `config/skills/{skill_id}.toml`。
 - 核心不提供主业务 SQLite，不内建语义记忆、编排、任务或产物索引表。
 
 ## 启动方式
@@ -72,10 +82,26 @@ bun install
 npm run dev
 ```
 
+开发态固定使用当前仓库根目录下的 `.dev/` 作为 home。
+
+停止开发环境：
+
+```bash
+npm run stop -- dev
+```
+
+`npm run stop` 会直接读取 pid 文件停进程，不触发 Rust CLI 编译。
+
 初始化运行目录：
 
 ```bash
 cargo run -p ennoia-cli -- init
+```
+
+启动默认运行目录：
+
+```bash
+npm run start
 ```
 
 默认开发地址来自配置和 CLI 默认值：

@@ -288,8 +288,10 @@ export default ui;
 
 ## 开发热加载
 
-- `ennoia dev` 会分别监听三类源码：`crates/`、`assets/`、`Cargo.toml` 与 `Cargo.lock` 用于 API 热重建；`builtins/extensions/*/(data|plugins|worker)/` 用于 builtin worker 热重建；`builtins/extensions/*/ui/entry.*` 用于扩展 UI watcher。
-- `ennoia dev` 会额外启动扩展 UI watcher，自动把 `ui/entry.*` 构建到 `ui/dist/entry.js`。
+- `ennoia dev` 会分别监听三类源码：`crates/`、`assets/`、`Cargo.toml` 与 `Cargo.lock` 用于 API 热重建；`builtins/extensions/*/(data|plugins|worker)/` 用于 builtin worker 热重建；所有已挂载的 dev source 扩展的 `ui/entry.*` 用于扩展 UI watcher。
+- `ennoia dev` 会额外启动扩展 UI watcher，自动把每个 dev source 的 `ui/entry.*` 构建到对应扩展目录下的 `ui/dist/entry.js`，不再只覆盖内置扩展。
+- 对于挂载到 `dev_sources` 的扩展，宿主会优先加载 `ui.dev_url`；未声明 `ui.dev_url` 时，如果扩展根目录存在 `ui/entry.tsx`、`ui/entry.ts`、`ui/entry.jsx` 或 `ui/entry.js`，会直接按源码入口加载；只有未发现开发入口时才回退到 `build.ui_bundle`。
+- `ennoia start` / `ennoia serve` 不会消费 `dev_sources`；运行态只从当前 home 的 `extensions/` 目录读取已安装扩展。
 - Server 运行时每 2 秒刷新一次扩展注册表与 manifest；UI bundle 版本变化会进入 runtime snapshot，并通过 `/api/extensions/events/stream` 触发 Web 重新加载当前扩展模块。
 - Worker runtime 会缓存编译后的 Wasm Module；`.wasm` mtime 或文件大小变化后，下一次 RPC 调用会自动重新编译。
 - Process Worker 会在目标二进制 mtime 或文件大小变化后，于下一次 RPC 调用自动换新实例。

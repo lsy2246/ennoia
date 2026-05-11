@@ -219,6 +219,7 @@ pub struct ExtensionRuntimeConfig {
     pub registry_file: PathBuf,
     pub logs_dir: PathBuf,
     pub home_dir: PathBuf,
+    pub allow_dev_sources: bool,
     pub runtime_defaults: ExtensionRuntimeSpec,
 }
 
@@ -799,19 +800,21 @@ fn discover_sources(config: &ExtensionRuntimeConfig) -> io::Result<Vec<RuntimeSo
         }
     }
 
-    for item in registry
-        .dev_sources
-        .into_iter()
-        .filter(|entry| entry.enabled)
-    {
-        let root = PathBuf::from(&item.path);
-        ordered.insert(
-            normalize_display_path(&root),
-            RuntimeSource {
-                root,
-                source_mode: ExtensionSourceMode::Dev,
-            },
-        );
+    if config.allow_dev_sources {
+        for item in registry
+            .dev_sources
+            .into_iter()
+            .filter(|entry| entry.enabled)
+        {
+            let root = PathBuf::from(&item.path);
+            ordered.insert(
+                normalize_display_path(&root),
+                RuntimeSource {
+                    root,
+                    source_mode: ExtensionSourceMode::Dev,
+                },
+            );
+        }
     }
 
     Ok(ordered.into_values().collect())
@@ -1226,8 +1229,12 @@ fn resolve_ui(
                 version: generation.to_string(),
             }));
         }
-        if let Some(entry) = ui.entry.clone() {
-            let path = root.join(entry);
+        if let Some(path) = ui
+            .entry
+            .clone()
+            .map(|entry| root.join(entry))
+            .or_else(|| discover_dev_ui_entry(root))
+        {
             let version = regular_file_version(&path)?;
             return Ok(Some(ResolvedUiEntry {
                 kind: "module".to_string(),
@@ -1250,6 +1257,13 @@ fn resolve_ui(
     }
 
     Ok(None)
+}
+
+fn discover_dev_ui_entry(root: &Path) -> Option<PathBuf> {
+    ["ui/entry.tsx", "ui/entry.ts", "ui/entry.jsx", "ui/entry.js"]
+        .into_iter()
+        .map(|candidate| root.join(candidate))
+        .find(|path| path.is_file())
 }
 
 fn regular_file_version(path: &Path) -> io::Result<String> {
@@ -1565,6 +1579,7 @@ mod tests {
             registry_file: root.join("config/extensions.toml"),
             logs_dir: root.join("logs"),
             home_dir: root.clone(),
+            allow_dev_sources: true,
             runtime_defaults: ExtensionRuntimeSpec::default(),
         };
         write_registry_file(
@@ -1612,6 +1627,7 @@ mod tests {
             registry_file: root.join("config/extensions.toml"),
             logs_dir: root.join("logs"),
             home_dir: root.clone(),
+            allow_dev_sources: true,
             runtime_defaults: ExtensionRuntimeSpec::default(),
         };
         let runtime = ExtensionRuntime::bootstrap(config).expect("bootstrap runtime");
@@ -1624,8 +1640,125 @@ mod tests {
         fs::remove_dir_all(&root).expect("cleanup");
     }
 
+    #[test]
+    fn attached_dev_source_prefers_discovered_ui_entry_over_bundle() {
+        let root = unique_test_dir("runtime-dev-ui-entry");
+        let ext_dir = root.join("sample");
+        fs::create_dir_all(ext_dir.join("worker")).expect("create worker dir");
+        fs::create_dir_all(ext_dir.join("ui/dist")).expect("create bundle dir");
+        fs::write(
+            ext_dir.join("extension.toml"),
+            sample_descriptor_without_ui_entry("sample"),
+        )
+        .expect("write descriptor");
+        fs::write(ext_dir.join("worker/plugin.wasm"), b"test").expect("write worker");
+        fs::write(ext_dir.join("ui/entry.tsx"), "export default {};").expect("write ui entry");
+        fs::write(ext_dir.join("ui/dist/entry.js"), "export default {};")
+            .expect("write bundled ui entry");
+
+        let config = ExtensionRuntimeConfig {
+            registry_file: root.join("config/extensions.toml"),
+            logs_dir: root.join("logs"),
+            home_dir: root.clone(),
+            allow_dev_sources: true,
+            runtime_defaults: ExtensionRuntimeSpec::default(),
+        };
+        write_registry_file(
+            &config.registry_file,
+            &ExtensionRegistryFile {
+                dev_sources: vec![ExtensionDevSourceEntry {
+                    id: "sample".to_string(),
+                    path: normalize_display_path(&ext_dir),
+                    enabled: true,
+                }],
+                ..ExtensionRegistryFile::default()
+            },
+        )
+        .expect("write registry");
+
+        let runtime = ExtensionRuntime::bootstrap(config).expect("bootstrap runtime");
+        let snapshot = runtime.snapshot();
+        let extension = snapshot
+            .extensions
+            .into_iter()
+            .find(|item| item.id == "sample")
+            .expect("sample extension");
+        let ui = extension.ui.expect("resolved ui");
+        assert_eq!(ui.kind, "module");
+        assert!(ui.entry.ends_with("ui/entry.tsx"));
+
+        fs::remove_dir_all(&root).expect("cleanup");
+    }
+
+    #[test]
+    fn runtime_ignores_dev_sources_when_disabled() {
+        let root = unique_test_dir("runtime-ignore-dev-sources");
+        let ext_dir = root.join("sample");
+        fs::create_dir_all(ext_dir.join("worker")).expect("create worker dir");
+        fs::write(
+            ext_dir.join("extension.toml"),
+            sample_descriptor_without_ui_entry("sample"),
+        )
+        .expect("write descriptor");
+        fs::write(ext_dir.join("worker/plugin.wasm"), b"test").expect("write worker");
+
+        let config = ExtensionRuntimeConfig {
+            registry_file: root.join("config/extensions.toml"),
+            logs_dir: root.join("logs"),
+            home_dir: root.clone(),
+            allow_dev_sources: false,
+            runtime_defaults: ExtensionRuntimeSpec::default(),
+        };
+        write_registry_file(
+            &config.registry_file,
+            &ExtensionRegistryFile {
+                dev_sources: vec![ExtensionDevSourceEntry {
+                    id: "sample".to_string(),
+                    path: normalize_display_path(&ext_dir),
+                    enabled: true,
+                }],
+                ..ExtensionRegistryFile::default()
+            },
+        )
+        .expect("write registry");
+
+        let runtime = ExtensionRuntime::bootstrap(config).expect("bootstrap runtime");
+        assert!(runtime.snapshot().extensions.is_empty());
+
+        fs::remove_dir_all(&root).expect("cleanup");
+    }
+
     fn sample_descriptor() -> String {
         sample_descriptor_for("sample")
+    }
+
+    fn sample_descriptor_without_ui_entry(id: &str) -> String {
+        format!(
+            r##"
+id = "{id}"
+name = "Logs"
+kind = "extension"
+description = "Test extension"
+docs = "docs/overview.md"
+
+[source]
+mode = "package"
+root = "."
+dev = false
+
+[ui]
+runtime = "browser-esm"
+hmr = true
+
+[worker]
+kind = "wasm"
+entry = "./worker/plugin.wasm"
+abi = "ennoia.worker"
+
+[build]
+ui_bundle = "ui/dist/entry.js"
+"##
+        )
     }
 
     fn sample_descriptor_for(id: &str) -> String {

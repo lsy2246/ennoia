@@ -36,6 +36,7 @@ const LOGS_TARGET: &str = "server";
 const DEFAULT_SPACE_ID: &str = "studio";
 const DEFAULT_SPACE_NAME: &str = "Studio";
 const EXTENSION_REFRESH_SUMMARY: &str = "polled runtime refresh";
+const ENNOIA_ALLOW_DEV_SOURCES_ENV: &str = "ENNOIA_ALLOW_DEV_SOURCES";
 
 #[derive(Clone)]
 pub struct AppState {
@@ -66,6 +67,7 @@ pub fn default_app_state() -> AppState {
     let extensions = ExtensionRuntime::bootstrap(extension_runtime_config(
         &runtime_paths,
         &ServerConfig::default(),
+        false,
     ))
     .expect("runtime");
     let logs = Arc::new(LogsStore::new(&runtime_paths).expect("logs"));
@@ -123,8 +125,11 @@ pub async fn bootstrap_app_state(home_dir: impl AsRef<Path>) -> Result<AppState,
     let skills = load_skill_configs(&runtime_paths)?;
     let model_endpoints = load_model_endpoint_configs(&runtime_paths)?;
     let spaces = default_spaces();
-    let extensions =
-        ExtensionRuntime::bootstrap(extension_runtime_config(&runtime_paths, &server_config))?;
+    let extensions = ExtensionRuntime::bootstrap(extension_runtime_config(
+        &runtime_paths,
+        &server_config,
+        allow_dev_sources_from_env(),
+    ))?;
     let logs = Arc::new(LogsStore::new(&runtime_paths)?);
     let event_bus = Arc::new(EventBusStore::new(&runtime_paths)?);
     let agent_permissions = Arc::new(AgentPermissionStore::new(&runtime_paths)?);
@@ -957,17 +962,29 @@ fn normalize_agent_config(paths: &RuntimePaths, agent: &mut AgentConfig) {
 fn extension_runtime_config(
     paths: &RuntimePaths,
     server_config: &ServerConfig,
+    allow_dev_sources: bool,
 ) -> ExtensionRuntimeConfig {
     ExtensionRuntimeConfig {
         registry_file: paths.extensions_registry_file(),
         logs_dir: paths.extensions_logs_dir(),
         home_dir: paths.home().to_path_buf(),
+        allow_dev_sources,
         runtime_defaults: ennoia_kernel::ExtensionRuntimeSpec {
             timeout_ms: server_config.extension_runtime.timeout_ms,
             memory_limit_mb: server_config.extension_runtime.memory_limit_mb,
             ..ennoia_kernel::ExtensionRuntimeSpec::default()
         },
     }
+}
+
+fn allow_dev_sources_from_env() -> bool {
+    matches!(
+        std::env::var(ENNOIA_ALLOW_DEV_SOURCES_ENV)
+            .ok()
+            .as_deref()
+            .map(str::trim),
+        Some("1" | "true" | "TRUE" | "True")
+    )
 }
 
 pub fn upsert_skill_package(paths: &RuntimePaths, payload: &SkillConfig) -> Result<(), AppError> {

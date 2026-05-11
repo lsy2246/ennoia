@@ -5,6 +5,7 @@ use std::io::{self, BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
+use std::process;
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::{mpsc, Mutex, OnceLock};
 use std::thread;
@@ -21,6 +22,7 @@ use ennoia_server::{bootstrap_app_state, default_app_state, execution, run_serve
 use notify::{Config as NotifyConfig, RecommendedWatcher, RecursiveMode, Watcher};
 
 const WEB_DIR: &str = "web";
+const ENNOIA_ALLOW_DEV_SOURCES_ENV: &str = "ENNOIA_ALLOW_DEV_SOURCES";
 static DEV_CONSOLE_OUTPUT_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -106,7 +108,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 return Ok(());
             }
             let repo_root = env::current_dir()?;
-            let paths = RuntimePaths::resolve(parse_optional_home_arg("dev", &args[1..])?);
+            ensure_no_args("dev", &args[1..], &home_command_usage("dev"))?;
+            let paths = RuntimePaths::new(repo_root.join(".dev"));
             init_home_template(&paths)?;
             let mut server_config: ServerConfig =
                 read_toml_or_default(&paths.server_config_file())?;
@@ -128,9 +131,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 print_home_command_usage(command);
                 return Ok(());
             }
-            let paths = RuntimePaths::resolve(parse_optional_home_arg(command, &args[1..])?);
+            ensure_no_args(command, &args[1..], &home_command_usage(command))?;
+            let paths = RuntimePaths::resolve(None);
             init_home_template(&paths)?;
+            let _pid_guard = acquire_pid_file(paths.server_pid_file(), command)?;
             run_server(paths.home()).await?;
+        }
+        Some("stop") => {
+            if args.get(1).is_some_and(|value| is_help_flag(value)) {
+                print_stop_usage();
+                return Ok(());
+            }
+            stop_command(&args[1..])?;
         }
         Some("ext") => {
             if args.get(1).is_some_and(|value| is_help_flag(value)) {
@@ -183,6 +195,202 @@ fn parse_optional_home_arg<'a>(
 
 fn invalid_input_error(message: impl Into<String>) -> Box<dyn std::error::Error + Send + Sync> {
     io::Error::new(io::ErrorKind::InvalidInput, message.into()).into()
+}
+
+struct PidFileGuard {
+    path: PathBuf,
+    pid: u32,
+}
+
+impl Drop for PidFileGuard {
+    fn drop(&mut self) {
+        remove_pid_file_if_matches(&self.path, self.pid);
+    }
+}
+
+fn acquire_pid_file(path: PathBuf, label: &str) -> io::Result<PidFileGuard> {
+    if let Some(existing_pid) = read_pid_file(&path)? {
+        if existing_pid != process::id() && is_process_running(existing_pid)? {
+            return Err(io::Error::new(
+                io::ErrorKind::AddrInUse,
+                format!("{label} is already running with pid {existing_pid}"),
+            ));
+        }
+        remove_pid_file_if_matches(&path, existing_pid);
+    }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(&path, format!("{}\n", process::id()))?;
+    Ok(PidFileGuard {
+        path,
+        pid: process::id(),
+    })
+}
+
+fn stop_command(args: &[String]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    match resolve_stop_target(args)? {
+        StopTarget::Dev(paths) => {
+            stop_process_from_pid_file(&paths.dev_pid_file(), "dev runtime")?;
+        }
+        StopTarget::Runtime(paths) => {
+            stop_process_from_pid_file(&paths.server_pid_file(), "server runtime")?;
+        }
+    }
+    Ok(())
+}
+
+enum StopTarget {
+    Dev(RuntimePaths),
+    Runtime(RuntimePaths),
+}
+
+fn resolve_stop_target(
+    args: &[String],
+) -> Result<StopTarget, Box<dyn std::error::Error + Send + Sync>> {
+    match args {
+        [] => {
+            let cwd = env::current_dir()?;
+            let dev_home = cwd.join(".dev");
+            if dev_home.exists() {
+                Ok(StopTarget::Dev(RuntimePaths::new(dev_home)))
+            } else {
+                Ok(StopTarget::Runtime(RuntimePaths::resolve(None)))
+            }
+        }
+        [value] if value.starts_with('-') => Err(invalid_input_error(format!(
+            "unknown option for 'ennoia stop': {value}\n\n{}",
+            stop_usage()
+        ))),
+        [value] if value == "dev" => {
+            let cwd = env::current_dir()?;
+            Ok(StopTarget::Dev(RuntimePaths::new(cwd.join(".dev"))))
+        }
+        [value] => Ok(StopTarget::Runtime(RuntimePaths::new(value))),
+        _ => Err(invalid_input_error(format!(
+            "too many arguments for 'ennoia stop'\n\n{}",
+            stop_usage()
+        ))),
+    }
+}
+
+fn stop_process_from_pid_file(path: &Path, label: &str) -> io::Result<()> {
+    let Some(pid) = read_pid_file(path)? else {
+        println!("no {label} pid file found at {}", path.display());
+        return Ok(());
+    };
+
+    if !is_process_running(pid)? {
+        remove_pid_file_if_matches(path, pid);
+        println!(
+            "{label} is not running; removed stale pid file {}",
+            path.display()
+        );
+        return Ok(());
+    }
+
+    terminate_process(pid)?;
+    wait_for_process_exit(pid, Duration::from_secs(8))?;
+    remove_pid_file_if_matches(path, pid);
+    println!("stopped {label} (pid {pid})");
+    Ok(())
+}
+
+fn read_pid_file(path: &Path) -> io::Result<Option<u32>> {
+    if !path.exists() {
+        return Ok(None);
+    }
+    let contents = fs::read_to_string(path)?;
+    let value = contents
+        .trim()
+        .parse::<u32>()
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    Ok(Some(value))
+}
+
+fn remove_pid_file_if_matches(path: &Path, pid: u32) {
+    match read_pid_file(path) {
+        Ok(Some(existing_pid)) if existing_pid == pid => {
+            let _ = fs::remove_file(path);
+        }
+        Ok(None) => {}
+        Ok(Some(_)) | Err(_) => {}
+    }
+}
+
+fn wait_for_process_exit(pid: u32, timeout: Duration) -> io::Result<()> {
+    let started = Instant::now();
+    while started.elapsed() < timeout {
+        if !is_process_running(pid)? {
+            return Ok(());
+        }
+        thread::sleep(Duration::from_millis(120));
+    }
+    if is_process_running(pid)? {
+        #[cfg(not(windows))]
+        force_kill_process(pid)?;
+        #[cfg(windows)]
+        terminate_windows_process_tree(pid)?;
+    }
+    Ok(())
+}
+
+fn terminate_process(pid: u32) -> io::Result<()> {
+    #[cfg(windows)]
+    {
+        terminate_windows_process_tree(pid)
+    }
+
+    #[cfg(not(windows))]
+    {
+        let status = Command::new("kill")
+            .args(["-TERM", &pid.to_string()])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err(io::Error::other(format!("kill -TERM failed for pid {pid}")))
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn force_kill_process(pid: u32) -> io::Result<()> {
+    let status = Command::new("kill")
+        .args(["-KILL", &pid.to_string()])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(io::Error::other(format!("kill -KILL failed for pid {pid}")))
+    }
+}
+
+fn is_process_running(pid: u32) -> io::Result<bool> {
+    #[cfg(windows)]
+    {
+        let output = Command::new("tasklist")
+            .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .output()?;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        Ok(stdout.contains(&format!("\"{pid}\"")))
+    }
+
+    #[cfg(not(windows))]
+    {
+        let status = Command::new("kill")
+            .args(["-0", &pid.to_string()])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()?;
+        Ok(status.success())
+    }
 }
 
 fn ensure_no_args(
@@ -252,9 +460,10 @@ fn summary_text() -> String {
         String::new(),
         "commands:".to_string(),
         "  ennoia init [home]".to_string(),
-        "  ennoia dev [home]".to_string(),
-        "  ennoia start [home]".to_string(),
-        "  ennoia serve [home]".to_string(),
+        "  ennoia dev".to_string(),
+        "  ennoia start".to_string(),
+        "  ennoia serve".to_string(),
+        "  ennoia stop [home|dev]".to_string(),
         "  ennoia print-config".to_string(),
         "  ennoia ext list".to_string(),
         "  ennoia ext inspect <id>".to_string(),
@@ -275,6 +484,14 @@ fn print_summary() {
 }
 
 fn home_command_usage(command: &str) -> String {
+    if command == "dev" {
+        return "usage: ennoia dev\n\nennoia dev always uses the repository-local .dev directory and does not read ENNOIA_HOME.".to_string();
+    }
+    if command == "start" || command == "serve" {
+        return format!(
+            "usage: ennoia {command}\n\nennoia {command} resolves the runtime home from ENNOIA_HOME or the default ~/.ennoia directory and does not accept a path argument."
+        );
+    }
     format!(
         "usage: ennoia {command} [home]\n\nhome is optional. If omitted, ENNOIA_HOME or the default ~/.ennoia directory is used."
     )
@@ -296,8 +513,28 @@ fn print_print_config_usage() {
     println!("{}", print_config_usage());
 }
 
+fn print_stop_usage() {
+    println!("{}", stop_usage());
+}
+
 fn print_config_usage() -> String {
     "usage: ennoia print-config".to_string()
+}
+
+fn stop_usage() -> String {
+    [
+        "usage: ennoia stop [home|dev]".to_string(),
+        String::new(),
+        "Without arguments, Ennoia stops the repository-local dev runtime if ./.dev exists;"
+            .to_string(),
+        "otherwise it stops the runtime resolved from ENNOIA_HOME or ~/.ennoia.".to_string(),
+        String::new(),
+        "Examples:".to_string(),
+        "  ennoia stop".to_string(),
+        "  ennoia stop dev".to_string(),
+        "  ennoia stop C:/Users/Administrator/.ennoia".to_string(),
+    ]
+    .join("\n")
 }
 
 fn extension_usage() -> String {
@@ -545,6 +782,7 @@ async fn run_dev_supervisor(
     paths: RuntimePaths,
     server_config: ServerConfig,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let _pid_guard = acquire_pid_file(paths.dev_pid_file(), "dev")?;
     let repo_root = env::current_dir()?;
     let console_config = DevConsoleMirrorConfig::from_logging(&server_config.logging);
     let mut dev_processes = DevProcessGroup::new(
@@ -605,7 +843,7 @@ async fn run_dev_supervisor(
 
     loop {
         tokio::select! {
-            signal = tokio::signal::ctrl_c() => {
+            signal = wait_for_dev_stop_signal() => {
                 signal?;
                 println!("stopping Ennoia dev runtime...");
                 break;
@@ -664,6 +902,23 @@ async fn run_dev_supervisor(
     api.stop();
     drop(dev_processes);
     Ok(())
+}
+
+async fn wait_for_dev_stop_signal() -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        let mut terminate =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+        tokio::select! {
+            result = tokio::signal::ctrl_c() => result.map_err(io::Error::other),
+            _ = terminate.recv() => Ok(()),
+        }
+    }
+
+    #[cfg(not(unix))]
+    {
+        tokio::signal::ctrl_c().await.map_err(io::Error::other)
+    }
 }
 
 struct ApiDevProcess {
@@ -970,7 +1225,8 @@ impl ApiDevProcess {
     async fn launch_snapshot(&self, snapshot: PathBuf) -> io::Result<ApiChild> {
         let mut child = Command::new(&snapshot)
             .arg("start")
-            .arg(self.paths.home())
+            .env(ENNOIA_ALLOW_DEV_SOURCES_ENV, "1")
+            .env("ENNOIA_HOME", self.paths.home())
             .current_dir(&self.repo_root)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -1082,7 +1338,8 @@ impl DevProcessGroup {
             return Ok(());
         }
         let log_path = paths.server_logs_dir().join("extension-ui-dev.log");
-        let command = shell_command("node scripts/build-extension-ui.mjs --watch", repo_root);
+        let mut command = shell_command("node scripts/build-extension-ui.mjs --watch", repo_root);
+        attach_extension_ui_roots_env(&mut command, paths)?;
         self.spawn("extension-ui", command, &log_path)
     }
 
@@ -1093,9 +1350,11 @@ impl DevProcessGroup {
             return Ok(());
         }
         let log_path = paths.server_logs_dir().join("extension-ui-dev.log");
+        let mut command = shell_command("node scripts/build-extension-ui.mjs", repo_root);
+        attach_extension_ui_roots_env(&mut command, paths)?;
         let status = run_logged_command(
             "extension-ui-build",
-            shell_command("node scripts/build-extension-ui.mjs", repo_root),
+            command,
             &log_path,
             &self.console_config,
         )?;
@@ -1833,6 +2092,18 @@ fn attached_dev_source_roots(paths: &RuntimePaths) -> io::Result<Vec<PathBuf>> {
     Ok(roots)
 }
 
+fn attach_extension_ui_roots_env(command: &mut Command, paths: &RuntimePaths) -> io::Result<()> {
+    let roots = attached_dev_source_roots(paths)?
+        .into_iter()
+        .map(|root| root.to_string_lossy().replace('\\', "/"))
+        .collect::<Vec<_>>();
+    if !roots.is_empty() {
+        let payload = serde_json::to_string(&roots).map_err(io::Error::other)?;
+        command.env("ENNOIA_EXTENSION_UI_ROOTS", payload);
+    }
+    Ok(())
+}
+
 fn descriptor_path(root: &Path) -> Option<PathBuf> {
     let path = root.join("extension.toml");
     path.exists().then_some(path)
@@ -2079,9 +2350,9 @@ mod tests {
     use std::{fs, path::Path};
 
     use super::{
-        ensure_no_args, extension_subcommand_usage, extension_usage, internal_subcommand_usage,
-        is_builtin_worker_reload_path, is_host_reload_path, parse_optional_home_arg,
-        parse_optional_usize_arg, parse_required_arg, print_config_usage,
+        ensure_no_args, extension_subcommand_usage, extension_usage, home_command_usage,
+        internal_subcommand_usage, is_builtin_worker_reload_path, is_host_reload_path,
+        parse_optional_home_arg, parse_optional_usize_arg, parse_required_arg, print_config_usage,
         should_mark_binary_asset_executable, summary_text, tail_log_file, unique_suffix,
     };
 
@@ -2172,10 +2443,23 @@ mod tests {
     }
 
     #[test]
-    fn parse_optional_home_arg_accepts_single_path() {
+    fn dev_command_rejects_custom_home_argument() {
         let args = as_args(&["C:/ennoia-home"]);
-        let parsed = parse_optional_home_arg("dev", &args).expect("home path should parse");
-        assert_eq!(parsed, Some("C:/ennoia-home"));
+        let usage = home_command_usage("dev");
+        let error = ensure_no_args("dev", &args, &usage).expect_err("dev should reject args");
+        assert!(error
+            .to_string()
+            .contains("unexpected argument for 'ennoia dev': C:/ennoia-home"));
+    }
+
+    #[test]
+    fn start_command_rejects_custom_home_argument() {
+        let args = as_args(&["C:/ennoia-home"]);
+        let usage = home_command_usage("start");
+        let error = ensure_no_args("start", &args, &usage).expect_err("start should reject args");
+        assert!(error
+            .to_string()
+            .contains("unexpected argument for 'ennoia start': C:/ennoia-home"));
     }
 
     #[test]
@@ -2223,8 +2507,15 @@ mod tests {
     #[test]
     fn usage_texts_include_new_commands() {
         let summary = summary_text();
-        assert!(summary.contains("ennoia serve [home]"));
+        let dev_usage = home_command_usage("dev");
+        let start_usage = home_command_usage("start");
+        assert!(summary.contains("ennoia dev\n"));
+        assert!(!summary.contains("ennoia dev [home]"));
+        assert!(summary.contains("ennoia serve\n"));
+        assert!(!summary.contains("ennoia start [home]"));
         assert!(summary.contains("ennoia print-config"));
+        assert!(dev_usage.contains("repository-local .dev directory"));
+        assert!(start_usage.contains("does not accept a path argument"));
         assert!(extension_usage().contains("usage: ennoia ext <subcommand> [args]"));
         assert!(internal_subcommand_usage("sandbox-worker")
             .contains("sandbox-worker <request.json> <response.json>"));
