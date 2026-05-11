@@ -1,5 +1,12 @@
 # 变更日志
 
+## [0.2.4] - 2026-05-11
+
+### 重构
+- **[extension-runtime]**: 将官方内置扩展与技能源码统一收敛到 `assets/extensions/*` 和 `assets/skills/*`，同时把运行目录初始化模板从 `assets/templates/config/*.toml` 压平为 `assets/templates/*.toml`，并同步更新 CLI、构建脚本、Docker 构建、前端配置与仓库文档 — by lsy
+  - 方案: [202605111238_assets-root-reorg](plan/202605111238_assets-root-reorg/)
+  - 决策: assets-root-reorg#D001(内置源码根并入 assets)
+
 ## [0.2.3] - 2026-05-08
 
 ### 重构

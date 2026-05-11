@@ -9,14 +9,17 @@ fn main() {
         .and_then(Path::parent)
         .expect("repo root");
     let assets_root = repo_root.join("assets");
-    let builtins_root = repo_root.join("builtins");
+    let builtin_roots = [assets_root.join("extensions"), assets_root.join("skills")];
     let templates_root = assets_root.join("templates");
 
     println!("cargo:rerun-if-changed={}", templates_root.display());
-    println!("cargo:rerun-if-changed={}", builtins_root.display());
+    for root in &builtin_roots {
+        println!("cargo:rerun-if-changed={}", root.display());
+    }
 
     let template_assets = collect_assets(&templates_root, &templates_root);
-    let builtin_assets = collect_assets(&builtins_root, &builtins_root);
+    let mut builtin_assets = collect_prefixed_assets(&assets_root, &builtin_roots);
+    builtin_assets.sort_by(|left, right| left.0.cmp(&right.0));
 
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("out dir"));
     fs::write(
@@ -56,6 +59,14 @@ fn collect_assets(root: &Path, current: &Path) -> Vec<(String, String)> {
         assets.push((relative, absolute));
     }
 
+    assets
+}
+
+fn collect_prefixed_assets(prefix_root: &Path, roots: &[PathBuf]) -> Vec<(String, String)> {
+    let mut assets = Vec::new();
+    for root in roots {
+        assets.extend(collect_assets(prefix_root, root));
+    }
     assets
 }
 

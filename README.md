@@ -41,14 +41,14 @@
 - `crates/cli`：初始化、开发与启动入口
 - `web`：Ennoia Web 工作台
 - `web/packages/api-client`：前端统一 API 访问层
-- `builtins/extensions/conversation`：内置会话扩展，声明原生会话事实接口
-- `builtins/extensions/memory`：内置记忆扩展，声明记忆、上下文、审查与图谱接口
-- `builtins/extensions/workflow`：内置编排扩展，声明 run/task/artifact 接口
+- `assets/extensions/conversation`：内置会话扩展，声明原生会话事实接口
+- `assets/extensions/memory`：内置记忆扩展，声明记忆、上下文、审查与图谱接口
+- `assets/extensions/workflow`：内置编排扩展，声明 run/task/artifact 接口
 
 ## 内置能力源码
 
-- `builtins/extensions/*`：官方内置扩展源码
-- `builtins/skills/*`：官方内置技能源码
+- `assets/extensions/*`：官方内置扩展源码
+- `assets/skills/*`：官方内置技能源码
 - 运行态初始化会把未被 `blocked_builtin_sync` 屏蔽的内置包同步到 `~/.ennoia/extensions/*` 与 `~/.ennoia/skills/*`
 - 开发态会把内置扩展源码挂到仓库 `.dev/config/extensions.toml` 的 `dev_sources`
 - `config/extensions.toml` 与 `config/skills.toml` 保存运行时覆盖状态；其中 `dev_sources` 仅用于开发态

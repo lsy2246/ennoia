@@ -76,26 +76,26 @@ run(cargo, [
 copyWorker(
   "ennoia-workflow-worker",
   "ennoia_workflow_worker.wasm",
-  "builtins/extensions/workflow/worker/workflow.wasm",
+  "assets/extensions/workflow/worker/workflow.wasm",
 );
 copyNativeWorker(
   "ennoia-conversation-service",
   process.platform === "win32"
     ? "ennoia-conversation-service.exe"
     : "ennoia-conversation-service",
-  `builtins/extensions/conversation/bin/${conversationBinaryName}`,
+  `assets/extensions/conversation/bin/${conversationBinaryName}`,
 );
 copyNativeWorker(
   "ennoia-memory",
   process.platform === "win32"
     ? "ennoia-memory-extension.exe"
     : "ennoia-memory-extension",
-  `builtins/extensions/memory/bin/${memoryBinaryName}`,
+  `assets/extensions/memory/bin/${memoryBinaryName}`,
 );
 copyNativeWorker(
   "ennoia-workflow",
   process.platform === "win32"
     ? "ennoia-workflow-extension.exe"
     : "ennoia-workflow-extension",
-  `builtins/extensions/workflow/bin/${workflowBinaryName}`,
+  `assets/extensions/workflow/bin/${workflowBinaryName}`,
 );

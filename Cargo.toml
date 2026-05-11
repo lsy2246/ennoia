@@ -10,10 +10,10 @@ members = [
   "crates/contract",
   "crates/server",
   "crates/cli",
-  "builtins/extensions/memory/plugins/memory-service",
-  "builtins/extensions/conversation/plugins/conversation-service",
-  "builtins/extensions/workflow/plugins/workflow-service",
-  "builtins/extensions/workflow/worker",
+  "assets/extensions/memory/plugins/memory-service",
+  "assets/extensions/conversation/plugins/conversation-service",
+  "assets/extensions/workflow/plugins/workflow-service",
+  "assets/extensions/workflow/worker",
 ]
 resolver = "2"
 

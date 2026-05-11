@@ -823,7 +823,7 @@ async fn run_dev_supervisor(
     );
     println!("API: http://{}:{}", server_config.host, server_config.port);
     println!("Host hot reload: watching crates/, assets/, Cargo.toml and Cargo.lock.");
-    println!("Builtin worker hot reload: watching builtins/extensions/*/(data|plugins|worker)/.");
+    println!("Builtin worker hot reload: watching assets/extensions/*/(data|plugins|worker)/.");
     println!(
         "Dev console logs: {} (level >= {}).",
         if console_config.enabled {
@@ -1709,7 +1709,7 @@ fn start_builtin_worker_watcher(
 
     watch_if_exists(
         &mut watcher,
-        &repo_root.join("builtins").join("extensions"),
+        &repo_root.join("assets").join("extensions"),
         RecursiveMode::Recursive,
     )?;
 
@@ -1737,7 +1737,12 @@ fn is_host_reload_path(repo_root: &Path, path: &Path) -> bool {
     if relative == Path::new("Cargo.toml") || relative == Path::new("Cargo.lock") {
         return true;
     }
-    if !(relative.starts_with("crates") || relative.starts_with("assets")) {
+    if relative.starts_with("assets") {
+        return !relative.starts_with(Path::new("assets").join("extensions"))
+            && !relative.starts_with(Path::new("assets").join("skills"))
+            && has_host_reload_extension(path);
+    }
+    if !relative.starts_with("crates") {
         return false;
     }
     has_host_reload_extension(path)
@@ -1750,7 +1755,7 @@ fn is_builtin_worker_reload_path(repo_root: &Path, path: &Path) -> bool {
     if relative.starts_with("target") || relative.starts_with("web") {
         return false;
     }
-    if !relative.starts_with(Path::new("builtins").join("extensions")) {
+    if !relative.starts_with(Path::new("assets").join("extensions")) {
         return false;
     }
     is_builtin_worker_reload_relative_path(relative)
@@ -1958,7 +1963,7 @@ fn ensure_builtin_process_workers(repo_root: &Path) -> io::Result<()> {
     }
 
     let conversation_root = repo_root
-        .join("builtins")
+        .join("assets")
         .join("extensions")
         .join("conversation");
     if conversation_root.join("extension.toml").exists() {
@@ -1986,7 +1991,7 @@ fn ensure_builtin_process_workers(repo_root: &Path) -> io::Result<()> {
         copy_builtin_process_worker(&built_binary, &destination)?;
     }
 
-    let memory_root = repo_root.join("builtins").join("extensions").join("memory");
+    let memory_root = repo_root.join("assets").join("extensions").join("memory");
     if memory_root.join("extension.toml").exists() {
         let built_binary = repo_root
             .join("target")
@@ -2010,10 +2015,7 @@ fn ensure_builtin_process_workers(repo_root: &Path) -> io::Result<()> {
         copy_builtin_process_worker(&built_binary, &destination)?;
     }
 
-    let workflow_root = repo_root
-        .join("builtins")
-        .join("extensions")
-        .join("workflow");
+    let workflow_root = repo_root.join("assets").join("extensions").join("workflow");
     if workflow_root.join("extension.toml").exists() {
         let built_binary = repo_root
             .join("target")
@@ -2110,14 +2112,14 @@ fn descriptor_path(root: &Path) -> Option<PathBuf> {
 }
 
 fn auto_attach_dev_extensions(paths: &RuntimePaths) -> io::Result<()> {
-    let builtins_dir = env::current_dir()?.join("builtins").join("extensions");
-    if !builtins_dir.exists() {
+    let builtin_extensions_dir = env::current_dir()?.join("assets").join("extensions");
+    if !builtin_extensions_dir.exists() {
         return Ok(());
     }
 
     let mut registry = read_extension_registry(paths)?;
 
-    for entry in fs::read_dir(builtins_dir)? {
+    for entry in fs::read_dir(builtin_extensions_dir)? {
         let entry = entry?;
         if !entry.file_type()?.is_dir() {
             continue;
@@ -2397,7 +2399,7 @@ mod tests {
         assert!(!is_host_reload_path(
             repo_root,
             &repo_root.join(
-                "builtins/extensions/workflow/plugins/workflow-service/src/conversation_hooks.rs"
+                "assets/extensions/workflow/plugins/workflow-service/src/conversation_hooks.rs"
             )
         ));
     }
@@ -2408,16 +2410,16 @@ mod tests {
         assert!(is_builtin_worker_reload_path(
             repo_root,
             &repo_root.join(
-                "builtins/extensions/workflow/plugins/workflow-service/src/conversation_hooks.rs"
+                "assets/extensions/workflow/plugins/workflow-service/src/conversation_hooks.rs"
             )
         ));
         assert!(is_builtin_worker_reload_path(
             repo_root,
-            &repo_root.join("builtins/extensions/workflow/data/schema.sql")
+            &repo_root.join("assets/extensions/workflow/data/schema.sql")
         ));
         assert!(is_builtin_worker_reload_path(
             repo_root,
-            &repo_root.join("builtins/extensions/workflow/worker/src/lib.rs")
+            &repo_root.join("assets/extensions/workflow/worker/src/lib.rs")
         ));
     }
 
@@ -2426,19 +2428,19 @@ mod tests {
         let repo_root = Path::new("C:/repo");
         assert!(!is_builtin_worker_reload_path(
             repo_root,
-            &repo_root.join("builtins/extensions/workflow/bin/workflow-service.exe")
+            &repo_root.join("assets/extensions/workflow/bin/workflow-service.exe")
         ));
         assert!(!is_builtin_worker_reload_path(
             repo_root,
-            &repo_root.join("builtins/extensions/workflow/ui/page/Page.tsx")
+            &repo_root.join("assets/extensions/workflow/ui/page/Page.tsx")
         ));
         assert!(!is_builtin_worker_reload_path(
             repo_root,
-            &repo_root.join("builtins/extensions/workflow/install/data/system/sqlite/logs.db")
+            &repo_root.join("assets/extensions/workflow/install/data/system/sqlite/logs.db")
         ));
         assert!(!is_builtin_worker_reload_path(
             repo_root,
-            &repo_root.join("builtins/extensions/workflow/extension.toml")
+            &repo_root.join("assets/extensions/workflow/extension.toml")
         ));
     }
 

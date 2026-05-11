@@ -37,13 +37,13 @@ function discoverExtensionRoots() {
   if (envRoots.length > 0) {
     return [...new Set(envRoots)];
   }
-  const builtinsDir = resolve(rootDir, "builtins", "extensions");
-  if (!existsSync(builtinsDir)) {
+  const builtinExtensionsDir = resolve(rootDir, "assets", "extensions");
+  if (!existsSync(builtinExtensionsDir)) {
     return [];
   }
-  return [...new Set(readdirSync(builtinsDir, { withFileTypes: true })
+  return [...new Set(readdirSync(builtinExtensionsDir, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
-    .map((entry) => resolve(builtinsDir, entry.name)))];
+    .map((entry) => resolve(builtinExtensionsDir, entry.name)))];
 }
 
 function discoverEntry(extensionRoot) {

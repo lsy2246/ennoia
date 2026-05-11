@@ -18,7 +18,7 @@
 - `data/system/schedules.json` 保存 scheduler 计划；到期 tick 触发对应扩展的 `schedule_actions.method`
 - scheduler target 支持 `extension` 与 `command`；`command` 直接调用本机 shell，适合脚本自动化
 - 内置扩展资源允许同时包含文本资源和 `.wasm` 二进制资源
-- 开发模式监听 `builtins/extensions/` 与 `.wasm`，变更会触发 Host 重启
+- 开发模式监听 `assets/extensions/` 与 `.wasm`，变更会触发 Host 重启
 - Worker runtime 使用 `wasmtime` 装载 `ennoia.worker.v1`，缓存 Module，每次 RPC 新建实例
 - `.wasm` mtime 或大小变化会让 Module 缓存失效，下一次 RPC 自动重新编译
 - Host 默认不注入 WASI/import，按贡献 `entry` / `handler` / `method` 前缀校验 RPC 方法，并使用 `runtime.memory_limit_mb` 与 `runtime.timeout_ms` 约束执行

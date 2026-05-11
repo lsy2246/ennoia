@@ -4,8 +4,8 @@ Extension 负责系统能力，Skill 负责工具与用法。Extension 不再表
 
 ## 源码放置
 
-- 官方内置扩展源码放在 `builtins/extensions/<extension_id>/`
-- 官方内置技能源码放在 `builtins/skills/<skill_id>/`
+- 官方内置扩展源码放在 `assets/extensions/<extension_id>/`
+- 官方内置技能源码放在 `assets/skills/<skill_id>/`
 - 运行目录里的真实包内容分别落在 `~/.ennoia/extensions/<id>/` 与 `~/.ennoia/skills/<id>/`
 - 是否启用、是否阻止内置同步统一登记在 `~/.ennoia/config/extensions.toml` 与 `~/.ennoia/config/skills.toml`
 
@@ -255,7 +255,7 @@ Skill 的具体调用方式、常见输入、常见输出和平台限制统一�
 1. `cargo run -p ennoia-cli -- dev` 初始化运行目录。
 2. CLI 把未被 `blocked_builtin_sync` 屏蔽的内置扩展同步到 `<ENNOIA_HOME>/extensions/<extension_id>/`，并更新 `config/extensions.toml`。
 3. CLI 扫描内置扩展中的 `model-endpoint-presets/*.toml`，把默认模型接入实例写入 `config/model-endpoints/`。
-4. CLI 把仓库内 `builtins/extensions/*` 追加到 `config/extensions.toml` 的 `dev_sources`，供开发模式覆盖安装目录。
+4. CLI 把仓库内 `assets/extensions/*` 追加到 `config/extensions.toml` 的 `dev_sources`，供开发模式覆盖安装目录。
 5. Extension Host 扫描扩展，解析 `ui`、`worker` 和贡献能力，不启动扩展私有进程。
 6. Server 暴露 runtime snapshot、事件流、诊断、日志、资源贡献接口、接口绑定 API、scheduler API，以及 `/api/extensions/{extension_id}/rpc/{method}` Worker RPC 入口。
 7. Core 只维护稳定动作、绑定、计划与 Hook 派发；扩展内部按 Worker ABI 和 capability 组织自己的业务逻辑。
@@ -288,7 +288,7 @@ export default ui;
 
 ## 开发热加载
 
-- `ennoia dev` 会分别监听三类源码：`crates/`、`assets/`、`Cargo.toml` 与 `Cargo.lock` 用于 API 热重建；`builtins/extensions/*/(data|plugins|worker)/` 用于 builtin worker 热重建；所有已挂载的 dev source 扩展的 `ui/entry.*` 用于扩展 UI watcher。
+- `ennoia dev` 会分别监听三类源码：`crates/`、`assets/`、`Cargo.toml` 与 `Cargo.lock` 用于 API 热重建；`assets/extensions/*/(data|plugins|worker)/` 用于 builtin worker 热重建；所有已挂载的 dev source 扩展的 `ui/entry.*` 用于扩展 UI watcher。
 - `ennoia dev` 会额外启动扩展 UI watcher，自动把每个 dev source 的 `ui/entry.*` 构建到对应扩展目录下的 `ui/dist/entry.js`，不再只覆盖内置扩展。
 - 对于挂载到 `dev_sources` 的扩展，宿主会优先加载 `ui.dev_url`；未声明 `ui.dev_url` 时，如果扩展根目录存在 `ui/entry.tsx`、`ui/entry.ts`、`ui/entry.jsx` 或 `ui/entry.js`，会直接按源码入口加载；只有未发现开发入口时才回退到 `build.ui_bundle`。
 - `ennoia start` / `ennoia serve` 不会消费 `dev_sources`；运行态只从当前 home 的 `extensions/` 目录读取已安装扩展。
@@ -335,7 +335,7 @@ export default ui;
 执行 `bun run build:workers` 会：
 
 - 构建 `conversation`、`memory` 与 `workflow` 的 release 进程 Worker，并复制到各自扩展目录下的 `bin/`
-- 构建 `workflow` 的 `wasm32-unknown-unknown` release 产物，并复制到 `builtins/extensions/workflow/worker/workflow.wasm`
+- 构建 `workflow` 的 `wasm32-unknown-unknown` release 产物，并复制到 `assets/extensions/workflow/worker/workflow.wasm`
 
 ## 沙箱与权限
 

@@ -10,7 +10,6 @@ RUN apt-get update \
 
 COPY Cargo.toml Cargo.lock ./
 COPY assets ./assets
-COPY builtins ./builtins
 COPY crates ./crates
 
 # Build Linux process workers first so ennoia-assets embeds the correct runtime binaries
@@ -20,8 +19,8 @@ RUN cargo build --release \
     -p ennoia-memory \
     --bin ennoia-conversation-service \
     --bin ennoia-memory-extension \
-    && cp /app/target/release/ennoia-conversation-service /app/builtins/extensions/conversation/bin/conversation-service \
-    && cp /app/target/release/ennoia-memory-extension /app/builtins/extensions/memory/bin/memory-service
+    && cp /app/target/release/ennoia-conversation-service /app/assets/extensions/conversation/bin/conversation-service \
+    && cp /app/target/release/ennoia-memory-extension /app/assets/extensions/memory/bin/memory-service
 
 RUN cargo build --release --bin ennoia
 
@@ -52,7 +51,7 @@ FROM oven/bun:1 AS web-build
 WORKDIR /app
 
 COPY .npmrc package.json bun.lock ./
-COPY builtins ./builtins
+COPY assets ./assets
 COPY scripts ./scripts
 COPY web ./web
 

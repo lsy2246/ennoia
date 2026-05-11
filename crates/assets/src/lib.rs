@@ -56,11 +56,11 @@ pub mod templates {
     }
 
     pub fn server_config() -> &'static str {
-        get("config/server.toml").expect("server config template")
+        get("server.toml").expect("server config template")
     }
 
     pub fn ui_config() -> &'static str {
-        get("config/ui.toml").expect("ui config template")
+        get("ui.toml").expect("ui config template")
     }
 }
 

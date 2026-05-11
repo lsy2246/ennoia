@@ -57,7 +57,7 @@ Extension 默认不进入会话目录。只有显式声明了 `conversation.inje
 
 1. CLI 初始化运行目录和默认配置。
 2. CLI 同步未被 `blocked_builtin_sync` 屏蔽的内置扩展到 `<ENNOIA_HOME>/extensions/*`，并写入 `config/extensions.toml`。
-3. 开发模式下 CLI 把仓库内 `builtins/extensions/*` 追加到 `config/extensions.toml` 的 `dev_sources`。
+3. 开发模式下 CLI 把仓库内 `assets/extensions/*` 追加到 `config/extensions.toml` 的 `dev_sources`。
 4. Extension Host 扫描 `<ENNOIA_HOME>/extensions/*` 中已安装扩展，并叠加 `config/extensions.toml` 的 `enabled` 与 `dev_sources` 状态。
 5. Extension Host 解析 `ui`、`worker`、权限和贡献清单，生成 runtime snapshot。
 6. Server 暴露 runtime snapshot、事件、诊断、日志、资源贡献接口、动作规则视图、scheduler API 和 Worker RPC。
@@ -89,8 +89,8 @@ metadata = { schedule_action = { id = "workflow.run" } }
 
 ## 开发热加载
 
-- CLI 开发模式监听 `crates/`、`assets/`、`Cargo.toml` 和 `Cargo.lock`，命中后重建并重启 API；内置扩展后端源码由独立 watcher 监听 `builtins/extensions/*/(data|plugins|worker)/`，命中后重建并复制 builtin worker，不再把这类改动混进 API 热重载。
-- `node scripts/build-extension-ui.mjs --watch` 会把 `builtins/extensions/*/ui/entry.*` 构建到各自的 `ui/dist/entry.js`。
+- CLI 开发模式监听 `crates/`、`assets/`、`Cargo.toml` 和 `Cargo.lock`，命中后重建并重启 API；内置扩展后端源码由独立 watcher 监听 `assets/extensions/*/(data|plugins|worker)/`，命中后重建并复制 builtin worker，不再把这类改动混进 API 热重载。
+- `node scripts/build-extension-ui.mjs --watch` 会把 `assets/extensions/*/ui/entry.*` 构建到各自的 `ui/dist/entry.js`。
 - Server 运行时按 2 秒轮询刷新扩展注册表和 manifest；UI bundle 文件版本变化会更新 runtime snapshot。
 - Worker runtime 会缓存编译后的 Wasm Module，并在 `.wasm` mtime 或文件大小变化时自动重新编译。
 - Process Worker 会按扩展维度常驻，并在异常退出或目标二进制时间戳/大小变化后自动换新实例。

@@ -71,7 +71,7 @@
 - `kernel` 承载共享协议、配置结构和扩展 manifest 模型
 - `extension-host` 承载扩展扫描、attach、reload、restart、诊断、Worker 解析与 Worker RPC 分发
 - `server` 承载 API 暴露、TOML 配置文件、日志、Hook 派发、能力路由与启动流程
-- 内置扩展实现放在 `builtins/extensions/<extension_id>/ui|worker|data`，不得把 session、memory、workflow、任务编排等业务实现混回核心 crate
+- 内置扩展实现放在 `assets/extensions/<extension_id>/ui|worker|data`，不得把 session、memory、workflow、任务编排等业务实现混回核心 crate
 - Wasm Worker 使用 `ennoia.worker` ABI，宿主默认不注入 WASI/import；需要宿主能力时必须先在 `permissions` 中声明，并通过统一 capability bridge 接入
 - 公共转换逻辑提取为函数或模块级 helper
 
@@ -131,8 +131,8 @@
 
 扩展 Worker 如果使用数据库，schema、迁移和初始化入口必须放在该扩展自己的 `data/` 或 `worker/` 边界内，例如：
 
-- `builtins/extensions/memory/data/schema.sql`
-- `builtins/extensions/workflow/data/schema.sql`
+- `assets/extensions/memory/data/schema.sql`
+- `assets/extensions/workflow/data/schema.sql`
 
 核心仓库根目录不再提供主库基线文件。
 

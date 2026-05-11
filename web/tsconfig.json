@@ -39,6 +39,6 @@
     "./packages/logs/src",
     "./packages/theme-runtime/src",
     "./packages/ui-sdk/src",
-    "../builtins/extensions/*/ui"
+    "../assets/extensions/*/ui"
   ]
 }
