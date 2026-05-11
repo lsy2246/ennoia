@@ -2870,49 +2870,10 @@ async fn execute_builtin_tool(
     tool_call: &AgentToolCall,
 ) -> Result<OperationPerformResponse, HostApiError> {
     match tool_call.name.as_str() {
-        "fs_read" => {
-            client
-                .execute_operation_deferred(
-                    "fs.read",
-                    agent_id,
-                    conversation_id,
-                    _lane_id,
-                    run_id,
-                    message_id,
-                    tool_call.arguments.clone(),
-                )
-                .await
-        }
-        "fs_write" => {
-            client
-                .execute_operation_deferred(
-                    "fs.write",
-                    agent_id,
-                    conversation_id,
-                    _lane_id,
-                    run_id,
-                    message_id,
-                    tool_call.arguments.clone(),
-                )
-                .await
-        }
         "command_exec" => {
             client
                 .execute_operation_deferred(
                     "command.exec",
-                    agent_id,
-                    conversation_id,
-                    _lane_id,
-                    run_id,
-                    message_id,
-                    tool_call.arguments.clone(),
-                )
-                .await
-        }
-        "net_fetch" => {
-            client
-                .execute_operation_deferred(
-                    "net.fetch",
                     agent_id,
                     conversation_id,
                     _lane_id,
@@ -3598,46 +3559,15 @@ fn build_agent_tool_contexts(snapshot: &JsonValue, agent: &AgentConfig) -> Vec<J
         serde_json::json!({
             "extension_id": "runtime",
             "extension_name": "Runtime",
-            "capability_id": "fs.read",
-            "label": "文件读取",
-            "summary": if agent.execution_environment.sandbox_enabled {
-                "读取文本文件；优先使用 /workspace、/artifacts、/tmp 这些路径。"
-            } else {
-                "读取文本文件；相对路径默认按当前工作目录解析，也可以直接使用宿主机绝对路径。"
-            },
-            "kind": "builtin",
-            "contract": "fs.read",
-        }),
-        serde_json::json!({
-            "extension_id": "runtime",
-            "extension_name": "Runtime",
-            "capability_id": "fs.write",
-            "label": "文件写入",
-            "summary": if agent.execution_environment.sandbox_enabled {
-                "把文本写入文件；优先使用 /workspace、/artifacts、/tmp 这些路径。"
-            } else {
-                "把文本写入文件；相对路径默认按当前工作目录解析，也可以直接使用宿主机绝对路径。"
-            },
-            "kind": "builtin",
-            "contract": "fs.write",
-        }),
-        serde_json::json!({
-            "extension_id": "runtime",
-            "extension_name": "Runtime",
             "capability_id": "command.exec",
             "label": "命令执行",
-            "summary": "执行系统命令，并返回 stdout、stderr 和退出码。",
+            "summary": if agent.execution_environment.sandbox_enabled {
+                "执行系统命令，并返回 stdout、stderr 和退出码；需要读写文件或访问网络时，也通过命令完成。优先使用 /workspace、/artifacts、/tmp 这些路径。"
+            } else {
+                "执行系统命令，并返回 stdout、stderr 和退出码；需要读写文件或访问网络时，也通过命令完成。相对路径默认按当前工作目录解析，也可以直接使用宿主机绝对路径。"
+            },
             "kind": "builtin",
             "contract": "command.exec",
-        }),
-        serde_json::json!({
-            "extension_id": "runtime",
-            "extension_name": "Runtime",
-            "capability_id": "net.fetch",
-            "label": "网络请求",
-            "summary": "向外部 URL 发起 HTTP 请求，并返回状态码、响应头和文本内容。",
-            "kind": "builtin",
-            "contract": "net.fetch",
         }),
     ]);
     tools
@@ -3786,42 +3716,15 @@ fn build_agent_runtime_prompt(agent: &AgentConfig, run_id: &str) -> String {
         "系统会额外提供结构化上下文。按字段理解并使用，不要向用户原样复述 JSON。".to_string(),
     );
     sections.push("如果用户明确询问你有哪些工具或能力，优先依据上下文里的 tools 字段回答，使用 label 和 summary 做自然语言说明；不要把原始 JSON 对象或 `[object Object]` 直接输出给用户。".to_string());
-    sections.push("当用户要求你读取文件、写入文件、执行命令或访问网页/API，并且这些能力已经出现在 tools 字段里时，优先直接调用相应工具完成任务。只有在工具调用被权限系统拒绝或需要审批时，才解释阻塞原因。遇到普通的文件系统或命令执行错误时，按实际错误原因说明。".to_string());
+    sections.push("当用户要求你与操作系统交互时，优先使用 tools 字段里提供的命令执行能力完成任务，例如读取文件、写入文件、运行脚本或发起网络请求。只有在工具调用被权限系统拒绝或需要审批时，才解释阻塞原因。遇到普通的命令执行错误时，按实际错误原因说明。".to_string());
     sections.join("\n\n")
 }
 
 fn build_agent_builtin_tool_specs(_agent: &AgentConfig) -> Vec<ToolSpec> {
     vec![
         ToolSpec {
-            name: "fs_read".to_string(),
-            description: "读取文本文件内容。".to_string(),
-            parameters: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "path": { "type": "string", "description": "要读取的文件路径" },
-                    "max_bytes": { "type": "integer", "description": "最多读取多少字节，默认 32768" }
-                },
-                "required": ["path"],
-                "additionalProperties": false
-            }),
-        },
-        ToolSpec {
-            name: "fs_write".to_string(),
-            description: "把文本写入文件。".to_string(),
-            parameters: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "path": { "type": "string", "description": "目标文件路径" },
-                    "content": { "type": "string", "description": "要写入的文本内容" },
-                    "append": { "type": "boolean", "description": "是否追加写入，默认 false" }
-                },
-                "required": ["path", "content"],
-                "additionalProperties": false
-            }),
-        },
-        ToolSpec {
             name: "command_exec".to_string(),
-            description: "执行系统命令；command 只填可执行程序名，参数拆到 args 里。".to_string(),
+            description: "执行系统命令；需要读写文件、发起网络请求或运行脚本时，都通过命令完成。command 只填可执行程序名，参数拆到 args 里。".to_string(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -3831,22 +3734,6 @@ fn build_agent_builtin_tool_specs(_agent: &AgentConfig) -> Vec<ToolSpec> {
                     "timeout_ms": { "type": "integer" }
                 },
                 "required": ["command"],
-                "additionalProperties": false
-            }),
-        },
-        ToolSpec {
-            name: "net_fetch".to_string(),
-            description: "发起 HTTP 请求并返回响应摘要。".to_string(),
-            parameters: serde_json::json!({
-                "type": "object",
-                "properties": {
-                    "url": { "type": "string" },
-                    "method": { "type": "string" },
-                    "headers": { "type": "object", "additionalProperties": { "type": "string" } },
-                    "body": { "type": "string" },
-                    "timeout_ms": { "type": "integer" }
-                },
-                "required": ["url"],
                 "additionalProperties": false
             }),
         },

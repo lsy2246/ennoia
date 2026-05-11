@@ -1,27 +1,11 @@
 id = "web-search"
 version = "1.0.0"
-description = "网页搜索、候选页面打开与页面信息提取技能。"
+description = "网页搜索与候选页面提取技能。"
 
 [mount]
 mode = "auto"
 
 [[actions]]
 id = "search"
-description = "执行网页搜索，返回候选结果与可选页面抓取结果。"
+description = "统一网页搜索入口，可返回候选结果并按需提取候选页面正文。"
 entry = "scripts/search-runner.mjs"
-invoke_mode = "model"
-requires = ["network"]
-
-[[actions]]
-id = "open"
-description = "启动 agent-browser，并固定使用 Lightpanda 作为浏览器引擎。"
-entry = "scripts/agent-browser-lightpanda.mjs"
-invoke_mode = "confirm"
-requires = ["network", "browser"]
-
-[[actions]]
-id = "extract"
-description = "打开候选网页并提取正文、标题、摘要、时间和链接。"
-entry = "scripts/agent-browser-lightpanda.mjs"
-invoke_mode = "confirm"
-requires = ["network", "browser"]

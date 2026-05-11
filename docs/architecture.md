@@ -43,7 +43,7 @@ Web
   - Action Router：当内部 Agent 以 `permission_actor` 身份调用 `conversation.*`、`memory.*`、`run.*` 等稳定动作时。
   - Provider 调用：Agent 真正发起 `provider.generate` 上游请求前。
 - 裁决结果固定为 `allow`、`deny`、`ask`。`ask` 会生成待审批记录；审批通过后只会生成临时 grant，当前支持单次放行、本次回复同类操作放行和当前会话放行。
-- 当前产品层权限模型不再区分“网络 / 配置 / 扩展管理”等高风险分类，只保留三件事：命令默认模式、命令规则、路径规则。命令规则决定 `command.exec` 是默认允许还是默认询问；路径规则决定 `fs.read` / `fs.write` 对哪些路径可以直接访问。
+- 当前产品层权限模型不再区分“网络 / 配置 / 扩展管理”等高风险分类，只保留两件事：命令默认模式和命令匹配条目。命令匹配条目只服务 `command.exec`，并按规范化后的完整命令调用串做 `exact | prefix | regex` 匹配，例如 `git status`、`git diff --cached`、`node C:/tools/search-runner.mjs`。
 - 系统默认只管 Agent 身份，不拦截操作者直接发起的 HTTP 调用。
 
 ## Agent 执行环境
@@ -53,7 +53,7 @@ Web
 - 当前执行环境只保留一个布尔开关：
   - `sandbox_enabled = false`：直接在宿主机运行时执行。
   - `sandbox_enabled = true`：使用原生沙盒语义，模型与内置工具优先只看到 `/workspace`、`/artifacts`、`/tmp` 三个虚拟根。
-- 内置 `fs.read`、`fs.write`、`command.exec`、`net.fetch` 都应先经过权限裁决，再进入执行环境层，不直接把宿主机绝对路径暴露给模型。
+- Agent 当前只暴露一个原生操作能力：`command.exec`。文件读取、文件写入和网络访问都不再作为独立内置工具提供；如有需要，统一通过命令完成。`command.exec` 会先经过权限裁决，再进入执行环境层，不直接把宿主机绝对路径暴露给模型。
 
 ## 细粒度接口层
 
@@ -156,6 +156,7 @@ Web
 
 - Skill 是标准能力包，不再承担系统能力声明；系统只关心它有哪些 action、每个 action 的入口在哪、当前是否启用。
 - Skill manifest 只保留 `id`、`version`、`description`、`mount.mode` 与 `actions[]`；具体调用说明统一写在 skill 目录下的 `README.md`。
+- 默认一个 Skill 只对外暴露一个 action。只有当用户可感知为多个独立能力，或审批/权限、输入输出契约明确不同，才拆成多 action；内部脚本、子流程和调试入口不直接等于 action。
 - Skill action 的调用协议固定为 `skill_id + action_id + input -> output`；宿主不在 manifest 里强定义输入输出类型。
 - Skill 如果被 Agent 启用，会进入结构化 `context.skills`；模型看到的是 skill 摘要与 action 摘要，需要细看时再去读 `README.md`。
 - 扩展可以带自己的能力说明文档，但扩展说明不等于 skill；前者回答“系统里这块能力是什么”，后者回答“Agent 怎么调用这包里的动作”。

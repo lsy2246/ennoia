@@ -245,8 +245,12 @@ Skill 目录独立：
 - `id`
 - `description`
 - `entry`
-- `invoke_mode`
-- `requires[]`
+
+约定：
+
+- `actions[]` 表示对外可调用入口，不等于 skill 目录里的所有脚本。
+- 默认一个 skill 只暴露一个 action；只有当用户能明确感知为多个独立能力，或审批/权限、输入输出契约显著不同，才拆成多 action。
+- 调试脚本、浏览器包装器、安装脚本和内部子流程都应留在 `scripts/`，不要为了实现细节把它们直接提升成 action。
 
 Skill 的具体调用方式、常见输入、常见输出和平台限制统一写在 `README.md` 中；不要再把这些内容拆成 `docs`、`keywords` 或额外 schema 目录。
 

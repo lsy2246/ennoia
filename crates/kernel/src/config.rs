@@ -368,10 +368,6 @@ pub struct SkillActionConfig {
     pub description: String,
     #[serde(default)]
     pub entry: String,
-    #[serde(default = "default_skill_invoke_mode")]
-    pub invoke_mode: String,
-    #[serde(default)]
-    pub requires: Vec<String>,
 }
 
 /// SkillConfig represents one resolved skill returned to the UI/runtime.
@@ -500,10 +496,6 @@ fn default_skill_version() -> String {
 
 fn default_skill_mount_mode() -> String {
     "auto".to_string()
-}
-
-fn default_skill_invoke_mode() -> String {
-    "manual".to_string()
 }
 
 #[cfg(test)]

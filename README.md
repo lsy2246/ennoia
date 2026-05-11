@@ -7,7 +7,7 @@
 - 工作台：核心只提供宿主、配置、路径、日志、权限、事件总线、动作管道与 Worker RPC；业务能力由扩展提供。
 - Agents：维护协作者档案、模型接入、模型、技能和启用状态。
 - Agent 权限：系统级权限策略、审批和事件记录统一由宿主裁决，扩展只声明能力风险，不直接放权。
-- 技能：Agent 可挂载的标准能力包；skill 负责声明动作入口，具体调用说明写在各自的 `README.md` 中。
+- 技能：Agent 可挂载的标准能力包；skill 默认对外暴露单一能力入口，内部脚本不直接等同于 action，具体调用说明写在各自的 `README.md` 中。
 - API 模型接入：Agent 绑定的具体模型访问实例。
 - 扩展：扩展包，manifest 统一声明 `resource_types`、`capabilities`、`surfaces`、`entrypoints`、`settings`、`locales`、`themes`、`commands`、`subscriptions`；如需进入会话目录，再额外声明 `conversation` 规则。宿主把扩展/技能目录整理成结构化 `context` 交给 model provider 渲染，不再把它们直接硬拼进自然语言 prompt，也不自动注入文档正文。
 - 会话：前端通过通用 `/api/actions/{action}` 分发 `conversation.*`、`message.*`、`lane.*` 等动作，底层由内置 `conversation` 扩展实现。

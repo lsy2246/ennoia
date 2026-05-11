@@ -1,7 +1,8 @@
 mod sqlite;
 
 use chrono::Utc;
-use ennoia_kernel::{AgentPermissionRule, PermissionRequest};
+use ennoia_kernel::{AgentPermissionCommandEntry, AgentPermissionRule, PermissionRequest};
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 
 pub use sqlite::AgentPermissionStore;
@@ -97,7 +98,24 @@ fn matches_target_scope(rule: &AgentPermissionRule, request: &PermissionRequest)
     }
     rule.target_scope
         .iter()
-        .any(|pattern| pattern.matches(request.target.id.as_str()))
+        .any(|entry| matches_command_entry(entry, request.target.id.as_str()))
+}
+
+fn matches_command_entry(entry: &AgentPermissionCommandEntry, candidate: &str) -> bool {
+    match entry.match_type.trim().to_ascii_lowercase().as_str() {
+        "exact" => {
+            normalize_command_match_value(candidate) == normalize_command_match_value(&entry.value)
+        }
+        "regex" => Regex::new(entry.value.trim())
+            .map(|pattern| pattern.is_match(&normalize_command_match_value(candidate)))
+            .unwrap_or(false),
+        _ => normalize_command_match_value(candidate)
+            .starts_with(&normalize_command_match_value(&entry.value)),
+    }
+}
+
+fn normalize_command_match_value(value: &str) -> String {
+    value.trim().replace('\\', "/")
 }
 
 fn matches_conversation_scope(scope: Option<&str>, request: &PermissionRequest) -> bool {
@@ -260,8 +278,11 @@ pub(super) fn is_expired_iso(value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{grant_matches, PermissionGrantRecord};
-    use ennoia_kernel::{PermissionRequest, PermissionScope, PermissionTarget, PermissionTrigger};
+    use super::{grant_matches, matches_command_entry, PermissionGrantRecord};
+    use ennoia_kernel::{
+        AgentPermissionCommandEntry, PermissionRequest, PermissionScope, PermissionTarget,
+        PermissionTrigger,
+    };
 
     fn request(run_id: &str) -> PermissionRequest {
         PermissionRequest {
@@ -318,5 +339,49 @@ mod tests {
         resumed.scope.message_id = Some("msg-2".to_string());
         let approval_grant = grant("once", original);
         assert!(!grant_matches(&approval_grant, &resumed));
+    }
+
+    #[test]
+    fn command_entry_exact_match_uses_normalized_invocation() {
+        let entry = AgentPermissionCommandEntry {
+            match_type: "exact".to_string(),
+            value: r#"node C:\tools\runner.mjs"#.to_string(),
+        };
+        assert!(matches_command_entry(&entry, "node C:/tools/runner.mjs"));
+        assert!(!matches_command_entry(
+            &entry,
+            "node C:/tools/runner.mjs --watch"
+        ));
+    }
+
+    #[test]
+    fn command_entry_prefix_match_supports_global_commands() {
+        let entry = AgentPermissionCommandEntry {
+            match_type: "prefix".to_string(),
+            value: "git".to_string(),
+        };
+        assert!(matches_command_entry(&entry, "git status"));
+        assert!(matches_command_entry(&entry, "git diff --cached"));
+        assert!(!matches_command_entry(&entry, "node git-status.js"));
+    }
+
+    #[test]
+    fn command_entry_regex_match_supports_advanced_patterns() {
+        let entry = AgentPermissionCommandEntry {
+            match_type: "regex".to_string(),
+            value: String::from(r"^git\s+(status|diff)(\s|$)"),
+        };
+        assert!(matches_command_entry(&entry, "git status"));
+        assert!(matches_command_entry(&entry, "git diff --cached"));
+        assert!(!matches_command_entry(&entry, "git push origin main"));
+    }
+
+    #[test]
+    fn invalid_regex_entry_does_not_match() {
+        let entry = AgentPermissionCommandEntry {
+            match_type: "regex".to_string(),
+            value: "(".to_string(),
+        };
+        assert!(!matches_command_entry(&entry, "git status"));
     }
 }

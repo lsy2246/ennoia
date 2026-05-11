@@ -17,6 +17,7 @@ import {
   listSkills,
   updateAgent,
   type AgentExecutionEnvironment,
+  type AgentPermissionCommandEntry,
   type AgentPermissionProfile,
   type AgentProfile,
   type ModelEndpointConfig,
@@ -44,8 +45,7 @@ const EMPTY_AGENT: AgentProfile = {
   enabled: true,
   permission_profile: {
     mode: "whitelist",
-    command_rules: [],
-    path_rules: [],
+    entries: [],
   },
   execution_environment: {
     sandbox_enabled: false,
@@ -54,9 +54,14 @@ const EMPTY_AGENT: AgentProfile = {
 
 const EMPTY_PERMISSION_PROFILE: AgentPermissionProfile = {
   mode: "whitelist",
-  command_rules: [],
-  path_rules: [],
+  entries: [],
 };
+
+const COMMAND_PERMISSION_MATCH_OPTIONS = [
+  { value: "prefix", label: "前缀匹配" },
+  { value: "exact", label: "完整匹配" },
+  { value: "regex", label: "正则匹配" },
+];
 
 export function AgentEditorView({
   agentId,
@@ -429,7 +434,7 @@ export function AgentEditorView({
                       type="button"
                       className={form.skills.includes(skill.id) ? "chip chip--active" : "chip"}
                       onClick={() => toggleSkill(skill.id)}
-                      title={`${skill.mount.mode} · ${skill.actions.map((action) => action.id).join(", ")}`}
+                      title={`/${skill.id} · ${skill.description || skill.mount.mode}`}
                     >
                       {skill.id}
                     </button>
@@ -457,127 +462,103 @@ export function AgentEditorView({
                 </p>
               </section>
 
-              {!isNew && form.id ? (
-                <>
-                  <section className="details-panel agent-editor__section">
-                    <div className="panel-title">执行环境</div>
-                    <p className="helper-text">
-                      这里只决定命令是在沙盒里运行还是直接在宿主机运行。
-                    </p>
-                    <div className="agent-policy-editor">
-                      <label>
-                        沙盒模式
-                        <Select
-                          value={form.execution_environment.sandbox_enabled ? "enabled" : "disabled"}
-                          onChange={(value) =>
-                            setForm((current) => ({
-                              ...current,
-                              execution_environment: normalizeExecutionEnvironment({
-                                sandbox_enabled: value === "enabled",
-                              }),
-                            }))}
-                          options={[
-                            { value: "disabled", label: "关闭，直接在宿主机运行" },
-                            { value: "enabled", label: "开启，在原生沙盒中运行" },
-                          ]}
-                        />
-                      </label>
+              <>
+                <section className="details-panel agent-editor__section">
+                  <div className="panel-title">执行环境</div>
+                  <p className="helper-text">
+                    这里只决定命令是在沙盒里运行还是直接在宿主机运行。
+                  </p>
+                  <div className="agent-policy-editor">
+                    <label>
+                      沙盒模式
+                      <Select
+                        value={form.execution_environment.sandbox_enabled ? "enabled" : "disabled"}
+                        onChange={(value) =>
+                          setForm((current) => ({
+                            ...current,
+                            execution_environment: normalizeExecutionEnvironment({
+                              sandbox_enabled: value === "enabled",
+                            }),
+                          }))}
+                        options={[
+                          { value: "disabled", label: "关闭，直接在宿主机运行" },
+                          { value: "enabled", label: "开启，在原生沙盒中运行" },
+                        ]}
+                      />
+                    </label>
+                    <div className="resource-card agent-policy-rule">
+                      <div className="agent-policy-rule__header">
+                        <strong>当前说明</strong>
+                      </div>
+                      <p className="helper-text">
+                        {form.execution_environment.sandbox_enabled
+                          ? "命令会在原生沙盒中执行，文件路径使用 /workspace、/artifacts、/tmp 这些虚拟根。"
+                          : "命令会直接在宿主机环境里执行；相对路径按当前工作目录解析。"}
+                      </p>
+                    </div>
+                  </div>
+                </section>
+
+                <section className="details-panel agent-editor__section">
+                  <div className="panel-title">{t("web.permissions.profile", "权限模式")}</div>
+                  <p className="helper-text">
+                    长期权限配置属于 Agent 本身；这里只定义 <code>command.exec</code> 的命令匹配策略，沙盒与否由上面的执行环境单独决定。
+                  </p>
+                  <div className="agent-policy-editor">
+                    <label>
+                      命令默认策略
+                      <Select
+                        value={policyForm.mode}
+                        onChange={(value) =>
+                          setPolicyForm((current) => ({
+                            ...current,
+                            mode: value,
+                          }))}
+                        options={[
+                          { value: "whitelist", label: "白名单模式：默认询问，命中规则直接允许" },
+                          { value: "blacklist", label: "黑名单模式：默认允许，命中规则改为询问" },
+                        ]}
+                      />
+                    </label>
+
+                    <div className="agent-policy-editor__rules">
                       <div className="resource-card agent-policy-rule">
                         <div className="agent-policy-rule__header">
-                          <strong>当前说明</strong>
+                          <strong>命令匹配条目</strong>
                         </div>
                         <p className="helper-text">
-                          {form.execution_environment.sandbox_enabled
-                            ? "命令会在原生沙盒中执行，文件路径使用 /workspace、/artifacts、/tmp 这些虚拟根。"
-                            : "命令会直接在宿主机环境里执行；相对路径按当前工作目录解析。"}
+                          {policyForm.mode === "blacklist"
+                            ? "这里填写需要改成询问的命令调用。未命中的命令默认直接运行。"
+                            : "这里填写可以直接运行的命令调用。未命中的命令默认进入询问。"}
+                        </p>
+                        <CommandPermissionEntriesEditor
+                          t={t}
+                          entries={policyForm.entries}
+                          onChange={(entries) =>
+                            setPolicyForm((current) => ({
+                              ...current,
+                              entries,
+                            }))}
+                        />
+                      </div>
+
+                      <div className="resource-card agent-policy-rule">
+                        <div className="agent-policy-rule__header">
+                          <strong>当前行为</strong>
+                        </div>
+                        <p className="helper-text">
+                          {policyForm.mode === "blacklist"
+                            ? "command.exec 默认直接运行；只有命中这些条目的命令调用才会先询问。"
+                            : "command.exec 默认先询问；只有命中这些条目的命令调用才会直接运行。"}
                         </p>
                       </div>
                     </div>
-                  </section>
-
-                  <section className="details-panel agent-editor__section">
-                    <div className="panel-title">{t("web.permissions.profile", "权限模式")}</div>
+                  </div>
+                  {isNew ? (
                     <p className="helper-text">
-                      长期权限配置属于 Agent 本身；会话里的审批只处理这套规则命中的 ask。
+                      新建 Agent 时，这里的配置会和基础信息一起在点击底部“保存”后创建。
                     </p>
-                    <div className="agent-policy-editor">
-                      <label>
-                        命令默认策略
-                        <Select
-                          value={policyForm.mode}
-                          onChange={(value) =>
-                            setPolicyForm((current) => ({
-                              ...current,
-                              mode: value,
-                            }))}
-                          options={[
-                            { value: "whitelist", label: "白名单模式：默认询问，命中规则直接允许" },
-                            { value: "blacklist", label: "黑名单模式：默认允许，命中规则改为询问" },
-                          ]}
-                        />
-                      </label>
-
-                      <div className="agent-policy-editor__rules">
-                        <div className="resource-card agent-policy-rule">
-                          <div className="agent-policy-rule__header">
-                            <strong>命令规则</strong>
-                          </div>
-                          <p className="helper-text">
-                            {policyForm.mode === "blacklist"
-                              ? "这里填写需要改成询问的命令。未命中的命令默认直接运行。"
-                              : "这里填写可以直接运行的命令。未命中的命令默认进入询问。"}
-                          </p>
-                          <SimpleStringListEditor
-                            t={t}
-                            label="命令规则"
-                            placeholder={policyForm.mode === "blacklist" ? "例如 powershell" : "例如 git"}
-                            values={policyForm.command_rules}
-                            onChange={(values) =>
-                              setPolicyForm((current) => ({
-                                ...current,
-                                command_rules: values,
-                              }))}
-                          />
-                        </div>
-
-                        <div className="resource-card agent-policy-rule">
-                          <div className="agent-policy-rule__header">
-                            <strong>路径规则</strong>
-                          </div>
-                          <p className="helper-text">
-                            {policyForm.mode === "blacklist"
-                              ? form.execution_environment.sandbox_enabled
-                                ? "留空表示沙盒路径默认直接访问；填写后，命中的 /workspace、/artifacts、/tmp 路径直接允许，其他路径进入询问。"
-                                : "留空表示所有路径默认直接访问；填写后，命中的路径直接允许，其他路径进入询问。"
-                              : form.execution_environment.sandbox_enabled
-                                ? "留空表示沙盒路径默认进入询问；填写后，命中的 /workspace、/artifacts、/tmp 路径直接允许，其他路径进入询问。"
-                                : "留空表示所有路径默认进入询问；填写后，命中的路径直接允许，其他路径进入询问。"}
-                          </p>
-                          <SimpleStringListEditor
-                            t={t}
-                            label="路径规则"
-                            placeholder={form.execution_environment.sandbox_enabled ? "/workspace/project/**" : "例如 D:/data/code/ennoia/**"}
-                            values={policyForm.path_rules}
-                            onChange={(values) =>
-                              setPolicyForm((current) => ({
-                                ...current,
-                                path_rules: values,
-                              }))}
-                          />
-                        </div>
-
-                        <div className="resource-card agent-policy-rule">
-                          <div className="agent-policy-rule__header">
-                            <strong>当前行为</strong>
-                          </div>
-                          <p className="helper-text">
-                            {policyForm.mode === "blacklist"
-                              ? "命令默认直接运行，命中命令规则的命令会先询问。路径规则始终代表可直接访问的路径，未命中路径会询问。"
-                              : "命令默认先询问，只有命中命令规则的命令才会直接运行。路径也默认先询问，只有命中路径规则的路径才会直接访问。"}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
+                  ) : (
                     <div className="button-row button-row--wrap">
                       <button type="button" onClick={() => void handlePolicySave()} disabled={policyBusy}>
                         {policyBusy ? t("web.common.saving", "保存中") : t("web.action.save", "保存")}
@@ -586,8 +567,11 @@ export function AgentEditorView({
                         {t("web.action.refresh", "刷新")}
                       </button>
                     </div>
-                  </section>
+                  )}
+                </section>
 
+              {!isNew && form.id ? (
+                <>
                   <section className="details-panel agent-editor__section">
                     <div className="panel-title">{t("web.permissions.approvals", "最近审批")}</div>
                     <div className="agent-editor__card-list">
@@ -632,6 +616,7 @@ export function AgentEditorView({
                   </section>
                 </>
               ) : null}
+              </>
             </div>
           </div>
         </div>
@@ -763,12 +748,12 @@ function normalizeAgentForm(form: AgentProfile): AgentProfile {
 function normalizePermissionProfile(profile: AgentPermissionProfile | undefined): AgentPermissionProfile {
   return {
     mode: profile?.mode === "blacklist" ? "blacklist" : "whitelist",
-    command_rules: [...(profile?.command_rules ?? [])]
-      .map((value) => value.trim())
-      .filter(Boolean),
-    path_rules: [...(profile?.path_rules ?? [])]
-      .map((value) => value.trim())
-      .filter(Boolean),
+    entries: [...(profile?.entries ?? [])]
+      .map((entry) => ({
+        match: normalizeCommandPermissionMatch(entry.match),
+        value: entry.value.trim(),
+      }))
+      .filter((entry) => entry.value.length > 0),
   };
 }
 
@@ -780,44 +765,60 @@ function normalizeExecutionEnvironment(
   };
 }
 
-function SimpleStringListEditor({
+function normalizeCommandPermissionMatch(value: string | undefined) {
+  if (value === "exact" || value === "regex") {
+    return value;
+  }
+  return "prefix";
+}
+
+function CommandPermissionEntriesEditor({
   t,
-  label,
-  placeholder,
-  values,
+  entries,
   onChange,
 }: {
   t: (key: string, fallback: string, params?: Record<string, string | number>) => string;
-  label: string;
-  placeholder: string;
-  values: string[];
-  onChange: (values: string[]) => void;
+  entries: AgentPermissionCommandEntry[];
+  onChange: (entries: AgentPermissionCommandEntry[]) => void;
 }) {
-  function handleItemChange(itemIndex: number, nextValue: string) {
+  function handleItemChange(
+    itemIndex: number,
+    patch: Partial<AgentPermissionCommandEntry>,
+  ) {
     onChange(
-      values.map((value, index) => (index === itemIndex ? nextValue : value)),
+      entries.map((entry, index) =>
+        index === itemIndex ? { ...entry, ...patch } : entry,
+      ),
     );
   }
 
   function handleItemRemove(itemIndex: number) {
-    onChange(values.filter((_, index) => index !== itemIndex));
+    onChange(entries.filter((_, index) => index !== itemIndex));
   }
 
   function handleItemAdd() {
-    onChange([...values, ""]);
+    onChange([...entries, { match: "prefix", value: "" }]);
   }
 
   return (
     <div className="stack">
-      <label>{label}</label>
       <div className="model-list">
-        {values.length > 0 ? (
-          values.map((value, itemIndex) => (
-            <div key={`${label}-${itemIndex}`} className="model-row">
+        {entries.length > 0 ? (
+          entries.map((entry, itemIndex) => (
+            <div key={`permission-entry-${itemIndex}`} className="model-row">
+              <Select
+                value={normalizeCommandPermissionMatch(entry.match)}
+                onChange={(value) =>
+                  handleItemChange(itemIndex, {
+                    match: normalizeCommandPermissionMatch(value),
+                  })}
+                options={COMMAND_PERMISSION_MATCH_OPTIONS}
+              />
               <input
-                value={value}
-                placeholder={placeholder}
-                onChange={(event) => handleItemChange(itemIndex, event.target.value)}
+                value={entry.value}
+                placeholder={commandPermissionEntryPlaceholder(entry.match)}
+                onChange={(event) =>
+                  handleItemChange(itemIndex, { value: event.target.value })}
               />
               <button
                 type="button"
@@ -831,7 +832,7 @@ function SimpleStringListEditor({
         ) : (
           <div className="empty-card agent-editor__empty-state agent-policy-list-empty">
             <strong>{t("web.agents.empty_items_title", "当前没有条目")}</strong>
-            <p>{t("web.agents.empty_items_body", "点击下方“新增条目”后，再补充这个范围的匹配规则。")}</p>
+            <p>{t("web.agents.empty_items_body", "点击下方“新增条目”后，再补充命令匹配规则。")}</p>
           </div>
         )}
         <button type="button" className="secondary" onClick={handleItemAdd}>
@@ -840,4 +841,15 @@ function SimpleStringListEditor({
       </div>
     </div>
   );
+}
+
+function commandPermissionEntryPlaceholder(match: string | undefined) {
+  switch (normalizeCommandPermissionMatch(match)) {
+    case "exact":
+      return '例如 git status';
+    case "regex":
+      return String.raw`例如 ^git\s+(push|pull)(\s|$)`;
+    default:
+      return "例如 git";
+  }
 }

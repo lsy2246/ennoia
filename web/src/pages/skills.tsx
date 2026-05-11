@@ -8,7 +8,6 @@ import {
   type SkillConfig,
 } from "@ennoia/api-client";
 import { StatusNotice } from "@/components/StatusNotice";
-import { formatRelativePath } from "@/lib/pathDisplay";
 import { useUiHelpers } from "@/stores/ui";
 
 export function Skills() {
@@ -65,7 +64,7 @@ export function Skills() {
   }
 
   const enabledCount = skills.filter((item) => item.enabled).length;
-  const blockedCount = skills.filter((item) => item.builtin_sync_blocked).length;
+  const singleEntryCount = skills.filter((item) => item.actions.length <= 1).length;
   const totalAssignments = [...assignmentMap.values()].reduce((sum, current) => sum + current.length, 0);
 
   return (
@@ -75,8 +74,8 @@ export function Skills() {
         <div className="skills-toolbar__row">
           <div className="page-heading">
             <span>{t("web.skills.eyebrow", "Skill Registry")}</span>
-            <h1>{t("web.skills.title", "技能是标准能力包，由具体 Agent 选择挂载。")}</h1>
-            <p>{t("web.skills.description", "技能页只展示包定义、动作和挂载状态；具体调用说明统一写在 skill 自己的 README.md。")}</p>
+            <h1>{t("web.skills.title", "技能是给 Agent 和会话使用的能力包。")}</h1>
+            <p>{t("web.skills.description", "这里优先看能力说明、触发方式和挂载状态；内部 action 与同步策略不再作为主信息。")}</p>
           </div>
           <div className="skills-toolbar__actions">
             <button type="button" className="secondary" onClick={() => void refresh()}>
@@ -96,9 +95,9 @@ export function Skills() {
             <small>{t("web.common.enabled", "启用")}</small>
           </article>
           <article className="metric-card skills-metric-card">
-            <span>{t("web.skills.summary_docs", "阻止内置同步")}</span>
-            <strong>{blockedCount}</strong>
-            <small>{t("web.skills.docs", "同步拦截")}</small>
+            <span>{t("web.skills.summary_single_entry", "单入口技能")}</span>
+            <strong>{singleEntryCount}</strong>
+            <small>{t("web.skills.single_entry", "统一入口")}</small>
           </article>
           <article className="metric-card skills-metric-card">
             <span>{t("web.skills.summary_assignments", "已分配")}</span>
@@ -112,8 +111,8 @@ export function Skills() {
         <div className="skills-section__header">
           <div className="page-heading">
             <span>{t("web.skills.catalog", "技能目录")}</span>
-            <h1>{t("web.skills.catalog_title", "按技能查看动作与分配")}</h1>
-            <p>{t("web.skills.catalog_description", "每个技能展示版本、挂载模式、动作列表和内置同步状态；你可以直接把它分配给某个 Agent。")}</p>
+            <h1>{t("web.skills.catalog_title", "按能力查看技能与分配")}</h1>
+            <p>{t("web.skills.catalog_description", "每个技能展示用途、触发方式、挂载模式和已分配 Agent，帮助你判断该把它给谁用。")}</p>
           </div>
           <span className="skills-catalog-count">{`${skills.length} ${t("web.skills.catalog_count", "项")}`}</span>
         </div>
@@ -125,79 +124,74 @@ export function Skills() {
           </div>
         ) : (
           <div className="skills-grid">
-            {skills.map((skill) => (
-              <article key={skill.id} className="resource-card skills-card">
-                <div className="skills-card__header">
-                  <div className="stack skills-card__title">
-                    <strong>{skill.id}</strong>
-                    <small>{skill.version}</small>
-                  </div>
-                  <span className={`badge ${skill.enabled ? "badge--success" : "badge--muted"}`}>
-                    {skill.enabled ? t("web.common.enabled", "启用") : t("web.common.disabled", "停用")}
-                  </span>
-                </div>
+            {skills.map((skill) => {
+              const assignedAgents = assignmentMap.get(skill.id) ?? [];
 
-                <p className="skills-card__description">{skill.description || t("web.common.none", "无")}</p>
-
-                <div className="skills-meta-grid">
-                  <div className="skills-meta-item">
-                    <span>{t("web.skills.source", "挂载模式")}</span>
-                    <strong>{skill.mount.mode}</strong>
-                  </div>
-                  <div className="skills-meta-item">
-                    <span>{t("web.skills.entry", "动作数")}</span>
-                    <strong>{skill.actions.length}</strong>
-                  </div>
-                  <div className="skills-meta-item">
-                    <span>{t("web.skills.docs", "内置同步")}</span>
-                    <strong>{skill.builtin_sync_blocked ? "blocked" : "follow"}</strong>
-                  </div>
-                </div>
-
-                <div className="skills-card__section">
-                  <div className="skills-subtitle">Actions</div>
-                  {skill.actions.length === 0 ? (
-                    <div className="empty-card skills-inline-empty">这个技能当前没有声明可执行动作。</div>
-                  ) : (
-                    <div className="stack">
-                      {skill.actions.map((action) => (
-                        <div key={action.id} className="resource-card">
-                          <strong>{action.id}</strong>
-                          <p className="helper-text">{action.description || "无说明"}</p>
-                          <div className="chip-grid">
-                            <span className="chip chip--active">{action.invoke_mode}</span>
-                            {action.requires.map((item) => (
-                              <span key={`${action.id}:${item}`} className="chip">{item}</span>
-                            ))}
-                          </div>
-                          <small>{formatRelativePath(action.entry)}</small>
-                        </div>
-                      ))}
+              return (
+                <article key={skill.id} className="resource-card skills-card">
+                  <div className="skills-card__header">
+                    <div className="stack skills-card__title">
+                      <strong>{skill.id}</strong>
+                      <small>{skill.version}</small>
                     </div>
-                  )}
-                </div>
-
-                <div className="skills-card__section">
-                  <div className="skills-subtitle">{t("web.skills.assigned_agents", "已启用到这些 Agent")}</div>
-                  <div className="chip-grid">
-                    {agents.map((agent) => {
-                      const active = assignmentMap.get(skill.id)?.includes(agent.id) ?? false;
-                      return (
-                        <button
-                          key={agent.id}
-                          type="button"
-                          className={active ? "chip chip--active" : "chip"}
-                          disabled={savingKey === `${skill.id}:${agent.id}`}
-                          onClick={() => void toggleAssignment(skill.id, agent)}
-                        >
-                          {agent.display_name}
-                        </button>
-                      );
-                    })}
+                    <span className={`badge ${skill.enabled ? "badge--success" : "badge--muted"}`}>
+                      {skill.enabled ? t("web.common.enabled", "启用") : t("web.common.disabled", "停用")}
+                    </span>
                   </div>
-                </div>
-              </article>
-            ))}
+
+                  <p className="skills-card__description">{skill.description || t("web.common.none", "无")}</p>
+
+                  <div className="skills-meta-grid">
+                    <div className="skills-meta-item">
+                      <span>{t("web.skills.trigger", "触发词")}</span>
+                      <strong>/{skill.id}</strong>
+                    </div>
+                    <div className="skills-meta-item">
+                      <span>{t("web.skills.source", "挂载模式")}</span>
+                      <strong>{skill.mount.mode}</strong>
+                    </div>
+                    <div className="skills-meta-item">
+                      <span>{t("web.skills.assignment_count", "已分配")}</span>
+                      <strong>
+                        {assignedAgents.length > 0
+                          ? `${assignedAgents.length} ${t("web.skills.agent_unit", "Agent")}`
+                          : t("web.skills.assignment_none", "未分配")}
+                      </strong>
+                    </div>
+                  </div>
+
+                  <div className="skills-card__section">
+                    <div className="skills-subtitle">{t("web.skills.how_to_use", "使用方式")}</div>
+                    <div className="empty-card skills-inline-empty">
+                      <strong>/{skill.id}</strong>
+                      <p className="helper-text">
+                        {t("web.skills.usage_hint", "在会话输入框里插入这个技能片段，系统再按 skill 自己的 README 约定去解释具体输入。")}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="skills-card__section">
+                    <div className="skills-subtitle">{t("web.skills.assigned_agents", "已启用到这些 Agent")}</div>
+                    <div className="chip-grid">
+                      {agents.map((agent) => {
+                        const active = assignedAgents.includes(agent.id);
+                        return (
+                          <button
+                            key={agent.id}
+                            type="button"
+                            className={active ? "chip chip--active" : "chip"}
+                            disabled={savingKey === `${skill.id}:${agent.id}`}
+                            onClick={() => void toggleAssignment(skill.id, agent)}
+                          >
+                            {agent.display_name}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
           </div>
         )}
       </section>

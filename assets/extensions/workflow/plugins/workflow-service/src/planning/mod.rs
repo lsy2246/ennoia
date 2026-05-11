@@ -492,7 +492,7 @@ mod tests {
     #[test]
     fn parses_plan_from_json_fence() {
         let plan = parse_plan_from_text(
-            "方案如下\n```json\n{\"schema_version\":\"3.0\",\"objective\":\"测试\",\"intent\":\"mixed\",\"steps\":[{\"id\":\"S1\",\"type\":\"baseline_verify\",\"goal\":\"看现状\",\"allowed_tools\":[\"fs_read\"],\"expected_outputs\":[\"baseline\"],\"pass_if\":[\"ok\"],\"next_pass\":\"S2\",\"next_fail\":\"REPLAN\"}],\"tool_plan\":[{\"tool\":\"fs_read\"}],\"verify_contract\":{\"ok\":true},\"meta\":{\"plan_status\":\"ready\"}}\n```",
+            "方案如下\n```json\n{\"schema_version\":\"3.0\",\"objective\":\"测试\",\"intent\":\"mixed\",\"steps\":[{\"id\":\"S1\",\"type\":\"baseline_verify\",\"goal\":\"看现状\",\"allowed_tools\":[\"command_exec\"],\"expected_outputs\":[\"baseline\"],\"pass_if\":[\"ok\"],\"next_pass\":\"S2\",\"next_fail\":\"REPLAN\"}],\"tool_plan\":[{\"tool\":\"command_exec\"}],\"verify_contract\":{\"ok\":true},\"meta\":{\"plan_status\":\"ready\"}}\n```",
             "测试",
         )
         .expect("plan");
@@ -512,7 +512,7 @@ mod tests {
                     step_type: "execute".to_string(),
                     goal: "直接改".to_string(),
                     tool: String::new(),
-                    allowed_tools: vec!["fs_write".to_string()],
+                    allowed_tools: vec!["command_exec".to_string()],
                     input: JsonValue::Null,
                     expected_outputs: vec![],
                     pass_if: vec![],
@@ -521,7 +521,7 @@ mod tests {
                     assigned_agent_id: String::new(),
                 }],
                 tool_plan: vec![PlanTool {
-                    tool: "fs_write".to_string(),
+                    tool: "command_exec".to_string(),
                     tools: vec![],
                     allow_tools: vec![],
                     allowed_tools: vec![],

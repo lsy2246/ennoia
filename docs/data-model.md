@@ -185,8 +185,7 @@
 `AgentPermissionProfile` 字段：
 
 - `mode`
-- `command_rules`
-- `path_rules`
+- `entries`
 
 ## Agent 执行环境域
 
@@ -201,11 +200,13 @@
 
 运行时不再让用户直接维护底层规则。系统会把 `AgentPermissionProfile` 编译成内部 `AgentPermissionPolicy`：
 
-- `whitelist`：命令默认 `ask`，命中 `command_rules` 后直接 `allow`
-- `blacklist`：命令默认 `allow`，命中 `command_rules` 后改为 `ask`
-- `path_rules` 始终表示可直接访问的路径
-- `whitelist` 下，`path_rules` 为空时路径默认 `ask`；命中路径 `allow`
-- `blacklist` 下，`path_rules` 为空时路径默认 `allow`；非空时命中路径 `allow`，其他路径 `ask`
+- `mode = "whitelist"`：`command.exec` 默认 `ask`，命中 `entries` 后直接 `allow`
+- `mode = "blacklist"`：`command.exec` 默认 `allow`，命中 `entries` 后改为 `ask`
+- `entries[]` 只描述命令调用匹配规则，每条条目包含：
+  - `match`：`exact | prefix | regex`
+  - `value`：用户自定义的命令匹配字符串
+- `entries[]` 匹配的是规范化后的完整命令调用串，例如 `git status`、`git diff --cached`、`node C:/tools/search-runner.mjs`
+- `sandbox_enabled` 与权限模型解耦；它只决定命令在哪个执行环境里运行，不参与白名单/黑名单判定
 
 `PermissionApprovalRecord` 字段：
 
@@ -286,7 +287,9 @@
 
 `SkillManifest` 字段：`id`、`version`、`description`、`mount.mode`、`actions[]`。
 
-`actions[]` 字段：`id`、`description`、`entry`、`invoke_mode`、`requires[]`。
+`actions[]` 字段：`id`、`description`、`entry`。
+
+约定：`actions[]` 表示 skill 的对外可调用入口，不等于 skill 内部的所有脚本或子流程；默认一个 skill 只暴露一个 action。
 
 `SkillConfig` 是运行时返回对象，在 manifest 基础上额外附带：`enabled`、`builtin_sync_blocked`。
 

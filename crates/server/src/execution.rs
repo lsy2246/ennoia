@@ -1,11 +1,9 @@
-use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
 use ennoia_contract::ApiError;
 use ennoia_kernel::{AgentConfig, AgentExecutionEnvironment};
 use serde::{Deserialize, Serialize};
-use serde_json::Value as JsonValue;
 use uuid::Uuid;
 
 use crate::app::AppState;
@@ -33,29 +31,11 @@ pub struct SandboxRoots {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum SandboxOperation {
-    FsRead {
-        host_path: String,
-        display_path: String,
-        max_bytes: usize,
-    },
-    FsWrite {
-        host_path: String,
-        display_path: String,
-        content: String,
-        append: bool,
-    },
     CommandExec {
         command: String,
         args: Vec<String>,
         cwd_host_path: String,
         cwd_display_path: String,
-        timeout_ms: u64,
-    },
-    NetFetch {
-        url: String,
-        method: String,
-        headers: BTreeMap<String, String>,
-        body: Option<String>,
         timeout_ms: u64,
     },
 }
@@ -242,17 +222,6 @@ pub async fn run_sandbox_worker(request_path: &str, response_path: &str) -> Resu
 
 async fn execute_worker_request(request: SandboxWorkerRequest) -> Result<String, String> {
     match request.operation {
-        SandboxOperation::FsRead {
-            host_path,
-            display_path,
-            max_bytes,
-        } => execute_worker_fs_read(&request.roots, &host_path, &display_path, max_bytes),
-        SandboxOperation::FsWrite {
-            host_path,
-            display_path,
-            content,
-            append,
-        } => execute_worker_fs_write(&request.roots, &host_path, &display_path, &content, append),
         SandboxOperation::CommandExec {
             command,
             args,
@@ -270,83 +239,7 @@ async fn execute_worker_request(request: SandboxWorkerRequest) -> Result<String,
             )
             .await
         }
-        SandboxOperation::NetFetch {
-            url,
-            method,
-            headers,
-            body,
-            timeout_ms,
-        } => {
-            execute_worker_net_fetch(
-                request.allow_network,
-                &url,
-                &method,
-                &headers,
-                body.as_deref(),
-                timeout_ms,
-            )
-            .await
-        }
     }
-}
-
-fn execute_worker_fs_read(
-    roots: &SandboxRoots,
-    host_path: &str,
-    display_path: &str,
-    max_bytes: usize,
-) -> Result<String, String> {
-    ensure_within_roots(roots, host_path)?;
-    let bytes = fs::read(host_path).map_err(|error| format!("read file failed: {error}"))?;
-    let truncated = bytes.len() > max_bytes;
-    let visible = if truncated {
-        &bytes[..max_bytes]
-    } else {
-        &bytes[..]
-    };
-    Ok(serde_json::json!({
-        "ok": true,
-        "tool": "fs.read",
-        "path": display_path,
-        "bytes_read": visible.len(),
-        "truncated": truncated,
-        "content": String::from_utf8_lossy(visible),
-    })
-    .to_string())
-}
-
-fn execute_worker_fs_write(
-    roots: &SandboxRoots,
-    host_path: &str,
-    display_path: &str,
-    content: &str,
-    append: bool,
-) -> Result<String, String> {
-    ensure_within_roots(roots, host_path)?;
-    if let Some(parent) = Path::new(host_path).parent() {
-        fs::create_dir_all(parent).map_err(|error| format!("create parent dir failed: {error}"))?;
-    }
-    if append {
-        use std::io::Write as _;
-        let mut file = fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(host_path)
-            .map_err(|error| format!("open file for append failed: {error}"))?;
-        file.write_all(content.as_bytes())
-            .map_err(|error| format!("append file failed: {error}"))?;
-    } else {
-        fs::write(host_path, content.as_bytes())
-            .map_err(|error| format!("write file failed: {error}"))?;
-    }
-    Ok(serde_json::json!({
-        "ok": true,
-        "tool": "fs.write",
-        "path": display_path,
-        "bytes_written": content.len(),
-        "append": append,
-    })
-    .to_string())
 }
 
 async fn execute_worker_command_exec(
@@ -378,62 +271,6 @@ async fn execute_worker_command_exec(
         "status": output.status.code(),
         "stdout": String::from_utf8_lossy(&output.stdout),
         "stderr": String::from_utf8_lossy(&output.stderr),
-    })
-    .to_string())
-}
-
-async fn execute_worker_net_fetch(
-    allow_network: bool,
-    url: &str,
-    method: &str,
-    headers: &BTreeMap<String, String>,
-    body: Option<&str>,
-    timeout_ms: u64,
-) -> Result<String, String> {
-    if !allow_network {
-        return Err("sandbox worker network capability is disabled".to_string());
-    }
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_millis(timeout_ms))
-        .build()
-        .map_err(|error| format!("build http client failed: {error}"))?;
-    let mut request_builder = client.request(
-        reqwest::Method::from_bytes(method.as_bytes())
-            .map_err(|error| format!("invalid http method: {error}"))?,
-        url,
-    );
-    for (key, value) in headers {
-        request_builder = request_builder.header(key, value);
-    }
-    if let Some(body) = body {
-        request_builder = request_builder.body(body.to_string());
-    }
-    let response = request_builder
-        .send()
-        .await
-        .map_err(|error| format!("http request failed: {error}"))?;
-    let status = response.status().as_u16();
-    let response_headers = response
-        .headers()
-        .iter()
-        .map(|(key, value)| {
-            (
-                key.as_str().to_string(),
-                JsonValue::String(value.to_str().unwrap_or_default().to_string()),
-            )
-        })
-        .collect::<serde_json::Map<String, JsonValue>>();
-    let text = response
-        .text()
-        .await
-        .map_err(|error| format!("read http response failed: {error}"))?;
-    Ok(serde_json::json!({
-        "ok": true,
-        "tool": "net.fetch",
-        "url": url,
-        "status": status,
-        "headers": response_headers,
-        "body": text,
     })
     .to_string())
 }

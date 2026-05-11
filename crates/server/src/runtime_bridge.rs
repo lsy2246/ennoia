@@ -18,8 +18,7 @@ use tokio::io::AsyncWriteExt;
 
 use crate::app::{live_server_config, AppState};
 use crate::execution::{
-    execute_native_operation, resolve_agent_tool_path, resolve_command_cwd, AgentExecutionPaths,
-    SandboxOperation,
+    execute_native_operation, resolve_command_cwd, AgentExecutionPaths, SandboxOperation,
 };
 use crate::logs_store::{LogEntryWrite, LOGS_COMPONENT_HOST};
 use crate::realtime::RealtimeEvent;
@@ -229,10 +228,7 @@ pub async fn execute_runtime_operation(
             )
         })?;
     let content = match operation {
-        "fs.read" => execute_fs_read(state, request, &agent, &payload).await?,
-        "fs.write" => execute_fs_write(state, request, &agent, &payload).await?,
         "command.exec" => execute_command_exec(state, request, &agent, &payload).await?,
-        "net.fetch" => execute_net_fetch(state, request, &agent, &payload).await?,
         other => {
             return Err(scoped(
                 ApiError::bad_request(format!("unsupported runtime operation '{other}'")),
@@ -573,10 +569,7 @@ async fn execute_operation_payload(
         ("provider", "generate") => {
             execute_provider_generate_operation(state, request, payload).await
         }
-        ("runtime", "fs.read")
-        | ("runtime", "fs.write")
-        | ("runtime", "command.exec")
-        | ("runtime", "net.fetch") => {
+        ("runtime", "command.exec") => {
             let result = execute_runtime_operation(
                 state,
                 request,
@@ -717,18 +710,6 @@ fn log_operation_event(
     );
 }
 
-fn resolve_runtime_timeout_ms(
-    arguments: &JsonValue,
-    config: &RuntimeOperationTimeoutConfig,
-) -> u64 {
-    integer_argument(arguments, "timeout_ms")
-        .unwrap_or(config.default_timeout_ms as i64)
-        .clamp(
-            config.default_timeout_ms as i64,
-            config.max_timeout_ms as i64,
-        ) as u64
-}
-
 fn resolve_command_timeout_ms(
     arguments: &JsonValue,
     config: &RuntimeOperationTimeoutConfig,
@@ -763,6 +744,28 @@ fn normalize_command_exec_invocation(
         }
     }
     (command.to_string(), args.to_vec(), false)
+}
+
+fn format_command_invocation(command: &str, args: &[String]) -> String {
+    std::iter::once(command)
+        .chain(args.iter().map(String::as_str))
+        .map(format_command_invocation_segment)
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn format_command_invocation_segment(value: &str) -> String {
+    let normalized = value.trim().replace('\\', "/");
+    if normalized.is_empty() {
+        return "\"\"".to_string();
+    }
+    if normalized
+        .chars()
+        .any(|character| character.is_whitespace() || character == '"')
+    {
+        return format!("\"{}\"", normalized.replace('"', "\\\""));
+    }
+    normalized
 }
 
 fn authorize_permission_request(
@@ -840,163 +843,6 @@ fn consume_runtime_grant(
     Ok(())
 }
 
-async fn execute_fs_read(
-    state: &AppState,
-    request: &RequestContext,
-    agent: &AgentConfig,
-    payload: &RuntimeOperationRequest,
-) -> Result<JsonValue, ApiError> {
-    let path = required_string_argument(&payload.arguments, "path", request)?;
-    let max_bytes = integer_argument(&payload.arguments, "max_bytes")
-        .unwrap_or(32_768)
-        .clamp(256, 262_144) as usize;
-    let execution_paths = AgentExecutionPaths::for_agent(state, agent, &payload.run_id);
-    let resolved_path =
-        resolve_agent_tool_path(&agent.execution_environment, &execution_paths, &path)
-            .map_err(|error| scoped(error, request))?;
-    let grant_id = authorize_runtime_operation(
-        state,
-        request,
-        &agent.id,
-        "fs.read",
-        "file",
-        &resolved_path.display_path,
-        &payload.conversation_id,
-        &payload.run_id,
-        payload.message_id.as_deref(),
-        Some(&resolved_path.display_path),
-        None,
-        "runtime.operation",
-    )?;
-    consume_runtime_grant(state, request, grant_id)?;
-    let content = if agent.execution_environment.sandbox_enabled {
-        execute_native_operation(
-            agent,
-            &execution_paths,
-            false,
-            SandboxOperation::FsRead {
-                host_path: resolved_path.host_path.to_string_lossy().to_string(),
-                display_path: resolved_path.display_path.clone(),
-                max_bytes,
-            },
-        )
-        .await
-        .map_err(|error| scoped(error, request))?
-    } else {
-        let bytes = fs::read(&resolved_path.host_path).map_err(|error| {
-            scoped(
-                ApiError::internal(format!("read file failed: {error}")),
-                request,
-            )
-        })?;
-        let truncated = bytes.len() > max_bytes;
-        let visible = if truncated {
-            &bytes[..max_bytes]
-        } else {
-            &bytes[..]
-        };
-        serde_json::json!({
-            "ok": true,
-            "tool": "fs.read",
-            "path": resolved_path.display_path,
-            "bytes_read": visible.len(),
-            "truncated": truncated,
-            "content": String::from_utf8_lossy(visible).to_string(),
-        })
-        .to_string()
-    };
-    Ok(parse_runtime_content(&content))
-}
-
-async fn execute_fs_write(
-    state: &AppState,
-    request: &RequestContext,
-    agent: &AgentConfig,
-    payload: &RuntimeOperationRequest,
-) -> Result<JsonValue, ApiError> {
-    let path = required_string_argument(&payload.arguments, "path", request)?;
-    let content = required_string_argument(&payload.arguments, "content", request)?;
-    let append = boolean_argument(&payload.arguments, "append").unwrap_or(false);
-    let execution_paths = AgentExecutionPaths::for_agent(state, agent, &payload.run_id);
-    let resolved_path =
-        resolve_agent_tool_path(&agent.execution_environment, &execution_paths, &path)
-            .map_err(|error| scoped(error, request))?;
-    let grant_id = authorize_runtime_operation(
-        state,
-        request,
-        &agent.id,
-        "fs.write",
-        "file",
-        &resolved_path.display_path,
-        &payload.conversation_id,
-        &payload.run_id,
-        payload.message_id.as_deref(),
-        Some(&resolved_path.display_path),
-        None,
-        "runtime.operation",
-    )?;
-    consume_runtime_grant(state, request, grant_id)?;
-    let response = if agent.execution_environment.sandbox_enabled {
-        execute_native_operation(
-            agent,
-            &execution_paths,
-            false,
-            SandboxOperation::FsWrite {
-                host_path: resolved_path.host_path.to_string_lossy().to_string(),
-                display_path: resolved_path.display_path.clone(),
-                content,
-                append,
-            },
-        )
-        .await
-        .map_err(|error| scoped(error, request))?
-    } else {
-        if let Some(parent) = resolved_path.host_path.parent() {
-            fs::create_dir_all(parent).map_err(|error| {
-                scoped(
-                    ApiError::internal(format!("create parent dir failed: {error}")),
-                    request,
-                )
-            })?;
-        }
-        if append {
-            use std::io::Write as _;
-            let mut file = fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&resolved_path.host_path)
-                .map_err(|error| {
-                    scoped(
-                        ApiError::internal(format!("open file for append failed: {error}")),
-                        request,
-                    )
-                })?;
-            file.write_all(content.as_bytes()).map_err(|error| {
-                scoped(
-                    ApiError::internal(format!("append file failed: {error}")),
-                    request,
-                )
-            })?;
-        } else {
-            fs::write(&resolved_path.host_path, content.as_bytes()).map_err(|error| {
-                scoped(
-                    ApiError::internal(format!("write file failed: {error}")),
-                    request,
-                )
-            })?;
-        }
-        serde_json::json!({
-            "ok": true,
-            "tool": "fs.write",
-            "path": resolved_path.display_path,
-            "bytes_written": content.len(),
-            "append": append,
-        })
-        .to_string()
-    };
-    Ok(parse_runtime_content(&response))
-}
-
 async fn execute_command_exec(
     state: &AppState,
     request: &RequestContext,
@@ -1008,6 +854,7 @@ async fn execute_command_exec(
     let requested_args = string_array_argument(&payload.arguments, "args");
     let (effective_command_name, effective_args, invocation_normalized) =
         normalize_command_exec_invocation(&command_name, &requested_args);
+    let formatted_invocation = format_command_invocation(&effective_command_name, &effective_args);
     let cwd_value = string_argument(&payload.arguments, "cwd");
     let execution_paths = AgentExecutionPaths::for_agent(state, agent, &payload.run_id);
     let cwd = resolve_command_cwd(
@@ -1030,7 +877,7 @@ async fn execute_command_exec(
         &agent.id,
         "command.exec",
         "command",
-        &command_name,
+        &formatted_invocation,
         &payload.conversation_id,
         &payload.run_id,
         payload.message_id.as_deref(),
@@ -1046,6 +893,7 @@ async fn execute_command_exec(
         "args": requested_args,
         "effective_command": effective_command_name,
         "effective_args": effective_args,
+        "invocation": formatted_invocation,
         "cwd": cwd.display_path,
         "timeout_ms": timeout_ms,
         "sandbox_enabled": agent.execution_environment.sandbox_enabled,
@@ -1104,137 +952,11 @@ async fn execute_command_exec(
             "tool": "command.exec",
             "command": effective_command_name,
             "args": effective_args,
+            "invocation": formatted_invocation,
             "cwd": cwd.display_path,
             "status": output.status.code(),
             "stdout": String::from_utf8_lossy(&output.stdout).to_string(),
             "stderr": String::from_utf8_lossy(&output.stderr).to_string(),
-        })
-        .to_string()
-    };
-    Ok(parse_runtime_content(&content))
-}
-
-async fn execute_net_fetch(
-    state: &AppState,
-    request: &RequestContext,
-    agent: &AgentConfig,
-    payload: &RuntimeOperationRequest,
-) -> Result<JsonValue, ApiError> {
-    let server_config = live_server_config(state);
-    let url = required_string_argument(&payload.arguments, "url", request)?;
-    let method = string_argument(&payload.arguments, "method").unwrap_or_else(|| "GET".to_string());
-    let body = string_argument(&payload.arguments, "body");
-    let operation_config = &server_config.operations.net;
-    let timeout_ms = resolve_runtime_timeout_ms(&payload.arguments, operation_config);
-    let host = reqwest::Url::parse(&url)
-        .ok()
-        .and_then(|parsed| parsed.host_str().map(str::to_string));
-    let grant_id = authorize_runtime_operation(
-        state,
-        request,
-        &agent.id,
-        "net.fetch",
-        "network",
-        &url,
-        &payload.conversation_id,
-        &payload.run_id,
-        payload.message_id.as_deref(),
-        None,
-        host.as_deref(),
-        "runtime.operation",
-    )?;
-    consume_runtime_grant(state, request, grant_id)?;
-    let execution_paths = AgentExecutionPaths::for_agent(state, agent, &payload.run_id);
-    let content = if agent.execution_environment.sandbox_enabled {
-        let mut headers = std::collections::BTreeMap::new();
-        if let Some(raw_headers) = payload
-            .arguments
-            .get("headers")
-            .and_then(JsonValue::as_object)
-        {
-            for (key, value) in raw_headers {
-                if let Some(value) = value.as_str() {
-                    headers.insert(key.clone(), value.to_string());
-                }
-            }
-        }
-        execute_native_operation(
-            agent,
-            &execution_paths,
-            true,
-            SandboxOperation::NetFetch {
-                url: url.clone(),
-                method: method.clone(),
-                headers,
-                body: body.clone(),
-                timeout_ms,
-            },
-        )
-        .await
-        .map_err(|error| scoped(error, request))?
-    } else {
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_millis(timeout_ms))
-            .build()
-            .map_err(|error| {
-                scoped(
-                    ApiError::internal(format!("build http client failed: {error}")),
-                    request,
-                )
-            })?;
-        let mut request_builder = client.request(
-            reqwest::Method::from_bytes(method.as_bytes()).map_err(|error| {
-                scoped(
-                    ApiError::bad_request(format!("invalid http method: {error}")),
-                    request,
-                )
-            })?,
-            &url,
-        );
-        if let Some(headers) = payload
-            .arguments
-            .get("headers")
-            .and_then(JsonValue::as_object)
-        {
-            for (key, value) in headers {
-                if let Some(value) = value.as_str() {
-                    request_builder = request_builder.header(key, value);
-                }
-            }
-        }
-        if let Some(body) = body {
-            request_builder = request_builder.body(body);
-        }
-        let response = request_builder.send().await.map_err(|error| {
-            scoped(
-                ApiError::internal(format!("http request failed: {error}")),
-                request,
-            )
-        })?;
-        let status = response.status().as_u16();
-        let headers = response
-            .headers()
-            .iter()
-            .map(|(key, value)| {
-                (
-                    key.as_str().to_string(),
-                    JsonValue::String(value.to_str().unwrap_or_default().to_string()),
-                )
-            })
-            .collect::<serde_json::Map<String, JsonValue>>();
-        let text = response.text().await.map_err(|error| {
-            scoped(
-                ApiError::internal(format!("read http response failed: {error}")),
-                request,
-            )
-        })?;
-        serde_json::json!({
-            "ok": true,
-            "tool": "net.fetch",
-            "url": url,
-            "status": status,
-            "headers": headers,
-            "body": text,
         })
         .to_string()
     };
@@ -1263,10 +985,6 @@ fn string_argument(arguments: &JsonValue, key: &str) -> Option<String> {
 
 fn integer_argument(arguments: &JsonValue, key: &str) -> Option<i64> {
     arguments.get(key).and_then(JsonValue::as_i64)
-}
-
-fn boolean_argument(arguments: &JsonValue, key: &str) -> Option<bool> {
-    arguments.get(key).and_then(JsonValue::as_bool)
 }
 
 fn string_array_argument(arguments: &JsonValue, key: &str) -> Vec<String> {
@@ -1341,4 +1059,48 @@ fn read_windows_environment_value(hive: &winreg::RegKey, path: &str, name: &str)
     key.get_value::<String, _>(name)
         .ok()
         .map(|value| value.trim().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{format_command_invocation, normalize_command_exec_invocation};
+
+    #[test]
+    fn format_command_invocation_normalizes_windows_paths_and_quotes_spaces() {
+        assert_eq!(
+            format_command_invocation(
+                r#"node"#,
+                &[
+                    r#"C:\Program Files\Ennoia\runner.mjs"#.to_string(),
+                    "--watch".to_string()
+                ],
+            ),
+            r#"node "C:/Program Files/Ennoia/runner.mjs" --watch"#
+        );
+    }
+
+    #[test]
+    fn format_command_invocation_keeps_simple_global_commands_readable() {
+        assert_eq!(
+            format_command_invocation("git", &["status".to_string()]),
+            "git status"
+        );
+    }
+
+    #[test]
+    fn normalize_command_exec_invocation_inserts_cmd_mode_flag() {
+        let (command, args, normalized) =
+            normalize_command_exec_invocation("cmd", &["echo".to_string(), "hi".to_string()]);
+        assert_eq!(command, "cmd");
+        if cfg!(windows) {
+            assert_eq!(
+                args,
+                vec!["/c".to_string(), "echo".to_string(), "hi".to_string()]
+            );
+            assert!(normalized);
+        } else {
+            assert_eq!(args, vec!["echo".to_string(), "hi".to_string()]);
+            assert!(!normalized);
+        }
+    }
 }

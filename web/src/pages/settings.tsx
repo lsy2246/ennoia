@@ -601,7 +601,7 @@ export function Settings() {
             <article className="mini-card settings-section-card settings-section-anchor settings-module">
               <div className="settings-section-card__header">
                 <div className="panel-title">内置工具</div>
-                <p className="helper-text">命令执行和网络请求的默认超时与上下限。</p>
+                <p className="helper-text">当前只对 Agent 暴露命令执行能力，这里配置命令执行的默认超时与上下限。</p>
               </div>
               <div className="form-grid settings-form-grid">
                 <label className="settings-field">
@@ -651,60 +651,6 @@ export function Settings() {
                           ...config.operations,
                           command: {
                             ...config.operations.command,
-                            max_timeout_ms: Number(event.target.value),
-                          },
-                        },
-                      })
-                    }
-                  />
-                </label>
-                <label className="settings-field">
-                  网络默认超时
-                  <input
-                    value={config.operations.net.default_timeout_ms}
-                    onChange={(event) =>
-                      setConfig({
-                        ...config,
-                        operations: {
-                          ...config.operations,
-                          net: {
-                            ...config.operations.net,
-                            default_timeout_ms: Number(event.target.value),
-                          },
-                        },
-                      })
-                    }
-                  />
-                </label>
-                <label className="settings-field">
-                  网络最小超时
-                  <input
-                    value={config.operations.net.min_timeout_ms}
-                    onChange={(event) =>
-                      setConfig({
-                        ...config,
-                        operations: {
-                          ...config.operations,
-                          net: {
-                            ...config.operations.net,
-                            min_timeout_ms: Number(event.target.value),
-                          },
-                        },
-                      })
-                    }
-                  />
-                </label>
-                <label className="settings-field">
-                  网络最大超时
-                  <input
-                    value={config.operations.net.max_timeout_ms}
-                    onChange={(event) =>
-                      setConfig({
-                        ...config,
-                        operations: {
-                          ...config.operations,
-                          net: {
-                            ...config.operations.net,
                             max_timeout_ms: Number(event.target.value),
                           },
                         },

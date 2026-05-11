@@ -249,8 +249,6 @@ export type SkillActionConfig = {
   id: string;
   description: string;
   entry: string;
-  invoke_mode: string;
-  requires: string[];
 };
 
 export type ProviderModelDescriptor = {
@@ -310,8 +308,12 @@ export type PermissionTrigger = {
 
 export type AgentPermissionProfile = {
   mode: string;
-  command_rules: string[];
-  path_rules: string[];
+  entries: AgentPermissionCommandEntry[];
+};
+
+export type AgentPermissionCommandEntry = {
+  match: string;
+  value: string;
 };
 
 export type PermissionPolicySummary = {
