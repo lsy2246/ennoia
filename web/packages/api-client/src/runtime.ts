@@ -18,6 +18,7 @@ export async function bootstrapSetup(payload: {
   display_name?: string;
   locale?: string;
   time_zone?: string;
+  operating_system?: string;
   default_space_id?: string;
   theme_id?: string;
   date_style?: string;
@@ -50,6 +51,7 @@ export async function saveRuntimeProfile(payload: {
   display_name?: string | null;
   locale?: string | null;
   time_zone?: string | null;
+  operating_system?: string | null;
   default_space_id?: string | null;
 }) {
   return fetchJson<RuntimeProfile>("/api/runtime/profile", {

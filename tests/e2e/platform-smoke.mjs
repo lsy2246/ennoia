@@ -31,6 +31,7 @@ try {
       display_name: "Operator",
       locale: "zh-CN",
       time_zone: "Asia/Shanghai",
+      operating_system: "Windows",
       theme_id: "system",
     }),
   });

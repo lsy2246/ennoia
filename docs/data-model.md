@@ -18,6 +18,23 @@
 - 系统核心额外提供 `ExtensionStateEntry` 与 `ExtensionRecordEntry` 两个宿主级通用原语，供扩展保存轻量运行态和会话可视记录。
 - 这两个模型不是 workflow、memory、conversation 的替代主数据，只用于跨刷新状态同步、前端挂载和运行事实投影。
 
+## RuntimeProfile 域
+
+`RuntimeProfile` 字段：
+
+- `id`
+- `display_name`
+- `locale`
+- `time_zone`
+- `operating_system`
+- `default_space_id`
+- `created_at`
+- `updated_at`
+
+约定：
+
+- `operating_system` 表示当前操作者设备系统，前端优先自动识别后写入；允许为空，兼容旧实例未落盘该字段的 `profile.toml`。
+
 ## ServerConfig 域
 
 `ServerConfig` 当前包含：

@@ -47,7 +47,7 @@
 ├─ config/
 │  ├─ server.toml              # HTTP、中间件、系统内置组件配置
 │  ├─ ui.toml                  # Web 标题、语言、主题、默认操作者名与本地化默认值
-│  ├─ profile.toml             # 实例资料（显示名、locale、时区、默认空间）
+│  ├─ profile.toml             # 实例资料（显示名、locale、时区、操作者系统、默认空间）
 │  ├─ preferences/
 │  │  ├─ instance.toml         # 实例级 UI 偏好
 │  │  └─ spaces/               # 空间级 UI 偏好

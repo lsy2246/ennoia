@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { bootstrapSetup } from "@ennoia/api-client";
 import { applyTheme, readUiBootstrapCache, writeUiBootstrapCache } from "@ennoia/theme-runtime";
 import { StatusNotice } from "@/components/StatusNotice";
+import { detectOperatorSystem } from "@/lib/operatorSystem";
 import { buildTimeZoneOptionGroups, getBrowserTimeZone } from "@/lib/timeZones";
 import { normalizeLocaleSelection } from "@/lib/uiCapabilities";
 import {
@@ -25,6 +26,7 @@ export function Welcome() {
   const defaultDisplayName = resolveDefaultDisplayName(runtime);
   const defaultLocale = resolveDefaultLocale(runtime);
   const defaultTheme = resolveDefaultTheme(runtime);
+  const operatorSystem = useMemo(() => detectOperatorSystem(), []);
 
   const [displayName, setDisplayName] = useState(defaultDisplayName);
   const timeZoneGroups = useMemo(() => buildTimeZoneOptionGroups(t, false), [t]);
@@ -82,6 +84,7 @@ export function Welcome() {
         display_name: displayName,
         locale,
         time_zone: timeZone,
+        operating_system: operatorSystem ?? undefined,
         theme_id: themeId,
       });
       await Promise.all([hydrateRuntime(), hydrateUi()]);

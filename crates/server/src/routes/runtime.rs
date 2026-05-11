@@ -57,6 +57,7 @@ pub(super) async fn bootstrap_setup(
         time_zone: payload
             .time_zone
             .unwrap_or_else(|| ui_config.default_time_zone.clone()),
+        operating_system: normalize_optional_text(payload.operating_system),
         default_space_id: payload
             .default_space_id
             .or_else(|| state.spaces.first().map(|space| space.id.clone())),
@@ -127,6 +128,11 @@ pub(super) async fn runtime_profile_put(
             .time_zone
             .or_else(|| current.as_ref().map(|profile| profile.time_zone.clone()))
             .unwrap_or_else(|| ui_config.default_time_zone.clone()),
+        operating_system: normalize_optional_text(payload.operating_system).or_else(|| {
+            current
+                .as_ref()
+                .and_then(|profile| profile.operating_system.clone())
+        }),
         default_space_id: payload.default_space_id.or_else(|| {
             current
                 .as_ref()
@@ -340,4 +346,15 @@ where
     }
     let contents = toml::to_string_pretty(value).map_err(std::io::Error::other)?;
     fs::write(path, contents)
+}
+
+fn normalize_optional_text(value: Option<String>) -> Option<String> {
+    value.and_then(|item| {
+        let trimmed = item.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    })
 }

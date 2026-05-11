@@ -10,7 +10,8 @@ use ennoia_kernel::{
     ExtensionRecordAppend, ExtensionRecordEntry, ExtensionRecordUpdate, ExtensionStateEntry,
     ExtensionStateGetQuery, ExtensionStatePut, HookDispatchResponse, HookEventEnvelope,
     ModelEndpointConfig, NextAction, OperationPerformRequest, OperationPerformResponse,
-    OperationRecord, OwnerKind, OwnerRef, RunContext, RunStage, RunStageEvent, ServerConfig,
+    OperationRecord, OwnerKind, OwnerRef, RunContext, RunStage, RunStageEvent, RuntimeProfile,
+    ServerConfig,
 };
 use ennoia_paths::RuntimePaths;
 use serde::{Deserialize, Serialize};
@@ -97,6 +98,13 @@ struct AgentReplyLoopState {
     pending_operation_kind: Option<String>,
     next_iteration: usize,
     last_process_text: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct OperatorProfileSnapshot {
+    display_name: String,
+    time_zone: Option<String>,
+    operating_system: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -851,7 +859,7 @@ async fn generate_conversation_agent_reply(
                 client,
                 &owner,
                 &conversation_id,
-                visible_recent_messages(&conversation_messages, agent_id),
+                visible_recent_messages(&runtime.runtime_paths, &conversation_messages, agent_id),
                 permission_actor_context(
                     agent_id,
                     "workflow.memory_context",
@@ -1747,8 +1755,11 @@ async fn generate_draft_plan(
     }
 
     let draft_run_id = format!("draft-{}", message_id.unwrap_or("preview"));
-    let base_messages =
-        normalize_conversation_messages_for_provider(conversation_messages, agent_id);
+    let base_messages = normalize_conversation_messages_for_provider(
+        conversation_messages,
+        agent_id,
+        &resolve_operator_profile(&runtime.runtime_paths).display_name,
+    );
     let mut planning_prompt = build_planning_prompt(goal, true);
     if previous_plan.is_some() {
         planning_prompt
@@ -1798,6 +1809,7 @@ async fn generate_draft_plan(
             "role": "user",
             "content": prompt,
         }));
+        let operator_profile = resolve_operator_profile(&runtime.runtime_paths);
         let response = client
             .provider_generate(
                 &model_endpoint.kind,
@@ -1805,9 +1817,9 @@ async fn generate_draft_plan(
                     "model_endpoint": model_endpoint_runtime_request_config(model_endpoint),
                     "model": model_id,
                     "instructions": ProviderInstructions {
-                        base: build_agent_runtime_prompt(agent, &draft_run_id),
+                        base: build_agent_runtime_prompt(agent, &draft_run_id, &operator_profile),
                     },
-                    "system_prompt": build_agent_runtime_prompt(agent, &draft_run_id),
+                    "system_prompt": build_agent_runtime_prompt(agent, &draft_run_id, &operator_profile),
                     "context": context,
                     "messages": messages,
                     "generation_options": agent.generation_options,
@@ -2192,8 +2204,13 @@ async fn execute_direct_reply(
     agent_id: &str,
     run_id: &str,
 ) -> Result<(), String> {
+    let operator_display_name = resolve_operator_profile(runtime_paths).display_name;
     let initial_state = AgentReplyLoopState {
-        messages: normalize_conversation_messages_for_provider(conversation_messages, agent_id),
+        messages: normalize_conversation_messages_for_provider(
+            conversation_messages,
+            agent_id,
+            &operator_display_name,
+        ),
         pending_tool_calls: Vec::new(),
         pending_operation_id: None,
         pending_operation_kind: None,
@@ -2347,7 +2364,11 @@ async fn generate_real_agent_reply(
         &run_id,
         agent_id,
         AgentReplyLoopState {
-            messages: normalize_conversation_messages_for_provider(conversation_messages, agent_id),
+            messages: normalize_conversation_messages_for_provider(
+                conversation_messages,
+                agent_id,
+                &resolve_operator_profile(runtime_paths).display_name,
+            ),
             pending_tool_calls: Vec::new(),
             pending_operation_id: None,
             pending_operation_kind: None,
@@ -2427,8 +2448,9 @@ async fn continue_agent_reply_from_state(
         plan,
     )
     .await;
+    let operator_profile = resolve_operator_profile(runtime_paths);
     let instructions = ProviderInstructions {
-        base: build_agent_runtime_prompt(agent, run_id),
+        base: build_agent_runtime_prompt(agent, run_id, &operator_profile),
     };
     let metadata = serde_json::json!({
         "conversation_id": conversation_id,
@@ -2679,7 +2701,7 @@ async fn continue_agent_reply_from_state(
                     "model_endpoint": model_endpoint_runtime_request_config(model_endpoint),
                     "model": model_id,
                     "instructions": instructions,
-                    "system_prompt": build_agent_runtime_prompt(agent, run_id),
+                    "system_prompt": build_agent_runtime_prompt(agent, run_id, &operator_profile),
                     "context": context,
                     "messages": state.messages,
                     "generation_options": agent.generation_options,
@@ -3478,6 +3500,7 @@ async fn build_agent_provider_context(
         .call_json(ExtensionHostCapabilityRequest::ExtensionsRuntimeSnapshot)
         .await
         .unwrap_or(JsonValue::Null);
+    let operator_profile = resolve_operator_profile(runtime_paths);
     let plan_context = plan
         .cloned()
         .filter(|value| !value.is_null())
@@ -3503,6 +3526,11 @@ async fn build_agent_provider_context(
             "workspace_root": if agent.execution_environment.sandbox_enabled { "/workspace".to_string() } else { normalize_display_dir(&agent.working_dir, runtime_paths.display_for_user(runtime_paths.agent_working_dir(&agent.id))) },
             "artifacts_root": if agent.execution_environment.sandbox_enabled { "/artifacts".to_string() } else { normalize_display_dir(&agent.artifacts_dir, runtime_paths.display_for_user(runtime_paths.agent_artifacts_dir(&agent.id))) },
             "temp_root": if agent.execution_environment.sandbox_enabled { "/tmp" } else { "系统临时目录" },
+        },
+        "operator_profile": {
+            "display_name": operator_profile.display_name,
+            "time_zone": operator_profile.time_zone,
+            "operating_system": operator_profile.operating_system,
         },
         "conversation": {
             "conversation_id": conversation_id,
@@ -3676,7 +3704,11 @@ fn model_endpoint_runtime_request_config(model_endpoint: &ModelEndpointConfig) -
     })
 }
 
-fn build_agent_runtime_prompt(agent: &AgentConfig, run_id: &str) -> String {
+fn build_agent_runtime_prompt(
+    agent: &AgentConfig,
+    run_id: &str,
+    operator_profile: &OperatorProfileSnapshot,
+) -> String {
     let execution_mode = if agent.execution_environment.sandbox_enabled {
         "sandbox"
     } else {
@@ -3697,9 +3729,20 @@ fn build_agent_runtime_prompt(agent: &AgentConfig, run_id: &str) -> String {
         sections.push(agent.system_prompt.trim().to_string());
     }
     sections.push(format!(
-        "你当前运行在 Ennoia 会话系统中。\nagent_id：{}\nagent_name：{}\nrun_id：{}\nsandbox_enabled：{}\nexecution_mode：{}\nworkspace_root：{}\nartifacts_root：{}\ntemp_root：{}\n{}\n除非用户明确需要，否则不要主动复述内部路径或实现细节。直接回答用户，不要伪装成“系统已接收”或“正在处理中”。",
+        "你当前运行在 Ennoia 会话系统中。\nagent_id：{}\nagent_name：{}\noperator_name：{}\noperator_time_zone：{}\noperator_operating_system：{}\nrun_id：{}\nsandbox_enabled：{}\nexecution_mode：{}\nworkspace_root：{}\nartifacts_root：{}\ntemp_root：{}\n{}\n除非用户明确需要，否则不要主动复述内部路径或实现细节。直接回答用户，不要伪装成“系统已接收”或“正在处理中”。",
         agent.id,
         agent.display_name,
+        operator_profile.display_name,
+        operator_profile
+            .time_zone
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or("unknown"),
+        operator_profile
+            .operating_system
+            .as_deref()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or("unknown"),
         if run_id.trim().is_empty() { "unknown" } else { run_id },
         agent.execution_environment.sandbox_enabled,
         execution_mode,
@@ -3743,6 +3786,7 @@ fn build_agent_builtin_tool_specs(_agent: &AgentConfig) -> Vec<ToolSpec> {
 fn normalize_conversation_messages_for_provider(
     conversation_messages: &JsonValue,
     agent_id: &str,
+    operator_display_name: &str,
 ) -> Vec<JsonValue> {
     let mut messages = conversation_messages
         .as_array()
@@ -3750,6 +3794,7 @@ fn normalize_conversation_messages_for_provider(
         .unwrap_or_default()
         .into_iter()
         .filter(|message| message_visible_to_agent(message, agent_id))
+        .map(|message| normalize_operator_message_sender(message, operator_display_name))
         .rev()
         .take(24)
         .collect::<Vec<_>>();
@@ -3757,29 +3802,65 @@ fn normalize_conversation_messages_for_provider(
     messages
 }
 
-fn visible_recent_messages(conversation_messages: &JsonValue, agent_id: &str) -> Vec<String> {
-    normalize_conversation_messages_for_provider(conversation_messages, agent_id)
-        .into_iter()
-        .filter_map(|message| {
-            let sender = message
-                .get("sender")
-                .and_then(JsonValue::as_str)
-                .unwrap_or_default();
-            let role = message
-                .get("role")
-                .and_then(JsonValue::as_str)
-                .unwrap_or_default();
-            let body = message
-                .get("body")
-                .and_then(JsonValue::as_str)
-                .unwrap_or_default();
-            if body.trim().is_empty() {
-                None
-            } else {
-                Some(format!("{role}:{sender}:{body}"))
-            }
-        })
-        .collect()
+fn visible_recent_messages(
+    runtime_paths: &Arc<RuntimePaths>,
+    conversation_messages: &JsonValue,
+    agent_id: &str,
+) -> Vec<String> {
+    let operator_display_name = resolve_operator_profile(runtime_paths).display_name;
+    normalize_conversation_messages_for_provider(
+        conversation_messages,
+        agent_id,
+        &operator_display_name,
+    )
+    .into_iter()
+    .filter_map(|message| {
+        let sender = message
+            .get("sender")
+            .and_then(JsonValue::as_str)
+            .unwrap_or_default();
+        let role = message
+            .get("role")
+            .and_then(JsonValue::as_str)
+            .unwrap_or_default();
+        let body = message
+            .get("body")
+            .and_then(JsonValue::as_str)
+            .unwrap_or_default();
+        if body.trim().is_empty() {
+            None
+        } else {
+            Some(format!("{role}:{sender}:{body}"))
+        }
+    })
+    .collect()
+}
+
+fn normalize_operator_message_sender(
+    mut message: JsonValue,
+    operator_display_name: &str,
+) -> JsonValue {
+    let role = message
+        .get("role")
+        .and_then(JsonValue::as_str)
+        .unwrap_or_default();
+    let sender = message
+        .get("sender")
+        .and_then(JsonValue::as_str)
+        .unwrap_or_default();
+    if matches!(role, "operator" | "user")
+        && (sender.trim().is_empty()
+            || sender.eq_ignore_ascii_case("operator")
+            || sender.eq_ignore_ascii_case("user"))
+    {
+        if let Some(object) = message.as_object_mut() {
+            object.insert(
+                "sender".to_string(),
+                JsonValue::String(operator_display_name.to_string()),
+            );
+        }
+    }
+    message
 }
 
 fn message_visible_to_agent(message: &JsonValue, agent_id: &str) -> bool {
@@ -4011,6 +4092,40 @@ fn read_server_config(runtime_paths: &Arc<RuntimePaths>) -> Result<ServerConfig,
     toml::from_str::<ServerConfig>(&contents)
         .map(|config| config.normalize())
         .map_err(|error| format!("parse server config failed: {error}"))
+}
+
+fn resolve_operator_profile(runtime_paths: &Arc<RuntimePaths>) -> OperatorProfileSnapshot {
+    let profile = load_runtime_profile(runtime_paths);
+    let display_name = profile
+        .as_ref()
+        .map(|item| item.display_name.trim())
+        .filter(|value| !value.is_empty())
+        .unwrap_or("Operator")
+        .to_string();
+    OperatorProfileSnapshot {
+        display_name,
+        time_zone: profile
+            .as_ref()
+            .and_then(|item| non_empty_string(item.time_zone.as_str())),
+        operating_system: profile
+            .as_ref()
+            .and_then(|item| item.operating_system.as_deref())
+            .and_then(non_empty_string),
+    }
+}
+
+fn load_runtime_profile(runtime_paths: &Arc<RuntimePaths>) -> Option<RuntimeProfile> {
+    let contents = fs::read_to_string(runtime_paths.profile_config_file()).ok()?;
+    toml::from_str::<RuntimeProfile>(&contents).ok()
+}
+
+fn non_empty_string(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
 }
 
 fn load_agent_configs(paths: &Arc<RuntimePaths>) -> Result<Vec<AgentConfig>, String> {

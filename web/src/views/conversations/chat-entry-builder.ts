@@ -167,8 +167,10 @@ export function buildChatEntries(params: {
   messages: ConversationMessage[];
   records?: Array<import("@ennoia/api-client").ExtensionRecordEntry>;
   localDrafts: LocalMessageDraft[];
+  operatorDisplayName?: string;
   resolveRecipients: (mentions: string[]) => AgentProfile[];
 }): ChatEntryViewModel[] {
+  const operatorDisplayName = params.operatorDisplayName?.trim() || "Operator";
   const entries: Array<{ order: number; entry: ChatEntryViewModel }> = [];
   const messageContextById = new Map(
     params.messages.map((message) => [
@@ -195,6 +197,9 @@ export function buildChatEntries(params: {
       state: "done" as const,
       format: detectMessageFormat(message.body),
     };
+    if (message.role === "operator" && (!message.sender.trim() || message.sender === "operator")) {
+      base.sender = operatorDisplayName;
+    }
 
     if (isLikelyErrorMessage(message.role, message.body)) {
       if (message.role === "agent") {
@@ -341,7 +346,7 @@ export function buildChatEntries(params: {
       kind: "message",
       format: detectMessageFormat(draft.body),
       state: draft.status === "failed" ? "failed" : draft.status === "sending" ? "streaming" : "pending",
-      sender: "Operator",
+      sender: operatorDisplayName,
       body: draft.body,
       createdAt: draft.createdAt,
       branchId: draft.branchId,

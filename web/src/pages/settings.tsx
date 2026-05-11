@@ -10,6 +10,7 @@ import {
   type UiConfig,
 } from "@ennoia/api-client";
 import { StatusNotice } from "@/components/StatusNotice";
+import { detectOperatorSystem } from "@/lib/operatorSystem";
 import { buildTimeZoneOptionGroups } from "@/lib/timeZones";
 import { resolveDefaultDisplayName, resolveDefaultTimeZone } from "@/lib/uiDefaults";
 import { Select } from "@/components/Select";
@@ -207,10 +208,13 @@ export function Settings() {
   const { runtime, t } = useUiHelpers();
   const defaultProfileName = resolveDefaultDisplayName(runtime);
   const defaultTimeZone = resolveDefaultTimeZone(runtime);
+  const detectedOperatingSystem = detectOperatorSystem();
+  const resolvedOperatingSystem = detectedOperatingSystem ?? profile?.operating_system ?? "";
   const [config, setConfig] = useState<ServerConfig | null>(null);
   const [uiConfig, setUiConfig] = useState<UiConfig | null>(null);
   const [profileName, setProfileName] = useState(profile?.display_name ?? defaultProfileName);
   const [timeZone, setTimeZone] = useState(profile?.time_zone ?? defaultTimeZone);
+  const [operatingSystem, setOperatingSystem] = useState(resolvedOperatingSystem);
   const [corsOrigins, setCorsOrigins] = useState<StringEntry[]>([]);
   const [timeoutOverrides, setTimeoutOverrides] = useState<NumberMapEntry[]>([]);
   const [bodyLimitOverrides, setBodyLimitOverrides] = useState<NumberMapEntry[]>([]);
@@ -225,7 +229,8 @@ export function Settings() {
   useEffect(() => {
     setProfileName(profile?.display_name ?? defaultProfileName);
     setTimeZone(profile?.time_zone ?? defaultTimeZone);
-  }, [defaultProfileName, defaultTimeZone, profile]);
+    setOperatingSystem(resolvedOperatingSystem);
+  }, [defaultProfileName, defaultTimeZone, profile, resolvedOperatingSystem]);
 
   async function hydrate() {
     const [serverSnapshot, uiSnapshot] = await Promise.all([
@@ -248,6 +253,7 @@ export function Settings() {
       await saveRuntimeProfile({
         display_name: profileName,
         time_zone: timeZone,
+        operating_system: operatingSystem || null,
       });
       await hydrateRuntime();
       setMessage(t("web.settings.profile_saved", "个人设置已保存。"));
@@ -358,6 +364,16 @@ export function Settings() {
                   }))
                 )}
               />
+            </label>
+            <label>
+              {t("web.settings.operator_system", "操作者系统")}
+              <input
+                value={operatingSystem || t("web.settings.operator_system_unknown", "未识别")}
+                readOnly
+              />
+              <small className="helper-text">
+                {t("web.settings.operator_system_help", "自动识别当前设备系统，不需要手动修改。")}
+              </small>
             </label>
           </div>
           <div className="settings-actions settings-actions--inline">

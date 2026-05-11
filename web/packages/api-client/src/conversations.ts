@@ -161,6 +161,7 @@ export async function appendConversationMessage(
     lane_id?: string;
     branch_id?: string;
     body: string;
+    sender?: string;
     goal?: string;
     addressed_agents?: string[];
     mentions?: string[];
@@ -175,7 +176,7 @@ export async function appendConversationMessage(
     message: {
       ...payload,
       role: "operator",
-      sender: "operator",
+      sender: payload.sender ?? "operator",
     },
   });
 }

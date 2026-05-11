@@ -397,6 +397,8 @@ struct BootstrapSetupPayload {
     #[serde(default)]
     time_zone: Option<String>,
     #[serde(default)]
+    operating_system: Option<String>,
+    #[serde(default)]
     default_space_id: Option<String>,
     #[serde(default)]
     theme_id: Option<String>,
@@ -423,6 +425,8 @@ struct RuntimeProfilePayload {
     locale: Option<String>,
     #[serde(default)]
     time_zone: Option<String>,
+    #[serde(default)]
+    operating_system: Option<String>,
     #[serde(default)]
     default_space_id: Option<String>,
 }

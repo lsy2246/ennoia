@@ -41,9 +41,10 @@ try {
   const setup = await fetchJson(baseUrl, "/api/bootstrap/setup", {
     method: "POST",
     body: JSON.stringify({
-      display_name: "Operator",
+      display_name: "Lin",
       locale: "zh-CN",
       time_zone: "Asia/Shanghai",
+      operating_system: "Windows",
       theme_id: "system",
     }),
   });
@@ -86,7 +87,9 @@ try {
   assert(health.status === "ok", "health status should be ok");
   assert(bootstrap.is_initialized === false, "bootstrap should start as uninitialized");
   assert(setup.bootstrap.is_initialized === true, "bootstrap setup should initialize workspace");
-  assert(profile.display_name === "Operator", "runtime profile should be persisted");
+  assert(profile.display_name === "Lin", "runtime profile should be persisted");
+  assert(profile.operating_system === "Windows", "runtime profile should persist operator system");
+  assert(envelope.message.sender === "Lin", "operator sender should follow runtime profile display name");
   assert(preferences.preference.theme_id === "system", "instance preference should be persisted");
   assert(uiMessages.bundles.length === 3, "ui messages should return requested namespaces");
   assert(

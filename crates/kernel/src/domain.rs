@@ -44,6 +44,8 @@ pub struct RuntimeProfile {
     pub display_name: String,
     pub locale: String,
     pub time_zone: String,
+    #[serde(default)]
+    pub operating_system: Option<String>,
     pub default_space_id: Option<String>,
     pub created_at: String,
     pub updated_at: String,

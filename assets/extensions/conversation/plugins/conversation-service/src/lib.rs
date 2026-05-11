@@ -10,7 +10,7 @@ use chrono::{DateTime, Utc};
 use conversations::ConversationStore;
 use ennoia_kernel::{
     ConversationBranchSpec, ConversationSpec, ConversationTopology, ExtensionRpcResponse, LaneSpec,
-    MessageRole, MessageSpec, OwnerKind, OwnerRef,
+    MessageRole, MessageSpec, OwnerKind, OwnerRef, RuntimeProfile,
 };
 use ennoia_paths::RuntimePaths;
 use serde::{Deserialize, Serialize};
@@ -173,6 +173,7 @@ struct ConversationBranchView {
 
 struct ConversationServiceState {
     store: ConversationStore,
+    runtime_paths: RuntimePaths,
 }
 
 pub fn module_name() -> &'static str {
@@ -199,6 +200,7 @@ pub async fn run() -> Result<(), Box<dyn Error + Send + Sync>> {
     initialize_conversation_schema(&pool).await?;
     let state = ConversationServiceState {
         store: ConversationStore::new(pool),
+        runtime_paths,
     };
 
     let stdin = io::stdin();
@@ -962,7 +964,8 @@ async fn append_message(
         .sender
         .clone()
         .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| default_sender.to_string());
+        .map(|value| normalize_operator_sender(&state.runtime_paths, role, value, default_sender))
+        .unwrap_or_else(|| resolve_default_sender(&state.runtime_paths, role, default_sender));
     let explicit_mentions = payload
         .message
         .mentions
@@ -1714,6 +1717,51 @@ fn message_role_from(value: &str) -> MessageRole {
 
 fn now_iso() -> String {
     Utc::now().to_rfc3339()
+}
+
+fn resolve_default_sender(
+    runtime_paths: &RuntimePaths,
+    role: MessageRole,
+    default_sender: &str,
+) -> String {
+    if role == MessageRole::Operator {
+        resolve_operator_display_name(runtime_paths).unwrap_or_else(|| default_sender.to_string())
+    } else {
+        default_sender.to_string()
+    }
+}
+
+fn normalize_operator_sender(
+    runtime_paths: &RuntimePaths,
+    role: MessageRole,
+    sender: String,
+    default_sender: &str,
+) -> String {
+    if role != MessageRole::Operator {
+        return sender.trim().to_string();
+    }
+
+    let trimmed = sender.trim();
+    if trimmed.is_empty()
+        || trimmed.eq_ignore_ascii_case(default_sender)
+        || trimmed.eq_ignore_ascii_case("operator")
+        || trimmed.eq_ignore_ascii_case("user")
+    {
+        return resolve_default_sender(runtime_paths, role, default_sender);
+    }
+
+    trimmed.to_string()
+}
+
+fn resolve_operator_display_name(runtime_paths: &RuntimePaths) -> Option<String> {
+    let contents = std::fs::read_to_string(runtime_paths.profile_config_file()).ok()?;
+    let profile = toml::from_str::<RuntimeProfile>(&contents).ok()?;
+    let trimmed = profile.display_name.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
 }
 
 fn branch_time_label(value: &str) -> String {

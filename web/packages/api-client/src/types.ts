@@ -103,6 +103,7 @@ export type RuntimeProfile = {
   display_name: string;
   locale: string;
   time_zone: string;
+  operating_system?: string | null;
   default_space_id?: string | null;
   created_at: string;
   updated_at: string;

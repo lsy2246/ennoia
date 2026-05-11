@@ -25,6 +25,7 @@ import {
 } from "@ennoia/api-client";
 import { StatusNotice } from "@/components/StatusNotice";
 import { useConversationsStore } from "@/stores/conversations";
+import { useRuntimeStore } from "@/stores/runtime";
 import { useSessionCommandsStore } from "@/stores/sessionCommands";
 import { useUiHelpers } from "@/stores/ui";
 import { useWorkbenchStore } from "@/stores/workbench";
@@ -898,6 +899,7 @@ function isConversationMissingError(error: unknown) {
 export function SessionView({ conversationId, panelId }: { conversationId: string; panelId?: string }) {
   const sessionId = conversationId;
   const { formatDateTime, t } = useUiHelpers();
+  const operatorProfile = useRuntimeStore((state) => state.profile);
   const openView = useWorkbenchStore((state) => state.openView);
   const closeView = useWorkbenchStore((state) => state.closeView);
   const registerSessionCommands = useSessionCommandsStore((state) => state.register);
@@ -1475,8 +1477,9 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
     messages: detail?.messages ?? [],
     records: detail?.records ?? [],
     localDrafts,
+    operatorDisplayName: operatorProfile?.display_name,
     resolveRecipients,
-  }), [detail?.messages, detail?.records, localDrafts, resolveRecipients]);
+  }), [detail?.messages, detail?.records, localDrafts, operatorProfile?.display_name, resolveRecipients]);
   const visibleOperations = useMemo(
     () => (detail?.operations ?? []).filter((operation) =>
       normalizeConversationBranchId(operation.branch_id, operation.lane_id) === activeConversationBranchId),
@@ -1622,6 +1625,7 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
         lane_id: draft.branchId ?? conversation.default_lane_id ?? undefined,
         branch_id: draft.branchId ?? conversation.active_branch_id ?? undefined,
         body: draft.body,
+        sender: operatorProfile?.display_name,
         addressed_agents: draft.addressedAgents,
         mentions: draft.explicitMentions,
         fork_from_message_id: draft.forkFromMessageId,
@@ -1703,7 +1707,7 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
         inFlightDraftIdRef.current = null;
       }
     }
-  }, [conversation, handleConversationMissing, notifyChanged, refreshThread]);
+  }, [conversation, handleConversationMissing, notifyChanged, operatorProfile?.display_name, refreshThread]);
 
   const dispatchCurrentMessage = useCallback(() => {
     if (!conversation) {
