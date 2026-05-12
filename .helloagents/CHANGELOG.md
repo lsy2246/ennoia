@@ -1,5 +1,20 @@
 # 变更日志
 
+## [0.2.5] - 2026-05-12
+
+### 修复
+- **[web-skills]**: 精简技能页信息结构，移除重复的“使用方式”和低价值的“已分配”展示，并在每个技能卡片右上角补上可直接切换的启用/停用按钮 — by lsy
+  - 方案: [202605121029_skill-page-toggle](archive/2026-05/202605121029_skill-page-toggle/)
+  - 决策: skill-page-toggle#D001(在卡片头部直接提供启停按钮)
+
+### 快速修改
+- **[web-skills]**: 删除技能卡片里的“状态”展示块，保留右上角启用/停用按钮作为唯一状态入口 — by lsy
+  - 类型: 快速修改（无方案包）
+  - 文件: web/src/pages/skills.tsx
+- **[skill-config]**: 为技能页补齐技能级配置与手动检测链路；`skill.toml` 现在支持 `settings[]` 和 `diagnostics.check`，宿主新增 `skills/{id}/config|status|check` 接口，前端则提供统一配置弹层、就绪摘要与逐项环境检测展示；内置 `web-search` 也接入了 Lightpanda 路径配置和结构化 doctor 检测 — by Codex
+  - 类型: 快速修改（无方案包）
+  - 文件: crates/kernel/src/config.rs, crates/server/src/skills.rs, crates/server/src/routes/resources.rs, web/src/pages/skills.tsx, assets/skills/web-search/skill.toml, assets/skills/web-search/scripts/doctor.mjs, docs/api-surface.md, docs/extension-development.md, docs/runtime-layout.md
+
 ## [0.2.4] - 2026-05-11
 
 ### 重构

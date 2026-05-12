@@ -244,12 +244,84 @@ export type SkillConfig = {
   actions: SkillActionConfig[];
   enabled: boolean;
   builtin_sync_blocked: boolean;
+  settings: ExtensionSettingField[];
+  diagnostics: SkillDiagnosticsSpec;
+  readiness: SkillReadinessSummary;
 };
 
 export type SkillActionConfig = {
   id: string;
   description: string;
   entry: string;
+};
+
+export type SkillDiagnosticsSpec = {
+  manual_check: boolean;
+  check?: SkillCommandSpec | null;
+};
+
+export type SkillCommandSpec = {
+  runner: string;
+  entry: string;
+  args: string[];
+  timeout_ms?: number | null;
+};
+
+export type SkillReadinessSummary = {
+  status: SkillRuntimeStatus;
+  summary: string;
+  checked_at?: string | null;
+};
+
+export type SkillRuntimeStatus =
+  | "ready"
+  | "partial"
+  | "missing_config"
+  | "env_missing"
+  | "error"
+  | "unknown";
+
+export type SkillCheckCategory =
+  | "config"
+  | "environment"
+  | "permission"
+  | "dependency"
+  | "connectivity";
+
+export type SkillCheckItemStatus =
+  | "ok"
+  | "missing"
+  | "warning"
+  | "error"
+  | "skipped";
+
+export type SkillCheckItem = {
+  key: string;
+  category: SkillCheckCategory;
+  label: string;
+  status: SkillCheckItemStatus;
+  required: boolean;
+  message?: string | null;
+  fix_hint?: string | null;
+};
+
+export type SkillCheckAction = {
+  key: string;
+  label: string;
+  kind: string;
+};
+
+export type SkillCheckResult = {
+  status: SkillRuntimeStatus;
+  summary: string;
+  checked_at?: string | null;
+  items: SkillCheckItem[];
+  actions: SkillCheckAction[];
+};
+
+export type SkillSettingsResponse = {
+  skill_id: string;
+  values: Record<string, string | number | boolean>;
 };
 
 export type ProviderModelDescriptor = {

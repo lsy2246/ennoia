@@ -65,7 +65,7 @@
 - 核心文本日志与前端日志写入对应 home 的 `data/system/logs/`；开发态默认是仓库 `.dev/data/system/logs/`。
 - 运行态与开发态的 pid 文件统一写入对应 home 的 `data/system/pids/`。
 - 扩展私有数据写入对应 home 的 `data/extensions/{extension_id}/`，扩展级宿主配置写入 `config/extensions/{extension_id}.toml`。
-- 技能私有数据写入对应 home 的 `data/skills/{skill_id}/`，技能级宿主配置写入 `config/skills/{skill_id}.toml`。
+- 技能私有数据写入对应 home 的 `data/skills/{skill_id}/`，其中最近一次检测结果缓存为 `status.json`；技能级宿主配置写入 `config/skills/{skill_id}.toml`。
 - 核心不提供主业务 SQLite，不内建语义记忆、编排、任务或产物索引表。
 
 ## 启动方式

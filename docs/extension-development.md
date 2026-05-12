@@ -232,7 +232,7 @@ Skill 目录独立：
 └─ assets/           # 可选：skill 自带资源
 ```
 
-`skill.toml` 现在只保留最小运行字段：
+`skill.toml` 至少包含这些运行字段：
 
 - `id`
 - `version`
@@ -240,17 +240,46 @@ Skill 目录独立：
 - `mount.mode`
 - `actions[]`
 
+可选的宿主管理字段：
+
+- `settings[]`：声明技能级配置字段，由宿主统一渲染表单并保存到 `~/.ennoia/config/skills/{skill_id}.toml`
+- `diagnostics.manual_check`：是否在 UI 中显示“重新检测”按钮
+- `diagnostics.check`：技能自定义的检测命令，宿主会把当前配置通过 `ENNOIA_SKILL_CONFIG_JSON` 注入后执行，并把结构化结果缓存到 `~/.ennoia/data/skills/{skill_id}/status.json`
+
 其中 `actions[]` 只声明：
 
 - `id`
 - `description`
 - `entry`
 
+`settings[]` 当前复用扩展设置字段模型，支持：
+
+- `text`
+- `textarea`
+- `boolean`
+- `select`
+- `number`
+
+`diagnostics.check` 当前推荐字段：
+
+- `runner`：`node` / `bun` / `python` / `direct`
+- `entry`：相对技能根目录的检测入口
+- `args[]`
+- `timeout_ms`
+
+检测命令推荐输出 JSON，结构应包含：
+
+- `status`：`ready` / `partial` / `missing_config` / `env_missing` / `error` / `unknown`
+- `summary`
+- `items[]`：逐项检查结果，建议标注 `category`、`status`、`label`、`message`、`fix_hint`
+
 约定：
 
 - `actions[]` 表示对外可调用入口，不等于 skill 目录里的所有脚本。
 - 默认一个 skill 只暴露一个 action；只有当用户能明确感知为多个独立能力，或审批/权限、输入输出契约显著不同，才拆成多 action。
 - 调试脚本、浏览器包装器、安装脚本和内部子流程都应留在 `scripts/`，不要为了实现细节把它们直接提升成 action。
+- `settings[]` 只负责声明“用户可填写什么”，不要把环境探测结果硬编码进配置表单。
+- `diagnostics.check` 负责声明“技能如何判断自己是否可用”；宿主只负责统一展示，不让每个技能自定义整块页面。
 
 Skill 的具体调用方式、常见输入、常见输出和平台限制统一写在 `README.md` 中；不要再把这些内容拆成 `docs`、`keywords` 或额外 schema 目录。
 

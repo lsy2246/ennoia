@@ -4,6 +4,10 @@ use crate::app::{
     write_agent_document,
 };
 use crate::realtime::RealtimeEvent;
+use crate::skills::{
+    load_skill_manifest, load_skill_settings, load_skill_status, run_skill_check,
+    save_skill_settings, validate_skill_settings_payload,
+};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentRecord {
     #[serde(flatten)]
@@ -168,6 +172,70 @@ pub(super) async fn skill_delete(
     } else {
         Err(ApiError::not_found(format!("skill '{skill_id}' not found")))
     }
+}
+
+pub(super) async fn skill_settings(
+    State(state): State<AppState>,
+    Extension(request): Extension<RequestContext>,
+    Path(skill_id): Path<String>,
+) -> ApiResult<SkillSettingsRecord> {
+    let manifest = load_skill_manifest(&state.runtime_paths, &skill_id).map_err(|error| {
+        scoped(
+            ApiError::not_found(format!("skill '{skill_id}' not found: {error}")),
+            &request,
+        )
+    })?;
+    Ok(Json(load_skill_settings(&state.runtime_paths, &manifest)))
+}
+
+pub(super) async fn skill_settings_put(
+    State(state): State<AppState>,
+    Extension(request): Extension<RequestContext>,
+    Path(skill_id): Path<String>,
+    Json(payload): Json<SkillSettingsPayload>,
+) -> ApiResult<SkillSettingsRecord> {
+    let manifest = load_skill_manifest(&state.runtime_paths, &skill_id).map_err(|error| {
+        scoped(
+            ApiError::not_found(format!("skill '{skill_id}' not found: {error}")),
+            &request,
+        )
+    })?;
+    validate_skill_settings_payload(&manifest, &payload)
+        .map_err(|error| scoped(ApiError::bad_request(error), &request))?;
+    save_skill_settings(&state.runtime_paths, &manifest, &payload)
+        .map(Json)
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))
+}
+
+pub(super) async fn skill_status(
+    State(state): State<AppState>,
+    Extension(request): Extension<RequestContext>,
+    Path(skill_id): Path<String>,
+) -> ApiResult<SkillCheckResult> {
+    let manifest = load_skill_manifest(&state.runtime_paths, &skill_id).map_err(|error| {
+        scoped(
+            ApiError::not_found(format!("skill '{skill_id}' not found: {error}")),
+            &request,
+        )
+    })?;
+    Ok(Json(load_skill_status(&state.runtime_paths, &manifest)))
+}
+
+pub(super) async fn skill_check(
+    State(state): State<AppState>,
+    Extension(request): Extension<RequestContext>,
+    Path(skill_id): Path<String>,
+) -> ApiResult<SkillCheckResult> {
+    let manifest = load_skill_manifest(&state.runtime_paths, &skill_id).map_err(|error| {
+        scoped(
+            ApiError::not_found(format!("skill '{skill_id}' not found: {error}")),
+            &request,
+        )
+    })?;
+    run_skill_check(&state.runtime_paths, &manifest)
+        .await
+        .map(Json)
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))
 }
 
 pub(super) async fn model_endpoints(

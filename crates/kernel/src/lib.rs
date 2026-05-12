@@ -19,8 +19,11 @@ pub mod ui;
 pub use config::{
     AgentConfig, AgentDocument, ExtensionDevSourceEntry, ExtensionRegistryEntry,
     ExtensionRegistryFile, ModelEndpointConfig, ModelEndpointModelDiscoveryConfig, ServerConfig,
-    SkillActionConfig, SkillConfig, SkillManifest, SkillMountConfig, SkillRegistryEntry,
-    SkillRegistryFile, UiApiConfig, UiConfig, UiNotificationConfig,
+    SkillActionConfig, SkillCheckAction, SkillCheckCategory, SkillCheckItem, SkillCheckItemStatus,
+    SkillCheckResult, SkillCommandSpec, SkillConfig, SkillDiagnosticsSpec, SkillManifest,
+    SkillMountConfig, SkillReadinessSummary, SkillRegistryEntry, SkillRegistryFile,
+    SkillRuntimeStatus, SkillSettingsPayload, SkillSettingsRecord, UiApiConfig, UiConfig,
+    UiNotificationConfig,
 };
 pub use context::{ContextFrame, ContextLayer, RunContext};
 pub use decision::{Decision, DecisionSnapshot, NextAction};

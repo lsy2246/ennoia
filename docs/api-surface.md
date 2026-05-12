@@ -35,12 +35,26 @@
 - `GET /api/skills/{skill_id}`
 - `PUT /api/skills/{skill_id}`
 - `DELETE /api/skills/{skill_id}`
+- `GET /api/skills/{skill_id}/config`
+- `PUT /api/skills/{skill_id}/config`
+- `GET /api/skills/{skill_id}/status`
+- `POST /api/skills/{skill_id}/check`
 
 - `GET /api/model-endpoints`
 - `POST /api/model-endpoints`
 - `GET /api/model-endpoints/{model_endpoint_id}`
 - `PUT /api/model-endpoints/{model_endpoint_id}`
 - `DELETE /api/model-endpoints/{model_endpoint_id}`
+
+`GET /api/skills/{skill_id}` 返回技能元信息与当前轻量就绪摘要；当技能声明了 `settings[]` 或 `diagnostics` 时，宿主会一并返回这部分元数据。
+
+`GET /api/skills/{skill_id}/config` 返回技能当前生效的技能级配置；宿主会把 `skill.toml` 里的默认值和 `~/.ennoia/config/skills/{skill_id}.toml` 中的已保存值合并后返回。
+
+`PUT /api/skills/{skill_id}/config` 接收技能声明过的配置字段值，宿主会按 `skill.toml` 做键、类型、必填项和 `select` 值校验，然后写入 `~/.ennoia/config/skills/{skill_id}.toml`。
+
+`GET /api/skills/{skill_id}/status` 返回当前技能的最近一次检测结果；如果必填配置未完成，宿主会直接返回 `missing_config` 摘要，即使还没有执行过手动检测。
+
+`POST /api/skills/{skill_id}/check` 主动执行技能声明的检测命令，并把结构化结果缓存到 `~/.ennoia/data/skills/{skill_id}/status.json`。
 
 ## Extension
 

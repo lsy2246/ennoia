@@ -5329,6 +5329,24 @@ label {
   gap: 14px;
 }
 
+.skills-card__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.skills-card__readiness {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.skills-card__summary {
+  margin: 0;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
 .skills-card__description {
   margin: 0;
   color: var(--text-muted);
@@ -5377,6 +5395,114 @@ label {
 .skills-card__footer {
   flex-wrap: wrap;
   justify-content: flex-start;
+}
+
+.skill-config-modal {
+  width: min(920px, calc(100vw - 48px));
+}
+
+.skill-config-modal__content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.skill-config-modal__section {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px 18px;
+  border: 1px solid color-mix(in srgb, var(--registry-line) 92%, transparent);
+  border-radius: var(--radius-lg);
+  background: #ffffff;
+}
+
+.skill-config-modal__section-header,
+.skill-check-card__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.skill-config-modal__summary {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--text-muted);
+}
+
+.skill-config-modal__summary strong {
+  color: var(--text);
+  font-size: var(--text-md);
+}
+
+.skill-config-modal__issue-summary {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+.skills-settings-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.skills-setting-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.skills-setting-field--wide {
+  grid-column: 1 / -1;
+}
+
+.skills-setting-field__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.skills-setting-field__label em {
+  font-style: normal;
+  font-size: var(--text-xs);
+  color: var(--accent);
+}
+
+.skills-setting-field__help {
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+.skill-check-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.skill-check-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.skill-check-card p,
+.skill-check-card small {
+  margin: 0;
+  line-height: 1.6;
+}
+
+.skill-check-card p {
+  color: var(--text);
+}
+
+.skill-check-card small {
+  color: var(--text-muted);
 }
 
 .schedules-form-section {
@@ -6349,6 +6475,7 @@ label {
   .composer,
   .form-grid,
   .kv-list,
+  .skills-settings-grid,
   .skills-meta-grid,
   .logs-filter-grid,
   .filter-bar {
@@ -6802,6 +6929,8 @@ label {
   .conversation-branch-overview,
   .session-manager-modal__header,
   .session-manager-modal__item,
+  .skill-config-modal__section-header,
+  .skill-check-card__header,
   .branch-manager__item,
   .branch-manager__actions {
     flex-direction: column;

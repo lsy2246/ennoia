@@ -92,7 +92,7 @@
 - `config/extensions.toml`：扩展运行时覆盖状态，记录 `enabled` 与 `blocked_builtin_sync`；开发态目录中额外保存 `dev_sources`。
 - `config/skills.toml`：技能运行时覆盖状态，记录 `enabled` 与 `blocked_builtin_sync`。
 - `config/extensions/{extension_id}.toml`：扩展级宿主配置，例如声明过的 `settings[]`。
-- `config/skills/{skill_id}.toml`：技能级宿主配置，供后续技能级设置落盘。
+- `config/skills/{skill_id}.toml`：技能级宿主配置，保存技能声明过的设置字段值。
 
 ## 数据职责
 
@@ -108,6 +108,7 @@
   - `memory` 扩展在自己的目录中维护完整记忆系统数据。
   - `workflow` 扩展在自己的目录中维护 run / task / artifact / handoff 等运行数据。
 - `data/skills/{skill_id}/`：技能私有运行数据根目录。
+  - `status.json`：最近一次技能检测结果缓存，供技能页展示“是否就绪 / 缺什么 / 为什么不可用”。
 
 ## 目录职责
 

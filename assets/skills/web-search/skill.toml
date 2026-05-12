@@ -9,3 +9,19 @@ mode = "auto"
 id = "search"
 description = "统一网页搜索入口，可返回候选结果并按需提取候选页面正文。"
 entry = "scripts/search-runner.mjs"
+
+[[settings]]
+key = "lightpanda_executable_path"
+label = { key = "skill.web_search.lightpanda_executable_path", fallback = "Lightpanda 可执行文件" }
+description = { key = "skill.web_search.lightpanda_executable_path.help", fallback = "可选。Windows 原生环境下建议显式指定 Lightpanda 路径；留空时使用系统环境变量或默认缓存目录。" }
+type = "text"
+placeholder = "C:/Users/<you>/.cache/lightpanda-node/lightpanda.exe"
+required = false
+
+[diagnostics]
+manual_check = true
+
+[diagnostics.check]
+runner = "node"
+entry = "scripts/doctor.mjs"
+timeout_ms = 15000

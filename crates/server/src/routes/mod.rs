@@ -26,8 +26,9 @@ use ennoia_extension_host::{
 };
 use ennoia_kernel::{
     AgentConfig, BootstrapState, ExtensionDiagnostic, ExtensionRuntimeEvent, HookEventEnvelope,
-    LocalizedText, ModelEndpointConfig, RuntimeProfile, ServerConfig, SkillConfig, UiConfig,
-    UiPreference, UiPreferenceRecord,
+    LocalizedText, ModelEndpointConfig, RuntimeProfile, ServerConfig, SkillCheckResult,
+    SkillConfig, SkillSettingsPayload, SkillSettingsRecord, UiConfig, UiPreference,
+    UiPreferenceRecord,
 };
 use ennoia_logs::RequestContext;
 use serde::{Deserialize, Serialize};
@@ -227,6 +228,12 @@ pub fn build_router(state: AppState) -> Router {
             "/api/skills/{skill_id}",
             get(skill_detail).put(skill_update).delete(skill_delete),
         )
+        .route(
+            "/api/skills/{skill_id}/config",
+            get(skill_settings).put(skill_settings_put),
+        )
+        .route("/api/skills/{skill_id}/status", get(skill_status))
+        .route("/api/skills/{skill_id}/check", post(skill_check))
         .route(
             "/api/model-endpoints",
             get(model_endpoints).post(model_endpoint_create),

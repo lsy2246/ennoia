@@ -29,6 +29,7 @@ use crate::middleware::RateLimitState;
 use crate::operations::OperationStore;
 use crate::realtime::RealtimeHub;
 use crate::routes::{build_router, run_due_schedules_once};
+use crate::skills::load_skill_readiness_summary;
 
 type AppError = Box<dyn std::error::Error + Send + Sync>;
 
@@ -659,6 +660,7 @@ pub fn load_skill_configs(paths: &RuntimePaths) -> Result<Vec<SkillConfig>, AppE
             }
             let manifest = load_skill_manifest_from_path(&descriptor_path)?;
             let enabled = enabled_by_id.get(&manifest.id).copied().unwrap_or(true);
+            let readiness = load_skill_readiness_summary(paths, &manifest);
             skills.push(SkillConfig {
                 id: manifest.id.clone(),
                 version: manifest.version,
@@ -667,6 +669,9 @@ pub fn load_skill_configs(paths: &RuntimePaths) -> Result<Vec<SkillConfig>, AppE
                 actions: manifest.actions,
                 enabled,
                 builtin_sync_blocked: blocked.contains(&manifest.id),
+                settings: manifest.settings,
+                diagnostics: manifest.diagnostics,
+                readiness,
             });
         }
     }
@@ -998,6 +1003,8 @@ pub fn upsert_skill_package(paths: &RuntimePaths, payload: &SkillConfig) -> Resu
             description: payload.description.clone(),
             mount: payload.mount.clone(),
             actions: payload.actions.clone(),
+            settings: payload.settings.clone(),
+            diagnostics: payload.diagnostics.clone(),
         })?,
     )?;
 

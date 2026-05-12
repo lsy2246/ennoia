@@ -13,6 +13,7 @@ pub mod pipeline;
 pub mod realtime;
 pub mod routes;
 pub mod runtime_bridge;
+pub mod skills;
 
 pub use app::{bootstrap_app_state, default_app_state, run_server, AppState};
 pub use routes::build_router;

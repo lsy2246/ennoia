@@ -13,65 +13,145 @@ const lightpandaDefaultPath = path.join(
   process.platform === "win32" ? "lightpanda.exe" : "lightpanda",
 );
 
-const checks = [];
-
-function pushCheck(name, ok, detail) {
-  checks.push({ name, ok, detail });
+let config = {};
+try {
+  config = JSON.parse(process.env.ENNOIA_SKILL_CONFIG_JSON || "{}");
+} catch {
+  config = {};
 }
 
-pushCheck(
-  "package.json",
-  existsSync(path.join(skillRoot, "package.json")),
-  "技能包依赖清单存在",
-);
+const configuredExecutable = typeof config.lightpanda_executable_path === "string"
+  ? config.lightpanda_executable_path.trim()
+  : "";
+const explicitExecutable = configuredExecutable || process.env.LIGHTPANDA_EXECUTABLE_PATH || "";
+const explicitExecutableExists = explicitExecutable ? existsSync(explicitExecutable) : false;
+const defaultExecutableExists = existsSync(lightpandaDefaultPath);
 
-pushCheck(
-  "agent-browser",
-  existsSync(
+const items = [];
+
+function pushItem({
+  key,
+  category,
+  label,
+  status,
+  required = true,
+  message,
+  fix_hint,
+}) {
+  items.push({ key, category, label, status, required, message, fix_hint });
+}
+
+pushItem({
+  key: "package-json",
+  category: "dependency",
+  label: "package.json",
+  status: existsSync(path.join(skillRoot, "package.json")) ? "ok" : "missing",
+  message: "技能包依赖清单存在",
+  fix_hint: "确认技能目录完整同步到本地实例。",
+});
+
+pushItem({
+  key: "agent-browser",
+  category: "dependency",
+  label: "agent-browser",
+  status: existsSync(
     path.join(
       skillRoot,
       "node_modules",
       ".bin",
       process.platform === "win32" ? "agent-browser.exe" : "agent-browser",
     ),
-  ),
-  "agent-browser 二进制入口已安装",
-);
+  ) ? "ok" : "missing",
+  message: "agent-browser 二进制入口已安装",
+  fix_hint: "在技能目录下重新运行 `node scripts/setup.mjs`。",
+});
 
-pushCheck(
-  "lightpanda-package",
-  existsSync(path.join(skillRoot, "node_modules", "@lightpanda", "browser", "package.json")),
-  "@lightpanda/browser 包已安装",
-);
+pushItem({
+  key: "lightpanda-package",
+  category: "dependency",
+  label: "@lightpanda/browser",
+  status: existsSync(path.join(skillRoot, "node_modules", "@lightpanda", "browser", "package.json"))
+    ? "ok"
+    : "missing",
+  message: "@lightpanda/browser 包已安装",
+  fix_hint: "在技能目录下重新运行 `node scripts/setup.mjs`。",
+});
 
-const hasExplicitExecutable = Boolean(process.env.LIGHTPANDA_EXECUTABLE_PATH);
-const hasDefaultExecutable = existsSync(lightpandaDefaultPath);
+if (configuredExecutable && !explicitExecutableExists) {
+  pushItem({
+    key: "lightpanda-config-path",
+    category: "config",
+    label: "Lightpanda 路径",
+    status: "error",
+    required: false,
+    message: `配置中的可执行文件不存在：${configuredExecutable}`,
+    fix_hint: "修正配置里的路径，或清空后改用环境变量 / 默认缓存目录。",
+  });
+}
 
 if (process.platform === "win32") {
-  pushCheck(
-    "lightpanda-runtime",
-    hasExplicitExecutable,
-    hasExplicitExecutable
-      ? "已显式设置 LIGHTPANDA_EXECUTABLE_PATH"
-      : "Windows 原生不自带 Lightpanda 二进制；请在 WSL2 中运行，或显式设置 LIGHTPANDA_EXECUTABLE_PATH",
-  );
-} else {
-  pushCheck(
-    "lightpanda-runtime",
-    hasExplicitExecutable || hasDefaultExecutable,
-    hasExplicitExecutable || hasDefaultExecutable
+  pushItem({
+    key: "lightpanda-runtime",
+    category: "environment",
+    label: "Lightpanda 运行时",
+    status: explicitExecutableExists ? "ok" : "missing",
+    message: explicitExecutableExists
       ? "检测到可用的 Lightpanda 可执行文件"
-      : "未检测到 Lightpanda 可执行文件；请重新运行 `node scripts/setup.mjs`",
-  );
+      : "Windows 原生环境需要显式提供 Lightpanda 可执行文件路径",
+    fix_hint: explicitExecutableExists
+      ? undefined
+      : "在配置里填写 Lightpanda 可执行文件路径，或切换到 WSL2 后运行 setup。",
+  });
+} else {
+  pushItem({
+    key: "lightpanda-runtime",
+    category: "environment",
+    label: "Lightpanda 运行时",
+    status: explicitExecutableExists || defaultExecutableExists ? "ok" : "missing",
+    message: explicitExecutableExists || defaultExecutableExists
+      ? "检测到可用的 Lightpanda 可执行文件"
+      : "未检测到 Lightpanda 可执行文件",
+    fix_hint: explicitExecutableExists || defaultExecutableExists
+      ? undefined
+      : "在技能目录下重新运行 `node scripts/setup.mjs`，或在配置中显式填写路径。",
+  });
 }
 
-const failed = checks.filter((item) => !item.ok);
+const issues = items.filter((item) => item.status !== "ok" && item.status !== "skipped");
 
-for (const check of checks) {
-  const prefix = check.ok ? "OK" : "ERR";
-  console.log(`${prefix} ${check.name}: ${check.detail}`);
+let status = "ready";
+if (issues.some((item) => item.category === "config")) {
+  status = "missing_config";
+} else if (issues.some((item) => item.required && item.category !== "config")) {
+  status = "env_missing";
+} else if (issues.some((item) => item.status === "error")) {
+  status = "error";
+} else if (issues.length > 0) {
+  status = "partial";
 }
 
-if (failed.length > 0) {
+const summary = (() => {
+  if (issues.length === 0) {
+    return "web-search 已就绪。";
+  }
+  if (status === "missing_config") {
+    return "配置存在问题，请修正后重新检测。";
+  }
+  if (status === "env_missing") {
+    return "运行环境未满足，请先补齐依赖或运行时。";
+  }
+  if (status === "partial") {
+    return "部分检查未通过。";
+  }
+  return "技能检测失败。";
+})();
+
+console.log(JSON.stringify({
+  status,
+  summary,
+  items,
+}));
+
+if (issues.length > 0) {
   process.exit(1);
 }

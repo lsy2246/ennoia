@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::extension::ProviderModelDescriptor;
+use crate::extension::{ExtensionSettingFieldSpec, ExtensionSettingValue};
 use crate::permission::{AgentExecutionEnvironment, AgentPermissionProfile};
 use crate::server_settings::{
     default_local_dev_origins, BackgroundRuntimeConfig, BodyLimitConfig, BootstrapState,
@@ -345,6 +346,10 @@ pub struct SkillManifest {
     pub mount: SkillMountConfig,
     #[serde(default)]
     pub actions: Vec<SkillActionConfig>,
+    #[serde(default)]
+    pub settings: Vec<ExtensionSettingFieldSpec>,
+    #[serde(default)]
+    pub diagnostics: SkillDiagnosticsSpec,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -386,6 +391,128 @@ pub struct SkillConfig {
     pub enabled: bool,
     #[serde(default)]
     pub builtin_sync_blocked: bool,
+    #[serde(default)]
+    pub settings: Vec<ExtensionSettingFieldSpec>,
+    #[serde(default)]
+    pub diagnostics: SkillDiagnosticsSpec,
+    #[serde(default)]
+    pub readiness: SkillReadinessSummary,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SkillDiagnosticsSpec {
+    #[serde(default)]
+    pub manual_check: bool,
+    #[serde(default)]
+    pub check: Option<SkillCommandSpec>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SkillCommandSpec {
+    #[serde(default = "default_skill_command_runner")]
+    pub runner: String,
+    #[serde(default)]
+    pub entry: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub timeout_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SkillReadinessSummary {
+    #[serde(default)]
+    pub status: SkillRuntimeStatus,
+    #[serde(default)]
+    pub summary: String,
+    #[serde(default)]
+    pub checked_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SkillSettingsRecord {
+    #[serde(default)]
+    pub skill_id: String,
+    #[serde(default)]
+    pub values: BTreeMap<String, ExtensionSettingValue>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SkillSettingsPayload {
+    #[serde(default)]
+    pub values: BTreeMap<String, ExtensionSettingValue>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillRuntimeStatus {
+    Ready,
+    Partial,
+    MissingConfig,
+    EnvMissing,
+    Error,
+    Unknown,
+}
+
+impl Default for SkillRuntimeStatus {
+    fn default() -> Self {
+        Self::Unknown
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillCheckCategory {
+    Config,
+    Environment,
+    Permission,
+    Dependency,
+    Connectivity,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SkillCheckItemStatus {
+    Ok,
+    Missing,
+    Warning,
+    Error,
+    Skipped,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SkillCheckItem {
+    pub key: String,
+    pub category: SkillCheckCategory,
+    pub label: String,
+    pub status: SkillCheckItemStatus,
+    #[serde(default)]
+    pub required: bool,
+    #[serde(default)]
+    pub message: Option<String>,
+    #[serde(default)]
+    pub fix_hint: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SkillCheckAction {
+    pub key: String,
+    pub label: String,
+    pub kind: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SkillCheckResult {
+    #[serde(default)]
+    pub status: SkillRuntimeStatus,
+    #[serde(default)]
+    pub summary: String,
+    #[serde(default)]
+    pub checked_at: Option<String>,
+    #[serde(default)]
+    pub items: Vec<SkillCheckItem>,
+    #[serde(default)]
+    pub actions: Vec<SkillCheckAction>,
 }
 
 /// ExtensionRegistryFile stores extension package registration records under `config/extensions.toml`.
@@ -496,6 +623,10 @@ fn default_skill_version() -> String {
 
 fn default_skill_mount_mode() -> String {
     "auto".to_string()
+}
+
+fn default_skill_command_runner() -> String {
+    "node".to_string()
 }
 
 #[cfg(test)]

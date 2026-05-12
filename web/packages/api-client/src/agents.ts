@@ -4,7 +4,9 @@ import type {
   AgentProfile,
   ModelEndpointConfig,
   ModelEndpointModelsResponse,
+  SkillCheckResult,
   SkillConfig,
+  SkillSettingsResponse,
 } from "./types";
 
 const MODEL_ENDPOINTS_API = "/api/model-endpoints";
@@ -49,6 +51,10 @@ export async function listSkills() {
   return fetchJson<SkillConfig[]>("/api/skills");
 }
 
+export async function getSkill(skillId: string) {
+  return fetchJson<SkillConfig>(`/api/skills/${skillId}`);
+}
+
 export async function createSkill(payload: SkillConfig) {
   return fetchJson<SkillConfig>("/api/skills", {
     method: "POST",
@@ -65,6 +71,31 @@ export async function updateSkill(skillId: string, payload: SkillConfig) {
 
 export async function deleteSkill(skillId: string) {
   return fetchJson<void>(`/api/skills/${skillId}`, { method: "DELETE" });
+}
+
+export async function getSkillSettings(skillId: string) {
+  return fetchJson<SkillSettingsResponse>(`/api/skills/${skillId}/config`);
+}
+
+export async function saveSkillSettings(
+  skillId: string,
+  values: Record<string, string | number | boolean>,
+) {
+  return fetchJson<SkillSettingsResponse>(`/api/skills/${skillId}/config`, {
+    method: "PUT",
+    body: JSON.stringify({ values }),
+  });
+}
+
+export async function getSkillStatus(skillId: string) {
+  return fetchJson<SkillCheckResult>(`/api/skills/${skillId}/status`);
+}
+
+export async function runSkillCheck(skillId: string) {
+  return fetchJson<SkillCheckResult>(`/api/skills/${skillId}/check`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
 }
 
 export async function listModelEndpoints() {
