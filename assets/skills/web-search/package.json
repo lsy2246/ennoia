@@ -9,8 +9,6 @@
     "agent-browser"
   ],
   "scripts": {
-    "setup": "node scripts/setup.mjs",
-    "doctor": "node scripts/doctor.mjs",
     "search": "node scripts/search-runner.mjs",
     "browse": "node scripts/agent-browser-lightpanda.mjs"
   },

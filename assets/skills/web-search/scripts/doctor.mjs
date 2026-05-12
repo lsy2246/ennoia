@@ -3,29 +3,17 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  describeResolvedSource,
+  isWindowsNative,
+  lightpandaDefaultPath,
+  resolveLightpandaRuntime,
+  windowsRuntimeGuidance,
+} from "./runtime.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const skillRoot = path.resolve(scriptDir, "..");
-const lightpandaDefaultPath = path.join(
-  process.env.USERPROFILE || process.env.HOME || "",
-  ".cache",
-  "lightpanda-node",
-  process.platform === "win32" ? "lightpanda.exe" : "lightpanda",
-);
-
-let config = {};
-try {
-  config = JSON.parse(process.env.ENNOIA_SKILL_CONFIG_JSON || "{}");
-} catch {
-  config = {};
-}
-
-const configuredExecutable = typeof config.lightpanda_executable_path === "string"
-  ? config.lightpanda_executable_path.trim()
-  : "";
-const explicitExecutable = configuredExecutable || process.env.LIGHTPANDA_EXECUTABLE_PATH || "";
-const explicitExecutableExists = explicitExecutable ? existsSync(explicitExecutable) : false;
-const defaultExecutableExists = existsSync(lightpandaDefaultPath);
+const runtime = resolveLightpandaRuntime();
 
 const items = [];
 
@@ -63,7 +51,7 @@ pushItem({
     ),
   ) ? "ok" : "missing",
   message: "agent-browser 二进制入口已安装",
-  fix_hint: "在技能目录下重新运行 `node scripts/setup.mjs`。",
+  fix_hint: "请先在技能目录自行安装依赖，再重新尝试。",
 });
 
 pushItem({
@@ -74,46 +62,44 @@ pushItem({
     ? "ok"
     : "missing",
   message: "@lightpanda/browser 包已安装",
-  fix_hint: "在技能目录下重新运行 `node scripts/setup.mjs`。",
+  fix_hint: "请先在技能目录自行安装依赖，再重新尝试。",
 });
 
-if (configuredExecutable && !explicitExecutableExists) {
+if (runtime.configuredPath && !runtime.configuredExists) {
   pushItem({
     key: "lightpanda-config-path",
     category: "config",
     label: "Lightpanda 路径",
     status: "error",
     required: false,
-    message: `配置中的可执行文件不存在：${configuredExecutable}`,
+    message: `配置中的可执行文件不存在：${runtime.configuredPath}`,
     fix_hint: "修正配置里的路径，或清空后改用环境变量 / 默认缓存目录。",
   });
 }
 
-if (process.platform === "win32") {
+if (isWindowsNative) {
   pushItem({
     key: "lightpanda-runtime",
     category: "environment",
     label: "Lightpanda 运行时",
-    status: explicitExecutableExists ? "ok" : "missing",
-    message: explicitExecutableExists
-      ? "检测到可用的 Lightpanda 可执行文件"
-      : "Windows 原生环境需要显式提供 Lightpanda 可执行文件路径",
-    fix_hint: explicitExecutableExists
-      ? undefined
-      : "在配置里填写 Lightpanda 可执行文件路径，或切换到 WSL2 后运行 setup。",
+    status: runtime.resolvedPath ? "ok" : "missing",
+    message: runtime.resolvedPath
+      ? `检测到可用的 Lightpanda 可执行文件（${describeResolvedSource(runtime.resolvedSource)}）`
+      : `Windows 原生环境还缺少 Lightpanda 可执行文件。默认缓存目录：${lightpandaDefaultPath}`,
+    fix_hint: runtime.resolvedPath ? undefined : windowsRuntimeGuidance(),
   });
 } else {
   pushItem({
     key: "lightpanda-runtime",
     category: "environment",
     label: "Lightpanda 运行时",
-    status: explicitExecutableExists || defaultExecutableExists ? "ok" : "missing",
-    message: explicitExecutableExists || defaultExecutableExists
-      ? "检测到可用的 Lightpanda 可执行文件"
+    status: runtime.resolvedPath ? "ok" : "missing",
+    message: runtime.resolvedPath
+      ? `检测到可用的 Lightpanda 可执行文件（${describeResolvedSource(runtime.resolvedSource)}）`
       : "未检测到 Lightpanda 可执行文件",
-    fix_hint: explicitExecutableExists || defaultExecutableExists
+    fix_hint: runtime.resolvedPath
       ? undefined
-      : "在技能目录下重新运行 `node scripts/setup.mjs`，或在配置中显式填写路径。",
+      : "请先自行补齐运行时，或在配置中显式填写路径。",
   });
 }
 

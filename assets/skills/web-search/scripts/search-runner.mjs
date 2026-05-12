@@ -6,10 +6,12 @@ import { fileURLToPath } from "node:url";
 import { load as loadHtml } from "cheerio";
 import { DOMParser } from "linkedom";
 import { Readability } from "@mozilla/readability";
-import { lightpanda } from "@lightpanda/browser";
+
+import { isWindowsNative, resolveLightpandaRuntime, windowsRuntimeGuidance } from "./runtime.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const skillRoot = path.resolve(scriptDir, "..");
+let lightpandaRuntime = null;
 
 const DEFAULT_LIMIT = 5;
 const DEFAULT_PAGES = 3;
@@ -67,9 +69,15 @@ function parseArgs(argv) {
 }
 
 function ensureRuntime() {
-  if (process.platform === "win32" && !process.env.LIGHTPANDA_EXECUTABLE_PATH) {
+  const runtime = resolveLightpandaRuntime();
+  if (runtime.resolvedPath) {
+    process.env.LIGHTPANDA_EXECUTABLE_PATH = runtime.resolvedPath;
+    return;
+  }
+
+  if (isWindowsNative) {
     throw new Error(
-      "Windows 下未设置 LIGHTPANDA_EXECUTABLE_PATH。请在 WSL2 中运行，或显式提供可用的 Lightpanda 二进制路径。",
+      windowsRuntimeGuidance(),
     );
   }
 }
@@ -93,7 +101,7 @@ function normalizeHref(rawHref) {
 }
 
 async function fetchHtml(url) {
-  const html = await lightpanda.fetch(url, {
+  const html = await lightpandaRuntime.fetch(url, {
     dump: true,
     dumpOptions: { type: "html" },
   });
@@ -299,6 +307,7 @@ async function main() {
   }
 
   ensureRuntime();
+  ({ lightpanda: lightpandaRuntime } = await import("@lightpanda/browser"));
 
   const searchUrl = `${SEARCH_BASE}?q=${encodeURIComponent(args.query)}`;
   const searchHtml = await fetchHtml(searchUrl);

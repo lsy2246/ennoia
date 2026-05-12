@@ -63,19 +63,11 @@
 - 需要点击、快照、截图、继续探索页面
 - 调试 `agent-browser + Lightpanda` 本身的行为
 
-## 安装
+## 本地依赖
 
-先在技能目录执行：
+如果你要在本地直接调试这些脚本，请自行在技能目录安装依赖并准备运行环境。
 
-```bash
-node scripts/setup.mjs
-```
-
-这会做三件事：
-
-1. 用 `bun` 安装 skill 私有依赖
-2. 信任 `agent-browser` / `@lightpanda/browser` 的 postinstall
-3. 运行环境检查
+这个 skill 不再向宿主声明安装或检测流程；宿主只负责发现动作和保存配置。
 
 ## 命令行入口
 
@@ -106,10 +98,11 @@ node scripts/agent-browser-lightpanda.mjs --help
 
 ## 平台说明
 
-- macOS / Linux：`@lightpanda/browser` 可直接下载原生二进制
-- Windows：官方 npm 包不提供原生二进制；请使用：
-  - `WSL2` 内运行本技能，或
+- macOS / Linux：`@lightpanda/browser` 通常可以直接提供原生二进制
+- Windows：仍需自行准备可用的 Lightpanda 运行时；常见做法是：
+  - 在 `WSL2` 内运行本技能，或
   - 自己提供 `LIGHTPANDA_EXECUTABLE_PATH`
+  - 或在技能配置里填写 `lightpanda_executable_path`
 
 详情见：
 

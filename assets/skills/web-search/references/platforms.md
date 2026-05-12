@@ -13,11 +13,11 @@
 
 在 Windows 上使用本技能时，推荐两种方式：
 
-1. 在 `WSL2` 里运行 `node scripts/setup.mjs` 和 `node scripts/search-runner.mjs`
+1. 在 `WSL2` 里自行安装依赖后运行 `node scripts/search-runner.mjs`
 2. 手动提供一个可执行的 Lightpanda 二进制，并设置：
 
 ```powershell
 $env:LIGHTPANDA_EXECUTABLE_PATH = "D:\\path\\to\\lightpanda.exe-or-wrapper"
 ```
 
-如果没有 `LIGHTPANDA_EXECUTABLE_PATH`，`doctor` 会直接报错。
+如果你更希望走宿主配置，也可以在技能配置里填写 `lightpanda_executable_path`。

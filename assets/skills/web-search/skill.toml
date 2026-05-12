@@ -17,11 +17,3 @@ description = { key = "skill.web_search.lightpanda_executable_path.help", fallba
 type = "text"
 placeholder = "C:/Users/<you>/.cache/lightpanda-node/lightpanda.exe"
 required = false
-
-[diagnostics]
-manual_check = true
-
-[diagnostics.check]
-runner = "node"
-entry = "scripts/doctor.mjs"
-timeout_ms = 15000

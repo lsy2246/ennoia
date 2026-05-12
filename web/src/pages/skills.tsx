@@ -1,19 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
 import {
   getSkill,
   getSkillSettings,
-  getSkillStatus,
   listSkills,
-  runSkillCheck,
   saveSkillSettings,
   updateSkill,
-  type SkillCheckCategory,
-  type SkillCheckItemStatus,
-  type SkillCheckResult,
   type SkillConfig,
-  type SkillDiagnosticsSpec,
-  type SkillReadinessSummary,
 } from "@ennoia/api-client";
 import { StatusNotice } from "@/components/StatusNotice";
 import { useUiHelpers } from "@/stores/ui";
@@ -22,121 +15,15 @@ type SkillDetailState = {
   status: "idle" | "loading" | "ready" | "error";
   skill: SkillConfig | null;
   values: Record<string, string | number | boolean>;
-  readiness: SkillCheckResult | null;
   message: { tone: "success" | "error"; text: string } | null;
 };
-
-function fallbackReadiness(): SkillReadinessSummary {
-  return {
-    status: "unknown",
-    summary: "",
-    checked_at: null,
-  };
-}
-
-function getSkillReadiness(skill: SkillConfig | null | undefined): SkillReadinessSummary {
-  return skill?.readiness ?? fallbackReadiness();
-}
-
-function getSkillDiagnostics(skill: SkillConfig | null | undefined): SkillDiagnosticsSpec {
-  return skill?.diagnostics ?? { manual_check: false, check: null };
-}
 
 function getSkillSettingFields(skill: SkillConfig | null | undefined) {
   return skill?.settings ?? [];
 }
 
-function readinessBadgeClass(status: SkillConfig["readiness"]["status"]) {
-  switch (status) {
-    case "ready":
-      return "badge--success";
-    case "partial":
-      return "badge--warn";
-    case "missing_config":
-    case "env_missing":
-    case "error":
-      return "badge--danger";
-    default:
-      return "badge--muted";
-  }
-}
-
-function localizeReadiness(
-  status: SkillConfig["readiness"]["status"],
-  t: (key: string, fallback: string) => string,
-) {
-  switch (status) {
-    case "ready":
-      return t("web.skills.readiness.ready", "已就绪");
-    case "partial":
-      return t("web.skills.readiness.partial", "部分就绪");
-    case "missing_config":
-      return t("web.skills.readiness.missing_config", "缺少配置");
-    case "env_missing":
-      return t("web.skills.readiness.env_missing", "环境未满足");
-    case "error":
-      return t("web.skills.readiness.error", "检测失败");
-    default:
-      return t("web.skills.readiness.unknown", "未检测");
-  }
-}
-
-function localizeCheckCategory(
-  category: SkillCheckCategory,
-  t: (key: string, fallback: string) => string,
-) {
-  switch (category) {
-    case "config":
-      return t("web.skills.check_category.config", "配置");
-    case "environment":
-      return t("web.skills.check_category.environment", "环境");
-    case "permission":
-      return t("web.skills.check_category.permission", "权限");
-    case "dependency":
-      return t("web.skills.check_category.dependency", "依赖");
-    case "connectivity":
-      return t("web.skills.check_category.connectivity", "连通性");
-    default:
-      return category;
-  }
-}
-
-function checkItemBadgeClass(status: SkillCheckItemStatus) {
-  switch (status) {
-    case "ok":
-      return "badge--success";
-    case "warning":
-      return "badge--warn";
-    case "missing":
-    case "error":
-      return "badge--danger";
-    default:
-      return "badge--muted";
-  }
-}
-
-function localizeCheckItemStatus(
-  status: SkillCheckItemStatus,
-  t: (key: string, fallback: string) => string,
-) {
-  switch (status) {
-    case "ok":
-      return t("web.skills.check_item.ok", "通过");
-    case "warning":
-      return t("web.skills.check_item.warning", "注意");
-    case "missing":
-      return t("web.skills.check_item.missing", "缺失");
-    case "error":
-      return t("web.skills.check_item.error", "失败");
-    case "skipped":
-      return t("web.skills.check_item.skipped", "跳过");
-    default:
-      return status;
-  }
-}
-
 export function Skills() {
-  const { formatDateTime, resolveText, t } = useUiHelpers();
+  const { resolveText, t } = useUiHelpers();
   const [skills, setSkills] = useState<SkillConfig[]>([]);
   const [savingSkillId, setSavingSkillId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -145,11 +32,9 @@ export function Skills() {
     status: "idle",
     skill: null,
     values: {},
-    readiness: null,
     message: null,
   });
   const [savingSettings, setSavingSettings] = useState(false);
-  const [checkingSkill, setCheckingSkill] = useState(false);
 
   useEffect(() => {
     void refresh();
@@ -179,20 +64,17 @@ export function Skills() {
       status: "loading",
       skill: null,
       values: {},
-      readiness: null,
       message: null,
     });
     try {
-      const [skill, settings, readiness] = await Promise.all([
+      const [skill, settings] = await Promise.all([
         getSkill(skillId),
         getSkillSettings(skillId),
-        getSkillStatus(skillId),
       ]);
       setDetailState({
         status: "ready",
         skill,
         values: settings.values,
-        readiness,
         message: null,
       });
     } catch (err) {
@@ -200,7 +82,6 @@ export function Skills() {
         status: "error",
         skill: null,
         values: {},
-        readiness: null,
         message: {
           tone: "error",
           text: String(err),
@@ -215,7 +96,6 @@ export function Skills() {
       status: "idle",
       skill: null,
       values: {},
-      readiness: null,
       message: null,
     });
   }
@@ -258,17 +138,15 @@ export function Skills() {
     setError(null);
     try {
       const saved = await saveSkillSettings(detailState.skill.id, detailState.values);
-      const readiness = await runSkillCheck(detailState.skill.id);
       await refresh();
       await refreshSelectedSkill(detailState.skill.id);
       setDetailState((current) => ({
         ...current,
         status: "ready",
         values: saved.values,
-        readiness,
         message: {
           tone: "success",
-          text: t("web.skills.settings_saved", "技能配置已保存，并已重新检测。"),
+          text: t("web.skills.settings_saved", "技能配置已保存。"),
         },
       }));
     } catch (err) {
@@ -286,50 +164,10 @@ export function Skills() {
     }
   }
 
-  async function handleRunCheck() {
-    if (!detailState.skill) {
-      return;
-    }
-    setCheckingSkill(true);
-    setError(null);
-    try {
-      const readiness = await runSkillCheck(detailState.skill.id);
-      await refresh();
-      await refreshSelectedSkill(detailState.skill.id);
-      setDetailState((current) => ({
-        ...current,
-        readiness,
-        message: {
-          tone: "success",
-          text: t("web.skills.check_ran", "技能检测已刷新。"),
-        },
-      }));
-    } catch (err) {
-      const message = String(err);
-      setError(message);
-      setDetailState((current) => ({
-        ...current,
-        message: {
-          tone: "error",
-          text: message,
-        },
-      }));
-    } finally {
-      setCheckingSkill(false);
-    }
-  }
-
   const enabledCount = skills.filter((item) => item.enabled).length;
-  const readyCount = skills.filter((item) => getSkillReadiness(item).status === "ready").length;
-  const configurableCount = skills.filter((item) => getSkillSettingFields(item).length > 0 || getSkillDiagnostics(item).check).length;
-  const selectedSkillReadiness = getSkillReadiness(detailState.skill);
-  const selectedSkillDiagnostics = getSkillDiagnostics(detailState.skill);
+  const configurableCount = skills.filter((item) => getSkillSettingFields(item).length > 0).length;
+  const totalActions = skills.reduce((sum, item) => sum + item.actions.length, 0);
   const selectedSkillSettings = getSkillSettingFields(detailState.skill);
-
-  const issueCount = useMemo(
-    () => detailState.readiness?.items.filter((item) => item.status !== "ok" && item.status !== "skipped").length ?? 0,
-    [detailState.readiness],
-  );
 
   return (
     <div className="skills-page">
@@ -339,7 +177,7 @@ export function Skills() {
           <div className="page-heading">
             <span>{t("web.skills.eyebrow", "Skill Registry")}</span>
             <h1>{t("web.skills.title", "技能是给 Agent 和会话使用的能力包。")}</h1>
-            <p>{t("web.skills.description", "这里优先看能力说明、触发方式、配置入口和是否就绪；具体变量与环境检查收进配置面板里。")}</p>
+            <p>{t("web.skills.description", "这里优先看能力说明、触发方式、动作入口和配置入口。")}</p>
           </div>
           <div className="skills-toolbar__actions">
             <button type="button" className="secondary" onClick={() => void refresh()}>
@@ -359,9 +197,9 @@ export function Skills() {
             <small>{t("web.common.enabled", "启用")}</small>
           </article>
           <article className="metric-card skills-metric-card">
-            <span>{t("web.skills.summary_ready", "已就绪")}</span>
-            <strong>{readyCount}</strong>
-            <small>{t("web.skills.readiness.ready", "已就绪")}</small>
+            <span>{t("web.skills.summary_actions", "动作总数")}</span>
+            <strong>{totalActions}</strong>
+            <small>{t("web.skills.entry", "动作")}</small>
           </article>
           <article className="metric-card skills-metric-card">
             <span>{t("web.skills.summary_configurable", "可配置")}</span>
@@ -375,8 +213,8 @@ export function Skills() {
         <div className="skills-section__header">
           <div className="page-heading">
             <span>{t("web.skills.catalog", "技能目录")}</span>
-            <h1>{t("web.skills.catalog_title", "按能力查看技能与就绪情况")}</h1>
-            <p>{t("web.skills.catalog_description", "卡片里只保留用途、触发词、挂载模式和轻量就绪摘要；详细配置与环境检测放到单独面板。")}</p>
+            <h1>{t("web.skills.catalog_title", "按能力查看技能与动作入口")}</h1>
+            <p>{t("web.skills.catalog_description", "卡片里只保留用途、触发词、挂载模式和动作信息；配置放到单独面板。")}</p>
           </div>
           <span className="skills-catalog-count">{`${skills.length} ${t("web.skills.catalog_count", "项")}`}</span>
         </div>
@@ -389,10 +227,9 @@ export function Skills() {
         ) : (
           <div className="skills-grid">
             {skills.map((skill) => {
-              const readiness = getSkillReadiness(skill);
-              const configureLabel = readiness.status === "ready"
+              const configureLabel = getSkillSettingFields(skill).length > 0
                 ? t("web.skills.configure", "配置")
-                : t("web.skills.configure_needed", "去配置");
+                : t("web.skills.view_detail", "查看");
               return (
                 <article key={skill.id} className="resource-card skills-card">
                   <div className="skills-card__header">
@@ -423,18 +260,9 @@ export function Skills() {
                     </div>
                   </div>
 
-                  <div className="skills-card__readiness">
-                    <span className={`badge ${readinessBadgeClass(readiness.status)}`}>
-                      {localizeReadiness(readiness.status, t)}
-                    </span>
-                    <p className="skills-card__summary">
-                      {readiness.summary || t("web.skills.readiness_unknown_summary", "尚未生成技能检测摘要。")}
-                    </p>
-                  </div>
-
                   <p className="skills-card__description">{skill.description || t("web.common.none", "无")}</p>
 
-                  <div className="skills-meta-grid">
+                  <div className="skills-meta-grid skills-meta-grid--compact">
                     <div className="skills-meta-item">
                       <span>{t("web.skills.trigger", "触发词")}</span>
                       <strong>/{skill.id}</strong>
@@ -469,7 +297,7 @@ export function Skills() {
               <div>
                 <span>{t("web.skills.configure", "配置")}</span>
                 <h2>{detailState.skill?.id ?? selectedSkillId}</h2>
-                <p>{detailState.skill?.description || t("web.skills.config_description", "在这里填写技能变量并查看环境检测结果。")}</p>
+                <p>{detailState.skill?.description || t("web.skills.config_description", "在这里查看技能动作入口并填写技能变量。")}</p>
               </div>
               <button type="button" className="secondary" onClick={closeSkillConfig}>
                 {t("web.common.close", "关闭")}
@@ -485,7 +313,7 @@ export function Skills() {
             {detailState.status === "loading" ? (
               <div className="empty-card skills-empty-state">
                 <strong>{t("web.common.loading", "加载中…")}</strong>
-                <p>{t("web.skills.config_loading", "正在读取技能配置和检测结果。")}</p>
+                <p>{t("web.skills.config_loading", "正在读取技能说明和配置。")}</p>
               </div>
             ) : detailState.status === "error" ? (
               <div className="error">{detailState.message?.text ?? t("web.skills.config_load_error", "技能配置读取失败。")}</div>
@@ -494,38 +322,41 @@ export function Skills() {
                 <section className="skill-config-modal__section">
                   <div className="skill-config-modal__section-header">
                     <div className="stack">
-                      <div className="panel-title">{t("web.skills.readiness_title", "就绪摘要")}</div>
-                      <p className="helper-text">{t("web.skills.readiness_description", "由技能自身定义配置要求和手动检测逻辑，宿主只负责统一呈现。")}</p>
+                      <div className="panel-title">{t("web.skills.entry", "动作")}</div>
+                      <p className="helper-text">{t("web.skills.actions_description", "这里列出 skill 对外暴露的动作入口，宿主不再额外管理安装或检测逻辑。")}</p>
                     </div>
-                    <span className={`badge ${readinessBadgeClass(detailState.readiness?.status ?? selectedSkillReadiness.status)}`}>
-                      {localizeReadiness(detailState.readiness?.status ?? selectedSkillReadiness.status, t)}
-                    </span>
                   </div>
-                  <div className="skill-config-modal__summary">
-                    <strong>{detailState.readiness?.summary || selectedSkillReadiness.summary || t("web.skills.readiness_unknown_summary", "尚未生成技能检测摘要。")}</strong>
-                    <span>
-                      {detailState.readiness?.checked_at
-                        ? `${t("web.skills.checked_at", "最近检测")} ${formatDateTime(detailState.readiness.checked_at)}`
-                        : t("web.skills.not_checked", "还没有检测记录")}
-                    </span>
-                  </div>
+                  {detailState.skill.actions.length === 0 ? (
+                    <div className="skills-inline-empty">
+                      {t("web.skills.keywords_empty", "这个技能还没有声明可执行动作。")}
+                    </div>
+                  ) : (
+                    <div className="skills-meta-grid">
+                      {detailState.skill.actions.map((action) => (
+                        <div key={action.id} className="skills-meta-item">
+                          <span>{action.id}</span>
+                          <strong>{action.entry}</strong>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </section>
 
                 <section className="skill-config-modal__section">
                   <div className="skill-config-modal__section-header">
                     <div className="stack">
                       <div className="panel-title">{t("web.skills.settings", "基础配置")}</div>
-                      <p className="helper-text">{t("web.skills.settings_description", "这里显示技能自己声明的变量；保存后会自动触发一次重新检测。")}</p>
+                      <p className="helper-text">{t("web.skills.settings_description", "这里显示技能自己声明的变量；宿主只负责保存和回填。")}</p>
                     </div>
                     <button
                       type="button"
                       className="secondary"
                       onClick={() => void handleSaveSettings()}
-                      disabled={savingSettings || checkingSkill}
+                      disabled={savingSettings}
                     >
                       {savingSettings
                         ? t("web.common.saving", "保存中")
-                        : t("web.skills.save_settings", "保存并检测")}
+                        : t("web.skills.save_settings", "保存配置")}
                     </button>
                   </div>
 
@@ -596,61 +427,6 @@ export function Skills() {
                           </label>
                         );
                       })}
-                    </div>
-                  )}
-                </section>
-
-                <section className="skill-config-modal__section">
-                  <div className="skill-config-modal__section-header">
-                    <div className="stack">
-                      <div className="panel-title">{t("web.skills.diagnostics", "环境检测")}</div>
-                      <p className="helper-text">{t("web.skills.diagnostics_description", "检测项由技能自己定义，适合检查依赖、环境变量、可执行文件和连通性。")}</p>
-                    </div>
-                    {selectedSkillDiagnostics.manual_check || selectedSkillDiagnostics.check ? (
-                      <button
-                        type="button"
-                        className="secondary"
-                        onClick={() => void handleRunCheck()}
-                        disabled={checkingSkill || savingSettings}
-                      >
-                        {checkingSkill
-                          ? t("web.skills.check_running", "检测中")
-                          : t("web.skills.run_check", "重新检测")}
-                      </button>
-                    ) : null}
-                  </div>
-
-                  {detailState.readiness?.items.length ? (
-                    <>
-                      <div className="skill-config-modal__issue-summary">
-                        <span className={`badge ${issueCount > 0 ? "badge--warn" : "badge--success"}`}>
-                          {issueCount > 0
-                            ? `${issueCount} ${t("web.skills.issues", "项待处理")}`
-                            : t("web.skills.issue_free", "无待处理项")}
-                        </span>
-                      </div>
-                      <div className="skill-check-list">
-                        {detailState.readiness.items.map((item) => (
-                          <article key={item.key} className="mini-card skill-check-card">
-                            <div className="skill-check-card__header">
-                              <div className="stack">
-                                <strong>{item.label}</strong>
-                                <small>{localizeCheckCategory(item.category, t)}</small>
-                              </div>
-                              <span className={`badge ${checkItemBadgeClass(item.status)}`}>
-                                {localizeCheckItemStatus(item.status, t)}
-                              </span>
-                            </div>
-                            {item.message ? <p>{item.message}</p> : null}
-                            {item.fix_hint ? <small>{item.fix_hint}</small> : null}
-                          </article>
-                        ))}
-                      </div>
-                    </>
-                  ) : (
-                    <div className="empty-card skills-empty-state">
-                      <strong>{t("web.skills.diagnostics_empty_title", "当前没有额外检测项")}</strong>
-                      <p>{t("web.skills.diagnostics_empty", "这个技能还没有返回逐项检测结果，或所有检查都通过且未输出明细。")}</p>
                     </div>
                   )}
                 </section>
