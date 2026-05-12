@@ -12,6 +12,8 @@ import {
   type SkillCheckItemStatus,
   type SkillCheckResult,
   type SkillConfig,
+  type SkillDiagnosticsSpec,
+  type SkillReadinessSummary,
 } from "@ennoia/api-client";
 import { StatusNotice } from "@/components/StatusNotice";
 import { useUiHelpers } from "@/stores/ui";
@@ -23,6 +25,26 @@ type SkillDetailState = {
   readiness: SkillCheckResult | null;
   message: { tone: "success" | "error"; text: string } | null;
 };
+
+function fallbackReadiness(): SkillReadinessSummary {
+  return {
+    status: "unknown",
+    summary: "",
+    checked_at: null,
+  };
+}
+
+function getSkillReadiness(skill: SkillConfig | null | undefined): SkillReadinessSummary {
+  return skill?.readiness ?? fallbackReadiness();
+}
+
+function getSkillDiagnostics(skill: SkillConfig | null | undefined): SkillDiagnosticsSpec {
+  return skill?.diagnostics ?? { manual_check: false, check: null };
+}
+
+function getSkillSettingFields(skill: SkillConfig | null | undefined) {
+  return skill?.settings ?? [];
+}
 
 function readinessBadgeClass(status: SkillConfig["readiness"]["status"]) {
   switch (status) {
@@ -298,8 +320,11 @@ export function Skills() {
   }
 
   const enabledCount = skills.filter((item) => item.enabled).length;
-  const readyCount = skills.filter((item) => item.readiness.status === "ready").length;
-  const configurableCount = skills.filter((item) => item.settings.length > 0 || item.diagnostics.check).length;
+  const readyCount = skills.filter((item) => getSkillReadiness(item).status === "ready").length;
+  const configurableCount = skills.filter((item) => getSkillSettingFields(item).length > 0 || getSkillDiagnostics(item).check).length;
+  const selectedSkillReadiness = getSkillReadiness(detailState.skill);
+  const selectedSkillDiagnostics = getSkillDiagnostics(detailState.skill);
+  const selectedSkillSettings = getSkillSettingFields(detailState.skill);
 
   const issueCount = useMemo(
     () => detailState.readiness?.items.filter((item) => item.status !== "ok" && item.status !== "skipped").length ?? 0,
@@ -364,7 +389,8 @@ export function Skills() {
         ) : (
           <div className="skills-grid">
             {skills.map((skill) => {
-              const configureLabel = skill.readiness.status === "ready"
+              const readiness = getSkillReadiness(skill);
+              const configureLabel = readiness.status === "ready"
                 ? t("web.skills.configure", "配置")
                 : t("web.skills.configure_needed", "去配置");
               return (
@@ -398,11 +424,11 @@ export function Skills() {
                   </div>
 
                   <div className="skills-card__readiness">
-                    <span className={`badge ${readinessBadgeClass(skill.readiness.status)}`}>
-                      {localizeReadiness(skill.readiness.status, t)}
+                    <span className={`badge ${readinessBadgeClass(readiness.status)}`}>
+                      {localizeReadiness(readiness.status, t)}
                     </span>
                     <p className="skills-card__summary">
-                      {skill.readiness.summary || t("web.skills.readiness_unknown_summary", "尚未生成技能检测摘要。")}
+                      {readiness.summary || t("web.skills.readiness_unknown_summary", "尚未生成技能检测摘要。")}
                     </p>
                   </div>
 
@@ -471,12 +497,12 @@ export function Skills() {
                       <div className="panel-title">{t("web.skills.readiness_title", "就绪摘要")}</div>
                       <p className="helper-text">{t("web.skills.readiness_description", "由技能自身定义配置要求和手动检测逻辑，宿主只负责统一呈现。")}</p>
                     </div>
-                    <span className={`badge ${readinessBadgeClass(detailState.readiness?.status ?? detailState.skill.readiness.status)}`}>
-                      {localizeReadiness(detailState.readiness?.status ?? detailState.skill.readiness.status, t)}
+                    <span className={`badge ${readinessBadgeClass(detailState.readiness?.status ?? selectedSkillReadiness.status)}`}>
+                      {localizeReadiness(detailState.readiness?.status ?? selectedSkillReadiness.status, t)}
                     </span>
                   </div>
                   <div className="skill-config-modal__summary">
-                    <strong>{detailState.readiness?.summary || detailState.skill.readiness.summary || t("web.skills.readiness_unknown_summary", "尚未生成技能检测摘要。")}</strong>
+                    <strong>{detailState.readiness?.summary || selectedSkillReadiness.summary || t("web.skills.readiness_unknown_summary", "尚未生成技能检测摘要。")}</strong>
                     <span>
                       {detailState.readiness?.checked_at
                         ? `${t("web.skills.checked_at", "最近检测")} ${formatDateTime(detailState.readiness.checked_at)}`
@@ -503,13 +529,13 @@ export function Skills() {
                     </button>
                   </div>
 
-                  {detailState.skill.settings.length === 0 ? (
+                  {selectedSkillSettings.length === 0 ? (
                     <div className="skills-inline-empty">
                       {t("web.skills.settings_empty", "这个技能没有声明可填写的配置项。")}
                     </div>
                   ) : (
                     <div className="form-grid skills-settings-grid">
-                      {detailState.skill.settings.map((field) => {
+                      {selectedSkillSettings.map((field) => {
                         const currentValue = detailState.values[field.key] ?? field.default_value;
                         return (
                           <label
@@ -580,7 +606,7 @@ export function Skills() {
                       <div className="panel-title">{t("web.skills.diagnostics", "环境检测")}</div>
                       <p className="helper-text">{t("web.skills.diagnostics_description", "检测项由技能自己定义，适合检查依赖、环境变量、可执行文件和连通性。")}</p>
                     </div>
-                    {detailState.skill.diagnostics.manual_check || detailState.skill.diagnostics.check ? (
+                    {selectedSkillDiagnostics.manual_check || selectedSkillDiagnostics.check ? (
                       <button
                         type="button"
                         className="secondary"
