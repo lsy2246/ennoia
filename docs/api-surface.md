@@ -67,7 +67,6 @@
 - `GET /api/extensions/panels`
 - `GET /api/extensions/{extension_id}/ui/module`
 - `GET /api/extensions/{extension_id}/ui/assets/{*asset_path}`
-- `GET /api/extensions/commands`
 - `GET /api/extensions/providers`
 - `GET /api/extensions/behaviors`
 - `GET /api/extensions/memories`
@@ -98,7 +97,7 @@
 - `GET /api/actions`
 - `POST /api/actions/{action}`
 
-动作运行时返回系统动作键下挂载的规则列表。每条规则包含扩展、能力、阶段、优先级、结果收敛方式和条件。
+动作运行时返回系统动作键下挂载的规则列表。每条规则包含扩展、operation、阶段、优先级、结果收敛方式和条件。
 
 `POST /api/actions/{action}` 是产品动作统一入口。请求体默认直接传动作参数；宿主内部 Worker 也可以传 `{ params, context }` 包装体，把 `permission_actor` 等运行时上下文一起送进动作管道。前端不再直接调用 `/api/conversations/*`、`/api/memory/*`、`/api/runs/*` 这类核心包装 REST，而是提交动作键与参数，例如：
 
@@ -207,14 +206,14 @@ Scheduler 只保存计划并触发执行器。当前触发器支持 `once`、`in
 }
 ```
 
-## Workflow / Behavior Capability
+## Workflow / Behavior
 
 - `GET /api/behaviors`
 - `GET /api/behaviors/active`
 - `GET /api/behavior/status`
 - `ANY /api/behavior/{*path}`
 
-Behavior 能力入口保留用于兼容和扩展自有 API。系统级运行入口优先使用更细粒度的 run/task/artifact 接口绑定。
+Behavior API 作为扩展自有运行接口保留。系统级运行入口优先使用更细粒度的 run/task/artifact 接口绑定。
 `/api/behavior/*` 不再读取系统级 behavior 配置；存在多个 Behavior 实现时调用方应使用稳定接口绑定或显式扩展 RPC。
 
 ## 日志

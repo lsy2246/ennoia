@@ -1,145 +1,85 @@
 id = "workflow"
+version = "0.1.0"
 name = "Workflow"
 description = "提供 run、task、artifact 与调度动作的编排实现；是否接入 conversation 或 memory 由系统动作管道与事件链决定。"
 docs = "docs/overview.md"
-kind = "extension"
 
-[source]
-mode = "package"
-root = "."
-dev = false
-
-[ui]
-runtime = "browser-esm"
-hmr = true
-
-[worker]
-kind = "process"
-entry = "bin/workflow-service"
-protocol = "jsonrpc-stdio"
-
-[build]
-ui_bundle = "ui/dist/entry.js"
-
-[assets]
-locales_dir = "ui/locales"
-
-[permissions]
-storage = "extension"
-sqlite = true
-events = ["publish", "subscribe"]
+[compat]
+ennoia = ">=0.1.0"
 
 [conversation]
-inject = true
-capabilities = [
+visible = true
+resources = ["workflow.run", "workflow.task", "workflow.artifact"]
+operations = [
   "run.create",
   "run.get",
+  "run.list",
+  "task.list",
   "artifact.list",
 ]
 
-[[surfaces]]
-id = "workflow.page"
-kind = "page"
+[[views]]
+name = "workflow.page"
+type = "page"
 title = { key = "ext.workflow.page", fallback = "工作编排" }
+nav = "sidebar"
+order = 35
+icon = "workflow"
 route = "/workflow"
-mount = "workflow.page"
-icon = "workflow"
-nav = { default_pinned = false, order = 35 }
 
-[[entrypoints]]
-id = "workflow.workspace"
-label = { key = "ext.workflow.entry.workspace", fallback = "工作编排工作台" }
-description = { key = "ext.workflow.entry.workspace_description", fallback = "查看 run 的阶段流转、判定关卡、任务分支与产物输出。" }
-kind = "page"
-page_id = "workflow.page"
-icon = "workflow"
-order = 10
-prominent = false
+[[operations]]
+name = "workflow.default"
+description = "默认 workflow 行为实现。"
 
-[[locales]]
-locale = "zh-CN"
-namespace = "ext.workflow"
-entry = "ui/locales/zh-CN.json"
-
-[[locales]]
-locale = "en-US"
-namespace = "ext.workflow"
-entry = "ui/locales/en-US.json"
-
-[[capabilities]]
-id = "workflow.default"
-contract = "behavior.default"
-kind = "effect"
-entry = "behavior"
-metadata = { behavior = { id = "default", extension_id = "workflow", interfaces = ["runs", "tasks", "artifacts", "handoffs", "status"] } }
-
-[[capabilities]]
-id = "workflow.workspace"
-contract = "workflow.workspace"
-kind = "query"
-entry = "workspace"
+[[operations]]
+name = "workflow.workspace"
 title = { key = "ext.workflow.workspace", fallback = "工作流总览" }
-metadata = { action = { key = "workflow.workspace" }, permission = { action = "run.read", target_kind = "run", risk_level = "low", default_decision = "allow", scope_kind = "none" } }
+description = "读取 workflow 工作台摘要。"
 
-[[capabilities]]
-id = "run.create"
-contract = "run.create"
-kind = "action"
-entry = "workflow/runs/create"
-metadata = { action = { key = "run.create" }, permission = { action = "run.create", target_kind = "run", risk_level = "medium", default_decision = "allow", scope_kind = "conversation" } }
+[[operations]]
+name = "run.create"
+description = "创建 workflow run。"
+agent = true
 
-[[capabilities]]
-id = "run.get"
-contract = "run.get"
-kind = "query"
-entry = "workflow/runs/get"
-metadata = { action = { key = "run.get" }, permission = { action = "run.read", target_kind = "run", risk_level = "low", default_decision = "allow", scope_kind = "run" } }
+[[operations]]
+name = "run.get"
+description = "读取 workflow run 详情。"
+agent = true
 
-[[capabilities]]
-id = "run.list"
-contract = "run.list"
-kind = "query"
-entry = "workflow/runs/list-by-conversation"
-metadata = { action = { key = "run.list" }, permission = { action = "run.read", target_kind = "run", risk_level = "low", default_decision = "allow", scope_kind = "conversation" } }
+[[operations]]
+name = "run.list"
+description = "按会话列出 workflow run。"
+agent = true
 
-[[capabilities]]
-id = "task.list"
-contract = "task.list"
-kind = "query"
-entry = "workflow/tasks/list-by-run"
-metadata = { action = { key = "task.list" }, permission = { action = "run.read", target_kind = "task", risk_level = "low", default_decision = "allow", scope_kind = "run" } }
+[[operations]]
+name = "task.list"
+description = "列出 run 的任务。"
+agent = true
 
-[[capabilities]]
-id = "artifact.list"
-contract = "artifact.list"
-kind = "query"
-entry = "workflow/artifacts/list-by-run"
-metadata = { action = { key = "artifact.list" }, permission = { action = "artifact.read", target_kind = "artifact", risk_level = "low", default_decision = "allow", scope_kind = "run" } }
+[[operations]]
+name = "artifact.list"
+description = "列出 run 的产物。"
+agent = true
 
-[[capabilities]]
-id = "workflow.run"
-contract = "schedule.run"
-kind = "action"
-entry = "workflow/schedules/run"
+[[operations]]
+name = "workflow.run"
 title = { key = "ext.workflow.schedule.run", fallback = "Run workflow" }
-metadata = { schedule_action = { id = "workflow.run" } }
+description = "由 scheduler 触发 workflow run。"
+agent = true
+schedule = true
 
-[[capabilities]]
-id = "workflow.conversation.message.created"
-contract = "hook.conversation.message.created"
-kind = "event_handler"
-entry = "hooks/conversation-message-created"
+[[operations]]
+name = "workflow.conversation.message.created"
+description = "处理会话消息创建事件。"
 
-[[capabilities]]
-id = "workflow.operation.updated"
-contract = "hook.operation.updated"
-kind = "event_handler"
-entry = "hooks/operation-updated"
+[[operations]]
+name = "workflow.operation.updated"
+description = "处理系统操作状态更新事件。"
 
-[[subscriptions]]
-event = "conversation.message.created"
-capability = "workflow.conversation.message.created"
+[[events]]
+on = "conversation.message.created"
+operation = "workflow.conversation.message.created"
 
-[[subscriptions]]
-event = "operation.updated"
-capability = "workflow.operation.updated"
+[[events]]
+on = "operation.updated"
+operation = "workflow.operation.updated"

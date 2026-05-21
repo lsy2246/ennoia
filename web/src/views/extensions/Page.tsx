@@ -127,7 +127,7 @@ export function ExtensionPageView({ pageId: explicitPageId }: ExtensionPageViewP
 
       {mountStatus === "ready" ? null : (
       <section className="work-panel">
-        <div className="panel-title">{t("web.extension_page.highlights", "能力摘要")}</div>
+        <div className="panel-title">{t("web.extension_page.highlights", "视图摘要")}</div>
         <div className="card-grid">
           {[t("web.extension_page.dynamic_nav", "动态导航"), t("web.extension_page.dynamic_panel", "动态面板")].map((item) => (
             <article key={item} className="mini-card">

@@ -1,7 +1,10 @@
 use super::*;
 use ennoia_kernel::{
-    ExtensionRecordEntry, ExtensionRpcRequest, ExtensionRpcResponse, ExtensionSettingFieldType,
-    ExtensionSettingValue, ExtensionStateEntry, HookDispatchResponse, ModelEndpointConfig,
+    ExtensionCompatSpec, ExtensionConversationSpec, ExtensionDiagnostic, ExtensionEventSpec,
+    ExtensionHealth, ExtensionOperationSpec, ExtensionRecordEntry, ExtensionRpcRequest,
+    ExtensionRpcResponse, ExtensionSettingFieldSpec, ExtensionSettingFieldType,
+    ExtensionSettingValue, ExtensionSourceMode, ExtensionStateEntry, ExtensionViewSpec,
+    HookDispatchResponse, ModelEndpointConfig,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -61,6 +64,29 @@ pub(crate) struct ExtensionSettingsPayload {
     values: BTreeMap<String, ExtensionSettingValue>,
 }
 
+#[derive(Debug, Serialize)]
+pub(crate) struct ExtensionDetailRecord {
+    id: String,
+    #[serde(default)]
+    version: Option<String>,
+    name: String,
+    description: String,
+    #[serde(default)]
+    docs: Option<String>,
+    compat: ExtensionCompatSpec,
+    conversation: ExtensionConversationSpec,
+    source_mode: ExtensionSourceMode,
+    source_root: String,
+    install_dir: String,
+    generation: u64,
+    health: ExtensionHealth,
+    views: Vec<ExtensionViewSpec>,
+    operations: Vec<ExtensionOperationSpec>,
+    events: Vec<ExtensionEventSpec>,
+    settings: Vec<ExtensionSettingFieldSpec>,
+    diagnostics: Vec<ExtensionDiagnostic>,
+}
+
 pub(super) async fn extensions(
     State(state): State<AppState>,
 ) -> Json<Vec<ExtensionWorkbenchRecord>> {
@@ -83,12 +109,6 @@ pub(super) async fn extension_panels(
     State(state): State<AppState>,
 ) -> Json<Vec<RegisteredPanelContribution>> {
     Json(state.extensions.snapshot().panels)
-}
-
-pub(super) async fn extension_commands(
-    State(state): State<AppState>,
-) -> Json<Vec<RegisteredCommandContribution>> {
-    Json(state.extensions.snapshot().commands)
 }
 
 pub(super) async fn extension_providers(
@@ -149,17 +169,39 @@ pub(super) async fn extension_detail(
     State(state): State<AppState>,
     Extension(request): Extension<RequestContext>,
     Path(extension_id): Path<String>,
-) -> ApiResult<ResolvedExtensionSnapshot> {
+) -> ApiResult<ExtensionDetailRecord> {
     state
         .extensions
         .get(&extension_id)
-        .map(Json)
+        .map(|extension| Json(map_extension_detail_record(&extension)))
         .ok_or_else(|| {
             scoped(
                 ApiError::not_found(format!("extension '{extension_id}' not found")),
                 &request,
             )
         })
+}
+
+fn map_extension_detail_record(extension: &ResolvedExtensionSnapshot) -> ExtensionDetailRecord {
+    ExtensionDetailRecord {
+        id: extension.id.clone(),
+        version: extension.version.clone(),
+        name: extension.name.clone(),
+        description: extension.description.clone(),
+        docs: extension.docs.clone(),
+        compat: extension.compat.clone(),
+        conversation: extension.conversation.clone(),
+        source_mode: extension.source_mode.clone(),
+        source_root: extension.source_root.clone(),
+        install_dir: extension.install_dir.clone(),
+        generation: extension.generation,
+        health: extension.health.clone(),
+        views: extension.views.clone(),
+        operations: extension.operations.clone(),
+        events: extension.events.clone(),
+        settings: extension.settings.clone(),
+        diagnostics: extension.diagnostics.clone(),
+    }
 }
 
 pub(super) async fn extension_settings(
@@ -809,7 +851,7 @@ pub(super) async fn extension_reload(
     State(state): State<AppState>,
     Extension(request): Extension<RequestContext>,
     Path(extension_id): Path<String>,
-) -> ApiResult<ResolvedExtensionSnapshot> {
+) -> ApiResult<ExtensionDetailRecord> {
     let item = state
         .extensions
         .reload_extension(&extension_id)
@@ -833,14 +875,14 @@ pub(super) async fn extension_reload(
     state
         .realtime
         .publish(crate::realtime::RealtimeEvent::ExtensionsChanged);
-    Ok(Json(item))
+    Ok(Json(map_extension_detail_record(&item)))
 }
 
 pub(super) async fn extension_restart(
     State(state): State<AppState>,
     Extension(request): Extension<RequestContext>,
     Path(extension_id): Path<String>,
-) -> ApiResult<ResolvedExtensionSnapshot> {
+) -> ApiResult<ExtensionDetailRecord> {
     let item = state
         .extensions
         .restart_extension(&extension_id)
@@ -864,14 +906,14 @@ pub(super) async fn extension_restart(
     state
         .realtime
         .publish(crate::realtime::RealtimeEvent::ExtensionsChanged);
-    Ok(Json(item))
+    Ok(Json(map_extension_detail_record(&item)))
 }
 
 pub(super) async fn extension_attach(
     State(state): State<AppState>,
     Extension(request): Extension<RequestContext>,
     Json(payload): Json<ExtensionAttachPayload>,
-) -> ApiResult<ResolvedExtensionSnapshot> {
+) -> ApiResult<ExtensionDetailRecord> {
     let item = state
         .extensions
         .attach_dev_source(&payload.path)
@@ -889,7 +931,7 @@ pub(super) async fn extension_attach(
     state
         .realtime
         .publish(crate::realtime::RealtimeEvent::ExtensionsChanged);
-    Ok(Json(item))
+    Ok(Json(map_extension_detail_record(&item)))
 }
 
 pub(super) async fn extension_detach(

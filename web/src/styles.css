@@ -995,7 +995,7 @@ label {
   padding: 10px 14px;
   border-radius: 12px;
   border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--line));
-  background: color-mix(in srgb, var(--bg-elevated) 92%, white 8%);
+  background: color-mix(in srgb, var(--bg-elevated) 92%, var(--bg-panel) 8%);
   color: var(--text);
   box-shadow: var(--shadow-float);
   font: 500 13px var(--font-ui);
@@ -1385,7 +1385,7 @@ label {
   border-radius: 999px;
   background:
     radial-gradient(circle at 34% 30%, rgba(255, 255, 255, 0.42), transparent 20%),
-    radial-gradient(circle at 50% 46%, color-mix(in srgb, var(--dockview-tab-accent) 62%, white 38%), transparent 56%),
+    radial-gradient(circle at 50% 46%, color-mix(in srgb, var(--dockview-tab-accent) 62%, var(--bg-elevated) 38%), transparent 56%),
     radial-gradient(circle at 58% 54%, var(--dockview-empty-accent), transparent 74%);
   opacity: 0.82;
   filter: blur(58px) saturate(0.9);
@@ -2322,7 +2322,7 @@ label {
   flex-direction: column;
   gap: 12px;
   padding: 16px 18px;
-  border: 1px solid color-mix(in srgb, var(--warn) 32%, var(--border));
+  border: 1px solid color-mix(in srgb, var(--warn) 32%, var(--line));
   border-radius: 20px;
   background:
     linear-gradient(180deg, color-mix(in srgb, var(--warn) 8%, var(--bg-panel)) 0%, var(--bg-panel) 100%);
@@ -2810,7 +2810,7 @@ label {
   border: 1px solid var(--line);
   border-radius: 16px;
   background:
-    linear-gradient(135deg, color-mix(in srgb, var(--accent) 10%, var(--panel)) 0%, var(--panel) 100%);
+    linear-gradient(135deg, color-mix(in srgb, var(--accent) 10%, var(--bg-panel)) 0%, var(--bg-panel) 100%);
 }
 
 .conversation-branch-overview__copy {
@@ -2870,7 +2870,7 @@ label {
   border-radius: 24px;
   border: 1px solid var(--line);
   background:
-    linear-gradient(180deg, color-mix(in srgb, var(--panel) 94%, white 6%) 0%, var(--panel) 100%);
+    linear-gradient(180deg, color-mix(in srgb, var(--bg-panel) 94%, var(--bg-elevated) 6%) 0%, var(--bg-panel) 100%);
   box-shadow: 0 28px 60px color-mix(in srgb, black 20%, transparent);
 }
 
@@ -2920,7 +2920,7 @@ label {
   padding: 14px 16px;
   border-radius: 16px;
   border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--line));
-  background: color-mix(in srgb, var(--accent) 8%, var(--panel));
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-panel));
 }
 
 .session-manager-modal__list {
@@ -2937,7 +2937,7 @@ label {
   padding: 14px 16px;
   border-radius: 16px;
   border: 1px solid color-mix(in srgb, var(--line) 88%, transparent);
-  background: color-mix(in srgb, var(--panel) 82%, transparent);
+  background: color-mix(in srgb, var(--bg-panel) 82%, transparent);
 }
 
 .session-manager-modal__main {
@@ -2970,7 +2970,7 @@ label {
   padding: 14px 16px;
   border: 1px solid color-mix(in srgb, var(--line) 88%, transparent);
   border-radius: 16px;
-  background: color-mix(in srgb, var(--panel) 82%, transparent);
+  background: color-mix(in srgb, var(--bg-panel) 82%, transparent);
   margin-left: calc(var(--branch-depth, 0) * 16px);
   position: relative;
 }
@@ -3052,7 +3052,7 @@ label {
   padding: 0 12px;
   border-radius: 12px;
   border: 1px solid var(--line);
-  background: var(--surface);
+  background: var(--bg-elevated);
   color: var(--text);
 }
 
@@ -3364,7 +3364,7 @@ label {
   gap: 4px;
   padding: 12px;
   border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--bg-panel-2) 88%, transparent);
+  background: color-mix(in srgb, var(--bg-soft) 88%, transparent);
 }
 
 .composer-palette__empty strong {
@@ -3413,17 +3413,17 @@ label {
 }
 
 .logs-layout {
-  --logs-page-bg: #fcfeff;
-  --logs-panel-bg: #ffffff;
-  --logs-card-bg: #ffffff;
-  --logs-surface-soft: #f8fbff;
-  --logs-line: #e6edf5;
-  --logs-line-strong: #cdd8e6;
-  --logs-accent-soft: #eff5ff;
-  --logs-text: #0f1728;
-  --logs-text-muted: #5f6b7a;
-  --logs-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
-  --logs-shadow-hover: 0 12px 28px rgba(15, 23, 42, 0.05);
+  --logs-page-bg: var(--bg);
+  --logs-panel-bg: var(--bg-panel);
+  --logs-card-bg: var(--bg-elevated);
+  --logs-surface-soft: var(--bg-soft);
+  --logs-line: var(--line);
+  --logs-line-strong: var(--line-strong);
+  --logs-accent-soft: var(--accent-soft);
+  --logs-text: var(--text);
+  --logs-text-muted: var(--text-muted);
+  --logs-shadow: var(--shadow-1);
+  --logs-shadow-hover: var(--shadow-hover);
   padding: 0;
   border-radius: 0;
   background: var(--logs-page-bg);
@@ -3463,7 +3463,7 @@ label {
 .logs-layout textarea,
 .logs-layout .custom-select__trigger,
 .logs-layout .custom-select__menu {
-  background: #ffffff;
+  background: var(--logs-card-bg);
   border-color: var(--logs-line);
 }
 
@@ -3473,7 +3473,7 @@ label {
   padding: 0 14px;
   border: 1px solid var(--logs-line);
   border-radius: var(--radius-sm);
-  background: #ffffff;
+  background: var(--logs-card-bg);
   color: var(--logs-text);
   box-shadow: none;
   font-weight: 500;
@@ -3500,7 +3500,7 @@ label {
 .logs-layout .custom-select__trigger:hover,
 .logs-layout input:not([type="checkbox"]):not([type="radio"]):hover,
 .logs-layout textarea:hover {
-  background: #ffffff;
+  background: var(--logs-card-bg);
   border-color: var(--logs-line-strong);
   box-shadow: none;
 }
@@ -3508,15 +3508,15 @@ label {
 .logs-layout .custom-select--open .custom-select__trigger,
 .logs-layout input:not([type="checkbox"]):not([type="radio"]):focus-visible,
 .logs-layout textarea:focus-visible {
-  background: #ffffff;
+  background: var(--logs-card-bg);
   border-color: var(--accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 10%, transparent);
 }
 
 .logs-layout .custom-select__menu {
   padding: 6px;
-  background: #ffffff;
-  box-shadow: 0 18px 42px rgba(15, 23, 42, 0.1);
+  background: var(--logs-card-bg);
+  box-shadow: var(--shadow-float);
 }
 
 .logs-layout .custom-select__option--focused,
@@ -3656,7 +3656,7 @@ label {
 
 .logs-search {
   flex: 1;
-  background: #ffffff;
+  background: var(--logs-card-bg);
   border-color: var(--logs-line);
   box-shadow: none;
   min-height: 42px;
@@ -3694,8 +3694,8 @@ label {
   padding: 18px;
   border: 1px solid var(--logs-line);
   border-radius: var(--radius-lg);
-  background: #ffffff;
-  box-shadow: 0 20px 56px rgba(15, 23, 42, 0.1);
+  background: var(--logs-panel-bg);
+  box-shadow: var(--shadow-float);
   z-index: 40;
 }
 
@@ -3714,7 +3714,7 @@ label {
   border-color: var(--accent);
   box-shadow:
     0 0 0 1px color-mix(in srgb, var(--accent) 26%, transparent),
-    0 10px 26px rgba(37, 99, 235, 0.08);
+    0 10px 26px color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
 .logs-feed-card {
@@ -3793,7 +3793,7 @@ label {
   padding: 16px;
   border: 1px solid var(--logs-line);
   border-radius: var(--radius-md);
-  background: #ffffff;
+  background: var(--logs-card-bg);
   box-shadow: none;
 }
 
@@ -3808,7 +3808,7 @@ label {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  background: #ffffff;
+  background: var(--logs-card-bg);
   border-color: var(--logs-line);
   box-shadow: none;
 }
@@ -3841,7 +3841,7 @@ label {
 .logs-layout .mini-card:hover,
 .logs-layout .log-card:hover,
 .logs-layout .timeline-item:hover {
-  background: #ffffff;
+  background: var(--logs-card-bg);
   border-color: var(--logs-line-strong);
   box-shadow: var(--logs-shadow-hover);
   transform: none;
@@ -3912,7 +3912,7 @@ label {
   padding: 16px 18px;
   border-style: dashed;
   border-color: color-mix(in srgb, var(--accent) 14%, var(--logs-line));
-  background: linear-gradient(180deg, #ffffff, var(--logs-surface-soft));
+  background: linear-gradient(180deg, var(--logs-card-bg), var(--logs-surface-soft));
 }
 
 .logs-related-log-empty strong {
@@ -4004,9 +4004,9 @@ label {
 }
 
 .logs-layout .badge--muted {
-  background: #ffffff;
+  background: var(--logs-card-bg);
   border-color: var(--logs-line);
-  color: #475467;
+  color: var(--logs-text-muted);
 }
 
 .resource-layout--single {
@@ -4064,11 +4064,11 @@ label {
 }
 
 .resource-editor--agent {
-  --agent-line: #dfe8f2;
-  --agent-line-strong: #c8d7e7;
-  --agent-surface-soft: #f5f9fe;
-  --agent-surface-strong: #ecf4fe;
-  --agent-shadow: 0 12px 28px rgba(15, 23, 42, 0.04);
+  --agent-line: var(--line);
+  --agent-line-strong: var(--line-strong);
+  --agent-surface-soft: var(--bg-soft);
+  --agent-surface-strong: var(--accent-soft);
+  --agent-shadow: var(--shadow-1);
 }
 
 .resource-editor--agent .resource-editor__header,
@@ -4076,7 +4076,7 @@ label {
   padding: 18px 20px;
   border: 1px solid var(--agent-line);
   border-radius: var(--radius-lg);
-  background: linear-gradient(180deg, #ffffff, var(--agent-surface-soft));
+  background: linear-gradient(180deg, var(--bg-panel), var(--agent-surface-soft));
   box-shadow: var(--agent-shadow);
 }
 
@@ -4142,7 +4142,7 @@ label {
   gap: 12px;
   padding: 18px;
   border-color: var(--agent-line);
-  background: linear-gradient(180deg, #ffffff, var(--agent-surface-soft));
+  background: linear-gradient(180deg, var(--bg-panel), var(--agent-surface-soft));
   box-shadow: var(--agent-shadow);
 }
 
@@ -4183,7 +4183,7 @@ label {
   gap: 8px;
   min-width: 0;
   border-color: color-mix(in srgb, var(--agent-line) 92%, transparent);
-  background: #ffffff;
+  background: var(--bg-elevated);
   box-shadow: none;
 }
 
@@ -4194,7 +4194,7 @@ label {
 
 .resource-editor--agent .details-panel {
   border-color: var(--agent-line);
-  background: linear-gradient(180deg, #ffffff, var(--agent-surface-soft));
+  background: linear-gradient(180deg, var(--bg-panel), var(--agent-surface-soft));
 }
 
 .resource-editor--agent .details-panel .panel-title,
@@ -4212,7 +4212,7 @@ label {
 .resource-editor--agent .details-panel .empty-card,
 .resource-editor--agent .agent-policy-rule,
 .resource-editor--agent .mini-card {
-  background: #ffffff;
+  background: var(--bg-elevated);
 }
 
 .agent-policy-list-empty {
@@ -4228,7 +4228,7 @@ label {
   padding: 14px 16px;
   border: 1px dashed color-mix(in srgb, var(--agent-line-strong) 88%, transparent);
   border-radius: var(--radius-md);
-  background: linear-gradient(180deg, #ffffff, var(--agent-surface-soft));
+  background: linear-gradient(180deg, var(--bg-panel), var(--agent-surface-soft));
   box-shadow: none;
 }
 
@@ -4255,7 +4255,7 @@ label {
 .resource-editor--agent .kv-list {
   overflow: hidden;
   border-radius: var(--radius-md);
-  background: #ffffff;
+  background: var(--bg-elevated);
 }
 
 .resource-editor--agent .kv-list span,
@@ -4275,7 +4275,7 @@ label {
 }
 
 .resource-editor--agent .chip {
-  background: #ffffff;
+  background: var(--bg-elevated);
   border-color: color-mix(in srgb, var(--agent-line) 92%, transparent);
   color: var(--text);
 }
@@ -4291,7 +4291,7 @@ label {
 .resource-editor--agent .custom-select__trigger,
 .resource-editor--agent .custom-select__menu {
   border-color: var(--agent-line);
-  background: #ffffff;
+  background: var(--bg-elevated);
 }
 
 .resource-editor--agent textarea:hover,
@@ -4493,13 +4493,13 @@ label {
   padding: 15px 16px;
   border: 1px solid color-mix(in srgb, var(--line) 90%, transparent);
   border-radius: var(--radius-md);
-  background: #ffffff;
+  background: var(--bg-elevated);
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast), background var(--transition-fast);
 }
 
 .extensions-summary-card:hover {
   border-color: var(--line-strong);
-  background: color-mix(in srgb, var(--accent) 2%, white);
+  background: color-mix(in srgb, var(--accent) 6%, var(--bg-elevated));
   box-shadow: none;
 }
 
@@ -4674,12 +4674,12 @@ label {
   gap: 10px;
   min-width: 0;
   border-color: color-mix(in srgb, var(--line) 90%, transparent);
-  background: linear-gradient(180deg, color-mix(in srgb, var(--bg-panel) 95%, white), var(--bg-elevated));
+  background: linear-gradient(180deg, color-mix(in srgb, var(--bg-panel) 95%, var(--bg-elevated)), var(--bg-elevated));
 }
 
 .extensions-entry-card--prominent {
   border-color: color-mix(in srgb, var(--accent) 30%, var(--line));
-  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 5%, white), var(--bg-elevated));
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 8%, var(--bg-elevated)), var(--bg-elevated));
 }
 
 .extensions-entry-card__header {
@@ -4850,18 +4850,18 @@ label {
   min-height: 152px;
   padding: 18px;
   border: 1px solid color-mix(in srgb, var(--line) 92%, transparent);
-  background: linear-gradient(180deg, #ffffff, #fbfdff);
+  background: linear-gradient(180deg, var(--bg-panel), var(--bg-soft));
   box-shadow: none;
 }
 
 .extensions-contribution-empty strong {
   font-size: var(--text-base);
-  color: #0f1728;
+  color: var(--text);
 }
 
 .extensions-contribution-empty p {
   margin: 0;
-  color: #667085;
+  color: var(--text-muted);
   line-height: 1.6;
 }
 
@@ -4873,18 +4873,18 @@ label {
   min-height: 124px;
   padding: 18px;
   border: 1px solid color-mix(in srgb, var(--line) 92%, transparent);
-  background: linear-gradient(180deg, #ffffff, #fbfdff);
+  background: linear-gradient(180deg, var(--bg-panel), var(--bg-soft));
   box-shadow: none;
 }
 
 .extensions-empty-state strong {
   font-size: var(--text-base);
-  color: #0f1728;
+  color: var(--text);
 }
 
 .extensions-empty-state p {
   margin: 0;
-  color: #667085;
+  color: var(--text-muted);
   line-height: 1.6;
 }
 
@@ -4898,7 +4898,7 @@ label {
   position: relative;
   padding-left: 16px;
   border-color: color-mix(in srgb, var(--line) 90%, transparent);
-  background: linear-gradient(180deg, color-mix(in srgb, var(--bg-panel) 95%, white), var(--bg-elevated));
+  background: linear-gradient(180deg, color-mix(in srgb, var(--bg-panel) 95%, var(--bg-elevated)), var(--bg-elevated));
 }
 
 .extensions-diagnostic-card::before {
@@ -4907,7 +4907,7 @@ label {
   inset: 14px auto 14px 0;
   width: 3px;
   border-radius: 999px;
-  background: #cfd9e8;
+  background: var(--line-strong);
 }
 
 .extensions-diagnostic-card--danger::before {
@@ -4952,11 +4952,11 @@ label {
   gap: 10px;
   min-height: 0;
   border-color: color-mix(in srgb, var(--line) 90%, transparent);
-  background: linear-gradient(180deg, color-mix(in srgb, var(--bg-panel) 94%, white), var(--bg-elevated));
+  background: linear-gradient(180deg, color-mix(in srgb, var(--bg-panel) 94%, var(--bg-elevated)), var(--bg-elevated));
 }
 
 .extensions-conversation-card--status {
-  background: linear-gradient(180deg, color-mix(in srgb, var(--success) 7%, white), var(--bg-elevated));
+  background: linear-gradient(180deg, color-mix(in srgb, var(--success) 10%, var(--bg-elevated)), var(--bg-elevated));
 }
 
 .extensions-conversation-card p {
@@ -4997,20 +4997,20 @@ label {
   padding: 14px;
   border: 1px solid color-mix(in srgb, var(--line) 88%, transparent);
   border-radius: var(--radius-md);
-  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 2%, white), color-mix(in srgb, var(--accent) 5%, transparent));
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 6%, var(--bg-elevated)), color-mix(in srgb, var(--accent) 5%, transparent));
 }
 
 .conversations-page,
 .skills-page,
 .schedules-page {
-  --registry-line: #dfe8f2;
-  --registry-line-strong: #c5d5e6;
-  --registry-card-bg: #ffffff;
-  --registry-surface-soft: #f5f9fe;
-  --registry-surface-strong: #ebf3fd;
-  --registry-accent-soft: #eef5ff;
-  --registry-shadow: 0 10px 26px rgba(15, 23, 42, 0.04);
-  --registry-shadow-hover: 0 14px 30px rgba(15, 23, 42, 0.055);
+  --registry-line: var(--line);
+  --registry-line-strong: var(--line-strong);
+  --registry-card-bg: var(--bg-elevated);
+  --registry-surface-soft: var(--bg-soft);
+  --registry-surface-strong: var(--bg-hover);
+  --registry-accent-soft: var(--accent-soft);
+  --registry-shadow: var(--shadow-1);
+  --registry-shadow-hover: var(--shadow-hover);
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -5057,7 +5057,7 @@ label {
 .schedules-page .custom-select__trigger,
 .schedules-page .custom-select__menu {
   border-color: var(--registry-line);
-  background: #ffffff;
+  background: var(--registry-card-bg);
 }
 
 .conversations-page input:not([type="checkbox"]):not([type="radio"]):hover,
@@ -5137,7 +5137,7 @@ label {
 .skills-metric-card,
 .schedules-metric-card {
   border-color: color-mix(in srgb, var(--registry-line) 92%, transparent);
-  background: #ffffff;
+  background: var(--registry-card-bg);
   box-shadow: none;
 }
 
@@ -5216,7 +5216,7 @@ label {
 }
 
 .conversations-agent-chip {
-  background: #ffffff;
+  background: var(--registry-card-bg);
   border-color: color-mix(in srgb, var(--registry-line) 92%, transparent);
   color: var(--text);
   box-shadow: none;
@@ -5240,7 +5240,7 @@ label {
 .skills-card,
 .schedules-card {
   border-color: color-mix(in srgb, var(--registry-line) 92%, transparent);
-  background: #ffffff;
+  background: var(--registry-card-bg);
   box-shadow: none;
 }
 
@@ -5297,7 +5297,7 @@ label {
   gap: 8px;
   padding: 18px 20px;
   border-color: color-mix(in srgb, var(--registry-line) 94%, transparent);
-  background: #ffffff;
+  background: var(--registry-card-bg);
   box-shadow: none;
 }
 
@@ -5379,7 +5379,7 @@ label {
 
 .skills-card__notice--danger {
   border: 1px solid color-mix(in srgb, var(--danger) 18%, transparent);
-  background: color-mix(in srgb, var(--danger) 7%, white);
+  background: color-mix(in srgb, var(--danger) 8%, var(--registry-card-bg));
 }
 
 .skills-meta-grid {
@@ -5397,7 +5397,7 @@ label {
   padding: 12px;
   border: 1px solid color-mix(in srgb, var(--registry-line) 90%, transparent);
   border-radius: var(--radius-md);
-  background: #ffffff;
+  background: var(--registry-card-bg);
 }
 
 .skills-meta-item span,
@@ -5450,7 +5450,7 @@ label {
   padding: 16px 18px;
   border: 1px solid color-mix(in srgb, var(--registry-line) 92%, transparent);
   border-radius: var(--radius-lg);
-  background: #ffffff;
+  background: var(--registry-card-bg);
 }
 
 .skill-config-modal__section-header,
@@ -5548,7 +5548,7 @@ label {
   padding: 16px 18px;
   border: 1px solid color-mix(in srgb, var(--registry-line) 92%, transparent);
   border-radius: var(--radius-lg);
-  background: #ffffff;
+  background: var(--registry-card-bg);
 }
 
 .schedules-subtitle {
@@ -5565,7 +5565,7 @@ label {
   border: 1px solid color-mix(in srgb, var(--registry-line) 92%, transparent);
   border-radius: 16px;
   overflow: hidden;
-  background: #ffffff;
+  background: var(--registry-card-bg);
 }
 
 .schedules-kv-list span,
@@ -5596,7 +5596,7 @@ label {
   flex-direction: column;
   gap: 12px;
   border-color: color-mix(in srgb, var(--registry-line) 90%, transparent);
-  background: #ffffff;
+  background: var(--registry-card-bg);
 }
 
 .conversations-selection-pill {
@@ -5605,7 +5605,7 @@ label {
   padding: 6px 10px;
   border: 1px solid color-mix(in srgb, var(--registry-line) 92%, transparent);
   border-radius: 999px;
-  background: #ffffff;
+  background: var(--registry-card-bg);
   color: var(--text-muted);
   font-size: var(--text-sm);
   line-height: 1.4;
@@ -5637,7 +5637,7 @@ label {
 .schedules-output {
   min-height: 220px;
   border-color: var(--registry-line);
-  background: #ffffff;
+  background: var(--registry-card-bg);
   font-family: ui-monospace, "SF Mono", "Cascadia Code", "Fira Code", monospace;
   font-size: 12px;
   line-height: 1.6;
@@ -6291,7 +6291,7 @@ label {
 
 .status-toast:hover {
   transform: translateY(-2px);
-  box-shadow: 0 18px 36px rgba(15, 23, 42, 0.14);
+  box-shadow: 0 18px 36px color-mix(in srgb, var(--text) 14%, transparent);
 }
 
 .status-toast--error {
@@ -6331,11 +6331,11 @@ label {
 }
 
 .status-toast--error .status-toast__progress {
-  background: color-mix(in srgb, var(--danger) 72%, white 12%);
+  background: color-mix(in srgb, var(--danger) 72%, var(--bg-panel) 12%);
 }
 
 .status-toast--success .status-toast__progress {
-  background: color-mix(in srgb, var(--success) 72%, white 12%);
+  background: color-mix(in srgb, var(--success) 72%, var(--bg-panel) 12%);
 }
 
 .status-toast__close {

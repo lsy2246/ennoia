@@ -72,7 +72,7 @@
 - `extension-host` 承载扩展扫描、attach、reload、restart、诊断、Worker 解析与 Worker RPC 分发
 - `server` 承载 API 暴露、TOML 配置文件、日志、Hook 派发、能力路由与启动流程
 - 内置扩展实现放在 `assets/extensions/<extension_id>/ui|worker|data`，不得把 session、memory、workflow、任务编排等业务实现混回核心 crate
-- Wasm Worker 使用 `ennoia.worker` ABI，宿主默认不注入 WASI/import；需要宿主能力时必须先在 `permissions` 中声明，并通过统一 capability bridge 接入
+- Wasm Worker 使用 `ennoia.worker` ABI，宿主默认不注入 WASI/import；需要宿主能力时通过 operation 与 host capability bridge 接入，manifest 不声明底层权限边界
 - 公共转换逻辑提取为函数或模块级 helper
 
 ### 5.2 命名

@@ -1,258 +1,156 @@
+# Extension 开发约定
+
 ## 定位
 
-Extension 负责系统能力，Skill 负责工具与用法。Extension 不再表示“前端 + 独立后端服务”，而是由宿主装配的一组能力声明：`ui`、`worker`、`resource_types`、`capabilities`、`surfaces`、`entrypoints`、`settings`、`themes`、`locales`、`commands`、`subscriptions`。
+Extension 负责系统能力，Skill 负责 Agent 工具与用法。Extension manifest 只描述系统可见契约，不描述扩展内部实现细节。
+
+系统关心的扩展契约只有五类：
+
+- `views`：主壳可以打开或挂载的界面。
+- `operations`：系统可以调用的操作。
+- `events`：系统事件投递到 operation 的关系。
+- `settings`：宿主需要渲染和保存的扩展级配置字段。
+- `conversation`：扩展是否进入会话上下文，以及暴露哪些资源和 operation 名称。
+
+UI 入口、service 入口、SQLite、缓存、内部权限边界、构建产物和运行脚本都属于扩展内部实现。宿主可以按目录约定发现入口，但这些内容不进入 manifest 契约，也不在扩展设计界面展示。
 
 ## 源码放置
 
-- 官方内置扩展源码放在 `assets/extensions/<extension_id>/`
-- 官方内置技能源码放在 `assets/skills/<skill_id>/`
-- 运行目录里的真实包内容分别落在 `~/.ennoia/extensions/<id>/` 与 `~/.ennoia/skills/<id>/`
-- 是否启用、是否阻止内置同步统一登记在 `~/.ennoia/config/extensions.toml` 与 `~/.ennoia/config/skills.toml`
+- 官方内置扩展源码放在 `assets/extensions/<extension_id>/`。
+- 官方内置技能源码放在 `assets/skills/<skill_id>/`。
+- 运行目录里的真实包内容分别落在 `~/.ennoia/extensions/<id>/` 与 `~/.ennoia/skills/<id>/`。
+- 是否启用、是否阻止内置同步统一登记在 `~/.ennoia/config/extensions.toml` 与 `~/.ennoia/config/skills.toml`。
 
-## Manifest
-
-系统扩展只使用 `extension.toml`。推荐字段：
-
-- `description`
-- `docs`
-- `source`
-- `ui`
-- `worker`
-- `permissions`
-- `runtime`
-- `build`
-- `assets`
-- `watch`
-- `resource_types`
-- `capabilities`
-- `surfaces`
-- `entrypoints`
-- `settings`
-- `locales`
-- `themes`
-- `commands`
-- `subscriptions`
-- `conversation`
-
-扩展可以带能力说明文档，但这类说明仍然属于扩展本身，不进入 skill 语义。扩展默认不进入会话；只有显式声明 `conversation` 规则时，宿主才会把它加入会话目录。进入会话时宿主只整理扩展自身的 `description`、声明过的资源/能力目录和 `docs` 入口，放入结构化 `context.extensions`；不会把 `docs` 正文直接塞进每轮上下文。
-
-`ui` 和 `worker` 都是可选声明。纯 UI 扩展不需要 `worker`，纯能力扩展不需要 `ui`。`worker.kind` 当前支持 `wasm` 和 `process`；`process` Worker 通过 stdin/stdout 的 JSON 文本协议接入宿主，不需要自行开放 HTTP 端口。需要本地 SQLite、文件和后台任务的扩展，推荐直接使用 `process` Worker。
-
-```toml
-[worker]
-kind = "process"
-entry = "bin/conversation-service"
-protocol = "jsonrpc-stdio"
-
-[ui]
-runtime = "browser-esm"
-hmr = true
-
-[build]
-ui_bundle = "ui/dist/entry.js"
-
-[permissions]
-storage = "extension"
-sqlite = true
-network = []
-events = ["publish", "subscribe"]
-fs = []
-env = []
-
-[runtime]
-startup = "lazy"
-timeout_ms = 30000
-memory_limit_mb = 128
-
-[conversation]
-inject = true
-resource_types = ["canvas.document"]
-capabilities = ["canvas.read", "canvas.patch"]
-```
-
-如果使用 Wasm Worker，则把 `worker.kind` 改为 `wasm`，并额外声明 `abi = "ennoia.worker"` 与对应的 `.wasm` 入口文件。
-
-Manifest 主声明只有一层：
-
-- `resource_types[]`：声明扩展理解或产出的资源模型。
-- `capabilities[]`：声明系统能力入口。
-- `surfaces[]`：声明 page、panel 等 UI 挂载点。
-- `entrypoints[]`：声明扩展页里优先展示的“可进入入口”，名称、说明和排序都由扩展自己定义。
-- `settings[]`：声明扩展级配置字段，由宿主渲染表单并保存。
-- `locales[]`、`themes[]`、`commands[]`：声明静态 UI 资源。
-- `subscriptions[]`：声明事件订阅关系。
-
-运行时会从 `capabilities[].metadata` 和 `subscriptions[]` 派生旧的产品视图：
-
-- `metadata.provider` -> Provider
-- `metadata.behavior` -> Behavior
-- `metadata.memory` -> Memory
-- `metadata.action` -> Action
-- `metadata.schedule_action` -> Schedule Action
-- `subscriptions[] + capability.entry` -> Hook
-
-`surfaces[]` 里的 `kind = "page"` 是可选 UI 页面贡献。声明页面后，Web 的扩展详情页会根据 `entrypoints[]` 把这些入口优先展示出来；只有页面额外声明 `nav.default_pinned = true` 时才默认进入主导航。
-
-`entrypoints[]` 用来表达“用户从哪里进入这个扩展”，而不是简单暴露底层 surface。当前支持两种目标：
-
-- `kind = "page"`：进入某个页面，使用 `page_id`
-- `kind = "panel"`：进入某个面板，使用 `panel_id`
-
-推荐字段：
-
-- `id`
-- `label`
-- `description`
-- `kind`
-- `page_id` 或 `panel_id`
-- `icon`
-- `order`
-- `prominent`
-
-如果扩展没有显式声明 `entrypoints[]`，宿主会从 `surfaces[]` 派生默认 page / panel 入口，保证扩展页始终可进入。
-
-`settings[]` 用来声明扩展级配置表单。当前支持字段类型：
-
-- `text`
-- `textarea`
-- `boolean`
-- `select`
-- `number`
-
-推荐字段：
-
-- `key`
-- `label`
-- `description`
-- `type`
-- `placeholder`
-- `required`
-- `options`
-- `default_value`
-
-宿主会把扩展配置保存到 `~/.ennoia/config/extensions/{extension_id}.toml`。扩展私有数据库、缓存和业务运行数据仍然保留在 `~/.ennoia/data/extensions/{extension_id}/`。
-
-`themes[]` 是可选主题贡献。扩展主题遵循 `ennoia.theme`，通过 `tokens_entry` 提供 CSS 变量文件，详细 token 规范见 [主题协议](theme-contract.md)。
-
-```toml
-[[themes]]
-id = "acme.sunrise"
-contract = "ennoia.theme"
-label = { key = "ext.acme.theme.sunrise", fallback = "Sunrise" }
-appearance = "light"
-tokens_entry = "ui/themes/sunrise.css"
-preview_color = "#f59e0b"
-extends = "system"
-category = "extension"
-```
-
-Hook 不再直接作为 manifest 顶层声明，而是拆成“能力入口 + 订阅关系”：
-
-```toml
-[[capabilities]]
-id = "acme.conversation_message"
-contract = "hook.conversation_message"
-kind = "event_handler"
-entry = "hooks/conversation-message-created"
-
-[[subscriptions]]
-event = "conversation.message.created"
-capability = "acme.conversation_message"
-```
-
-系统先把 Hook 事件写入宿主事件总线，再异步转换为 Worker RPC 调用。扩展返回 `HookDispatchResponse`：
-
-- `handled=true`：扩展已处理该事件。
-- `result`：可选结构化结果，供调用方继续返回或落库。
-- `message`：可选诊断说明。
-
-Action 规则通过 capability metadata 声明：
-
-```toml
-[[capabilities]]
-id = "conversation.list"
-contract = "conversation.list"
-kind = "query"
-entry = "conversation/conversations/list"
-metadata = { action = { key = "conversation.list", phase = "execute", priority = 100, result_mode = "last" }, permission = { action = "conversation.read", target_kind = "conversation", risk_level = "low", default_decision = "allow", scope_kind = "none" } }
-
-[[capabilities]]
-id = "message.append.operator"
-contract = "message.append.operator"
-kind = "action"
-entry = "conversation/messages/append-user"
-metadata = { action = { key = "message.append", phase = "execute", priority = 300, result_mode = "last", when = { message_role_in = ["operator", "user"] } }, permission = { action = "conversation.write", target_kind = "conversation", risk_level = "medium", default_decision = "allow", scope_kind = "conversation" } }
-```
-
-`metadata.permission` 是 Agent 权限系统的能力声明，不是最终授权结果。推荐字段：
-
-- `action`：系统级动作名，例如 `conversation.read`、`memory.write`、`provider.generate`。
-- `target_kind`：权限目标类型，例如 `conversation`、`memory`、`run`、`artifact`。
-- `risk_level`：能力风险分级，当前主要用于说明和前端展示。
-- `default_decision`：建议默认裁决，用于表达扩展设计意图；真正是否放行仍由宿主 policy / grant 决定。
-- `scope_kind`：作用域粒度，例如 `none`、`conversation`、`run`。
-
-扩展不直接判断 Agent 是否有权执行某项能力。扩展只声明 `permission` 元数据，宿主在 Action Router 和 Provider 调用前统一完成裁决、审批和事件落库。
-
-Schedule Action 也通过 capability metadata 声明：
-
-```toml
-[[capabilities]]
-id = "workflow.run"
-contract = "workflow.run"
-kind = "action"
-entry = "workflow/schedules/run"
-metadata = { schedule_action = { id = "workflow.run" } }
-```
-
-Provider、Behavior、Memory、Hook、Action 和 Schedule Action 都只声明能力入口；实际执行统一通过宿主 Worker RPC 分发或宿主事件总线投递，不允许扩展自行开放端口。
-扩展自己的配置、UI 文案、主题、页面实现和业务运行态都属于扩展边界，不得放入 Web 主壳的系统模块、核心配置模型或 `config/` 根目录。
-
-## 推荐目录
+推荐扩展目录：
 
 ```text
 <extension_id>/
 ├─ extension.toml
-├─ ui/               # 可选：页面、面板、主题、语言
-├─ bin/              # 可选：process Worker
-├─ worker/           # 可选：Wasm Worker
-├─ data/             # 可选：schema、私有模型、资源
+├─ docs/                 # 可选：扩展说明
+├─ ui/                   # 可选：页面、面板、会话卡片、主题、语言
+├─ bin/                  # 可选：process service
+├─ worker/               # 可选：Wasm worker
+├─ data/                 # 可选：schema、私有模型、资源
 └─ model-endpoint-presets/ # 可选：初始化模型接入实例
 ```
 
-Skill 目录独立：
+## Manifest
 
-```text
-<skill_id>/
-├─ skill.toml
-├─ README.md
-├─ package.json      # 可选：skill 私有依赖
-├─ scripts/          # 可选：安装、runner、包装脚本
-├─ references/       # 可选：补充说明与操作约定
-└─ assets/           # 可选：skill 自带资源
-```
-
-`skill.toml` 至少包含这些运行字段：
+系统扩展只使用 `extension.toml`。顶层字段固定为：
 
 - `id`
 - `version`
+- `name`
 - `description`
-- `mount.mode`
-- `actions[]`
+- `docs`
+- `compat`
+- `views`
+- `operations`
+- `events`
+- `settings`
+- `conversation`
 
-可选的宿主管理字段：
+示例：
 
-- `settings[]`：声明技能级配置字段，由宿主统一渲染表单并保存到 `~/.ennoia/config/skills/{skill_id}.toml`
-- `diagnostics.manual_check`：是否在 UI 中显示“重新检测”按钮
-- `diagnostics.check`：技能自定义的检测命令，宿主会把当前配置通过 `ENNOIA_SKILL_CONFIG_JSON` 注入后执行，并把结构化结果缓存到 `~/.ennoia/data/skills/{skill_id}/status.json`
+```toml
+id = "workflow"
+version = "0.1.0"
+name = "Workflow"
+description = "提供 run、task、artifact 与调度动作的编排实现。"
+docs = "docs/overview.md"
 
-其中 `actions[]` 只声明：
+[compat]
+ennoia = ">=0.1.0"
 
-- `id`
+[conversation]
+visible = true
+resources = ["workflow.run", "workflow.task", "workflow.artifact"]
+operations = ["run.create", "run.get", "run.list", "task.list", "artifact.list"]
+
+[[views]]
+name = "workflow.page"
+type = "page"
+title = { key = "ext.workflow.page", fallback = "工作编排" }
+nav = "sidebar"
+order = 35
+icon = "workflow"
+route = "/workflow"
+
+[[operations]]
+name = "run.create"
+description = "创建 workflow run。"
+agent = true
+
+[[operations]]
+name = "workflow.run"
+title = { key = "ext.workflow.schedule.run", fallback = "Run workflow" }
+description = "由 scheduler 触发 workflow run。"
+agent = true
+schedule = true
+
+[[operations]]
+name = "workflow.conversation.message.created"
+description = "处理会话消息创建事件。"
+
+[[events]]
+on = "conversation.message.created"
+operation = "workflow.conversation.message.created"
+```
+
+## Views
+
+`views[]` 声明主壳可以打开或挂载的界面。当前稳定类型是页面与面板。
+
+字段：
+
+- `name`：视图唯一名，也是 UI module 中的 mount key。
+- `type`：视图类型，例如 `page`、`panel`。
+- `title`：本地化标题。
+- `nav`：可选导航位置；`sidebar` 表示可进入主导航。
+- `order`：可选排序。
+- `slot`：面板槽位，例如 `right`。
+- `icon`：可选图标名。
+- `route`：页面路由。
+- `priority`：同类挂载优先级。
+
+Web 主壳按 runtime snapshot 挂载 view，不需要在 manifest 里重复描述 UI 或 service 入口。
+
+## Operations
+
+`operations[]` 声明系统可调用的操作。`operation.name` 是唯一调用名，同时作为：
+
+- `/api/actions/{action}` 的 action key。
+- Worker RPC method。
+- `events[].operation` 的投递目标。
+- Agent 权限裁决里的 action 名。
+
+字段：
+
+- `name`
+- `title`
 - `description`
-- `entry`
+- `agent`
+- `input`
+- `output`
+- `provider`
+- `schedule`
 
-`settings[]` 当前复用扩展设置字段模型，支持：
+扩展不在 manifest 中声明权限目标、SQLite、网络、文件或环境变量。Agent 权限由宿主按 operation 名称、调用参数和 `permission_actor` 上下文统一裁决。
+
+## Events
+
+`events[]` 只声明系统事件投递关系：
+
+- `on`：系统事件名。
+- `operation`：事件发生后调用的 operation 名称。
+
+系统先把事件写入宿主持久化事件总线，再异步投递到目标 operation。扩展临时离线不会阻塞主业务写入。
+
+## Settings
+
+`settings[]` 声明扩展级配置表单。宿主渲染表单并保存到 `~/.ennoia/config/extensions/{extension_id}.toml`。
+
+支持字段类型：
 
 - `text`
 - `textarea`
@@ -260,45 +158,24 @@ Skill 目录独立：
 - `select`
 - `number`
 
-`diagnostics.check` 当前推荐字段：
+扩展私有数据库、缓存和业务运行数据保留在 `~/.ennoia/data/extensions/{extension_id}/`，由扩展自行解释。
 
-- `runner`：`node` / `bun` / `python` / `direct`
-- `entry`：相对技能根目录的检测入口
-- `args[]`
-- `timeout_ms`
+## Conversation
 
-检测命令推荐输出 JSON，结构应包含：
+扩展默认不进入会话上下文。需要进入时声明：
 
-- `status`：`ready` / `partial` / `missing_config` / `env_missing` / `error` / `unknown`
-- `summary`
-- `items[]`：逐项检查结果，建议标注 `category`、`status`、`label`、`message`、`fix_hint`
+```toml
+[conversation]
+visible = true
+resources = ["memory.item"]
+operations = ["memory.query", "memory.build_context"]
+```
 
-约定：
-
-- `actions[]` 表示对外可调用入口，不等于 skill 目录里的所有脚本。
-- 默认一个 skill 只暴露一个 action；只有当用户能明确感知为多个独立能力，或审批/权限、输入输出契约显著不同，才拆成多 action。
-- 调试脚本、浏览器包装器、安装脚本和内部子流程都应留在 `scripts/`，不要为了实现细节把它们直接提升成 action。
-- `settings[]` 只负责声明“用户可填写什么”，不要把环境探测结果硬编码进配置表单。
-- `diagnostics.check` 负责声明“技能如何判断自己是否可用”；宿主只负责统一展示，不让每个技能自定义整块页面。
-
-Skill 的具体调用方式、常见输入、常见输出和平台限制统一写在 `README.md` 中；不要再把这些内容拆成 `docs`、`keywords` 或额外 schema 目录。
-
-## 运行链路
-
-1. `cargo run -p ennoia-cli -- dev` 初始化运行目录。
-2. CLI 把未被 `blocked_builtin_sync` 屏蔽的内置扩展同步到 `<ENNOIA_HOME>/extensions/<extension_id>/`，并更新 `config/extensions.toml`。
-3. CLI 扫描内置扩展中的 `model-endpoint-presets/*.toml`，把默认模型接入实例写入 `config/model-endpoints/`。
-4. CLI 把仓库内 `assets/extensions/*` 追加到 `config/extensions.toml` 的 `dev_sources`，供开发模式覆盖安装目录。
-5. Extension Host 扫描扩展，解析 `ui`、`worker` 和贡献能力，不启动扩展私有进程。
-6. Server 暴露 runtime snapshot、事件流、诊断、日志、资源贡献接口、接口绑定 API、scheduler API，以及 `/api/extensions/{extension_id}/rpc/{method}` Worker RPC 入口。
-7. Core 只维护稳定动作、绑定、计划与 Hook 派发；扩展内部按 Worker ABI 和 capability 组织自己的业务逻辑。
-8. Web 工作台根据 runtime snapshot 动态导入扩展 UI 模块，并按 mount id 挂载页面、面板、主题、语言和命令。
+进入会话时，宿主只暴露扩展的 `description`、`docs` 入口、`conversation.resources` 和 `conversation.operations`。宿主不自动注入 `docs` 正文，也不展示扩展内部实现细节。
 
 ## UI Module ABI
 
-- 扩展 UI 源码入口推荐放在 `ui/entry.tsx`
-- 构建产物推荐输出到 `ui/dist/entry.js`
-- UI bundle 必须导出一个 ESM 模块对象，按 mount id 暴露页面和面板挂载器：
+扩展 UI 源码入口推荐放在 `ui/entry.tsx`，构建产物推荐输出到 `ui/dist/entry.js`。UI bundle 导出 `ExtensionUiModule`：
 
 ```ts
 import type { ExtensionUiModule } from "@ennoia/ui-sdk";
@@ -311,28 +188,23 @@ const ui: ExtensionUiModule = {
       };
     },
   },
+  panels: {
+    "memory.context": (container, context) => {
+      return {
+        unmount() {},
+      };
+    },
+  },
 };
 
 export default ui;
 ```
 
-- 页面和面板不再向主壳导出 React 组件本身，而是导出 `mount(container, context)` / `unmount()`；这样扩展 UI 可以自带自己的 React runtime，不和主壳 hooks 冲突。
-- `context.helpers` 会提供 `apiBaseUrl`、`locale`、`themeId`、`t()`、`formatDateTime()` 等宿主运行时能力。
-
-## 开发热加载
-
-- `ennoia dev` 会分别监听三类源码：`crates/`、`assets/`、`Cargo.toml` 与 `Cargo.lock` 用于 API 热重建；`assets/extensions/*/(data|plugins|worker)/` 用于 builtin worker 热重建；所有已挂载的 dev source 扩展的 `ui/entry.*` 用于扩展 UI watcher。
-- `ennoia dev` 会额外启动扩展 UI watcher，自动把每个 dev source 的 `ui/entry.*` 构建到对应扩展目录下的 `ui/dist/entry.js`，不再只覆盖内置扩展。
-- 对于挂载到 `dev_sources` 的扩展，宿主会优先加载 `ui.dev_url`；未声明 `ui.dev_url` 时，如果扩展根目录存在 `ui/entry.tsx`、`ui/entry.ts`、`ui/entry.jsx` 或 `ui/entry.js`，会直接按源码入口加载；只有未发现开发入口时才回退到 `build.ui_bundle`。
-- `ennoia start` / `ennoia serve` 不会消费 `dev_sources`；运行态只从当前 home 的 `extensions/` 目录读取已安装扩展。
-- Server 运行时每 2 秒刷新一次扩展注册表与 manifest；UI bundle 版本变化会进入 runtime snapshot，并通过 `/api/extensions/events/stream` 触发 Web 重新加载当前扩展模块。
-- Worker runtime 会缓存编译后的 Wasm Module；`.wasm` mtime 或文件大小变化后，下一次 RPC 调用会自动重新编译。
-- Process Worker 会在目标二进制 mtime 或文件大小变化后，于下一次 RPC 调用自动换新实例。
-- 每次 RPC 调用都会创建新的 Wasm 实例，避免线性内存状态跨请求泄漏。
+页面和面板导出 `mount(container, context)` / `unmount()`；扩展 UI 可以自带自己的 React runtime，不和主壳 hooks 冲突。需要渲染会话时间线记录时导出 `conversationRecords`，它使用扩展记录的 `kind` 作为 mount key。`context.helpers` 提供 `apiBaseUrl`、`locale`、`themeId`、`t()`、`formatDateTime()` 等宿主运行时能力。
 
 ## Worker ABI
 
-当前宿主支持 `ennoia.worker`，Worker 需要导出：
+Process service 推荐放在 `bin/`。Wasm worker 推荐放在 `worker/`，当前宿主支持 `ennoia.worker` ABI：
 
 - `memory`
 - `ennoia_worker_alloc(len: i32) -> i32`
@@ -343,7 +215,7 @@ export default ui;
 
 ```json
 {
-  "method": "memory/recall",
+  "method": "memory.query",
   "params": {},
   "context": {
     "trace": {
@@ -359,32 +231,21 @@ export default ui;
 }
 ```
 
-`ennoia_worker_handle` 返回高 32 位为 `ptr`、低 32 位为 `len` 的打包值。返回缓冲区应是 `ExtensionRpcResponse` JSON；如果返回普通 JSON，宿主会包装为成功响应。
+返回缓冲区应是 `ExtensionRpcResponse` JSON；如果返回普通 JSON，宿主会包装为成功响应。RPC 方法必须匹配 manifest 中声明的 `operation.name`。
 
-`context.trace` 表示当前跨边界调用的链路上下文。扩展不需要理解宿主内部数据库结构，但如果扩展内部还会继续拆子步骤、写自己的日志或继续调用其他能力，应该优先透传这组字段。
+## 运行链路
 
-内置 `conversation`、`memory` 与 `workflow` 当前都采用 process Worker；`workflow/worker/workflow.wasm` 仍可作为独立 Wasm worker 构建产物存在，但默认运行链路不再直接使用它。
-
-执行 `bun run build:workers` 会：
-
-- 构建 `conversation`、`memory` 与 `workflow` 的 release 进程 Worker，并复制到各自扩展目录下的 `bin/`
-- 构建 `workflow` 的 `wasm32-unknown-unknown` release 产物，并复制到 `assets/extensions/workflow/worker/workflow.wasm`
+1. CLI 初始化运行目录。
+2. CLI 同步未被 `blocked_builtin_sync` 屏蔽的内置扩展到 `<ENNOIA_HOME>/extensions/<extension_id>/`，并更新 `config/extensions.toml`。
+3. 开发模式下 CLI 把仓库内 `assets/extensions/*` 追加到 `config/extensions.toml` 的 `dev_sources`。
+4. Extension Host 扫描扩展并解析 manifest 契约。
+5. Extension Host 按目录约定发现 UI / service 入口，生成 runtime snapshot。
+6. Server 暴露 runtime snapshot、事件流、诊断、日志、scheduler API、action API 和 Worker RPC。
+7. Web 工作台根据 runtime snapshot 动态导入扩展 UI 模块，并按 view name 挂载页面和面板；会话时间线记录按扩展 record kind 挂载。
 
 ## 沙箱与权限
 
 - Host 默认不注入 WASI，也不允许任意 import。
-- RPC 方法必须匹配 manifest 中 Provider、Behavior、Memory、Hook、Action 或 Schedule Action 贡献声明的 `entry` / `handler` / `method` 前缀；纯 Worker 扩展没有贡献前缀时允许调用安全方法名。
-- `runtime.memory_limit_mb` 控制 Wasm store 内存上限。
-- `runtime.timeout_ms` 控制 Wasm fuel 预算，防止无限循环长期占用 Host。
-- `permissions` 是后续 host capability bridge 的唯一声明来源；在 bridge 接入前，Worker 没有文件、网络、环境变量或数据库的宿主访问能力。
-
-## 安装与扫描目录
-
-- 扩展注册表：`<ENNOIA_HOME>/config/extensions.toml`
-- 技能注册表：`<ENNOIA_HOME>/config/skills.toml`
-- 扩展目录：`<ENNOIA_HOME>/extensions/<extension_id>/`
-- 技能目录：`<ENNOIA_HOME>/skills/<skill_id>/`
-- 扩展私有数据目录：`<ENNOIA_HOME>/data/extensions/<extension_id>/`
-
-扩展自己的数据库、缓存和私有运行态文件都应放在扩展私有数据目录。核心不提供主业务 SQLite；扩展通过 Worker capability 使用宿主授予的存储、SQLite、网络、事件和日志能力。
-扩展私有业务配置也应放在扩展私有数据目录，并由扩展自行解释；核心只负责扩展生命周期、能力发现和 Worker RPC 分发。
+- Wasm 内存和超时预算使用宿主运行时默认值。
+- Agent 权限由宿主按 operation 和上下文裁决。
+- 扩展 manifest 不声明底层权限、SQLite、网络、文件或环境变量。

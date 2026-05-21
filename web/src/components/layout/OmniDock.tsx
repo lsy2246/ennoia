@@ -120,6 +120,8 @@ export function OmniDock({
 }: OmniDockProps) {
   const { availableLocales, availableThemes, t } = useUiHelpers();
   const uiState = useUiStore();
+  const preferencesLabel = t("web.dock.preferences", "偏好设置");
+  const preferencesHint = t("web.dock.preferences_hint", "主题、语言与界面偏好");
 
   const [showPreferences, setShowPreferences] = useState(false);
   const [openPreferenceMenu, setOpenPreferenceMenu] = useState<"theme" | "locale" | null>(null);
@@ -164,7 +166,7 @@ export function OmniDock({
 
   const localeOptions: PreferenceOption[] = availableLocales.map((locale) => ({
     value: locale,
-    label: locale,
+    label: t(`web.locale.${locale.replace(/[^a-zA-Z0-9]+/g, "_")}`, locale),
   }));
 
   // When dragging, use the preview pos to determine if it should render vertically or horizontally
@@ -256,12 +258,12 @@ export function OmniDock({
   };
 
   async function changeTheme(themeId: string) {
-    await uiState.savePreferences({ ...uiState, theme_id: themeId });
+    await uiState.savePreferences({ theme_id: themeId });
     setOpenPreferenceMenu(null);
   }
 
   async function changeLocale(locale: string) {
-    await uiState.savePreferences({ ...uiState, locale });
+    await uiState.savePreferences({ locale });
     setOpenPreferenceMenu(null);
   }
 
@@ -340,7 +342,11 @@ export function OmniDock({
             type="button"
             className="dock-edge-toggle"
             onClick={toggleExpanded}
-            title={expanded ? "收起导航" : "展开导航"}
+            title={
+              expanded
+                ? t("web.dock.collapse_nav", "收起导航")
+                : t("web.dock.expand_nav", "展开导航")
+            }
           >
             <span>{getToggleIcon()}</span>
           </button>
@@ -351,7 +357,7 @@ export function OmniDock({
             className="dock-handle"
             data-vertical={isVertical}
             onMouseDown={handleDragStart}
-            title="按住拖拽到任意边缘"
+            title={t("web.dock.drag_handle", "按住拖拽到任意边缘")}
           >
             <div className="dock-handle-grip" />
           </div>
@@ -394,13 +400,13 @@ export function OmniDock({
               type="button"
               className={`dock-item ${showPreferences ? "dock-item--active" : ""}`}
               onClick={togglePreferences}
-              title={expanded ? undefined : "偏好设置"}
+              title={expanded ? undefined : preferencesLabel}
             >
               <span className="dock-icon">☷</span>
               {expanded && (
                 <span className="dock-copy">
-                  <span className="dock-label">偏好设置</span>
-                  <span className="dock-hint">主题、语言与界面偏好</span>
+                  <span className="dock-label">{preferencesLabel}</span>
+                  <span className="dock-hint">{preferencesHint}</span>
                 </span>
               )}
             </button>

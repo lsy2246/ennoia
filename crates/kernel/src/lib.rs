@@ -35,23 +35,21 @@ pub use domain::{
 };
 pub use ennoia_error_utils::normalize_error_message;
 pub use extension::{
-    ActionPhase, ActionResultMode, ActionRule, BehaviorContribution, CapabilityContribution,
-    CommandContribution, ExtensionAssetsSpec, ExtensionCapabilities, ExtensionConversationSpec,
-    ExtensionDiagnostic, ExtensionEntrypointKind, ExtensionEntrypointSpec, ExtensionHealth,
-    ExtensionHostCapabilityRequest, ExtensionKind, ExtensionManifest, ExtensionPermissionSpec,
-    ExtensionRecordAppend, ExtensionRecordEntry, ExtensionRecordListQuery, ExtensionRecordUpdate,
-    ExtensionRpcError, ExtensionRpcRequest, ExtensionRpcResponse, ExtensionRuntimeEvent,
-    ExtensionRuntimeSpec, ExtensionSettingFieldSpec, ExtensionSettingFieldType,
-    ExtensionSettingOptionSpec, ExtensionSettingValue, ExtensionSourceMode, ExtensionSourceSpec,
-    ExtensionStateEntry, ExtensionStateGetQuery, ExtensionStateListQuery, ExtensionStatePut,
-    ExtensionStateSelector, ExtensionUiSpec, ExtensionWatchSpec, ExtensionWorkerSpec,
-    HookContribution, HookDispatchResponse, HookEventEnvelope, HookResourceRef, LocaleContribution,
+    ActionPhase, ActionResultMode, ActionRule, BehaviorContribution, ExtensionCompatSpec,
+    ExtensionConversationSpec, ExtensionDiagnostic, ExtensionEventSpec, ExtensionHealth,
+    ExtensionHostCapabilityRequest, ExtensionManifest, ExtensionOperationSpec,
+    ExtensionProviderSpec, ExtensionRecordAppend, ExtensionRecordEntry, ExtensionRecordListQuery,
+    ExtensionRecordUpdate, ExtensionRpcError, ExtensionRpcRequest, ExtensionRpcResponse,
+    ExtensionRuntimeEvent, ExtensionRuntimeSpec, ExtensionSettingFieldSpec,
+    ExtensionSettingFieldType, ExtensionSettingOptionSpec, ExtensionSettingValue,
+    ExtensionSourceMode, ExtensionStateEntry, ExtensionStateGetQuery, ExtensionStateListQuery,
+    ExtensionStatePut, ExtensionStateSelector, ExtensionViewSpec, HookContribution,
+    HookDispatchResponse, HookEventEnvelope, HookResourceRef, LocaleContribution,
     MemoryContribution, OperationApprovalLink, OperationEventRecord, OperationListQuery,
     OperationPerformRequest, OperationPerformResponse, OperationRecord, OperationStatus,
     PageContribution, PageNavContribution, PanelContribution, ProcessWorkerControlMessage,
     ProviderContribution, ProviderGenerationOption, ProviderModelDescriptor, ResolvedUiEntry,
-    ResolvedWorkerEntry, ResourceTypeContribution, RuntimeOperationRequest,
-    ScheduleActionContribution, SubscriptionContribution, SurfaceContribution, ThemeContribution,
+    ResolvedWorkerEntry, RuntimeOperationRequest, ScheduleActionContribution, ThemeContribution,
     HOOK_EVENT_ARTIFACT_CREATED, HOOK_EVENT_CONVERSATION_CREATED,
     HOOK_EVENT_CONVERSATION_MESSAGE_CREATED, HOOK_EVENT_JOB_DUE, HOOK_EVENT_OPERATION_UPDATED,
     HOOK_EVENT_PERMISSION_APPROVAL_RESOLVED, HOOK_EVENT_RUN_REQUESTED,
@@ -61,9 +59,8 @@ pub use gate::{GateRecord, GateSeverity, GateVerdict};
 pub use overview::{core_modules, PlatformOverview};
 pub use permission::{
     AgentExecutionEnvironment, AgentPermissionCommandEntry, AgentPermissionPolicy,
-    AgentPermissionProfile, AgentPermissionRule, CapabilityPermissionMetadata,
-    PermissionApprovalRecord, PermissionDecision, PermissionEventRecord, PermissionRequest,
-    PermissionScope, PermissionTarget, PermissionTrigger,
+    AgentPermissionProfile, AgentPermissionRule, PermissionApprovalRecord, PermissionDecision,
+    PermissionEventRecord, PermissionRequest, PermissionScope, PermissionTarget, PermissionTrigger,
 };
 pub use policy::{
     GlobPattern, MemoryPolicy, RuntimeRule, RuntimeRuleCondition, RuntimeRuleTarget, StagePolicy,

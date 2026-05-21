@@ -1,110 +1,68 @@
 id = "conversation"
+version = "0.1.0"
 name = "Conversation"
 description = "提供原生会话事实（conversation / message / lane / branch）的统一接口实现。"
 docs = "docs/overview.md"
-kind = "extension"
 
-[source]
-mode = "package"
-root = "."
-dev = false
+[compat]
+ennoia = ">=0.1.0"
 
-[worker]
-kind = "process"
-entry = "bin/conversation-service"
-protocol = "jsonrpc-stdio"
+[[operations]]
+name = "conversation.list"
+description = "列出会话。"
+agent = true
 
-[permissions]
-storage = "extension"
-sqlite = true
+[[operations]]
+name = "conversation.create"
+description = "创建会话。"
+agent = true
 
-[[capabilities]]
-id = "conversation.list"
-contract = "conversation.list"
-kind = "query"
-entry = "conversation/conversations/list"
-metadata = { action = { key = "conversation.list" }, permission = { action = "conversation.read", target_kind = "conversation", risk_level = "low", default_decision = "allow", scope_kind = "none" } }
+[[operations]]
+name = "conversation.get"
+description = "读取会话详情。"
+agent = true
 
-[[capabilities]]
-id = "conversation.create"
-contract = "conversation.create"
-kind = "action"
-entry = "conversation/conversations/create"
-metadata = { action = { key = "conversation.create" }, permission = { action = "conversation.write", target_kind = "conversation", risk_level = "medium", default_decision = "allow", scope_kind = "none" } }
+[[operations]]
+name = "conversation.delete"
+description = "删除会话。"
+agent = true
 
-[[capabilities]]
-id = "conversation.get"
-contract = "conversation.get"
-kind = "query"
-entry = "conversation/conversations/get"
-metadata = { action = { key = "conversation.get" }, permission = { action = "conversation.read", target_kind = "conversation", risk_level = "low", default_decision = "allow", scope_kind = "conversation" } }
+[[operations]]
+name = "lane.list"
+description = "列出会话 lane。"
+agent = true
 
-[[capabilities]]
-id = "conversation.delete"
-contract = "conversation.delete"
-kind = "action"
-entry = "conversation/conversations/delete"
-metadata = { action = { key = "conversation.delete" }, permission = { action = "conversation.write", target_kind = "conversation", risk_level = "high", default_decision = "ask", scope_kind = "conversation" } }
+[[operations]]
+name = "message.list"
+description = "列出会话消息。"
+agent = true
 
-[[capabilities]]
-id = "lane.list"
-contract = "lane.list"
-kind = "query"
-entry = "conversation/lanes/list-by-conversation"
-metadata = { action = { key = "lane.list" }, permission = { action = "conversation.read", target_kind = "conversation", risk_level = "low", default_decision = "allow", scope_kind = "conversation" } }
+[[operations]]
+name = "branch.list"
+description = "列出会话分支。"
+agent = true
 
-[[capabilities]]
-id = "message.list"
-contract = "message.list"
-kind = "query"
-entry = "conversation/messages/list"
-metadata = { action = { key = "message.list" }, permission = { action = "conversation.read", target_kind = "conversation", risk_level = "low", default_decision = "allow", scope_kind = "conversation" } }
+[[operations]]
+name = "branch.create"
+description = "创建会话分支。"
+agent = true
 
-[[capabilities]]
-id = "branch.list"
-contract = "branch.list"
-kind = "query"
-entry = "conversation/branches/list-by-conversation"
-metadata = { action = { key = "branch.list" }, permission = { action = "conversation.read", target_kind = "conversation", risk_level = "low", default_decision = "allow", scope_kind = "conversation" } }
+[[operations]]
+name = "branch.switch"
+description = "切换会话分支。"
+agent = true
 
-[[capabilities]]
-id = "branch.create"
-contract = "branch.create"
-kind = "action"
-entry = "conversation/branches/create"
-metadata = { action = { key = "branch.create" }, permission = { action = "conversation.branch.create", target_kind = "branch", risk_level = "medium", default_decision = "allow", scope_kind = "conversation" } }
+[[operations]]
+name = "branch.update"
+description = "更新会话分支。"
+agent = true
 
-[[capabilities]]
-id = "branch.switch"
-contract = "branch.switch"
-kind = "action"
-entry = "conversation/branches/switch"
-metadata = { action = { key = "branch.switch" }, permission = { action = "conversation.branch.switch", target_kind = "branch", risk_level = "medium", default_decision = "allow", scope_kind = "conversation" } }
+[[operations]]
+name = "branch.delete"
+description = "删除会话分支。"
+agent = true
 
-[[capabilities]]
-id = "branch.update"
-contract = "branch.update"
-kind = "action"
-entry = "conversation/branches/update"
-metadata = { action = { key = "branch.update" }, permission = { action = "conversation.branch.update", target_kind = "branch", risk_level = "medium", default_decision = "allow", scope_kind = "conversation" } }
-
-[[capabilities]]
-id = "branch.delete"
-contract = "branch.delete"
-kind = "action"
-entry = "conversation/branches/delete"
-metadata = { action = { key = "branch.delete" }, permission = { action = "conversation.branch.delete", target_kind = "branch", risk_level = "high", default_decision = "ask", scope_kind = "conversation" } }
-
-[[capabilities]]
-id = "message.append.operator"
-contract = "message.append.operator"
-kind = "action"
-entry = "conversation/messages/append-user"
-metadata = { action = { key = "message.append", phase = "execute", priority = 300, result_mode = "last", when = { message_role_in = ["operator", "user"] } }, permission = { action = "conversation.write", target_kind = "conversation", risk_level = "medium", default_decision = "allow", scope_kind = "conversation" } }
-
-[[capabilities]]
-id = "message.append.agent"
-contract = "message.append.agent"
-kind = "action"
-entry = "conversation/messages/append-agent"
-metadata = { action = { key = "message.append", phase = "execute", priority = 300, result_mode = "last", when = { message_role_in = ["agent", "assistant", "system", "tool"] } }, permission = { action = "conversation.write", target_kind = "conversation", risk_level = "medium", default_decision = "allow", scope_kind = "conversation" } }
+[[operations]]
+name = "message.append"
+description = "追加会话消息。"
+agent = true

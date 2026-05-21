@@ -6,10 +6,10 @@
 
 - 工作台：核心只提供宿主、配置、路径、日志、权限、事件总线、动作管道与 Worker RPC；业务能力由扩展提供。
 - Agents：维护协作者档案、模型接入、模型、技能和启用状态。
-- Agent 权限：系统级权限策略、审批和事件记录统一由宿主裁决，扩展只声明能力风险，不直接放权。
+- Agent 权限：系统级权限策略、审批和事件记录统一由宿主裁决；扩展 manifest 不声明底层权限边界，宿主按 operation 与调用上下文裁决。
 - 技能：Agent 可挂载的标准能力包；skill 默认对外暴露单一能力入口，内部脚本不直接等同于 action，具体调用说明写在各自的 `README.md` 中。
 - API 模型接入：Agent 绑定的具体模型访问实例。
-- 扩展：扩展包，manifest 统一声明 `resource_types`、`capabilities`、`surfaces`、`entrypoints`、`settings`、`locales`、`themes`、`commands`、`subscriptions`；如需进入会话目录，再额外声明 `conversation` 规则。宿主把扩展/技能目录整理成结构化 `context` 交给 model provider 渲染，不再把它们直接硬拼进自然语言 prompt，也不自动注入文档正文。
+- 扩展：扩展包，manifest 只声明系统可见契约：`id`、`version`、`name`、`description`、`docs`、`compat`、`views`、`operations`、`events`、`settings`、`conversation`。扩展自己的 UI / service 入口、数据库、缓存和内部实现由目录约定与扩展代码自行负责，不进入系统级设计界面。宿主把扩展/技能目录整理成结构化 `context` 交给 model provider 渲染，不再把它们直接硬拼进自然语言 prompt，也不自动注入文档正文。
 - 会话：前端通过通用 `/api/actions/{action}` 分发 `conversation.*`、`message.*`、`lane.*` 等动作，底层由内置 `conversation` 扩展实现。
 - 记忆：以内置 `memory` 扩展形式提供记忆、上下文、审查和图谱能力；不再镜像保存原始会话消息。
 - 编排：以内置 `workflow` 扩展承载 run、task、artifact，以及会话触发、审批恢复、结果回写等产品编排；核心只保留动作、事件、provider 和 runtime operation 这些中立桥接能力。
@@ -57,7 +57,7 @@
 
 - 运行目录统一分成两类：`config/` 保存声明性配置，`data/` 保存全部运行数据。
 - 运行态核心系统配置走 `~/.ennoia/config/*.toml`；开发态对应配置走仓库 `.dev/config/*.toml`。
-- 系统动作规则来自扩展 manifest；宿主在运行时收集规则、排序并执行。
+- 系统动作规则来自扩展 manifest 的 `operations[]`；`operation.name` 是唯一调用名，同时作为 action key、Worker method 和事件投递目标。
 - 系统定时计划写入 `~/.ennoia/data/system/schedules.json`，到期后由宿主运行命令或触发 Agent，并可把完整结果、摘要或最终结论投递到会话 / lane。
 - 系统事件总线写入 `~/.ennoia/data/system/sqlite/events.db`，用于持久化会话等系统事件及其 Hook 投递状态。
 - 系统日志数据写入 `~/.ennoia/data/system/sqlite/logs.db`，统一承载 logs、traces 和 span links。

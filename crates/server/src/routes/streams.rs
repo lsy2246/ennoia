@@ -224,11 +224,12 @@ async fn build_workflow_stream_snapshot(
     request: &RequestContext,
     query: &WorkflowStreamQuery,
 ) -> Result<String, ApiError> {
-    let workspace = workflow_rpc_json(state, request, "workspace", serde_json::json!({})).await?;
+    let workspace =
+        workflow_rpc_json(state, request, "workflow.workspace", serde_json::json!({})).await?;
     let runs = workflow_rpc_json(
         state,
         request,
-        "workflow/runs/list-by-conversation",
+        "run.list",
         serde_json::json!({
             "conversation_id": normalize_optional_string(query.conversation_id.clone()),
             "stage": normalize_optional_string(query.stage.clone()),
@@ -242,7 +243,7 @@ async fn build_workflow_stream_snapshot(
             workflow_rpc_json(
                 state,
                 request,
-                "workflow/runs/get",
+                "run.get",
                 serde_json::json!({ "run_id": run_id }),
             )
             .await?,

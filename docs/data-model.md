@@ -59,7 +59,7 @@
 `ActionRule` 字段：
 
 - `action`
-- `capability_id`
+- `operation`
 - `method`
 - `phase`
 - `priority`
@@ -71,8 +71,8 @@
 约定：
 
 - `action` 是系统动作键，例如 `conversation.list`、`message.append`、`run.create`。
-- `capability_id` 是扩展自己的能力标识。
-- `method` 指向扩展 Worker 的 RPC entry。
+- `operation` 是扩展 manifest 中的 operation 名称。
+- `method` 指向扩展 Worker 的 RPC method；当前与 `operation` 保持一致。
 - `phase` 支持 `before`、`execute`、`after_success`、`after_error`。
 - 宿主把同一动作键下的规则收集为一组，按阶段和优先级执行。
 
@@ -256,7 +256,7 @@
 
 约定：
 
-- Policy 是系统级主模型，扩展只声明 `capabilities[].metadata.permission`，不保存最终授权结果。
+- Policy 是系统级主模型；扩展 manifest 不声明底层权限边界，宿主按 operation、调用参数和 actor 上下文构造权限请求。
 - `effect` 固定使用 `allow`、`deny`、`ask`。
 - 审批通过后只会产生临时 grant，不再写回 policy。
 - 事件记录只表达“谁、在什么作用域、请求了什么、系统如何裁决”，不复写业务结果。
@@ -318,7 +318,7 @@
 
 ## Extension 域
 
-扩展运行态以 `ExtensionRuntimeState` 为准。扩展 manifest 只保留一份 `description` 与一份 `docs`；如果需要进入会话目录，再通过 `conversation.inject`、`conversation.resource_types` 和 `conversation.capabilities` 声明会话装配规则。会话里只复用这一份 `description`，`docs` 仍然只是按需查阅的文档入口。
+扩展运行态以 `ExtensionRuntimeState` 为准。扩展 manifest 只声明系统可见契约：`id`、`version`、`name`、`description`、`docs`、`compat`、`views`、`operations`、`events`、`settings`、`conversation`。需要进入会话上下文时，通过 `conversation.visible`、`conversation.resources` 和 `conversation.operations` 声明会话装配规则。会话里只复用这一份 `description`，`docs` 仍然只是按需查阅的文档入口。
 
 ## 存储快照
 

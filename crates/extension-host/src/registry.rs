@@ -6,15 +6,14 @@ use std::sync::{Arc, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use ennoia_kernel::{
-    ActionRule, BehaviorContribution, CapabilityContribution, CommandContribution,
-    ExtensionCapabilities, ExtensionConversationSpec, ExtensionDevSourceEntry, ExtensionDiagnostic,
-    ExtensionEntrypointKind, ExtensionEntrypointSpec, ExtensionHealth, ExtensionKind,
-    ExtensionManifest, ExtensionPermissionSpec, ExtensionRegistryEntry, ExtensionRegistryFile,
+    ActionRule, BehaviorContribution, ExtensionCompatSpec, ExtensionConversationSpec,
+    ExtensionDevSourceEntry, ExtensionDiagnostic, ExtensionEventSpec, ExtensionHealth,
+    ExtensionManifest, ExtensionOperationSpec, ExtensionRegistryEntry, ExtensionRegistryFile,
     ExtensionRpcRequest, ExtensionRpcResponse, ExtensionRuntimeEvent, ExtensionRuntimeSpec,
-    ExtensionSettingFieldSpec, ExtensionSourceMode, ExtensionUiSpec, HookContribution,
-    LocaleContribution, MemoryContribution, PageContribution, PanelContribution,
-    ProviderContribution, ResolvedUiEntry, ResolvedWorkerEntry, ResourceTypeContribution,
-    ScheduleActionContribution, SubscriptionContribution, SurfaceContribution, ThemeContribution,
+    ExtensionSettingFieldSpec, ExtensionSourceMode, ExtensionViewSpec, HookContribution,
+    LocaleContribution, MemoryContribution, PageContribution, PageNavContribution,
+    PanelContribution, ProviderContribution, ResolvedUiEntry, ResolvedWorkerEntry,
+    ScheduleActionContribution, ThemeContribution,
 };
 use serde::Serialize;
 use serde_json::Value as JsonValue;
@@ -22,30 +21,30 @@ use serde_json::Value as JsonValue;
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ResolvedExtensionSnapshot {
     pub id: String,
+    pub version: Option<String>,
     pub name: String,
     pub description: String,
     pub docs: Option<String>,
+    pub compat: ExtensionCompatSpec,
     pub conversation: ExtensionConversationSpec,
-    pub kind: ExtensionKind,
     pub source_mode: ExtensionSourceMode,
     pub source_root: String,
     pub install_dir: String,
     pub generation: u64,
     pub health: ExtensionHealth,
+    pub views: Vec<ExtensionViewSpec>,
+    pub operations: Vec<ExtensionOperationSpec>,
+    pub events: Vec<ExtensionEventSpec>,
+    #[serde(skip_serializing)]
     pub ui: Option<ResolvedUiEntry>,
+    #[serde(skip_serializing)]
     pub worker: Option<ResolvedWorkerEntry>,
-    pub permissions: ExtensionPermissionSpec,
+    #[serde(skip_serializing)]
     pub runtime: ExtensionRuntimeSpec,
-    pub capabilities: ExtensionCapabilities,
-    pub resource_types: Vec<ResourceTypeContribution>,
-    pub capability_rows: Vec<CapabilityContribution>,
-    pub surfaces: Vec<SurfaceContribution>,
     pub pages: Vec<PageContribution>,
     pub panels: Vec<PanelContribution>,
     pub themes: Vec<ThemeContribution>,
     pub locales: Vec<LocaleContribution>,
-    pub commands: Vec<CommandContribution>,
-    pub entrypoints: Vec<ExtensionEntrypointSpec>,
     pub settings: Vec<ExtensionSettingFieldSpec>,
     pub providers: Vec<ProviderContribution>,
     pub behaviors: Vec<BehaviorContribution>,
@@ -53,50 +52,36 @@ pub struct ResolvedExtensionSnapshot {
     pub hooks: Vec<HookContribution>,
     pub actions: Vec<ActionRule>,
     pub schedule_actions: Vec<ScheduleActionContribution>,
-    pub subscriptions: Vec<SubscriptionContribution>,
     pub diagnostics: Vec<ExtensionDiagnostic>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct RegisteredResourceTypeContribution {
+pub struct RegisteredExtensionViewContribution {
     pub extension_id: String,
-    pub extension_kind: ExtensionKind,
     pub source_mode: ExtensionSourceMode,
     pub install_dir: String,
-    pub resource_type: ResourceTypeContribution,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize)]
-pub struct RegisteredCapabilityContribution {
-    pub extension_id: String,
-    pub extension_kind: ExtensionKind,
-    pub source_mode: ExtensionSourceMode,
-    pub install_dir: String,
-    pub capability: CapabilityContribution,
+    pub view: ExtensionViewSpec,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct RegisteredSurfaceContribution {
+pub struct RegisteredExtensionOperationContribution {
     pub extension_id: String,
-    pub extension_kind: ExtensionKind,
     pub source_mode: ExtensionSourceMode,
     pub install_dir: String,
-    pub surface: SurfaceContribution,
+    pub operation: ExtensionOperationSpec,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct RegisteredSubscriptionContribution {
+pub struct RegisteredExtensionEventContribution {
     pub extension_id: String,
-    pub extension_kind: ExtensionKind,
     pub source_mode: ExtensionSourceMode,
     pub install_dir: String,
-    pub subscription: SubscriptionContribution,
+    pub event: ExtensionEventSpec,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RegisteredPageContribution {
     pub extension_id: String,
-    pub extension_kind: ExtensionKind,
     pub source_mode: ExtensionSourceMode,
     pub install_dir: String,
     pub page: PageContribution,
@@ -105,7 +90,6 @@ pub struct RegisteredPageContribution {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RegisteredPanelContribution {
     pub extension_id: String,
-    pub extension_kind: ExtensionKind,
     pub source_mode: ExtensionSourceMode,
     pub install_dir: String,
     pub panel: PanelContribution,
@@ -114,7 +98,6 @@ pub struct RegisteredPanelContribution {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RegisteredThemeContribution {
     pub extension_id: String,
-    pub extension_kind: ExtensionKind,
     pub source_mode: ExtensionSourceMode,
     pub install_dir: String,
     pub theme: ThemeContribution,
@@ -123,25 +106,14 @@ pub struct RegisteredThemeContribution {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RegisteredLocaleContribution {
     pub extension_id: String,
-    pub extension_kind: ExtensionKind,
     pub source_mode: ExtensionSourceMode,
     pub install_dir: String,
     pub locale: LocaleContribution,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct RegisteredCommandContribution {
-    pub extension_id: String,
-    pub extension_kind: ExtensionKind,
-    pub source_mode: ExtensionSourceMode,
-    pub install_dir: String,
-    pub command: CommandContribution,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RegisteredProviderContribution {
     pub extension_id: String,
-    pub extension_kind: ExtensionKind,
     pub source_mode: ExtensionSourceMode,
     pub install_dir: String,
     pub provider: ProviderContribution,
@@ -150,7 +122,6 @@ pub struct RegisteredProviderContribution {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RegisteredBehaviorContribution {
     pub extension_id: String,
-    pub extension_kind: ExtensionKind,
     pub source_mode: ExtensionSourceMode,
     pub install_dir: String,
     pub behavior: BehaviorContribution,
@@ -159,7 +130,6 @@ pub struct RegisteredBehaviorContribution {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RegisteredMemoryContribution {
     pub extension_id: String,
-    pub extension_kind: ExtensionKind,
     pub source_mode: ExtensionSourceMode,
     pub install_dir: String,
     pub memory: MemoryContribution,
@@ -168,7 +138,6 @@ pub struct RegisteredMemoryContribution {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RegisteredHookContribution {
     pub extension_id: String,
-    pub extension_kind: ExtensionKind,
     pub source_mode: ExtensionSourceMode,
     pub install_dir: String,
     pub hook: HookContribution,
@@ -177,7 +146,6 @@ pub struct RegisteredHookContribution {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct RegisteredActionRuleContribution {
     pub extension_id: String,
-    pub extension_kind: ExtensionKind,
     pub source_mode: ExtensionSourceMode,
     pub install_dir: String,
     pub action: ActionRule,
@@ -186,7 +154,6 @@ pub struct RegisteredActionRuleContribution {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RegisteredScheduleActionContribution {
     pub extension_id: String,
-    pub extension_kind: ExtensionKind,
     pub source_mode: ExtensionSourceMode,
     pub install_dir: String,
     pub schedule_action: ScheduleActionContribution,
@@ -197,15 +164,13 @@ pub struct ExtensionRuntimeSnapshot {
     pub generation: u64,
     pub updated_at: String,
     pub extensions: Vec<ResolvedExtensionSnapshot>,
-    pub resource_types: Vec<RegisteredResourceTypeContribution>,
-    pub capabilities: Vec<RegisteredCapabilityContribution>,
-    pub surfaces: Vec<RegisteredSurfaceContribution>,
-    pub subscriptions: Vec<RegisteredSubscriptionContribution>,
+    pub views: Vec<RegisteredExtensionViewContribution>,
+    pub operations: Vec<RegisteredExtensionOperationContribution>,
+    pub events: Vec<RegisteredExtensionEventContribution>,
     pub pages: Vec<RegisteredPageContribution>,
     pub panels: Vec<RegisteredPanelContribution>,
     pub themes: Vec<RegisteredThemeContribution>,
     pub locales: Vec<RegisteredLocaleContribution>,
-    pub commands: Vec<RegisteredCommandContribution>,
     pub providers: Vec<RegisteredProviderContribution>,
     pub behaviors: Vec<RegisteredBehaviorContribution>,
     pub memories: Vec<RegisteredMemoryContribution>,
@@ -470,58 +435,41 @@ impl ExtensionRuntimeState {
 }
 
 impl ResolvedExtensionSnapshot {
-    fn resource_type_rows(&self) -> Vec<RegisteredResourceTypeContribution> {
-        self.resource_types
+    fn view_rows(&self) -> Vec<RegisteredExtensionViewContribution> {
+        self.views
             .iter()
             .cloned()
-            .map(|resource_type| RegisteredResourceTypeContribution {
+            .map(|view| RegisteredExtensionViewContribution {
                 extension_id: self.id.clone(),
-                extension_kind: self.kind.clone(),
                 source_mode: self.source_mode.clone(),
                 install_dir: self.install_dir.clone(),
-                resource_type,
+                view,
             })
             .collect()
     }
 
-    fn capability_rows(&self) -> Vec<RegisteredCapabilityContribution> {
-        self.capability_rows
+    fn operation_rows(&self) -> Vec<RegisteredExtensionOperationContribution> {
+        self.operations
             .iter()
             .cloned()
-            .map(|capability| RegisteredCapabilityContribution {
+            .map(|operation| RegisteredExtensionOperationContribution {
                 extension_id: self.id.clone(),
-                extension_kind: self.kind.clone(),
                 source_mode: self.source_mode.clone(),
                 install_dir: self.install_dir.clone(),
-                capability,
+                operation,
             })
             .collect()
     }
 
-    fn surface_rows(&self) -> Vec<RegisteredSurfaceContribution> {
-        self.surfaces
+    fn event_rows(&self) -> Vec<RegisteredExtensionEventContribution> {
+        self.events
             .iter()
             .cloned()
-            .map(|surface| RegisteredSurfaceContribution {
+            .map(|event| RegisteredExtensionEventContribution {
                 extension_id: self.id.clone(),
-                extension_kind: self.kind.clone(),
                 source_mode: self.source_mode.clone(),
                 install_dir: self.install_dir.clone(),
-                surface,
-            })
-            .collect()
-    }
-
-    fn subscription_rows(&self) -> Vec<RegisteredSubscriptionContribution> {
-        self.subscriptions
-            .iter()
-            .cloned()
-            .map(|subscription| RegisteredSubscriptionContribution {
-                extension_id: self.id.clone(),
-                extension_kind: self.kind.clone(),
-                source_mode: self.source_mode.clone(),
-                install_dir: self.install_dir.clone(),
-                subscription,
+                event,
             })
             .collect()
     }
@@ -532,7 +480,6 @@ impl ResolvedExtensionSnapshot {
             .cloned()
             .map(|page| RegisteredPageContribution {
                 extension_id: self.id.clone(),
-                extension_kind: self.kind.clone(),
                 source_mode: self.source_mode.clone(),
                 install_dir: self.install_dir.clone(),
                 page,
@@ -546,7 +493,6 @@ impl ResolvedExtensionSnapshot {
             .cloned()
             .map(|panel| RegisteredPanelContribution {
                 extension_id: self.id.clone(),
-                extension_kind: self.kind.clone(),
                 source_mode: self.source_mode.clone(),
                 install_dir: self.install_dir.clone(),
                 panel,
@@ -560,7 +506,6 @@ impl ResolvedExtensionSnapshot {
             .cloned()
             .map(|theme| RegisteredThemeContribution {
                 extension_id: self.id.clone(),
-                extension_kind: self.kind.clone(),
                 source_mode: self.source_mode.clone(),
                 install_dir: self.install_dir.clone(),
                 theme,
@@ -574,24 +519,9 @@ impl ResolvedExtensionSnapshot {
             .cloned()
             .map(|locale| RegisteredLocaleContribution {
                 extension_id: self.id.clone(),
-                extension_kind: self.kind.clone(),
                 source_mode: self.source_mode.clone(),
                 install_dir: self.install_dir.clone(),
                 locale,
-            })
-            .collect()
-    }
-
-    fn command_rows(&self) -> Vec<RegisteredCommandContribution> {
-        self.commands
-            .iter()
-            .cloned()
-            .map(|command| RegisteredCommandContribution {
-                extension_id: self.id.clone(),
-                extension_kind: self.kind.clone(),
-                source_mode: self.source_mode.clone(),
-                install_dir: self.install_dir.clone(),
-                command,
             })
             .collect()
     }
@@ -602,7 +532,6 @@ impl ResolvedExtensionSnapshot {
             .cloned()
             .map(|provider| RegisteredProviderContribution {
                 extension_id: self.id.clone(),
-                extension_kind: self.kind.clone(),
                 source_mode: self.source_mode.clone(),
                 install_dir: self.install_dir.clone(),
                 provider,
@@ -616,7 +545,6 @@ impl ResolvedExtensionSnapshot {
             .cloned()
             .map(|behavior| RegisteredBehaviorContribution {
                 extension_id: self.id.clone(),
-                extension_kind: self.kind.clone(),
                 source_mode: self.source_mode.clone(),
                 install_dir: self.install_dir.clone(),
                 behavior,
@@ -630,7 +558,6 @@ impl ResolvedExtensionSnapshot {
             .cloned()
             .map(|memory| RegisteredMemoryContribution {
                 extension_id: self.id.clone(),
-                extension_kind: self.kind.clone(),
                 source_mode: self.source_mode.clone(),
                 install_dir: self.install_dir.clone(),
                 memory,
@@ -644,7 +571,6 @@ impl ResolvedExtensionSnapshot {
             .cloned()
             .map(|hook| RegisteredHookContribution {
                 extension_id: self.id.clone(),
-                extension_kind: self.kind.clone(),
                 source_mode: self.source_mode.clone(),
                 install_dir: self.install_dir.clone(),
                 hook,
@@ -658,7 +584,6 @@ impl ResolvedExtensionSnapshot {
             .cloned()
             .map(|action| RegisteredActionRuleContribution {
                 extension_id: self.id.clone(),
-                extension_kind: self.kind.clone(),
                 source_mode: self.source_mode.clone(),
                 install_dir: self.install_dir.clone(),
                 action,
@@ -672,7 +597,6 @@ impl ResolvedExtensionSnapshot {
             .cloned()
             .map(|schedule_action| RegisteredScheduleActionContribution {
                 extension_id: self.id.clone(),
-                extension_kind: self.kind.clone(),
                 source_mode: self.source_mode.clone(),
                 install_dir: self.install_dir.clone(),
                 schedule_action,
@@ -698,15 +622,13 @@ fn build_snapshot(
     let mut extensions = resolved_by_id.into_values().collect::<Vec<_>>();
     extensions.sort_by(|left, right| left.id.cmp(&right.id));
 
-    let mut resource_types = Vec::new();
-    let mut capabilities = Vec::new();
-    let mut surfaces = Vec::new();
-    let mut subscriptions = Vec::new();
+    let mut views = Vec::new();
+    let mut operations = Vec::new();
+    let mut events = Vec::new();
     let mut pages = Vec::new();
     let mut panels = Vec::new();
     let mut themes = Vec::new();
     let mut locales = Vec::new();
-    let mut commands = Vec::new();
     let mut providers = Vec::new();
     let mut behaviors = Vec::new();
     let mut memories = Vec::new();
@@ -715,15 +637,13 @@ fn build_snapshot(
     let mut schedule_actions = Vec::new();
 
     for extension in &extensions {
-        resource_types.extend(extension.resource_type_rows());
-        capabilities.extend(extension.capability_rows());
-        surfaces.extend(extension.surface_rows());
-        subscriptions.extend(extension.subscription_rows());
+        views.extend(extension.view_rows());
+        operations.extend(extension.operation_rows());
+        events.extend(extension.event_rows());
         pages.extend(extension.page_rows());
         panels.extend(extension.panel_rows());
         themes.extend(extension.theme_rows());
         locales.extend(extension.locale_rows());
-        commands.extend(extension.command_rows());
         providers.extend(extension.provider_rows());
         behaviors.extend(extension.behavior_rows());
         memories.extend(extension.memory_rows());
@@ -736,15 +656,13 @@ fn build_snapshot(
         generation,
         updated_at: now_string(),
         extensions,
-        resource_types,
-        capabilities,
-        surfaces,
-        subscriptions,
+        views,
+        operations,
+        events,
         pages,
         panels,
         themes,
         locales,
-        commands,
         providers,
         behaviors,
         memories,
@@ -839,53 +757,44 @@ fn resolve_manifest(
 ) -> ResolvedExtensionSnapshot {
     let install_dir = normalize_display_path(&source.root);
     let source_root = install_dir.clone();
-    let capabilities = manifest.effective_capabilities();
-    let resource_types = manifest.resource_types.clone();
-    let capability_rows = manifest.capabilities.clone();
-    let surfaces = manifest.surfaces.clone();
-    let pages = derive_pages(&surfaces);
-    let panels = derive_panels(&surfaces);
-    let entrypoints = derive_entrypoints(&manifest, &pages, &panels);
+    let views = manifest.views.clone();
+    let operations = manifest.operations.clone();
+    let events = manifest.events.clone();
+    let pages = derive_pages(&views);
+    let panels = derive_panels(&views);
     let settings = manifest.settings.clone();
-    let providers = derive_providers(&capability_rows, &manifest.id);
-    let behaviors = derive_behaviors(&capability_rows, &manifest.id);
-    let memories = derive_memories(&capability_rows, &manifest.id);
-    let actions = derive_actions(&capability_rows);
-    let schedule_actions = derive_schedule_actions(&capability_rows);
-    let subscriptions = manifest.subscriptions.clone();
-    let hooks = derive_hooks(&capability_rows, &subscriptions);
+    let providers = derive_providers(&operations, &manifest.id, &source.root);
+    let behaviors = derive_behaviors(&operations, &manifest.id);
+    let memories = derive_memories(&operations, &manifest.id);
+    let actions = derive_actions(&operations);
+    let schedule_actions = derive_schedule_actions(&operations);
+    let hooks = derive_hooks(&events);
     let mut diagnostics = Vec::new();
-    let ui = resolve_ui(
-        &source.root,
-        &source.source_mode,
-        &manifest.ui,
-        &manifest,
-        generation,
-    )
-    .map_err(|error| {
-        diagnostics.push(diagnostic(
-            "warn",
-            "ui resolution failed",
-            Some(error.to_string()),
-        ));
-    })
-    .ok()
-    .flatten();
-    let worker = resolve_worker(&source.root, &manifest)
+    let ui = resolve_ui(&source.root, &source.source_mode, generation)
         .map_err(|error| {
             diagnostics.push(diagnostic(
                 "warn",
-                "worker resolution failed",
+                "ui entry discovery failed",
+                Some(error.to_string()),
+            ));
+        })
+        .ok()
+        .flatten();
+    let worker = resolve_worker(&source.root, &manifest.id)
+        .map_err(|error| {
+            diagnostics.push(diagnostic(
+                "warn",
+                "service entry discovery failed",
                 Some(error.to_string()),
             ));
         })
         .ok()
         .flatten();
 
-    if ui.is_none() && worker.is_none() && capabilities == ExtensionCapabilities::default() {
+    if ui.is_none() && worker.is_none() && views.is_empty() && operations.is_empty() {
         diagnostics.push(diagnostic(
             "warn",
-            "extension has no resolved ui or worker entry",
+            "extension has no visible views or callable operations",
             None,
         ));
     }
@@ -898,41 +807,31 @@ fn resolve_manifest(
         ExtensionHealth::Ready
     };
 
-    let mut runtime = manifest.runtime.clone();
-    let baseline_defaults = ExtensionRuntimeSpec::default();
-    if runtime.timeout_ms == baseline_defaults.timeout_ms {
-        runtime.timeout_ms = config.runtime_defaults.timeout_ms;
-    }
-    if runtime.memory_limit_mb == baseline_defaults.memory_limit_mb {
-        runtime.memory_limit_mb = config.runtime_defaults.memory_limit_mb;
-    }
+    let runtime = config.runtime_defaults.clone();
 
     ResolvedExtensionSnapshot {
         id: manifest.id.clone(),
+        version: manifest.version.clone(),
         name: manifest.display_name(),
         description: manifest.display_description(),
-        docs: manifest.docs,
-        conversation: manifest.conversation,
-        kind: manifest.kind,
+        docs: manifest.docs.clone(),
+        compat: manifest.compat.clone(),
+        conversation: manifest.conversation.clone(),
         source_mode: source.source_mode,
         source_root,
         install_dir,
         generation,
         health,
+        views,
+        operations,
+        events,
         ui,
         worker,
-        permissions: manifest.permissions,
         runtime,
-        capabilities,
-        resource_types,
-        capability_rows,
-        surfaces,
         pages,
         panels,
-        themes: manifest.themes,
-        locales: manifest.locales,
-        commands: manifest.commands,
-        entrypoints,
+        themes: discover_themes(&source.root),
+        locales: discover_locales(&source.root, &manifest.id),
         settings,
         providers,
         behaviors,
@@ -940,318 +839,216 @@ fn resolve_manifest(
         hooks,
         actions,
         schedule_actions,
-        subscriptions,
         diagnostics,
     }
 }
 
-fn derive_pages(surfaces: &[SurfaceContribution]) -> Vec<PageContribution> {
-    surfaces
+fn derive_pages(views: &[ExtensionViewSpec]) -> Vec<PageContribution> {
+    views
         .iter()
-        .filter(|surface| surface.kind == "page")
-        .filter_map(|surface| {
-            Some(PageContribution {
-                id: surface.id.clone(),
-                title: surface.title.clone()?,
-                route: surface.route.clone()?,
-                mount: surface.mount.clone(),
-                icon: surface.icon.clone(),
-                nav: surface.nav.clone(),
-            })
+        .filter(|view| view.view_type == "page")
+        .map(|view| {
+            let nav = view.nav.as_deref().and_then(|nav| match nav {
+                "sidebar" | "primary" | "main" => Some(PageNavContribution {
+                    default_pinned: true,
+                    order: view.order,
+                }),
+                "none" | "" => None,
+                _ => Some(PageNavContribution {
+                    default_pinned: false,
+                    order: view.order,
+                }),
+            });
+            PageContribution {
+                id: view.name.clone(),
+                title: view.title.clone(),
+                route: view
+                    .route
+                    .clone()
+                    .unwrap_or_else(|| format!("/{}", view.name.replace('.', "/"))),
+                mount: view.name.clone(),
+                icon: view.icon.clone(),
+                nav,
+            }
         })
         .collect()
 }
 
-fn derive_panels(surfaces: &[SurfaceContribution]) -> Vec<PanelContribution> {
-    surfaces
+fn derive_panels(views: &[ExtensionViewSpec]) -> Vec<PanelContribution> {
+    views
         .iter()
-        .filter(|surface| surface.kind == "panel")
-        .filter_map(|surface| {
-            Some(PanelContribution {
-                id: surface.id.clone(),
-                title: surface.title.clone()?,
-                mount: surface.mount.clone(),
-                slot: surface.slot.clone()?,
-                icon: surface.icon.clone(),
-            })
+        .filter(|view| view.view_type == "panel")
+        .map(|view| PanelContribution {
+            id: view.name.clone(),
+            title: view.title.clone(),
+            mount: view.name.clone(),
+            slot: view.slot.clone().unwrap_or_else(|| "right".to_string()),
+            icon: view.icon.clone(),
         })
         .collect()
-}
-
-fn derive_entrypoints(
-    manifest: &ExtensionManifest,
-    pages: &[PageContribution],
-    panels: &[PanelContribution],
-) -> Vec<ExtensionEntrypointSpec> {
-    let mut entrypoints = if manifest.entrypoints.is_empty() {
-        let page_entries = pages.iter().map(|page| ExtensionEntrypointSpec {
-            id: page.id.clone(),
-            label: page.title.clone(),
-            description: None,
-            kind: ExtensionEntrypointKind::Page,
-            page_id: Some(page.id.clone()),
-            panel_id: None,
-            icon: page.icon.clone(),
-            order: page.nav.as_ref().and_then(|nav| nav.order),
-            prominent: page
-                .nav
-                .as_ref()
-                .map(|nav| nav.default_pinned)
-                .unwrap_or(false),
-        });
-        let panel_entries = panels.iter().map(|panel| ExtensionEntrypointSpec {
-            id: panel.id.clone(),
-            label: panel.title.clone(),
-            description: None,
-            kind: ExtensionEntrypointKind::Panel,
-            page_id: None,
-            panel_id: Some(panel.id.clone()),
-            icon: panel.icon.clone(),
-            order: None,
-            prominent: false,
-        });
-        page_entries.chain(panel_entries).collect::<Vec<_>>()
-    } else {
-        manifest.entrypoints.clone()
-    };
-
-    entrypoints.sort_by(|left, right| {
-        let prominent = right.prominent.cmp(&left.prominent);
-        if prominent != std::cmp::Ordering::Equal {
-            return prominent;
-        }
-        let order = left
-            .order
-            .unwrap_or(i32::MAX)
-            .cmp(&right.order.unwrap_or(i32::MAX));
-        if order != std::cmp::Ordering::Equal {
-            return order;
-        }
-        left.id.cmp(&right.id)
-    });
-    entrypoints
 }
 
 fn derive_providers(
-    capabilities: &[CapabilityContribution],
+    operations: &[ExtensionOperationSpec],
     extension_id: &str,
+    root: &Path,
 ) -> Vec<ProviderContribution> {
-    capabilities
+    operations
         .iter()
-        .filter_map(|capability| {
-            let provider = capability.metadata.get("provider")?;
+        .filter_map(|operation| {
+            let provider = operation.provider.as_ref()?;
             Some(ProviderContribution {
-                id: json_string(provider, "id").unwrap_or_else(|| capability.id.clone()),
-                kind: json_string(provider, "kind").unwrap_or_else(|| capability.contract.clone()),
-                entry: capability.entry.clone(),
-                extension_id: Some(
-                    json_string(provider, "extension_id")
-                        .unwrap_or_else(|| extension_id.to_string()),
-                ),
-                interfaces: json_string_array(provider, "interfaces"),
-                model_discovery: json_bool(provider, "model_discovery"),
-                manual_model: json_bool_default(provider, "manual_model", true),
-                generation_options: provider_generation_options(provider),
+                id: operation.name.clone(),
+                kind: provider.kind.clone(),
+                entry: discover_provider_entry(root),
+                extension_id: Some(extension_id.to_string()),
+                interfaces: provider.interfaces.clone(),
+                model_discovery: provider.model_discovery,
+                manual_model: provider.manual_model,
+                generation_options: provider.generation_options.clone(),
             })
         })
         .collect()
 }
 
 fn derive_behaviors(
-    capabilities: &[CapabilityContribution],
+    operations: &[ExtensionOperationSpec],
     extension_id: &str,
 ) -> Vec<BehaviorContribution> {
-    capabilities
+    operations
         .iter()
-        .filter_map(|capability| {
-            let behavior = capability.metadata.get("behavior")?;
+        .filter(|operation| operation.name == "workflow.default")
+        .map(|operation| {
             Some(BehaviorContribution {
-                id: json_string(behavior, "id").unwrap_or_else(|| capability.id.clone()),
-                extension_id: Some(
-                    json_string(behavior, "extension_id")
-                        .unwrap_or_else(|| extension_id.to_string()),
-                ),
-                interfaces: json_string_array(behavior, "interfaces"),
-                entry: capability.entry.clone(),
+                id: "default".to_string(),
+                extension_id: Some(extension_id.to_string()),
+                interfaces: vec![
+                    "runs".to_string(),
+                    "tasks".to_string(),
+                    "artifacts".to_string(),
+                    "handoffs".to_string(),
+                    "status".to_string(),
+                ],
+                entry: Some(operation.name.clone()),
             })
         })
-        .collect()
+        .collect::<Option<Vec<_>>>()
+        .unwrap_or_default()
 }
 
 fn derive_memories(
-    capabilities: &[CapabilityContribution],
+    operations: &[ExtensionOperationSpec],
     extension_id: &str,
 ) -> Vec<MemoryContribution> {
-    capabilities
+    if !operations
         .iter()
-        .filter_map(|capability| {
-            let memory = capability.metadata.get("memory")?;
-            Some(MemoryContribution {
-                id: json_string(memory, "id").unwrap_or_else(|| capability.id.clone()),
-                extension_id: Some(
-                    json_string(memory, "extension_id").unwrap_or_else(|| extension_id.to_string()),
-                ),
-                interfaces: json_string_array(memory, "interfaces"),
-                entry: capability.entry.clone(),
-            })
-        })
-        .collect()
+        .any(|operation| operation.name.starts_with("memory."))
+    {
+        return Vec::new();
+    }
+    vec![MemoryContribution {
+        id: "memory".to_string(),
+        extension_id: Some(extension_id.to_string()),
+        interfaces: operations
+            .iter()
+            .filter(|operation| operation.name.starts_with("memory."))
+            .map(|operation| operation.name.clone())
+            .collect(),
+        entry: None,
+    }]
 }
 
-fn derive_actions(capabilities: &[CapabilityContribution]) -> Vec<ActionRule> {
-    capabilities
+fn derive_actions(operations: &[ExtensionOperationSpec]) -> Vec<ActionRule> {
+    operations
         .iter()
-        .filter_map(|capability| {
-            let action = capability.metadata.get("action")?;
-            let action_key =
-                json_string(action, "key").unwrap_or_else(|| capability.contract.clone());
-            let method = capability.entry.clone()?;
-            Some(ActionRule {
-                action: action_key,
-                capability_id: capability.id.clone(),
-                method,
-                phase: serde_json::from_value(
-                    action
-                        .get("phase")
-                        .cloned()
-                        .unwrap_or_else(|| serde_json::json!("execute")),
-                )
-                .unwrap_or_default(),
-                priority: json_i32(action, "priority").unwrap_or(100),
-                enabled: json_bool_default(action, "enabled", true),
-                result_mode: serde_json::from_value(
-                    action
-                        .get("result_mode")
-                        .cloned()
-                        .unwrap_or_else(|| serde_json::json!("last")),
-                )
-                .unwrap_or_default(),
-                when: action.get("when").cloned().unwrap_or(JsonValue::Null),
-                schema: json_string(action, "schema"),
-            })
+        .filter(|operation| operation.provider.is_none())
+        .map(|operation| ActionRule {
+            action: operation.name.clone(),
+            operation: operation.name.clone(),
+            method: operation.name.clone(),
+            phase: ennoia_kernel::ActionPhase::Execute,
+            priority: 100,
+            enabled: true,
+            result_mode: ennoia_kernel::ActionResultMode::Last,
+            when: JsonValue::Null,
+            schema: operation.input.clone(),
         })
         .collect()
 }
 
 fn derive_schedule_actions(
-    capabilities: &[CapabilityContribution],
+    operations: &[ExtensionOperationSpec],
 ) -> Vec<ScheduleActionContribution> {
-    capabilities
+    operations
         .iter()
-        .filter_map(|capability| {
-            let schedule_action = capability.metadata.get("schedule_action")?;
-            Some(ScheduleActionContribution {
-                id: json_string(schedule_action, "id").unwrap_or_else(|| capability.id.clone()),
-                method: capability.entry.clone()?,
-                title: capability.title.clone(),
-                schema: json_string(schedule_action, "schema"),
-            })
+        .filter(|operation| operation.schedule)
+        .map(|operation| ScheduleActionContribution {
+            id: operation.name.clone(),
+            method: operation.name.clone(),
+            title: operation.title.clone(),
+            schema: operation.input.clone(),
         })
         .collect()
 }
 
-fn derive_hooks(
-    capabilities: &[CapabilityContribution],
-    subscriptions: &[SubscriptionContribution],
-) -> Vec<HookContribution> {
-    subscriptions
+fn derive_hooks(events: &[ExtensionEventSpec]) -> Vec<HookContribution> {
+    events
         .iter()
-        .filter_map(|subscription| {
-            let capability = capabilities
-                .iter()
-                .find(|item| item.id == subscription.capability)?;
-            Some(HookContribution {
-                event: subscription.event.clone(),
-                handler: capability.entry.clone(),
-            })
+        .map(|event| HookContribution {
+            event: event.on.clone(),
+            handler: Some(event.operation.clone()),
         })
         .collect()
 }
 
-fn json_string(value: &serde_json::Value, key: &str) -> Option<String> {
-    value.get(key)?.as_str().map(str::to_string)
-}
-
-fn json_bool(value: &serde_json::Value, key: &str) -> bool {
-    value
-        .get(key)
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(false)
-}
-
-fn json_bool_default(value: &serde_json::Value, key: &str, default_value: bool) -> bool {
-    value
-        .get(key)
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(default_value)
-}
-
-fn json_i32(value: &serde_json::Value, key: &str) -> Option<i32> {
-    value
-        .get(key)?
-        .as_i64()
-        .and_then(|item| i32::try_from(item).ok())
-}
-
-fn json_string_array(value: &serde_json::Value, key: &str) -> Vec<String> {
-    value
-        .get(key)
-        .and_then(serde_json::Value::as_array)
-        .into_iter()
+fn discover_locales(root: &Path, extension_id: &str) -> Vec<LocaleContribution> {
+    let locales_dir = root.join("ui").join("locales");
+    let Ok(entries) = fs::read_dir(locales_dir) else {
+        return Vec::new();
+    };
+    let mut locales = entries
         .flatten()
-        .filter_map(serde_json::Value::as_str)
-        .map(str::to_string)
-        .collect()
-}
-
-fn provider_generation_options(
-    value: &serde_json::Value,
-) -> Vec<ennoia_kernel::ProviderGenerationOption> {
-    value
-        .get("generation_options")
-        .and_then(|item| serde_json::from_value(item.clone()).ok())
-        .unwrap_or_default()
+        .filter_map(|entry| {
+            let path = entry.path();
+            if !path.is_file() || path.extension().and_then(|item| item.to_str()) != Some("json") {
+                return None;
+            }
+            let locale = path.file_stem()?.to_string_lossy().to_string();
+            Some(LocaleContribution {
+                locale,
+                namespace: format!("ext.{extension_id}"),
+                entry: normalize_display_path(&path.strip_prefix(root).ok()?.to_path_buf()),
+            })
+        })
+        .collect::<Vec<_>>();
+    locales.sort_by(|left, right| left.locale.cmp(&right.locale));
+    locales
 }
 
 fn resolve_ui(
     root: &Path,
     source_mode: &ExtensionSourceMode,
-    ui: &ExtensionUiSpec,
-    manifest: &ExtensionManifest,
-    generation: u64,
+    _generation: u64,
 ) -> io::Result<Option<ResolvedUiEntry>> {
     if *source_mode == ExtensionSourceMode::Dev {
-        if let Some(dev_url) = ui.dev_url.clone() {
-            return Ok(Some(ResolvedUiEntry {
-                kind: "url".to_string(),
-                entry: dev_url,
-                hmr: ui.hmr,
-                version: generation.to_string(),
-            }));
-        }
-        if let Some(path) = ui
-            .entry
-            .clone()
-            .map(|entry| root.join(entry))
-            .or_else(|| discover_dev_ui_entry(root))
-        {
+        if let Some(path) = discover_dev_ui_entry(root) {
             let version = regular_file_version(&path)?;
             return Ok(Some(ResolvedUiEntry {
                 kind: "module".to_string(),
                 entry: normalize_display_path(&path),
-                hmr: ui.hmr,
+                hmr: true,
                 version,
             }));
         }
     }
 
-    if let Some(bundle) = manifest.build.ui_bundle.clone() {
-        let path = root.join(bundle);
+    let path = root.join("ui").join("dist").join("entry.js");
+    if path.exists() {
         let version = regular_file_version(&path)?;
         return Ok(Some(ResolvedUiEntry {
             kind: "file".to_string(),
             entry: normalize_display_path(&path),
-            hmr: ui.hmr,
+            hmr: false,
             version,
         }));
     }
@@ -1283,90 +1080,52 @@ fn regular_file_version(path: &Path) -> io::Result<String> {
     Ok(format!("{modified}-{}", metadata.len()))
 }
 
-fn resolve_worker(
-    root: &Path,
-    manifest: &ExtensionManifest,
-) -> io::Result<Option<ResolvedWorkerEntry>> {
-    let Some(entry) = manifest
-        .worker
-        .entry
-        .clone()
-        .or_else(|| manifest.build.worker_bundle.clone())
-    else {
+fn resolve_worker(root: &Path, extension_id: &str) -> io::Result<Option<ResolvedWorkerEntry>> {
+    let Some(entry_path) = discover_service_entry(root, extension_id) else {
         return Ok(None);
     };
-
-    let kind = manifest
-        .worker
-        .kind
-        .clone()
-        .unwrap_or_else(|| "wasm".to_string());
-    let protocol = manifest.worker.protocol.clone();
-    match kind.as_str() {
-        "wasm" => {
-            if protocol.is_some() {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "wasm worker must not declare a protocol",
-                ));
-            }
-        }
-        "process" => {
-            let protocol = protocol.as_deref().unwrap_or("jsonrpc-stdio");
-            if protocol != "jsonrpc-stdio" {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("unsupported process worker protocol '{protocol}'"),
-                ));
-            }
-        }
-        _ => {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("unsupported worker kind '{kind}'"),
-            ));
-        }
-    }
-
-    let entry_path = resolve_worker_entry_path(root, &entry, &kind)?;
     if !entry_path.exists() {
         return Err(io::Error::new(
             io::ErrorKind::NotFound,
-            format!("worker entry not found: {}", entry_path.display()),
+            format!(
+                "extension service entry not found: {}",
+                entry_path.display()
+            ),
         ));
     }
 
     Ok(Some(ResolvedWorkerEntry {
-        kind,
+        kind: "process".to_string(),
         entry: normalize_display_path(&entry_path),
-        abi: manifest.worker.abi.clone().unwrap_or_else(|| {
-            if manifest.worker.kind.as_deref() == Some("process") {
-                String::new()
-            } else {
-                "ennoia.worker".to_string()
-            }
-        }),
-        protocol: protocol
-            .or_else(|| Some("jsonrpc-stdio".to_string()))
-            .filter(|_| manifest.worker.kind.as_deref() == Some("process")),
+        abi: String::new(),
+        protocol: Some("jsonrpc-stdio".to_string()),
         status: "ready".to_string(),
     }))
 }
 
-fn resolve_worker_entry_path(root: &Path, entry: &str, kind: &str) -> io::Result<PathBuf> {
-    let direct = root.join(entry);
-    if direct.exists() {
-        return Ok(direct);
-    }
+fn discover_provider_entry(root: &Path) -> Option<String> {
+    ["plugins/provider/provider.js", "provider/index.js"]
+        .into_iter()
+        .find(|candidate| root.join(candidate).is_file())
+        .map(str::to_string)
+}
 
-    if kind == "process" && cfg!(windows) && Path::new(entry).extension().is_none() {
-        let fallback = root.join(format!("{entry}.exe"));
-        if fallback.exists() {
-            return Ok(fallback);
-        }
-    }
+fn discover_service_entry(root: &Path, extension_id: &str) -> Option<PathBuf> {
+    let executable_suffix = if cfg!(windows) { ".exe" } else { "" };
+    let candidates = [
+        format!("runtime/service{executable_suffix}"),
+        format!("bin/{extension_id}-service{executable_suffix}"),
+        format!("bin/{extension_id}{executable_suffix}"),
+        format!("bin/service{executable_suffix}"),
+    ];
+    candidates
+        .into_iter()
+        .map(|candidate| root.join(candidate))
+        .find(|path| path.is_file())
+}
 
-    Ok(direct)
+fn discover_themes(_root: &Path) -> Vec<ThemeContribution> {
+    Vec::new()
 }
 
 fn failed_extension_snapshot(
@@ -1382,30 +1141,27 @@ fn failed_extension_snapshot(
         .unwrap_or_else(|| "unknown".to_string());
     ResolvedExtensionSnapshot {
         id: id.clone(),
+        version: None,
         name: id,
         description: String::new(),
         docs: None,
+        compat: ExtensionCompatSpec::default(),
         conversation: ExtensionConversationSpec::default(),
-        kind: ExtensionKind::SystemExtension,
         source_mode: source.source_mode,
         source_root: source_root.clone(),
         install_dir: source_root,
         generation,
         health: ExtensionHealth::Failed,
+        views: Vec::new(),
+        operations: Vec::new(),
+        events: Vec::new(),
         ui: None,
         worker: None,
-        permissions: ExtensionPermissionSpec::default(),
         runtime: ExtensionRuntimeSpec::default(),
-        capabilities: ExtensionCapabilities::default(),
-        resource_types: Vec::new(),
-        capability_rows: Vec::new(),
-        surfaces: Vec::new(),
         pages: Vec::new(),
         panels: Vec::new(),
         themes: Vec::new(),
         locales: Vec::new(),
-        commands: Vec::new(),
-        entrypoints: Vec::new(),
         settings: Vec::new(),
         providers: Vec::new(),
         behaviors: Vec::new(),
@@ -1413,7 +1169,6 @@ fn failed_extension_snapshot(
         hooks: Vec::new(),
         actions: Vec::new(),
         schedule_actions: Vec::new(),
-        subscriptions: Vec::new(),
         diagnostics: vec![diagnostic(
             "error",
             "descriptor resolution failed",
@@ -1471,15 +1226,13 @@ fn equivalent_snapshots(
     next: &ExtensionRuntimeSnapshot,
 ) -> bool {
     normalize_extensions(&current.extensions) == normalize_extensions(&next.extensions)
-        && current.resource_types == next.resource_types
-        && current.capabilities == next.capabilities
-        && current.surfaces == next.surfaces
-        && current.subscriptions == next.subscriptions
+        && current.views == next.views
+        && current.operations == next.operations
+        && current.events == next.events
         && current.pages == next.pages
         && current.panels == next.panels
         && current.themes == next.themes
         && current.locales == next.locales
-        && current.commands == next.commands
         && current.providers == next.providers
         && current.behaviors == next.behaviors
         && current.memories == next.memories
@@ -1506,15 +1259,13 @@ fn empty_snapshot() -> ExtensionRuntimeSnapshot {
         generation: 0,
         updated_at: now_string(),
         extensions: Vec::new(),
-        resource_types: Vec::new(),
-        capabilities: Vec::new(),
-        surfaces: Vec::new(),
-        subscriptions: Vec::new(),
+        views: Vec::new(),
+        operations: Vec::new(),
+        events: Vec::new(),
         pages: Vec::new(),
         panels: Vec::new(),
         themes: Vec::new(),
         locales: Vec::new(),
-        commands: Vec::new(),
         providers: Vec::new(),
         behaviors: Vec::new(),
         memories: Vec::new(),
@@ -1571,9 +1322,9 @@ mod tests {
         let root = unique_test_dir("runtime-snapshot");
         let ext_dir = root.join("sample");
         fs::create_dir_all(&ext_dir).expect("create extension dir");
-        fs::create_dir_all(ext_dir.join("worker")).expect("create worker dir");
+        fs::create_dir_all(ext_dir.join("runtime")).expect("create runtime dir");
         fs::write(ext_dir.join("extension.toml"), sample_descriptor()).expect("write descriptor");
-        fs::write(ext_dir.join("worker/plugin.wasm"), b"test").expect("write worker");
+        fs::write(service_entry_path(&ext_dir), b"test").expect("write service entry");
 
         let config = ExtensionRuntimeConfig {
             registry_file: root.join("config/extensions.toml"),
@@ -1598,16 +1349,22 @@ mod tests {
         let runtime = ExtensionRuntime::bootstrap(config).expect("bootstrap runtime");
         let snapshot = runtime.snapshot();
         assert_eq!(snapshot.extensions.len(), 1);
-        assert_eq!(snapshot.resource_types.len(), 1);
-        assert_eq!(snapshot.capabilities.len(), 2);
-        assert_eq!(snapshot.surfaces.len(), 2);
-        assert_eq!(snapshot.subscriptions.len(), 1);
+        assert_eq!(snapshot.extensions[0].version.as_deref(), Some("0.1.0"));
+        assert_eq!(
+            snapshot.extensions[0].compat.ennoia.as_deref(),
+            Some(">=0.1.0")
+        );
+        assert!(snapshot.extensions[0].worker.is_some());
+        assert_eq!(snapshot.views.len(), 2);
+        assert_eq!(snapshot.operations.len(), 2);
+        assert_eq!(snapshot.events.len(), 1);
         assert_eq!(snapshot.pages.len(), 1);
         assert_eq!(snapshot.panels.len(), 1);
-        assert_eq!(snapshot.locales.len(), 2);
-        assert_eq!(snapshot.commands.len(), 1);
+        assert_eq!(snapshot.locales.len(), 0);
         assert_eq!(snapshot.providers.len(), 1);
         assert_eq!(snapshot.hooks.len(), 1);
+        assert_eq!(snapshot.actions.len(), 1);
+        assert_eq!(snapshot.actions[0].action.operation, "sample.run.completed");
         assert_eq!(snapshot.extensions[0].health, ExtensionHealth::Ready);
 
         fs::remove_dir_all(&root).expect("cleanup");
@@ -1618,10 +1375,10 @@ mod tests {
         let root = unique_test_dir("runtime-attach");
         let ext_dir = root.join("foo");
         fs::create_dir_all(&ext_dir).expect("create extension dir");
-        fs::create_dir_all(ext_dir.join("worker")).expect("create worker dir");
+        fs::create_dir_all(ext_dir.join("runtime")).expect("create runtime dir");
         fs::write(ext_dir.join("extension.toml"), sample_descriptor_for("foo"))
             .expect("write descriptor");
-        fs::write(ext_dir.join("worker/plugin.wasm"), b"test").expect("write worker");
+        fs::write(service_entry_path(&ext_dir), b"test").expect("write service entry");
 
         let config = ExtensionRuntimeConfig {
             registry_file: root.join("config/extensions.toml"),
@@ -1644,14 +1401,14 @@ mod tests {
     fn attached_dev_source_prefers_discovered_ui_entry_over_bundle() {
         let root = unique_test_dir("runtime-dev-ui-entry");
         let ext_dir = root.join("sample");
-        fs::create_dir_all(ext_dir.join("worker")).expect("create worker dir");
+        fs::create_dir_all(ext_dir.join("runtime")).expect("create runtime dir");
         fs::create_dir_all(ext_dir.join("ui/dist")).expect("create bundle dir");
         fs::write(
             ext_dir.join("extension.toml"),
             sample_descriptor_without_ui_entry("sample"),
         )
         .expect("write descriptor");
-        fs::write(ext_dir.join("worker/plugin.wasm"), b"test").expect("write worker");
+        fs::write(service_entry_path(&ext_dir), b"test").expect("write service entry");
         fs::write(ext_dir.join("ui/entry.tsx"), "export default {};").expect("write ui entry");
         fs::write(ext_dir.join("ui/dist/entry.js"), "export default {};")
             .expect("write bundled ui entry");
@@ -1694,13 +1451,13 @@ mod tests {
     fn runtime_ignores_dev_sources_when_disabled() {
         let root = unique_test_dir("runtime-ignore-dev-sources");
         let ext_dir = root.join("sample");
-        fs::create_dir_all(ext_dir.join("worker")).expect("create worker dir");
+        fs::create_dir_all(ext_dir.join("runtime")).expect("create runtime dir");
         fs::write(
             ext_dir.join("extension.toml"),
             sample_descriptor_without_ui_entry("sample"),
         )
         .expect("write descriptor");
-        fs::write(ext_dir.join("worker/plugin.wasm"), b"test").expect("write worker");
+        fs::write(service_entry_path(&ext_dir), b"test").expect("write service entry");
 
         let config = ExtensionRuntimeConfig {
             registry_file: root.join("config/extensions.toml"),
@@ -1737,26 +1494,8 @@ mod tests {
             r##"
 id = "{id}"
 name = "Logs"
-kind = "extension"
 description = "Test extension"
 docs = "docs/overview.md"
-
-[source]
-mode = "package"
-root = "."
-dev = false
-
-[ui]
-runtime = "browser-esm"
-hmr = true
-
-[worker]
-kind = "wasm"
-entry = "./worker/plugin.wasm"
-abi = "ennoia.worker"
-
-[build]
-ui_bundle = "ui/dist/entry.js"
 "##
         )
     }
@@ -1765,101 +1504,58 @@ ui_bundle = "ui/dist/entry.js"
         format!(
             r##"
 id = "{id}"
+version = "0.1.0"
 name = "Logs"
-kind = "extension"
 description = "Test extension"
 docs = "docs/overview.md"
 
-[source]
-mode = "dev"
-root = "."
-dev = true
+[compat]
+ennoia = ">=0.1.0"
 
 [conversation]
-inject = true
-resource_types = ["{id}.event"]
-capabilities = ["{id}.feed"]
+visible = true
+resources = ["{id}.event"]
+operations = ["{id}.feed"]
 
-[ui]
-runtime = "browser-esm"
-entry = "./ui/index.ts"
-dev_url = "http://127.0.0.1:4201/src/index.ts"
-hmr = true
-
-[worker]
-kind = "wasm"
-entry = "./worker/plugin.wasm"
-abi = "ennoia.worker"
-
-[[resource_types]]
-id = "{id}.event"
-title = {{ key = "ext.{id}.resource.event", fallback = "Event" }}
-content_kind = "json"
-operations = ["read"]
-tags = ["activity"]
-
-[[surfaces]]
-id = "{id}.events"
-kind = "page"
-mount = "{id}.events.page"
+[[views]]
+name = "{id}.events"
+type = "page"
 title = {{ key = "ext.{id}.page.events", fallback = "Logs" }}
 route = "/{id}"
+nav = "sidebar"
+order = 10
 icon = "activity"
 
-[[surfaces]]
-id = "{id}.timeline"
-kind = "panel"
-mount = "{id}.timeline.panel"
+[[views]]
+name = "{id}.timeline"
+type = "panel"
 title = {{ key = "ext.{id}.panel.timeline", fallback = "Event Timeline" }}
 slot = "right"
 icon = "panel-right"
 
-[[themes]]
-id = "{id}.daybreak"
-label = {{ key = "ext.{id}.theme.daybreak", fallback = "Daybreak" }}
-appearance = "Light"
-tokens_entry = "ui/themes/daybreak.css"
-preview_color = "#F4A261"
-extends = "system"
-category = "extension"
+[[operations]]
+name = "{id}.feed"
+provider = {{ kind = "activity-feed" }}
 
-[[locales]]
-locale = "zh-CN"
-namespace = "ext.{id}"
-entry = "ui/locales/zh-CN.json"
+[[operations]]
+name = "{id}.run.completed"
 
-[[locales]]
-locale = "en-US"
-namespace = "ext.{id}"
-entry = "ui/locales/en-US.json"
-
-[[commands]]
-id = "{id}.open"
-title = {{ key = "ext.{id}.command.open", fallback = "Open Logs" }}
-action = "open-page"
-shortcut = "Ctrl+Shift+O"
-
-[[capabilities]]
-id = "{id}.feed"
-contract = "activity-feed"
-kind = "query"
-entry = "worker/providers/activity-feed.js"
-metadata = {{ provider = {{ id = "{id}.feed", kind = "activity-feed" }} }}
-
-[[capabilities]]
-id = "{id}.run.completed"
-contract = "hook.run.completed"
-kind = "event_handler"
-entry = "worker/hooks/run-completed.js"
-
-[[subscriptions]]
-event = "run.completed"
-capability = "{id}.run.completed"
+[[events]]
+on = "run.completed"
+operation = "{id}.run.completed"
 "##
         )
     }
 
     fn unique_test_dir(prefix: &str) -> PathBuf {
         std::env::temp_dir().join(format!("ennoia-{prefix}-{}", unique_suffix()))
+    }
+
+    fn service_entry_path(root: &Path) -> PathBuf {
+        root.join("runtime").join(if cfg!(windows) {
+            "service.exe"
+        } else {
+            "service"
+        })
     }
 }

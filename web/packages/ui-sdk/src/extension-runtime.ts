@@ -5,72 +5,8 @@ export type LocalizedText = {
 
 export type RegisteredContributionBase = {
   extension_id: string;
-  extension_kind: string;
   source_mode: "dev" | "package";
   install_dir: string;
-};
-
-export type ExtensionResourceType = {
-  id: string;
-  title?: LocalizedText | null;
-  content_kind: string;
-  metadata_schema?: string | null;
-  content_schema?: string | null;
-  operations: string[];
-  tags: string[];
-};
-
-export type ExtensionCapability = {
-  id: string;
-  contract: string;
-  kind: string;
-  title?: LocalizedText | null;
-  runtime?: string | null;
-  entry?: string | null;
-  input_schema?: string | null;
-  output_schema?: string | null;
-  consumes: string[];
-  produces: string[];
-  requires: string[];
-  emits: string[];
-  metadata: unknown;
-};
-
-export type ExtensionSurface = {
-  id: string;
-  kind: string;
-  mount: string;
-  title?: LocalizedText | null;
-  route?: string | null;
-  slot?: string | null;
-  icon?: string | null;
-  nav?: {
-    default_pinned?: boolean;
-    order?: number | null;
-  } | null;
-  match_resource_types: string[];
-  match_capability_contracts: string[];
-  priority?: number | null;
-};
-
-export type ExtensionSubscription = {
-  event: string;
-  capability: string;
-  match_resource_types: string[];
-  match_capability_ids: string[];
-  match_capability_contracts: string[];
-};
-
-export type ExtensionEntrypoint = {
-  id: string;
-  label: LocalizedText;
-  description?: LocalizedText | null;
-  kind: "page" | "panel";
-  page_id?: string | null;
-  panel_id?: string | null;
-  icon?: string | null;
-  order?: number | null;
-  prominent: boolean;
 };
 
 export type ExtensionSettingValue = string | number | boolean;
@@ -89,20 +25,59 @@ export type ExtensionSettingField = {
   default_value?: ExtensionSettingValue | null;
 };
 
-export type ExtensionResourceTypeContribution = RegisteredContributionBase & {
-  resource_type: ExtensionResourceType;
+export type ExtensionView = {
+  name: string;
+  type: "page" | "panel" | string;
+  title: LocalizedText;
+  nav?: string | null;
+  order?: number | null;
+  slot?: string | null;
+  icon?: string | null;
+  route?: string | null;
+  priority?: number | null;
 };
 
-export type ExtensionCapabilityContribution = RegisteredContributionBase & {
-  capability: ExtensionCapability;
+export type ExtensionProviderSpec = {
+  kind: string;
+  interfaces: string[];
+  model_discovery: boolean;
+  manual_model: boolean;
+  generation_options: {
+    id: string;
+    label: LocalizedText;
+    value_type: string;
+    required: boolean;
+    default_value?: string | null;
+    allowed_values: string[];
+  }[];
 };
 
-export type ExtensionSurfaceContribution = RegisteredContributionBase & {
-  surface: ExtensionSurface;
+export type ExtensionOperation = {
+  name: string;
+  title?: LocalizedText | null;
+  description?: string | null;
+  agent: boolean;
+  input?: string | null;
+  output?: string | null;
+  provider?: ExtensionProviderSpec | null;
+  schedule: boolean;
 };
 
-export type ExtensionSubscriptionContribution = RegisteredContributionBase & {
-  subscription: ExtensionSubscription;
+export type ExtensionEvent = {
+  on: string;
+  operation: string;
+};
+
+export type ExtensionViewContribution = RegisteredContributionBase & {
+  view: ExtensionView;
+};
+
+export type ExtensionOperationContribution = RegisteredContributionBase & {
+  operation: ExtensionOperation;
+};
+
+export type ExtensionEventContribution = RegisteredContributionBase & {
+  event: ExtensionEvent;
 };
 
 export type ExtensionPageContribution = RegisteredContributionBase & {
@@ -154,20 +129,6 @@ export type ExtensionLocaleContribution = RegisteredContributionBase & {
 
 export type PanelSlot = "left" | "right" | "bottom" | "main";
 
-export type ExtensionPageDescriptor = {
-  mount: string;
-  eyebrow: string;
-  summary: string;
-  highlights: string[];
-};
-
-export type ExtensionPanelDescriptor = {
-  mount: string;
-  summary: string;
-  slot: PanelSlot;
-  metricLabel: string;
-};
-
 export type ExtensionUiRenderHelpers = {
   locale: string;
   themeId: string;
@@ -192,12 +153,6 @@ export type ExtensionPageMountContext = ExtensionViewMountContext & {
 export type ExtensionPanelMountContext = ExtensionViewMountContext & {
   kind: "panel";
   panel: ExtensionPanelContribution;
-};
-
-export type ExtensionConversationCardMountContext = ExtensionViewMountContext & {
-  kind: "conversation_card";
-  surface: ExtensionSurfaceContribution;
-  conversationId: string;
 };
 
 export type ExtensionConversationRecord = {
@@ -238,11 +193,6 @@ export type ExtensionPanelMount = (
   context: ExtensionPanelMountContext,
 ) => void | ExtensionViewHandle | Promise<void | ExtensionViewHandle>;
 
-export type ExtensionConversationCardMount = (
-  container: HTMLElement,
-  context: ExtensionConversationCardMountContext,
-) => void | ExtensionViewHandle | Promise<void | ExtensionViewHandle>;
-
 export type ExtensionConversationRecordMount = (
   container: HTMLElement,
   context: ExtensionConversationRecordMountContext,
@@ -251,36 +201,14 @@ export type ExtensionConversationRecordMount = (
 export type ExtensionUiModule = {
   pages?: Record<string, ExtensionPageMount>;
   panels?: Record<string, ExtensionPanelMount>;
-  conversationCards?: Record<string, ExtensionConversationCardMount>;
   conversationRecords?: Record<string, ExtensionConversationRecordMount>;
 };
 
-export type ExtensionCommandContribution = RegisteredContributionBase & {
-  command: {
-    id: string;
-    title: LocalizedText;
-    action: string;
-    shortcut?: string | null;
-  };
-};
-
 export type ExtensionProviderContribution = RegisteredContributionBase & {
-  provider: {
+  provider: ExtensionProviderSpec & {
     id: string;
-    kind: string;
     entry?: string | null;
     extension_id?: string | null;
-    interfaces: string[];
-    model_discovery: boolean;
-    manual_model: boolean;
-    generation_options: {
-      id: string;
-      label: LocalizedText;
-      value_type: string;
-      required: boolean;
-      default_value?: string | null;
-      allowed_values: string[];
-    }[];
   };
 };
 
@@ -312,7 +240,7 @@ export type ExtensionMemoryContribution = RegisteredContributionBase & {
 export type ExtensionActionContribution = RegisteredContributionBase & {
   action: {
     action: string;
-    capability_id: string;
+    operation: string;
     method: string;
     phase: "before" | "execute" | "after_success" | "after_error";
     priority: number;
@@ -332,21 +260,6 @@ export type ExtensionScheduleActionContribution = RegisteredContributionBase & {
   };
 };
 
-export type ResolvedUiEntry = {
-  kind: string;
-  entry: string;
-  hmr: boolean;
-  version: string;
-};
-
-export type ResolvedWorkerEntry = {
-  kind: string;
-  entry: string;
-  abi: string;
-  protocol?: string | null;
-  status: string;
-};
-
 export type ExtensionDiagnostic = {
   level: string;
   summary: string;
@@ -356,53 +269,30 @@ export type ExtensionDiagnostic = {
 
 export type ExtensionRuntimeExtension = {
   id: string;
+  version?: string | null;
   name: string;
   description: string;
   docs?: string | null;
-  conversation: {
-    inject: boolean;
-    resource_types: string[];
-    capabilities: string[];
+  compat: {
+    ennoia?: string | null;
   };
-  kind: string;
+  conversation: {
+    visible: boolean;
+    resources: string[];
+    operations: string[];
+  };
   source_mode: "dev" | "package";
   source_root: string;
   install_dir: string;
   generation: number;
   health: string;
-  ui?: ResolvedUiEntry | null;
-  worker?: ResolvedWorkerEntry | null;
-  permissions: {
-    storage?: string | null;
-    sqlite: boolean;
-    network: string[];
-    events: string[];
-    fs: string[];
-    env: string[];
-  };
-  runtime: {
-    startup: string;
-    timeout_ms: number;
-    memory_limit_mb: number;
-  };
-  capabilities: {
-    resource_types: boolean;
-    capabilities: boolean;
-    surfaces: boolean;
-    locales: boolean;
-    themes: boolean;
-    commands: boolean;
-    subscriptions: boolean;
-  };
-  resource_types: ExtensionResourceType[];
-  capability_rows: ExtensionCapability[];
-  surfaces: ExtensionSurface[];
+  views: ExtensionView[];
+  operations: ExtensionOperation[];
+  events: ExtensionEvent[];
   pages: ExtensionPageContribution["page"][];
   panels: ExtensionPanelContribution["panel"][];
   themes: ExtensionThemeContribution["theme"][];
   locales: ExtensionLocaleContribution["locale"][];
-  commands: ExtensionCommandContribution["command"][];
-  entrypoints: ExtensionEntrypoint[];
   settings: ExtensionSettingField[];
   providers: ExtensionProviderContribution["provider"][];
   behaviors: ExtensionBehaviorContribution["behavior"][];
@@ -410,7 +300,6 @@ export type ExtensionRuntimeExtension = {
   hooks: ExtensionHookContribution["hook"][];
   actions: ExtensionActionContribution["action"][];
   schedule_actions: ExtensionScheduleActionContribution["schedule_action"][];
-  subscriptions: ExtensionSubscription[];
   diagnostics: ExtensionDiagnostic[];
 };
 
@@ -418,15 +307,13 @@ export type ExtensionRuntimeSnapshot = {
   generation: number;
   updated_at: string;
   extensions: ExtensionRuntimeExtension[];
-  resource_types: ExtensionResourceTypeContribution[];
-  capabilities: ExtensionCapabilityContribution[];
-  surfaces: ExtensionSurfaceContribution[];
-  subscriptions: ExtensionSubscriptionContribution[];
+  views: ExtensionViewContribution[];
+  operations: ExtensionOperationContribution[];
+  events: ExtensionEventContribution[];
   pages: ExtensionPageContribution[];
   panels: ExtensionPanelContribution[];
   themes: ExtensionThemeContribution[];
   locales: ExtensionLocaleContribution[];
-  commands: ExtensionCommandContribution[];
   providers: ExtensionProviderContribution[];
   behaviors: ExtensionBehaviorContribution[];
   memories: ExtensionMemoryContribution[];

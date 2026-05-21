@@ -43,14 +43,7 @@ fn handle(invocation: Invocation) -> String {
     let path = invocation.method.trim_matches('/');
     let _context = invocation.context;
     match path {
-        "behavior/status" => success(json!({
-            "extension_id": "workflow",
-            "behavior_id": "default",
-            "healthy": true,
-            "version": "1",
-            "interfaces": ["runs", "tasks", "artifacts", "handoffs", "status"]
-        })),
-        "behavior/runs" | "behavior/run" | "behavior/start" => {
+        "workflow.default" => {
             let goal = invocation
                 .params
                 .get("goal")
@@ -79,28 +72,23 @@ fn handle(invocation: Invocation) -> String {
                 "gate_verdicts": []
             }))
         }
-        "workflow/runs/create" | "workflow/schedules/run" => success(json!(sample_run_bundle(
+        "run.create" | "workflow.run" => success(json!(sample_run_bundle(
             invocation
                 .params
                 .get("goal")
                 .and_then(Value::as_str)
                 .unwrap_or("Wasm workflow run")
         ))),
-        "workflow/runs/get" => success(json!(sample_run_bundle("Wasm workflow run"))),
-        "workflow/runs/list-by-conversation" => success(json!([sample_run(
+        "run.get" => success(json!(sample_run_bundle("Wasm workflow run"))),
+        "run.list" => success(json!([sample_run(
             invocation
                 .params
                 .get("conversation_id")
                 .and_then(Value::as_str)
                 .unwrap_or("wasm-conversation-1")
         )])),
-        "workflow/tasks/list-by-run" => success(json!([])),
-        "workflow/artifacts/list-by-run" => success(json!([])),
-        path if path.starts_with("behavior/") => success(json!({
-            "handled": true,
-            "path": path,
-            "source": "workflow.wasm"
-        })),
+        "task.list" => success(json!([])),
+        "artifact.list" => success(json!([])),
         _ => failure(
             "method_not_found",
             format!("workflow worker method '{path}' not found"),

@@ -439,11 +439,7 @@ pub async fn dispatch_extension_rpc(
     method: &str,
     request: ennoia_kernel::ExtensionRpcRequest,
 ) -> io::Result<ennoia_kernel::ExtensionRpcResponse> {
-    let timeout_ms = state
-        .extensions
-        .get(extension_id)
-        .map(|extension| extension.runtime.timeout_ms)
-        .unwrap_or_else(|| live_server_config(state).extension_runtime.timeout_ms);
+    let timeout_ms = live_server_config(state).extension_runtime.timeout_ms;
     let runtime_handle = tokio::runtime::Handle::current();
     let extensions = state.extensions.clone();
     let state_for_dispatcher = state.clone();

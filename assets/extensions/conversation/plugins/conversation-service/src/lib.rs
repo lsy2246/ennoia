@@ -236,120 +236,89 @@ async fn handle_invocation(
     let path = invocation.method.trim_matches('/');
     let _context = invocation.context;
     match path {
-        "conversation/conversations/list" => match state.store.list_conversations().await {
+        "conversation.list" => match state.store.list_conversations().await {
             Ok(conversations) => ExtensionRpcResponse::success(serde_json::json!(conversations)),
             Err(error) => {
                 ExtensionRpcResponse::failure("conversation_list_failed", error.to_string())
             }
         },
-        "conversation/conversations/create" => {
-            match parse_json::<CreateConversationPayload>(invocation.params) {
-                Ok(payload) => match create_conversation(state, payload).await {
-                    Ok(response) => ExtensionRpcResponse::success(serde_json::json!(response)),
-                    Err(error) => error,
-                },
+        "conversation.create" => match parse_json::<CreateConversationPayload>(invocation.params) {
+            Ok(payload) => match create_conversation(state, payload).await {
+                Ok(response) => ExtensionRpcResponse::success(serde_json::json!(response)),
                 Err(error) => error,
-            }
-        }
-        "conversation/conversations/get" => {
-            match parse_json::<ConversationLookupPayload>(invocation.params) {
-                Ok(payload) => match conversation_detail(state, payload).await {
-                    Ok(response) => ExtensionRpcResponse::success(serde_json::json!(response)),
-                    Err(error) => error,
-                },
+            },
+            Err(error) => error,
+        },
+        "conversation.get" => match parse_json::<ConversationLookupPayload>(invocation.params) {
+            Ok(payload) => match conversation_detail(state, payload).await {
+                Ok(response) => ExtensionRpcResponse::success(serde_json::json!(response)),
                 Err(error) => error,
-            }
-        }
-        "conversation/conversations/delete" => {
-            match parse_json::<ConversationLookupPayload>(invocation.params) {
-                Ok(payload) => match delete_conversation(state, payload).await {
-                    Ok(response) => ExtensionRpcResponse::success(serde_json::json!(response)),
-                    Err(error) => error,
-                },
+            },
+            Err(error) => error,
+        },
+        "conversation.delete" => match parse_json::<ConversationLookupPayload>(invocation.params) {
+            Ok(payload) => match delete_conversation(state, payload).await {
+                Ok(response) => ExtensionRpcResponse::success(serde_json::json!(response)),
                 Err(error) => error,
-            }
-        }
-        "conversation/lanes/list-by-conversation" => {
-            match parse_json::<ConversationLookupPayload>(invocation.params) {
-                Ok(payload) => match list_lanes(state, payload).await {
-                    Ok(lanes) => ExtensionRpcResponse::success(serde_json::json!(lanes)),
-                    Err(error) => error,
-                },
+            },
+            Err(error) => error,
+        },
+        "lane.list" => match parse_json::<ConversationLookupPayload>(invocation.params) {
+            Ok(payload) => match list_lanes(state, payload).await {
+                Ok(lanes) => ExtensionRpcResponse::success(serde_json::json!(lanes)),
                 Err(error) => error,
-            }
-        }
-        "conversation/branches/list-by-conversation" => {
-            match parse_json::<ConversationLookupPayload>(invocation.params) {
-                Ok(payload) => match list_branches(state, payload).await {
-                    Ok(branches) => ExtensionRpcResponse::success(serde_json::json!(branches)),
-                    Err(error) => error,
-                },
+            },
+            Err(error) => error,
+        },
+        "branch.list" => match parse_json::<ConversationLookupPayload>(invocation.params) {
+            Ok(payload) => match list_branches(state, payload).await {
+                Ok(branches) => ExtensionRpcResponse::success(serde_json::json!(branches)),
                 Err(error) => error,
-            }
-        }
-        "conversation/branches/create" => {
-            match parse_json::<CreateBranchPayload>(invocation.params) {
-                Ok(payload) => match create_branch(state, payload).await {
-                    Ok(branch) => ExtensionRpcResponse::success(serde_json::json!(branch)),
-                    Err(error) => error,
-                },
+            },
+            Err(error) => error,
+        },
+        "branch.create" => match parse_json::<CreateBranchPayload>(invocation.params) {
+            Ok(payload) => match create_branch(state, payload).await {
+                Ok(branch) => ExtensionRpcResponse::success(serde_json::json!(branch)),
                 Err(error) => error,
-            }
-        }
-        "conversation/branches/switch" => {
-            match parse_json::<BranchLookupPayload>(invocation.params) {
-                Ok(payload) => match switch_branch(state, payload).await {
-                    Ok(response) => ExtensionRpcResponse::success(serde_json::json!(response)),
-                    Err(error) => error,
-                },
+            },
+            Err(error) => error,
+        },
+        "branch.switch" => match parse_json::<BranchLookupPayload>(invocation.params) {
+            Ok(payload) => match switch_branch(state, payload).await {
+                Ok(response) => ExtensionRpcResponse::success(serde_json::json!(response)),
                 Err(error) => error,
-            }
-        }
-        "conversation/branches/update" => {
-            match parse_json::<UpdateBranchPayload>(invocation.params) {
-                Ok(payload) => match update_branch(state, payload).await {
-                    Ok(response) => ExtensionRpcResponse::success(serde_json::json!(response)),
-                    Err(error) => error,
-                },
+            },
+            Err(error) => error,
+        },
+        "branch.update" => match parse_json::<UpdateBranchPayload>(invocation.params) {
+            Ok(payload) => match update_branch(state, payload).await {
+                Ok(response) => ExtensionRpcResponse::success(serde_json::json!(response)),
                 Err(error) => error,
-            }
-        }
-        "conversation/branches/delete" => {
-            match parse_json::<DeleteBranchPayload>(invocation.params) {
-                Ok(payload) => match delete_branch(state, payload).await {
-                    Ok(response) => ExtensionRpcResponse::success(serde_json::json!(response)),
-                    Err(error) => error,
-                },
+            },
+            Err(error) => error,
+        },
+        "branch.delete" => match parse_json::<DeleteBranchPayload>(invocation.params) {
+            Ok(payload) => match delete_branch(state, payload).await {
+                Ok(response) => ExtensionRpcResponse::success(serde_json::json!(response)),
                 Err(error) => error,
-            }
-        }
-        "conversation/messages/list" => {
-            match parse_json::<BranchLookupPayload>(invocation.params) {
-                Ok(payload) => match list_messages(state, payload).await {
-                    Ok(messages) => ExtensionRpcResponse::success(serde_json::json!(messages)),
-                    Err(error) => error,
-                },
+            },
+            Err(error) => error,
+        },
+        "message.list" => match parse_json::<BranchLookupPayload>(invocation.params) {
+            Ok(payload) => match list_messages(state, payload).await {
+                Ok(messages) => ExtensionRpcResponse::success(serde_json::json!(messages)),
                 Err(error) => error,
-            }
-        }
-        "conversation/messages/append-user" => {
-            match parse_json::<AppendMessageParams>(invocation.params) {
-                Ok(payload) => match append_user_message(state, payload).await {
-                    Ok(response) => ExtensionRpcResponse::success(serde_json::json!(response)),
-                    Err(error) => error,
-                },
+            },
+            Err(error) => error,
+        },
+        "message.append" => match parse_json::<AppendMessageParams>(invocation.params) {
+            Ok(payload) => match append_routed_message(state, payload).await {
+                Ok(response) => ExtensionRpcResponse::success(serde_json::json!(response)),
                 Err(error) => error,
-            }
-        }
-        "conversation/messages/append-agent" => {
-            match parse_json::<AppendMessageParams>(invocation.params) {
-                Ok(payload) => match append_agent_message(state, payload).await {
-                    Ok(response) => ExtensionRpcResponse::success(serde_json::json!(response)),
-                    Err(error) => error,
-                },
-                Err(error) => error,
-            }
-        }
+            },
+            Err(error) => error,
+        },
         _ => ExtensionRpcResponse::failure(
             "method_not_found",
             format!("conversation worker method '{path}' not found"),
@@ -781,18 +750,22 @@ async fn switch_branch(
     conversation_detail(state, ConversationLookupPayload { conversation_id }).await
 }
 
-async fn append_user_message(
+async fn append_routed_message(
     state: &ConversationServiceState,
     payload: AppendMessageParams,
 ) -> Result<ConversationMessageResponse, ExtensionRpcResponse> {
-    append_message(state, payload, MessageRole::Operator, "operator").await
-}
-
-async fn append_agent_message(
-    state: &ConversationServiceState,
-    payload: AppendMessageParams,
-) -> Result<ConversationMessageResponse, ExtensionRpcResponse> {
-    append_message(state, payload, MessageRole::Agent, "agent").await
+    let role = payload
+        .message
+        .role
+        .as_deref()
+        .map(message_role_from)
+        .unwrap_or(MessageRole::Operator);
+    let default_sender = if role == MessageRole::Operator {
+        "operator"
+    } else {
+        "agent"
+    };
+    append_message(state, payload, role, default_sender).await
 }
 
 async fn append_message(

@@ -18,24 +18,17 @@ Extension 使用 `extension.toml` 描述系统能力。Skill 使用 `skill.toml`
 
 Extension descriptor 包含：
 
+- `id`
+- `version`
+- `name`
 - `description`
 - `docs`
+- `compat`
+- `views`
+- `operations`
+- `events`
+- `settings`
 - `conversation`
-- `source`
-- `ui`
-- `worker`
-- `permissions`
-- `runtime`
-- `build`
-- `assets`
-- `watch`
-- `resource_types`
-- `capabilities`
-- `surfaces`
-- `locales`
-- `themes`
-- `commands`
-- `subscriptions`
 
 Skill descriptor 包含：
 
@@ -45,13 +38,15 @@ Skill descriptor 包含：
 - `mount.mode`
 - `actions[]`
 
-主声明模型统一只有一层：`resource_types`、`capabilities`、`surfaces`、`locales`、`themes`、`commands`、`subscriptions`。页面、面板、Provider、Behavior、Memory、Action、Hook 和 Schedule Action 都是宿主运行时根据声明派生的视图。
+主声明模型统一只有一层：`views`、`operations`、`events`、`settings`、`conversation`。
 
-`ui` 是可选界面入口；`worker` 是可选执行单元，可为 Wasm，也可为进程型 stdio RPC。宿主按声明装配能力，不要求扩展同时包含 UI 和 Worker。
+`views` 表达主壳可以打开或挂载的界面契约，当前稳定类型是 `page` 与 `panel`。`operations` 表达系统可调用动作；`operation.name` 是唯一调用名，同时作为 action key、Worker method 和事件投递目标。`events` 只表达 `on -> operation` 的投递关系。
+
+UI 与 service 入口由目录约定发现，属于宿主内部解析结果，不属于 manifest 契约，也不在扩展设计界面展示。
 
 Skill 不声明系统能力入口。它只声明动作入口；CLI 参数、调用示例、平台限制和常见输入输出统一保留在 skill 目录下的 `README.md` 中。
 
-Extension 默认不进入会话目录。只有显式声明了 `conversation.inject = true` 时，宿主才会把它作为会话可见目录项暴露给模型；`conversation.resource_types` 和 `conversation.capabilities` 用于限定进入会话时附带的资源范围和能力入口。进入会话时复用扩展唯一那份 `description`，`docs` 仍然只作为按需查阅入口。
+Extension 默认不进入会话目录。只有显式声明了 `conversation.visible = true` 时，宿主才会把它作为会话可见目录项暴露给模型；`conversation.resources` 和 `conversation.operations` 用于限定进入会话时附带的资源范围和操作入口。进入会话时复用扩展唯一那份 `description`，`docs` 仍然只作为按需查阅入口。
 
 ## 运行流程
 
@@ -59,33 +54,34 @@ Extension 默认不进入会话目录。只有显式声明了 `conversation.inje
 2. CLI 同步未被 `blocked_builtin_sync` 屏蔽的内置扩展到 `<ENNOIA_HOME>/extensions/*`，并写入 `config/extensions.toml`。
 3. 开发模式下 CLI 把仓库内 `assets/extensions/*` 追加到 `config/extensions.toml` 的 `dev_sources`。
 4. Extension Host 扫描 `<ENNOIA_HOME>/extensions/*` 中已安装扩展，并叠加 `config/extensions.toml` 的 `enabled` 与 `dev_sources` 状态。
-5. Extension Host 解析 `ui`、`worker`、权限和贡献清单，生成 runtime snapshot。
+5. Extension Host 解析 manifest 契约，并按目录约定发现 UI / service 入口，生成 runtime snapshot。
 6. Server 暴露 runtime snapshot、事件、诊断、日志、资源贡献接口、动作规则视图、scheduler API 和 Worker RPC。
 7. Web 工作台通过 runtime snapshot 动态挂载扩展贡献。
 
-## Action 与 Schedule Action
+## Operation 与事件
 
-`capabilities[].metadata.action` 用于把扩展能力挂到系统稳定动作键上。典型 key 包括 `conversation.list`、`conversation.create`、`message.append`、`run.create`、`task.list`。
+`operations[]` 用于把扩展操作挂到系统稳定动作键上。典型 name 包括 `conversation.list`、`conversation.create`、`message.append`、`run.create`、`task.list`。
 
-`capabilities[].metadata.schedule_action` 用于声明可被系统 scheduler 调用的动作。Scheduler 只保存计划和触发到期动作，不解释业务语义；业务参数通过 `params` 原样传入 Worker。
+设置 `schedule = true` 的 operation 可被系统 scheduler 调用。Scheduler 只保存计划和触发到期动作，不解释业务语义；业务参数通过 `params` 原样传入 Worker。
 
 ```toml
-[[capabilities]]
-id = "run.create"
-contract = "run.create"
-kind = "action"
-entry = "workflow/runs/create"
-metadata = { action = { key = "run.create", phase = "execute", priority = 100, result_mode = "last" } }
+[[operations]]
+name = "run.create"
+description = "创建 workflow run。"
+agent = true
 
-[[capabilities]]
-id = "workflow.run"
-contract = "workflow.run"
-kind = "action"
-entry = "workflow/schedules/run"
-metadata = { schedule_action = { id = "workflow.run" } }
+[[operations]]
+name = "workflow.run"
+description = "由 scheduler 触发 workflow run。"
+agent = true
+schedule = true
+
+[[events]]
+on = "conversation.message.created"
+operation = "workflow.conversation.message.created"
 ```
 
-扩展源码推荐目录为 `ui/`、`worker/`、`data/` 和 `model-endpoint-presets/`。这些目录不是必备项，扩展只声明实际提供的能力。
+扩展源码推荐目录为 `ui/`、`bin/`、`worker/`、`data/` 和 `model-endpoint-presets/`。这些目录不是必备项，也不是 manifest 契约。
 
 ## 开发热加载
 
@@ -144,10 +140,9 @@ metadata = { schedule_action = { id = "workflow.run" } }
 ## 沙箱与权限
 
 - 默认不注入 WASI，也不允许任意 host import；声明了 import 的模块会被拒绝实例化。
-- RPC 方法必须匹配 manifest 中 Provider、Behavior、Memory、Hook、Action 或 Schedule Action 贡献声明的 `entry` / `handler` / `method` 前缀；没有声明贡献的纯 Worker 扩展允许调用任意安全方法名。
-- `runtime.memory_limit_mb` 映射为 Wasm store 内存上限。
-- `runtime.timeout_ms` 映射为 Wasm fuel 预算，防止无限循环长期占用 Host。
-- `permissions` 当前作为能力声明和后续 host capability bridge 的唯一来源；在 host capability bridge 接入前，Worker 没有文件、网络、环境变量或数据库的宿主访问能力。
+- RPC 方法必须匹配 manifest 中声明的 `operation.name`。
+- Wasm 内存和超时预算使用宿主运行时默认值。
+- Agent 权限系统由宿主按 operation 和调用上下文统一裁决；扩展 manifest 不声明底层权限边界、SQLite、文件、网络或环境变量。
 
 ## API
 

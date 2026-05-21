@@ -3,18 +3,6 @@ use serde::{Deserialize, Serialize};
 use crate::policy::GlobPattern;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct CapabilityPermissionMetadata {
-    pub action: String,
-    pub target_kind: String,
-    #[serde(default)]
-    pub risk_level: String,
-    #[serde(default)]
-    pub default_decision: String,
-    #[serde(default)]
-    pub scope_kind: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PermissionTarget {
     pub kind: String,
     pub id: String,

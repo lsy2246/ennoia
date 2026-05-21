@@ -102,11 +102,23 @@ pub(super) async fn behavior_api_proxy(
 ) -> Result<impl IntoResponse, ApiError> {
     let resolved = resolve_active_behavior(&state, &request)?;
     let extension_id = resolved.extension_id.clone();
-    dispatch_worker_capability_request(
+    let operation = resolved
+        .behavior
+        .entry
+        .as_deref()
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+        .ok_or_else(|| {
+            scoped(
+                ApiError::not_found("active behavior operation not configured"),
+                &request,
+            )
+        })?;
+    dispatch_behavior_operation_request(
         &state,
         &request,
         &extension_id,
-        resolved.behavior.entry.as_deref(),
+        operation,
         &path,
         method,
         body,
@@ -144,11 +156,11 @@ pub(super) fn resolve_active_behavior(
     }
 }
 
-pub(super) async fn dispatch_worker_capability_request(
+pub(super) async fn dispatch_behavior_operation_request(
     state: &AppState,
     request: &RequestContext,
     extension_id: &str,
-    entry: Option<&str>,
+    operation: &str,
     path: &str,
     method: Method,
     body: Bytes,
@@ -162,7 +174,7 @@ pub(super) async fn dispatch_worker_capability_request(
                 component: component.to_string(),
                 source_kind: "extension".to_string(),
                 source_id: Some(extension_id.to_string()),
-                message: "extension not found for capability request".to_string(),
+                message: "extension not found for behavior request".to_string(),
                 attributes: serde_json::json!({ "path": path }),
                 created_at: None,
             },
@@ -181,7 +193,6 @@ pub(super) async fn dispatch_worker_capability_request(
         ));
     }
 
-    let routed_path = join_entry_path(entry, path);
     let span_trace = request.child_trace("behavior_rpc");
     let started = Instant::now();
     let started_at = now_iso();
@@ -196,9 +207,9 @@ pub(super) async fn dispatch_worker_capability_request(
         params,
         context: serde_json::json!({
             "component": component,
-            "method": method.as_str(),
+            "operation": operation,
+            "http_method": method.as_str(),
             "path": path,
-            "routed_path": routed_path,
             "trace": {
                 "request_id": span_trace.request_id.clone(),
                 "trace_id": span_trace.trace_id.clone(),
@@ -211,7 +222,7 @@ pub(super) async fn dispatch_worker_capability_request(
         }),
     };
 
-    let response = dispatch_extension_rpc(&state, extension_id, &routed_path, rpc_request)
+    let response = dispatch_extension_rpc(&state, extension_id, operation, rpc_request)
         .await
         .map_err(|error| scoped(ApiError::internal(error.to_string()), request))?;
 
@@ -221,15 +232,15 @@ pub(super) async fn dispatch_worker_capability_request(
             LogTraceWrite {
                 trace: span_trace,
                 kind: "behavior_rpc".to_string(),
-                name: routed_path.clone(),
+                name: operation.to_string(),
                 component: component.to_string(),
                 source_kind: "extension".to_string(),
                 source_id: Some(extension_id.to_string()),
                 status: "ok".to_string(),
                 attributes: serde_json::json!({
-                    "method": method.as_str(),
+                    "operation": operation,
+                    "http_method": method.as_str(),
                     "path": path,
-                    "routed_path": routed_path,
                 }),
                 started_at,
                 ended_at: now_iso(),
@@ -248,15 +259,15 @@ pub(super) async fn dispatch_worker_capability_request(
         LogTraceWrite {
             trace: span_trace,
             kind: "behavior_rpc".to_string(),
-            name: routed_path.clone(),
+            name: operation.to_string(),
             component: component.to_string(),
             source_kind: "extension".to_string(),
             source_id: Some(extension_id.to_string()),
             status: "error".to_string(),
             attributes: serde_json::json!({
-                "method": method.as_str(),
+                "operation": operation,
+                "http_method": method.as_str(),
                 "path": path,
-                "routed_path": routed_path,
                 "error": error,
             }),
             started_at,
@@ -265,17 +276,4 @@ pub(super) async fn dispatch_worker_capability_request(
         },
     );
     Err(scoped(ApiError::bad_request(error), request))
-}
-
-fn join_entry_path(entry: Option<&str>, path: &str) -> String {
-    let normalized_entry = entry
-        .map(|value| value.trim_matches('/'))
-        .filter(|value| !value.is_empty());
-    let normalized_path = path.trim_matches('/');
-    match (normalized_entry, normalized_path.is_empty()) {
-        (Some(prefix), false) => format!("{prefix}/{normalized_path}"),
-        (Some(prefix), true) => prefix.to_string(),
-        (None, false) => normalized_path.to_string(),
-        (None, true) => String::new(),
-    }
 }

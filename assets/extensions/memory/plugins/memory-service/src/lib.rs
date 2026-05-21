@@ -189,11 +189,11 @@ async fn handle_invocation(
     let path = invocation.method.trim_matches('/');
     let _context = invocation.context;
     match path {
-        "memory/workspace" => match workspace_summary(state).await {
+        "memory.workspace.get" => match workspace_summary(state).await {
             Ok(summary) => ExtensionRpcResponse::success(serde_json::json!(summary)),
             Err(error) => error,
         },
-        "memory/memories/list" => match parse_json::<ListMemoriesPayload>(invocation.params) {
+        "memory.entry.list" => match parse_json::<ListMemoriesPayload>(invocation.params) {
             Ok(payload) => match state
                 .store
                 .list_memories(payload.limit.unwrap_or(100))
@@ -206,35 +206,35 @@ async fn handle_invocation(
             },
             Err(error) => error,
         },
-        "memory/episodes/list" => match parse_json::<EpisodesListPayload>(invocation.params) {
+        "memory.episode.list" => match parse_json::<EpisodesListPayload>(invocation.params) {
             Ok(payload) => match list_episodes(state, payload).await {
                 Ok(episodes) => ExtensionRpcResponse::success(serde_json::json!(episodes)),
                 Err(error) => error,
             },
             Err(error) => error,
         },
-        "memory/memories/remember" => match parse_json::<RememberPayload>(invocation.params) {
+        "memory.ingest" => match parse_json::<RememberPayload>(invocation.params) {
             Ok(payload) => match remember_memory(state, payload).await {
                 Ok(receipt) => ExtensionRpcResponse::success(serde_json::json!(receipt)),
                 Err(error) => error,
             },
             Err(error) => error,
         },
-        "memory/memories/recall" => match parse_json::<RecallPayload>(invocation.params) {
+        "memory.query" => match parse_json::<RecallPayload>(invocation.params) {
             Ok(payload) => match recall_memories(state, payload).await {
                 Ok(result) => ExtensionRpcResponse::success(serde_json::json!(result)),
                 Err(error) => error,
             },
             Err(error) => error,
         },
-        "memory/memories/review" => match parse_json::<ReviewPayload>(invocation.params) {
+        "memory.review" => match parse_json::<ReviewPayload>(invocation.params) {
             Ok(payload) => match review_memory(state, payload).await {
                 Ok(result) => ExtensionRpcResponse::success(serde_json::json!(result)),
                 Err(error) => error,
             },
             Err(error) => error,
         },
-        "memory/context/assemble" => match parse_json::<AssemblePayload>(invocation.params) {
+        "memory.build_context" => match parse_json::<AssemblePayload>(invocation.params) {
             Ok(payload) => match assemble_context(state, payload).await {
                 Ok(result) => ExtensionRpcResponse::success(serde_json::json!(result)),
                 Err(error) => error,

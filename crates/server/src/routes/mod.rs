@@ -17,12 +17,11 @@ use chrono::Utc;
 use ennoia_contract::ApiError;
 use ennoia_extension_host::{
     read_registry_file, ExtensionRuntimeSnapshot, RegisteredActionRuleContribution,
-    RegisteredBehaviorContribution, RegisteredCapabilityContribution,
-    RegisteredCommandContribution, RegisteredHookContribution, RegisteredLocaleContribution,
-    RegisteredMemoryContribution, RegisteredPageContribution, RegisteredPanelContribution,
-    RegisteredProviderContribution, RegisteredResourceTypeContribution,
-    RegisteredScheduleActionContribution, RegisteredSubscriptionContribution,
-    RegisteredSurfaceContribution, RegisteredThemeContribution, ResolvedExtensionSnapshot,
+    RegisteredBehaviorContribution, RegisteredExtensionEventContribution,
+    RegisteredExtensionOperationContribution, RegisteredExtensionViewContribution,
+    RegisteredHookContribution, RegisteredLocaleContribution, RegisteredMemoryContribution,
+    RegisteredPageContribution, RegisteredPanelContribution, RegisteredProviderContribution,
+    RegisteredScheduleActionContribution, RegisteredThemeContribution, ResolvedExtensionSnapshot,
 };
 use ennoia_kernel::{
     AgentConfig, BootstrapState, ExtensionDiagnostic, ExtensionRuntimeEvent, HookEventEnvelope,
@@ -148,7 +147,6 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/extensions/registry", get(extensions_runtime))
         .route("/api/extensions/pages", get(extension_pages))
         .route("/api/extensions/panels", get(extension_panels))
-        .route("/api/extensions/commands", get(extension_commands))
         .route("/api/extensions/providers", get(extension_providers))
         .route("/api/operations", get(operations_list))
         .route(
@@ -324,10 +322,9 @@ struct OverviewResponse {
 
 #[derive(Debug, Serialize)]
 struct UiRuntimeRegistryResponse {
-    resource_types: Vec<RegisteredResourceTypeContribution>,
-    capabilities: Vec<RegisteredCapabilityContribution>,
-    surfaces: Vec<RegisteredSurfaceContribution>,
-    subscriptions: Vec<RegisteredSubscriptionContribution>,
+    views: Vec<RegisteredExtensionViewContribution>,
+    operations: Vec<RegisteredExtensionOperationContribution>,
+    events: Vec<RegisteredExtensionEventContribution>,
     pages: Vec<RegisteredPageContribution>,
     panels: Vec<RegisteredPanelContribution>,
     themes: Vec<RegisteredThemeContribution>,
@@ -335,6 +332,7 @@ struct UiRuntimeRegistryResponse {
     providers: Vec<RegisteredProviderContribution>,
     behaviors: Vec<RegisteredBehaviorContribution>,
     memories: Vec<RegisteredMemoryContribution>,
+    hooks: Vec<RegisteredHookContribution>,
     actions: Vec<RegisteredActionRuleContribution>,
     schedule_actions: Vec<RegisteredScheduleActionContribution>,
 }
@@ -449,7 +447,6 @@ struct ExtensionWorkbenchRecord {
     name: String,
     enabled: bool,
     status: String,
-    kind: String,
     source_mode: String,
     install_dir: String,
     source_root: String,
@@ -524,10 +521,9 @@ async fn ui_runtime(State(state): State<AppState>) -> Json<UiRuntimeResponse> {
     let snapshot = state.extensions.snapshot();
     let instance_preference = read_instance_ui_preference_from_disk(&state);
     let space_preferences = list_space_ui_preferences_from_disk(&state);
-    let registry_version = (snapshot.resource_types.len()
-        + snapshot.capabilities.len()
-        + snapshot.surfaces.len()
-        + snapshot.subscriptions.len()
+    let registry_version = (snapshot.views.len()
+        + snapshot.operations.len()
+        + snapshot.events.len()
         + snapshot.pages.len()
         + snapshot.panels.len()
         + snapshot.themes.len()
@@ -535,6 +531,7 @@ async fn ui_runtime(State(state): State<AppState>) -> Json<UiRuntimeResponse> {
         + snapshot.providers.len()
         + snapshot.behaviors.len()
         + snapshot.memories.len()
+        + snapshot.hooks.len()
         + snapshot.actions.len()
         + snapshot.schedule_actions.len()) as u64;
     let preference_version = ui_preference_version_from_disk(&state);
@@ -542,10 +539,9 @@ async fn ui_runtime(State(state): State<AppState>) -> Json<UiRuntimeResponse> {
     Json(UiRuntimeResponse {
         ui_config,
         registry: UiRuntimeRegistryResponse {
-            resource_types: snapshot.resource_types,
-            capabilities: snapshot.capabilities,
-            surfaces: snapshot.surfaces,
-            subscriptions: snapshot.subscriptions,
+            views: snapshot.views,
+            operations: snapshot.operations,
+            events: snapshot.events,
             pages: snapshot.pages,
             panels: snapshot.panels,
             themes: snapshot.themes,
@@ -553,6 +549,7 @@ async fn ui_runtime(State(state): State<AppState>) -> Json<UiRuntimeResponse> {
             providers: snapshot.providers,
             behaviors: snapshot.behaviors,
             memories: snapshot.memories,
+            hooks: snapshot.hooks,
             actions: snapshot.actions,
             schedule_actions: snapshot.schedule_actions,
         },
@@ -921,7 +918,6 @@ fn list_extension_workbench_records(state: &AppState) -> Vec<ExtensionWorkbenchR
                     } else {
                         "disabled".to_string()
                     },
-                    kind: "extension".to_string(),
                     source_mode: "package".to_string(),
                     install_dir: state
                         .runtime_paths
@@ -945,7 +941,6 @@ fn list_extension_workbench_records(state: &AppState) -> Vec<ExtensionWorkbenchR
                     } else {
                         "disabled".to_string()
                     },
-                    kind: "extension".to_string(),
                     source_mode: "dev".to_string(),
                     install_dir: record.path.clone(),
                     source_root: record.path,
@@ -975,7 +970,6 @@ fn map_extension_workbench_record(
             ennoia_kernel::ExtensionHealth::Discovering => "discovering".to_string(),
             ennoia_kernel::ExtensionHealth::Resolving => "resolving".to_string(),
         },
-        kind: format!("{:?}", extension.kind),
         source_mode: format!("{:?}", extension.source_mode),
         install_dir: extension.install_dir.clone(),
         source_root: extension.source_root.clone(),

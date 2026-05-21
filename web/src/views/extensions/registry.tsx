@@ -1,10 +1,8 @@
 import { getExtensionUiModuleUrl } from "@ennoia/api-client";
 import type {
-  ExtensionConversationCardMount,
   ExtensionConversationRecordMount,
   ExtensionPageContribution,
   ExtensionPanelContribution,
-  ExtensionSurfaceContribution,
   ExtensionPageMount,
   ExtensionPanelMount,
   ExtensionUiModule,
@@ -44,15 +42,6 @@ export async function loadExtensionPanelMount(
   const module = await loadExtensionUiModule(panel.extension_id, generation);
   const resolved = module.default ?? module;
   return resolved.panels?.[panel.panel.mount] ?? null;
-}
-
-export async function loadExtensionConversationCardMount(
-  surface: ExtensionSurfaceContribution,
-  generation: number,
-): Promise<ExtensionConversationCardMount | null> {
-  const module = await loadExtensionUiModule(surface.extension_id, generation);
-  const resolved = module.default ?? module;
-  return resolved.conversationCards?.[surface.surface.mount] ?? null;
 }
 
 export async function loadExtensionConversationRecordMount(

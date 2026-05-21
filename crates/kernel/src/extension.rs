@@ -6,14 +6,6 @@ use crate::ui::{LocalizedText, ThemeAppearance};
 use crate::OwnerRef;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum ExtensionKind {
-    #[serde(alias = "extension", alias = "system", alias = "system_extension")]
-    SystemExtension,
-    #[serde(alias = "skill")]
-    Skill,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PageNavContribution {
     #[serde(default)]
     pub default_pinned: bool,
@@ -61,12 +53,72 @@ pub struct LocaleContribution {
     pub entry: String,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ExtensionCompatSpec {
+    #[serde(default)]
+    pub ennoia: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct CommandContribution {
-    pub id: String,
+#[serde(deny_unknown_fields)]
+pub struct ExtensionViewSpec {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub view_type: String,
     pub title: LocalizedText,
-    pub action: String,
-    pub shortcut: Option<String>,
+    #[serde(default)]
+    pub nav: Option<String>,
+    #[serde(default)]
+    pub order: Option<i32>,
+    #[serde(default)]
+    pub slot: Option<String>,
+    #[serde(default)]
+    pub icon: Option<String>,
+    #[serde(default)]
+    pub route: Option<String>,
+    #[serde(default)]
+    pub priority: Option<i32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ExtensionProviderSpec {
+    pub kind: String,
+    #[serde(default)]
+    pub interfaces: Vec<String>,
+    #[serde(default)]
+    pub model_discovery: bool,
+    #[serde(default = "default_manual_model")]
+    pub manual_model: bool,
+    #[serde(default)]
+    pub generation_options: Vec<ProviderGenerationOption>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ExtensionOperationSpec {
+    pub name: String,
+    #[serde(default)]
+    pub title: Option<LocalizedText>,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub agent: bool,
+    #[serde(default)]
+    pub input: Option<String>,
+    #[serde(default)]
+    pub output: Option<String>,
+    #[serde(default)]
+    pub provider: Option<ExtensionProviderSpec>,
+    #[serde(default)]
+    pub schedule: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct ExtensionEventSpec {
+    pub on: String,
+    pub operation: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -126,84 +178,6 @@ impl<'de> Deserialize<'de> for ProviderModelDescriptor {
             }),
         }
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ResourceTypeContribution {
-    pub id: String,
-    #[serde(default)]
-    pub title: Option<LocalizedText>,
-    pub content_kind: String,
-    #[serde(default)]
-    pub metadata_schema: Option<String>,
-    #[serde(default)]
-    pub content_schema: Option<String>,
-    #[serde(default)]
-    pub operations: Vec<String>,
-    #[serde(default)]
-    pub tags: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct CapabilityContribution {
-    pub id: String,
-    pub contract: String,
-    pub kind: String,
-    #[serde(default)]
-    pub title: Option<LocalizedText>,
-    #[serde(default)]
-    pub runtime: Option<String>,
-    #[serde(default)]
-    pub entry: Option<String>,
-    #[serde(default)]
-    pub input_schema: Option<String>,
-    #[serde(default)]
-    pub output_schema: Option<String>,
-    #[serde(default)]
-    pub consumes: Vec<String>,
-    #[serde(default)]
-    pub produces: Vec<String>,
-    #[serde(default)]
-    pub requires: Vec<String>,
-    #[serde(default)]
-    pub emits: Vec<String>,
-    #[serde(default)]
-    pub metadata: JsonValue,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct SurfaceContribution {
-    pub id: String,
-    pub kind: String,
-    pub mount: String,
-    #[serde(default)]
-    pub title: Option<LocalizedText>,
-    #[serde(default)]
-    pub route: Option<String>,
-    #[serde(default)]
-    pub slot: Option<String>,
-    #[serde(default)]
-    pub icon: Option<String>,
-    #[serde(default)]
-    pub nav: Option<PageNavContribution>,
-    #[serde(default)]
-    pub match_resource_types: Vec<String>,
-    #[serde(default)]
-    pub match_capability_contracts: Vec<String>,
-    #[serde(default)]
-    pub priority: Option<i32>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct SubscriptionContribution {
-    pub event: String,
-    pub capability: String,
-    #[serde(default)]
-    pub match_resource_types: Vec<String>,
-    #[serde(default)]
-    pub match_capability_ids: Vec<String>,
-    #[serde(default)]
-    pub match_capability_contracts: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -289,7 +263,7 @@ impl Default for ActionResultMode {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ActionRule {
     pub action: String,
-    pub capability_id: String,
+    pub operation: String,
     pub method: String,
     #[serde(default)]
     pub phase: ActionPhase,
@@ -318,37 +292,11 @@ pub struct ScheduleActionContribution {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ExtensionConversationSpec {
     #[serde(default)]
-    pub inject: bool,
+    pub visible: bool,
     #[serde(default)]
-    pub resource_types: Vec<String>,
+    pub resources: Vec<String>,
     #[serde(default)]
-    pub capabilities: Vec<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum ExtensionEntrypointKind {
-    Page,
-    Panel,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ExtensionEntrypointSpec {
-    pub id: String,
-    pub label: LocalizedText,
-    #[serde(default)]
-    pub description: Option<LocalizedText>,
-    pub kind: ExtensionEntrypointKind,
-    #[serde(default)]
-    pub page_id: Option<String>,
-    #[serde(default)]
-    pub panel_id: Option<String>,
-    #[serde(default)]
-    pub icon: Option<String>,
-    #[serde(default)]
-    pub order: Option<i32>,
-    #[serde(default)]
-    pub prominent: bool,
+    pub operations: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -492,24 +440,6 @@ pub struct ExtensionRecordEntry {
     pub closed_at: Option<String>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ExtensionCapabilities {
-    #[serde(default)]
-    pub resource_types: bool,
-    #[serde(default)]
-    pub capabilities: bool,
-    #[serde(default)]
-    pub surfaces: bool,
-    #[serde(default)]
-    pub locales: bool,
-    #[serde(default)]
-    pub themes: bool,
-    #[serde(default)]
-    pub commands: bool,
-    #[serde(default)]
-    pub subscriptions: bool,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ExtensionSourceMode {
@@ -532,56 +462,6 @@ pub enum ExtensionHealth {
     Degraded,
     Failed,
     Stopped,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ExtensionSourceSpec {
-    #[serde(default)]
-    pub mode: ExtensionSourceMode,
-    #[serde(default)]
-    pub root: Option<String>,
-    #[serde(default)]
-    pub dev: bool,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ExtensionUiSpec {
-    #[serde(default)]
-    pub runtime: Option<String>,
-    #[serde(default)]
-    pub entry: Option<String>,
-    #[serde(default)]
-    pub dev_url: Option<String>,
-    #[serde(default)]
-    pub hmr: bool,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ExtensionWorkerSpec {
-    #[serde(default)]
-    pub kind: Option<String>,
-    #[serde(default)]
-    pub entry: Option<String>,
-    #[serde(default)]
-    pub abi: Option<String>,
-    #[serde(default)]
-    pub protocol: Option<String>,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ExtensionPermissionSpec {
-    #[serde(default)]
-    pub storage: Option<String>,
-    #[serde(default)]
-    pub sqlite: bool,
-    #[serde(default)]
-    pub network: Vec<String>,
-    #[serde(default)]
-    pub events: Vec<String>,
-    #[serde(default)]
-    pub fs: Vec<String>,
-    #[serde(default)]
-    pub env: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -616,74 +496,26 @@ fn default_worker_memory_limit_mb() -> u32 {
     128
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ExtensionBuildSpec {
-    #[serde(default)]
-    pub out_dir: Option<String>,
-    #[serde(default)]
-    pub ui_bundle: Option<String>,
-    #[serde(default)]
-    pub worker_bundle: Option<String>,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ExtensionAssetsSpec {
-    #[serde(default)]
-    pub locales_dir: Option<String>,
-    #[serde(default)]
-    pub themes_dir: Option<String>,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ExtensionWatchSpec {
-    #[serde(default)]
-    pub include: Vec<String>,
-    #[serde(default)]
-    pub exclude: Vec<String>,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct ExtensionManifest {
     pub id: String,
+    #[serde(default)]
+    pub version: Option<String>,
     #[serde(default)]
     pub name: Option<String>,
     #[serde(default)]
     pub description: Option<String>,
     #[serde(default)]
     pub docs: Option<String>,
-    pub kind: ExtensionKind,
     #[serde(default)]
-    pub source: ExtensionSourceSpec,
+    pub compat: ExtensionCompatSpec,
     #[serde(default)]
-    pub ui: ExtensionUiSpec,
+    pub views: Vec<ExtensionViewSpec>,
     #[serde(default)]
-    pub worker: ExtensionWorkerSpec,
+    pub operations: Vec<ExtensionOperationSpec>,
     #[serde(default)]
-    pub permissions: ExtensionPermissionSpec,
-    #[serde(default)]
-    pub runtime: ExtensionRuntimeSpec,
-    #[serde(default)]
-    pub build: ExtensionBuildSpec,
-    #[serde(default)]
-    pub assets: ExtensionAssetsSpec,
-    #[serde(default)]
-    pub watch: ExtensionWatchSpec,
-    #[serde(default)]
-    pub resource_types: Vec<ResourceTypeContribution>,
-    #[serde(default)]
-    pub capabilities: Vec<CapabilityContribution>,
-    #[serde(default)]
-    pub surfaces: Vec<SurfaceContribution>,
-    #[serde(default)]
-    pub locales: Vec<LocaleContribution>,
-    #[serde(default)]
-    pub themes: Vec<ThemeContribution>,
-    #[serde(default)]
-    pub commands: Vec<CommandContribution>,
-    #[serde(default)]
-    pub subscriptions: Vec<SubscriptionContribution>,
-    #[serde(default)]
-    pub entrypoints: Vec<ExtensionEntrypointSpec>,
+    pub events: Vec<ExtensionEventSpec>,
     #[serde(default)]
     pub settings: Vec<ExtensionSettingFieldSpec>,
     #[serde(default)]
@@ -697,18 +529,6 @@ impl ExtensionManifest {
 
     pub fn display_description(&self) -> String {
         self.description.clone().unwrap_or_default()
-    }
-
-    pub fn effective_capabilities(&self) -> ExtensionCapabilities {
-        ExtensionCapabilities {
-            resource_types: !self.resource_types.is_empty(),
-            capabilities: !self.capabilities.is_empty(),
-            surfaces: !self.surfaces.is_empty(),
-            locales: !self.locales.is_empty(),
-            themes: !self.themes.is_empty(),
-            commands: !self.commands.is_empty(),
-            subscriptions: !self.subscriptions.is_empty(),
-        }
     }
 }
 

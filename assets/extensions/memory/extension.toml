@@ -1,68 +1,36 @@
 id = "memory"
+version = "0.1.0"
 name = "Memory"
 description = "提供记忆工作台、回忆、审查与上下文组装能力。"
 docs = "docs/overview.md"
-kind = "extension"
 
-[source]
-mode = "package"
-root = "."
-dev = false
-
-[ui]
-runtime = "browser-esm"
-hmr = true
-
-[worker]
-kind = "process"
-entry = "bin/memory-service"
-protocol = "jsonrpc-stdio"
-
-[build]
-ui_bundle = "ui/dist/entry.js"
-
-[permissions]
-storage = "extension"
-sqlite = true
-events = ["publish", "subscribe"]
+[compat]
+ennoia = ">=0.1.0"
 
 [conversation]
-inject = true
-capabilities = [
+visible = true
+resources = ["memory.item"]
+operations = [
   "memory.ingest",
   "memory.query",
   "memory.review",
   "memory.build_context",
 ]
 
-[assets]
-locales_dir = "ui/locales"
-
-[[surfaces]]
-id = "memory.page"
-kind = "page"
+[[views]]
+name = "memory.page"
+type = "page"
 title = { key = "ext.memory.page", fallback = "记忆" }
-route = "/memory"
-mount = "memory.page"
+nav = "sidebar"
+order = 30
 icon = "memory"
-nav = { default_pinned = false, order = 30 }
+route = "/memory"
 
-[[surfaces]]
-id = "memory.about"
-kind = "page"
+[[views]]
+name = "memory.about"
+type = "page"
 title = { key = "ext.memory.about.page", fallback = "关于记忆" }
 route = "/memory/about"
-mount = "memory.about"
-
-[[entrypoints]]
-id = "memory.workspace"
-label = { key = "ext.memory.entry.workspace", fallback = "记忆工作台" }
-description = { key = "ext.memory.entry.workspace_description", fallback = "进入记忆检索、上下文装配和审查界面。" }
-kind = "page"
-page_id = "memory.page"
-icon = "memory"
-order = 10
-prominent = false
 
 [[settings]]
 key = "default_owner_kind"
@@ -73,7 +41,7 @@ default_value = "global"
 options = [
   { label = { key = "ext.memory.setting.option.global", fallback = "全局" }, value = "global" },
   { label = { key = "ext.memory.setting.option.agent", fallback = "Agent" }, value = "agent" },
-  { label = { key = "ext.memory.setting.option.space", fallback = "空间" }, value = "space" }
+  { label = { key = "ext.memory.setting.option.space", fallback = "空间" }, value = "space" },
 ]
 
 [[settings]]
@@ -83,61 +51,36 @@ description = { key = "ext.memory.setting.default_recall_limit_description", fal
 type = "number"
 default_value = 8
 
-[[locales]]
-locale = "zh-CN"
-namespace = "ext.memory"
-entry = "ui/locales/zh-CN.json"
+[[operations]]
+name = "memory.workspace.get"
+description = "读取记忆工作台摘要。"
 
-[[locales]]
-locale = "en-US"
-namespace = "ext.memory"
-entry = "ui/locales/en-US.json"
+[[operations]]
+name = "memory.entry.list"
+description = "列出记忆条目。"
+agent = true
 
-[[capabilities]]
-id = "memory.workspace.get"
-contract = "memory.workspace.get"
-kind = "query"
-entry = "memory/workspace"
-metadata = { action = { key = "memory.workspace.get" }, memory = { id = "memory", interfaces = ["workspace"] }, permission = { action = "memory.read", target_kind = "memory", risk_level = "low", default_decision = "allow", scope_kind = "none" } }
+[[operations]]
+name = "memory.episode.list"
+description = "列出记忆 episode。"
+agent = true
 
-[[capabilities]]
-id = "memory.entry.list"
-contract = "memory.entry.list"
-kind = "query"
-entry = "memory/memories/list"
-metadata = { action = { key = "memory.entry.list" }, memory = { id = "memory", interfaces = ["list"] }, permission = { action = "memory.read", target_kind = "memory", risk_level = "low", default_decision = "allow", scope_kind = "none" } }
+[[operations]]
+name = "memory.ingest"
+description = "写入记忆。"
+agent = true
 
-[[capabilities]]
-id = "memory.episode.list"
-contract = "memory.episode.list"
-kind = "query"
-entry = "memory/episodes/list"
-metadata = { action = { key = "memory.episode.list" }, memory = { id = "memory", interfaces = ["episodes_list"] }, permission = { action = "memory.read", target_kind = "memory", risk_level = "low", default_decision = "allow", scope_kind = "none" } }
+[[operations]]
+name = "memory.query"
+description = "检索记忆。"
+agent = true
 
-[[capabilities]]
-id = "memory.ingest"
-contract = "memory.ingest"
-kind = "action"
-entry = "memory/memories/remember"
-metadata = { action = { key = "memory.ingest" }, memory = { id = "memory", interfaces = ["remember"] }, permission = { action = "memory.write", target_kind = "memory", risk_level = "medium", default_decision = "allow", scope_kind = "conversation" } }
+[[operations]]
+name = "memory.review"
+description = "审查记忆。"
+agent = true
 
-[[capabilities]]
-id = "memory.query"
-contract = "memory.query"
-kind = "query"
-entry = "memory/memories/recall"
-metadata = { action = { key = "memory.query" }, memory = { id = "memory", interfaces = ["recall"] }, permission = { action = "memory.read", target_kind = "memory", risk_level = "low", default_decision = "allow", scope_kind = "conversation" } }
-
-[[capabilities]]
-id = "memory.review"
-contract = "memory.review"
-kind = "action"
-entry = "memory/memories/review"
-metadata = { action = { key = "memory.review" }, memory = { id = "memory", interfaces = ["review"] }, permission = { action = "memory.review", target_kind = "memory", risk_level = "medium", default_decision = "allow", scope_kind = "conversation" } }
-
-[[capabilities]]
-id = "memory.build_context"
-contract = "memory.build_context"
-kind = "query"
-entry = "memory/context/assemble"
-metadata = { action = { key = "memory.build_context" }, memory = { id = "memory", interfaces = ["assemble_context"] }, permission = { action = "memory.read", target_kind = "memory", risk_level = "low", default_decision = "allow", scope_kind = "conversation" } }
+[[operations]]
+name = "memory.build_context"
+description = "为当前任务组装记忆上下文。"
+agent = true

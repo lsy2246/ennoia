@@ -13,9 +13,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use ennoia_assets::{builtins, templates};
 use ennoia_kernel::{
-    apply_server_log_env_overrides, ExtensionDevSourceEntry, ExtensionManifest,
-    ExtensionRegistryEntry, ExtensionRegistryFile, ExtensionSourceMode, LoggingConfig,
-    ServerConfig, SkillRegistryEntry, SkillRegistryFile,
+    apply_server_log_env_overrides, ExtensionDevSourceEntry, ExtensionRegistryEntry,
+    ExtensionRegistryFile, LoggingConfig, ServerConfig, SkillRegistryEntry, SkillRegistryFile,
 };
 use ennoia_paths::RuntimePaths;
 use ennoia_server::{bootstrap_app_state, default_app_state, execution, run_server};
@@ -1370,19 +1369,13 @@ impl DevProcessGroup {
 
     fn report_extension_ui_sources(&mut self, paths: &RuntimePaths) -> io::Result<()> {
         for source_root in attached_dev_source_roots(paths)? {
-            let Some(descriptor_path) = descriptor_path(&source_root) else {
+            if descriptor_path(&source_root).is_none() {
                 continue;
             };
-            let contents = fs::read_to_string(descriptor_path)?;
-            let manifest: ExtensionManifest =
-                toml::from_str(&contents).map_err(io::Error::other)?;
-            if manifest.source.mode != ExtensionSourceMode::Dev {
-                continue;
-            }
-            if let Some(dev_url) = manifest.ui.dev_url {
+            if let Some(entry) = discover_extension_ui_entry(&source_root) {
                 println!(
-                    "extension {} ui uses external dev_url: {}",
-                    manifest.id, dev_url
+                    "extension ui source discovered: {}",
+                    entry.to_string_lossy().replace('\\', "/")
                 );
             }
         }
@@ -2109,6 +2102,13 @@ fn attach_extension_ui_roots_env(command: &mut Command, paths: &RuntimePaths) ->
 fn descriptor_path(root: &Path) -> Option<PathBuf> {
     let path = root.join("extension.toml");
     path.exists().then_some(path)
+}
+
+fn discover_extension_ui_entry(root: &Path) -> Option<PathBuf> {
+    ["ui/entry.tsx", "ui/entry.ts", "ui/entry.jsx", "ui/entry.js"]
+        .into_iter()
+        .map(|candidate| root.join(candidate))
+        .find(|path| path.is_file())
 }
 
 fn auto_attach_dev_extensions(paths: &RuntimePaths) -> io::Result<()> {

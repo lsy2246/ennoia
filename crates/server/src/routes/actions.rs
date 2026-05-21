@@ -1,7 +1,6 @@
 use ennoia_kernel::{
-    ActionPhase, ActionResultMode, CapabilityPermissionMetadata, HookEventEnvelope,
-    HookResourceRef, OwnerRef, PermissionRequest, PermissionScope, PermissionTarget,
-    PermissionTrigger,
+    ActionPhase, ActionResultMode, HookEventEnvelope, HookResourceRef, OwnerRef, PermissionRequest,
+    PermissionScope, PermissionTarget, PermissionTrigger,
 };
 use std::time::Instant;
 
@@ -24,7 +23,7 @@ pub(super) struct ActionStatusRecord {
 #[derive(Debug, Clone, Serialize)]
 pub(super) struct ActionImplementationRecord {
     extension_id: String,
-    capability_id: String,
+    operation: String,
     method: String,
     phase: String,
     priority: i32,
@@ -192,7 +191,7 @@ pub(crate) async fn dispatch_action_rule_execute(
             params,
             context: serde_json::json!({
                 "action": key,
-                "capability_id": rule.action.capability_id,
+                "operation": rule.action.operation,
                 "request_id": request.request_id,
                 "trace": {
                     "request_id": span_trace.request_id,
@@ -224,7 +223,7 @@ pub(crate) async fn dispatch_action_rule_execute(
                 attributes: serde_json::json!({
                     "action": key,
                     "extension_id": rule.extension_id,
-                    "capability_id": rule.action.capability_id,
+                    "operation": rule.action.operation,
                     "method": rule.action.method,
                 }),
                 started_at,
@@ -258,7 +257,7 @@ pub(crate) async fn dispatch_action_rule_execute(
             attributes: serde_json::json!({
                 "action": key,
                 "extension_id": rule.extension_id,
-                "capability_id": rule.action.capability_id,
+                "operation": rule.action.operation,
                 "method": rule.action.method,
                 "error": error,
             }),
@@ -281,16 +280,7 @@ fn authorize_action_dispatch(
     let Some(actor) = permission_actor_from_context(context) else {
         return Ok(None);
     };
-    let Some(capability) =
-        find_action_capability(state, &rule.extension_id, &rule.action.capability_id)
-    else {
-        return Ok(None);
-    };
-    let Some(permission) = capability_permission_metadata(&capability.capability.metadata) else {
-        return Ok(None);
-    };
-    let permission_request =
-        build_action_permission_request(&actor, rule, &capability, &permission, params);
+    let permission_request = build_action_permission_request(&actor, rule, params);
     let decision = state
         .agent_permissions
         .evaluate_request(&permission_request, Some(request))
@@ -373,7 +363,7 @@ pub(crate) fn action_rules_for_key(
                 action_phase_rank(&left.action.phase).cmp(&action_phase_rank(&right.action.phase))
             })
             .then_with(|| left.extension_id.cmp(&right.extension_id))
-            .then_with(|| left.action.capability_id.cmp(&right.action.capability_id))
+            .then_with(|| left.action.operation.cmp(&right.action.operation))
     });
     matches
 }
@@ -413,7 +403,7 @@ fn list_action_status(state: &AppState) -> Vec<ActionStatusRecord> {
             .or_default()
             .push(ActionImplementationRecord {
                 extension_id: item.extension_id.clone(),
-                capability_id: item.action.capability_id,
+                operation: item.action.operation,
                 method: item.action.method,
                 phase: action_phase_label(&item.action.phase).to_string(),
                 priority: item.action.priority,
@@ -441,7 +431,7 @@ fn list_action_status(state: &AppState) -> Vec<ActionStatusRecord> {
                             .cmp(&action_phase_name_order(&right.phase))
                     })
                     .then_with(|| left.extension_id.cmp(&right.extension_id))
-                    .then_with(|| left.capability_id.cmp(&right.capability_id))
+                    .then_with(|| left.operation.cmp(&right.operation))
             });
             let execute_rule_count = rules
                 .iter()
@@ -595,28 +585,9 @@ fn permission_actor_from_context(context: &JsonValue) -> Option<PermissionActorC
     serde_json::from_value::<PermissionActorContext>(context.get("permission_actor")?.clone()).ok()
 }
 
-fn find_action_capability(
-    state: &AppState,
-    extension_id: &str,
-    capability_id: &str,
-) -> Option<RegisteredCapabilityContribution> {
-    state
-        .extensions
-        .snapshot()
-        .capabilities
-        .into_iter()
-        .find(|item| item.extension_id == extension_id && item.capability.id == capability_id)
-}
-
-fn capability_permission_metadata(metadata: &JsonValue) -> Option<CapabilityPermissionMetadata> {
-    serde_json::from_value(metadata.get("permission")?.clone()).ok()
-}
-
 fn build_action_permission_request(
     actor: &PermissionActorContext,
     rule: &RegisteredActionRuleContribution,
-    capability: &RegisteredCapabilityContribution,
-    permission: &CapabilityPermissionMetadata,
     params: &JsonValue,
 ) -> PermissionRequest {
     let conversation_id =
@@ -626,22 +597,17 @@ fn build_action_permission_request(
     let path = permission_path(params);
     let host = permission_host(params);
     let target = PermissionTarget {
-        kind: permission.target_kind.clone(),
-        id: permission_target_id(
-            permission,
-            capability,
-            params,
-            conversation_id.as_deref(),
-            run_id.as_deref(),
-        ),
+        kind: "operation".to_string(),
+        id: permission_target_id(params, conversation_id.as_deref(), run_id.as_deref())
+            .unwrap_or_else(|| rule.action.operation.clone()),
         conversation_id: conversation_id.clone(),
         run_id: run_id.clone(),
         path: path.clone(),
         host: host.clone(),
     };
     let scope = PermissionScope {
-        conversation_id: permission_scope_conversation_id(permission, conversation_id.clone()),
-        run_id: permission_scope_run_id(permission, run_id.clone()),
+        conversation_id,
+        run_id,
         message_id,
         extension_id: Some(rule.extension_id.clone()),
         path,
@@ -649,7 +615,7 @@ fn build_action_permission_request(
     };
     PermissionRequest {
         agent_id: actor.agent_id.clone(),
-        action: permission.action.clone(),
+        action: rule.action.operation.clone(),
         target,
         scope,
         trigger: PermissionTrigger {
@@ -659,53 +625,25 @@ fn build_action_permission_request(
     }
 }
 
-fn permission_scope_conversation_id(
-    permission: &CapabilityPermissionMetadata,
-    conversation_id: Option<String>,
-) -> Option<String> {
-    match permission.scope_kind.trim().to_ascii_lowercase().as_str() {
-        "none" => None,
-        "run" | "conversation" | "extension" | "" => conversation_id,
-        _ => conversation_id,
-    }
-}
-
-fn permission_scope_run_id(
-    permission: &CapabilityPermissionMetadata,
-    run_id: Option<String>,
-) -> Option<String> {
-    match permission.scope_kind.trim().to_ascii_lowercase().as_str() {
-        "run" => run_id,
-        _ => None,
-    }
-}
-
 fn permission_target_id(
-    permission: &CapabilityPermissionMetadata,
-    capability: &RegisteredCapabilityContribution,
     params: &JsonValue,
     conversation_id: Option<&str>,
     run_id: Option<&str>,
-) -> String {
-    let normalized_kind = permission.target_kind.trim().to_ascii_lowercase();
-    let candidate = match normalized_kind.as_str() {
-        "conversation" => json_string_at(params, &["conversation_id"])
-            .or_else(|| json_string_at(params, &["conversation", "id"]))
-            .or_else(|| conversation_id.map(str::to_string)),
-        "branch" => json_string_at(params, &["branch_id"])
-            .or_else(|| json_string_at(params, &["from_branch_id"]))
-            .or_else(|| conversation_id.map(str::to_string)),
-        "run" => json_string_at(params, &["run_id"]).or_else(|| run_id.map(str::to_string)),
-        "task" => json_string_at(params, &["task_id"]).or_else(|| run_id.map(str::to_string)),
-        "artifact" => {
-            json_string_at(params, &["artifact_id"]).or_else(|| run_id.map(str::to_string))
-        }
-        "memory" => json_string_at(params, &["memory_id"])
-            .or_else(|| json_string_at(params, &["workspace_id"]))
-            .or_else(|| Some("memory".to_string())),
-        _ => None,
-    };
-    candidate.unwrap_or_else(|| capability.capability.id.clone())
+) -> Option<String> {
+    json_string_at(params, &["conversation_id"])
+        .or_else(|| json_string_at(params, &["conversation", "id"]))
+        .or_else(|| json_string_at(params, &["branch_id"]))
+        .or_else(|| json_string_at(params, &["from_branch_id"]))
+        .or_else(|| json_string_at(params, &["run_id"]))
+        .or_else(|| json_string_at(params, &["run", "id"]))
+        .or_else(|| json_string_at(params, &["task_id"]))
+        .or_else(|| json_string_at(params, &["artifact_id"]))
+        .or_else(|| json_string_at(params, &["memory_id"]))
+        .or_else(|| json_string_at(params, &["workspace_id"]))
+        .or_else(|| json_string_at(params, &["path"]))
+        .or_else(|| json_string_at(params, &["host"]))
+        .or_else(|| conversation_id.map(str::to_string))
+        .or_else(|| run_id.map(str::to_string))
 }
 
 fn permission_conversation_id(params: &JsonValue) -> Option<String> {

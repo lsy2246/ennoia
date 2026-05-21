@@ -5,9 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 
-use ennoia_contract::behavior::{
-    BehaviorRunRequest, BehaviorSourceRef, BehaviorStatusResponse, BehaviorTrigger,
-};
+use ennoia_contract::behavior::{BehaviorRunRequest, BehaviorSourceRef, BehaviorTrigger};
 use ennoia_kernel::{
     DecisionSnapshot, ExtensionRpcResponse, GateSeverity, GateVerdict, OwnerRef, RunContext,
     RunSpec, TaskSpec,
@@ -243,25 +241,7 @@ async fn handle_invocation(
     let path = invocation.method.trim_matches('/');
     let _context = invocation.context;
     match path {
-        "behavior/status" => {
-            ExtensionRpcResponse::success(serde_json::json!(BehaviorStatusResponse {
-                extension_id: "workflow".to_string(),
-                behavior_id: "default".to_string(),
-                healthy: true,
-                interfaces: vec![
-                    "runs".to_string(),
-                    "tasks".to_string(),
-                    "artifacts".to_string(),
-                    "handoffs".to_string(),
-                    "status".to_string(),
-                ],
-            }))
-        }
-        "behavior/runs"
-        | "behavior/run"
-        | "behavior/start"
-        | "workflow/runs/create"
-        | "workflow/schedules/run" => match parse_run_request(invocation.params) {
+        "workflow.default" => match parse_run_request(invocation.params) {
             Ok(payload) => match run_behavior(&state.runtime, payload).await {
                 Ok(response) => match load_run_detail(&state.store, &response.run.id).await {
                     Ok(Some(detail)) => ExtensionRpcResponse::success(serde_json::json!(detail)),
@@ -274,7 +254,20 @@ async fn handle_invocation(
             },
             Err(error) => error,
         },
-        "workflow/runs/get" | "run-detail" => match parse_json::<RunIdPayload>(invocation.params) {
+        "run.create" | "workflow.run" => match parse_run_request(invocation.params) {
+            Ok(payload) => match run_behavior(&state.runtime, payload).await {
+                Ok(response) => match load_run_detail(&state.store, &response.run.id).await {
+                    Ok(Some(detail)) => ExtensionRpcResponse::success(serde_json::json!(detail)),
+                    Ok(None) => ExtensionRpcResponse::success(serde_json::json!(response)),
+                    Err(error) => {
+                        ExtensionRpcResponse::failure("workflow_run_failed", error.to_string())
+                    }
+                },
+                Err(error) => ExtensionRpcResponse::failure("workflow_run_failed", error),
+            },
+            Err(error) => error,
+        },
+        "run.get" => match parse_json::<RunIdPayload>(invocation.params) {
             Ok(payload) => match load_run_detail(&state.store, &payload.run_id).await {
                 Ok(Some(detail)) => ExtensionRpcResponse::success(serde_json::json!(detail)),
                 Ok(None) => ExtensionRpcResponse::failure(
@@ -285,25 +278,21 @@ async fn handle_invocation(
             },
             Err(error) => error,
         },
-        "workflow/runs/list-by-conversation" => {
-            match parse_json::<RunListPayload>(invocation.params) {
-                Ok(payload) => match list_runs(&state.pool, payload).await {
-                    Ok(runs) => ExtensionRpcResponse::success(serde_json::json!(runs)),
-                    Err(error) => {
-                        ExtensionRpcResponse::failure("run_list_failed", error.to_string())
-                    }
-                },
-                Err(error) => error,
-            }
-        }
-        "workflow/tasks/list-by-run" => match parse_json::<RunIdPayload>(invocation.params) {
+        "run.list" => match parse_json::<RunListPayload>(invocation.params) {
+            Ok(payload) => match list_runs(&state.pool, payload).await {
+                Ok(runs) => ExtensionRpcResponse::success(serde_json::json!(runs)),
+                Err(error) => ExtensionRpcResponse::failure("run_list_failed", error.to_string()),
+            },
+            Err(error) => error,
+        },
+        "task.list" => match parse_json::<RunIdPayload>(invocation.params) {
             Ok(payload) => match state.store.list_tasks_for_run(&payload.run_id).await {
                 Ok(tasks) => ExtensionRpcResponse::success(serde_json::json!(tasks)),
                 Err(error) => ExtensionRpcResponse::failure("task_list_failed", error.to_string()),
             },
             Err(error) => error,
         },
-        "workflow/artifacts/list-by-run" => match parse_json::<RunIdPayload>(invocation.params) {
+        "artifact.list" => match parse_json::<RunIdPayload>(invocation.params) {
             Ok(payload) => match state.store.list_artifacts_for_run(&payload.run_id).await {
                 Ok(artifacts) => ExtensionRpcResponse::success(serde_json::json!(artifacts)),
                 Err(error) => {
@@ -312,20 +301,13 @@ async fn handle_invocation(
             },
             Err(error) => error,
         },
-        "workspace" => match workspace_summary(&state.pool).await {
+        "workflow.workspace" => match workspace_summary(&state.pool).await {
             Ok(summary) => ExtensionRpcResponse::success(serde_json::json!(summary)),
             Err(error) => {
                 ExtensionRpcResponse::failure("workflow_workspace_failed", error.to_string())
             }
         },
-        "runs-list" => match parse_json::<RunListPayload>(invocation.params) {
-            Ok(payload) => match list_runs(&state.pool, payload).await {
-                Ok(runs) => ExtensionRpcResponse::success(serde_json::json!(runs)),
-                Err(error) => ExtensionRpcResponse::failure("run_list_failed", error.to_string()),
-            },
-            Err(error) => error,
-        },
-        "hooks/conversation-message-created" => {
+        "workflow.conversation.message.created" => {
             match parse_json::<ennoia_kernel::HookEventEnvelope>(invocation.params) {
                 Ok(payload) => {
                     match handle_conversation_message_created(&state.runtime, &state.store, payload)
@@ -344,7 +326,7 @@ async fn handle_invocation(
                 Err(error) => error,
             }
         }
-        "hooks/operation-updated" => {
+        "workflow.operation.updated" => {
             match parse_json::<ennoia_kernel::HookEventEnvelope>(invocation.params) {
                 Ok(payload) => {
                     match handle_operation_updated(&state.runtime, &state.store, payload).await {

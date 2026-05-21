@@ -1577,10 +1577,10 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
     if (canMention) {
       return t(
         "web.conversations.mention_and_palette_hint",
-        "输入 @ 可选择会话内 Agent，输入 / 可打开技能、记忆与更多能力面板。",
+        "输入 @ 可选择会话内 Agent，输入 / 可打开技能、记忆与扩展操作。",
       );
     }
-    return t("web.conversations.palette_hint", "输入 / 可打开技能、记忆与更多能力面板。");
+    return t("web.conversations.palette_hint", "输入 / 可打开技能、记忆与扩展操作。");
   }, [canMention, t]);
 
   const resetComposer = useCallback(() => {

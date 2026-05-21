@@ -616,12 +616,17 @@ export function Settings() {
 
             <article className="mini-card settings-section-card settings-section-anchor settings-module">
               <div className="settings-section-card__header">
-                <div className="panel-title">内置工具</div>
-                <p className="helper-text">当前只对 Agent 暴露命令执行能力，这里配置命令执行的默认超时与上下限。</p>
+                <div className="panel-title">{t("web.settings.builtin_tools", "内置工具")}</div>
+                <p className="helper-text">
+                  {t(
+                    "web.settings.builtin_tools_help",
+                    "当前只对 Agent 暴露命令执行能力，这里配置命令执行的默认超时与上下限。",
+                  )}
+                </p>
               </div>
               <div className="form-grid settings-form-grid">
                 <label className="settings-field">
-                  命令默认超时
+                  {t("web.settings.command_default_timeout", "命令默认超时")}
                   <input
                     value={config.operations.command.default_timeout_ms}
                     onChange={(event) =>
@@ -639,7 +644,7 @@ export function Settings() {
                   />
                 </label>
                 <label className="settings-field">
-                  命令最小超时
+                  {t("web.settings.command_min_timeout", "命令最小超时")}
                   <input
                     value={config.operations.command.min_timeout_ms}
                     onChange={(event) =>
@@ -657,7 +662,7 @@ export function Settings() {
                   />
                 </label>
                 <label className="settings-field">
-                  命令最大超时
+                  {t("web.settings.command_max_timeout", "命令最大超时")}
                   <input
                     value={config.operations.command.max_timeout_ms}
                     onChange={(event) =>
@@ -679,12 +684,17 @@ export function Settings() {
 
             <article className="mini-card settings-section-card settings-section-anchor settings-module">
               <div className="settings-section-card__header">
-                <div className="panel-title">上游与流式</div>
-                <p className="helper-text">控制上游请求超时，以及会话、工作流、日志流的轮询间隔。</p>
+                <div className="panel-title">{t("web.settings.upstream_streams", "上游与流式")}</div>
+                <p className="helper-text">
+                  {t(
+                    "web.settings.upstream_streams_help",
+                    "控制上游请求超时，以及会话、工作流、日志流的轮询间隔。",
+                  )}
+                </p>
               </div>
               <div className="form-grid settings-form-grid">
                 <label className="settings-field">
-                  上游默认超时
+                  {t("web.settings.upstream_default_timeout", "上游默认超时")}
                   <input
                     value={config.providers.default_request_timeout_ms}
                     onChange={(event) =>
@@ -699,7 +709,7 @@ export function Settings() {
                   />
                 </label>
                 <label className="settings-field">
-                  会话流间隔
+                  {t("web.settings.conversation_poll_interval", "会话流间隔")}
                   <input
                     value={config.streams.conversation_poll_ms}
                     onChange={(event) =>
@@ -714,7 +724,7 @@ export function Settings() {
                   />
                 </label>
                 <label className="settings-field">
-                  工作流流间隔
+                  {t("web.settings.workflow_poll_interval", "工作流流间隔")}
                   <input
                     value={config.streams.workflow_poll_ms}
                     onChange={(event) =>
@@ -729,7 +739,7 @@ export function Settings() {
                   />
                 </label>
                 <label className="settings-field">
-                  日志流间隔
+                  {t("web.settings.logs_poll_interval", "日志流间隔")}
                   <input
                     value={config.streams.logs_poll_ms}
                     onChange={(event) =>
@@ -748,12 +758,17 @@ export function Settings() {
 
             <article className="mini-card settings-section-card settings-section-anchor settings-module">
               <div className="settings-section-card__header">
-                <div className="panel-title">后台循环</div>
-                <p className="helper-text">控制扩展刷新、计划扫描和事件投递这些后台循环的运行节奏。</p>
+                <div className="panel-title">{t("web.settings.background_loops", "后台循环")}</div>
+                <p className="helper-text">
+                  {t(
+                    "web.settings.background_loops_help",
+                    "控制扩展刷新、计划扫描和事件投递这些后台循环的运行节奏。",
+                  )}
+                </p>
               </div>
               <div className="form-grid settings-form-grid">
                 <label className="settings-field">
-                  扩展刷新间隔
+                  {t("web.settings.extension_refresh_interval", "扩展刷新间隔")}
                   <input
                     value={config.background.extension_refresh_ms}
                     onChange={(event) =>
@@ -768,7 +783,7 @@ export function Settings() {
                   />
                 </label>
                 <label className="settings-field">
-                  计划扫描间隔
+                  {t("web.settings.schedule_scan_interval", "计划扫描间隔")}
                   <input
                     value={config.background.schedule_tick_ms}
                     onChange={(event) =>
@@ -783,7 +798,7 @@ export function Settings() {
                   />
                 </label>
                 <label className="settings-field">
-                  事件投递间隔
+                  {t("web.settings.event_delivery_interval", "事件投递间隔")}
                   <input
                     value={config.background.event_delivery_tick_ms}
                     onChange={(event) =>
@@ -802,12 +817,17 @@ export function Settings() {
 
             <article className="mini-card settings-section-card settings-section-anchor settings-module">
               <div className="settings-section-card__header">
-                <div className="panel-title">扩展运行时</div>
-                <p className="helper-text">给没有显式声明 runtime 配额的扩展提供宿主默认值。</p>
+                <div className="panel-title">{t("web.settings.extension_runtime", "扩展运行时")}</div>
+                <p className="helper-text">
+                  {t(
+                    "web.settings.extension_runtime_help",
+                    "给没有显式声明 runtime 配额的扩展提供宿主默认值。",
+                  )}
+                </p>
               </div>
               <div className="form-grid settings-form-grid">
                 <label className="settings-field">
-                  Worker 默认超时
+                  {t("web.settings.worker_default_timeout", "Worker 默认超时")}
                   <input
                     value={config.extension_runtime.timeout_ms}
                     onChange={(event) =>
@@ -822,7 +842,7 @@ export function Settings() {
                   />
                 </label>
                 <label className="settings-field">
-                  Worker 默认内存
+                  {t("web.settings.worker_default_memory", "Worker 默认内存")}
                   <input
                     value={config.extension_runtime.memory_limit_mb}
                     onChange={(event) =>
@@ -841,12 +861,17 @@ export function Settings() {
 
             <article className="mini-card settings-section-card settings-section-anchor settings-module">
               <div className="settings-section-card__header">
-                <div className="panel-title">调度默认值</div>
-                <p className="helper-text">统一调度命令的超时范围和重试策略边界。</p>
+                <div className="panel-title">{t("web.settings.schedule_defaults", "调度默认值")}</div>
+                <p className="helper-text">
+                  {t(
+                    "web.settings.schedule_defaults_help",
+                    "统一调度命令的超时范围和重试策略边界。",
+                  )}
+                </p>
               </div>
               <div className="form-grid settings-form-grid">
                 <label className="settings-field">
-                  调度命令默认超时
+                  {t("web.settings.schedule_command_default_timeout", "调度命令默认超时")}
                   <input
                     value={config.schedules.command.default_timeout_ms}
                     onChange={(event) =>
@@ -864,7 +889,7 @@ export function Settings() {
                   />
                 </label>
                 <label className="settings-field">
-                  调度命令最小超时
+                  {t("web.settings.schedule_command_min_timeout", "调度命令最小超时")}
                   <input
                     value={config.schedules.command.min_timeout_ms}
                     onChange={(event) =>
@@ -882,7 +907,7 @@ export function Settings() {
                   />
                 </label>
                 <label className="settings-field">
-                  调度命令最大超时
+                  {t("web.settings.schedule_command_max_timeout", "调度命令最大超时")}
                   <input
                     value={config.schedules.command.max_timeout_ms}
                     onChange={(event) =>
@@ -900,7 +925,7 @@ export function Settings() {
                   />
                 </label>
                 <label className="settings-field">
-                  默认重试次数
+                  {t("web.settings.default_retry_attempts", "默认重试次数")}
                   <input
                     value={config.schedules.retry.default_max_attempts}
                     onChange={(event) =>
@@ -918,7 +943,7 @@ export function Settings() {
                   />
                 </label>
                 <label className="settings-field">
-                  最大重试次数
+                  {t("web.settings.max_retry_attempts", "最大重试次数")}
                   <input
                     value={config.schedules.retry.max_attempts_cap}
                     onChange={(event) =>
@@ -936,7 +961,7 @@ export function Settings() {
                   />
                 </label>
                 <label className="settings-field">
-                  默认重试间隔
+                  {t("web.settings.default_retry_backoff", "默认重试间隔")}
                   <input
                     value={config.schedules.retry.default_backoff_seconds}
                     onChange={(event) =>
@@ -954,7 +979,7 @@ export function Settings() {
                   />
                 </label>
                 <label className="settings-field">
-                  最大重试间隔
+                  {t("web.settings.max_retry_backoff", "最大重试间隔")}
                   <input
                     value={config.schedules.retry.max_backoff_seconds}
                     onChange={(event) =>
@@ -976,15 +1001,23 @@ export function Settings() {
 
             <article className="mini-card settings-section-card settings-section-anchor settings-module">
               <div className="settings-section-card__header">
-                <div className="panel-title">前端运行时</div>
-                <p className="helper-text">控制前端 API 请求默认超时，以及全局弹窗的自动消失行为。</p>
+                <div className="panel-title">{t("web.settings.frontend_runtime", "前端运行时")}</div>
+                <p className="helper-text">
+                  {t(
+                    "web.settings.frontend_runtime_help",
+                    "控制前端 API 请求默认超时，以及全局弹窗的自动消失行为。",
+                  )}
+                </p>
               </div>
               <div className="form-grid settings-form-grid">
                 <label className="settings-field">
-                  前端 API 默认超时
+                  {t("web.settings.frontend_api_default_timeout", "前端 API 默认超时")}
                   <input
                     value={uiConfig.api.default_request_timeout_ms ?? ""}
-                    placeholder="留空表示不在前端层强制超时"
+                    placeholder={t(
+                      "web.settings.frontend_api_timeout_placeholder",
+                      "留空表示不在前端层强制超时",
+                    )}
                     onChange={(event) =>
                       setUiConfig({
                         ...uiConfig,
@@ -999,7 +1032,7 @@ export function Settings() {
                   />
                 </label>
                 <label className="settings-field">
-                  成功提示自动消失
+                  {t("web.settings.success_auto_dismiss", "成功提示自动消失")}
                   <input
                     value={uiConfig.notifications.success_auto_dismiss_ms}
                     onChange={(event) =>
@@ -1014,7 +1047,7 @@ export function Settings() {
                   />
                 </label>
                 <label className="settings-field">
-                  错误提示自动消失
+                  {t("web.settings.error_auto_dismiss", "错误提示自动消失")}
                   <input
                     value={uiConfig.notifications.error_auto_dismiss_ms}
                     onChange={(event) =>
@@ -1042,19 +1075,24 @@ export function Settings() {
                       })
                     }
                   />
-                  悬停时暂停自动消失
+                  {t("web.settings.pause_dismiss_on_hover", "悬停时暂停自动消失")}
                 </label>
               </div>
             </article>
 
             <article className="mini-card settings-section-card settings-section-anchor settings-module">
               <div className="settings-section-card__header">
-                <div className="panel-title">开发态高级</div>
-                <p className="helper-text">只影响 `ennoia dev` 这类本地开发链路，不影响生产服务运行。</p>
+                <div className="panel-title">{t("web.settings.dev_advanced", "开发态高级")}</div>
+                <p className="helper-text">
+                  {t(
+                    "web.settings.dev_advanced_help",
+                    "只影响 `ennoia dev` 这类本地开发链路，不影响生产服务运行。",
+                  )}
+                </p>
               </div>
               <div className="form-grid settings-form-grid">
                 <label className="settings-field">
-                  Host reload debounce
+                  {t("web.settings.host_reload_debounce", "宿主重载防抖")}
                   <input
                     value={config.dev_supervisor.host_reload_debounce_ms}
                     onChange={(event) =>
@@ -1069,7 +1107,7 @@ export function Settings() {
                   />
                 </label>
                 <label className="settings-field">
-                  Watch poll
+                  {t("web.settings.watch_poll", "文件监听轮询")}
                   <input
                     value={config.dev_supervisor.watch_poll_ms}
                     onChange={(event) =>
@@ -1084,7 +1122,7 @@ export function Settings() {
                   />
                 </label>
                 <label className="settings-field">
-                  API ready timeout
+                  {t("web.settings.api_ready_timeout", "API 就绪超时")}
                   <input
                     value={config.dev_supervisor.api_ready_timeout_ms}
                     onChange={(event) =>
@@ -1099,7 +1137,7 @@ export function Settings() {
                   />
                 </label>
                 <label className="settings-field">
-                  健康检查间隔
+                  {t("web.settings.healthcheck_interval", "健康检查间隔")}
                   <input
                     value={config.dev_supervisor.api_healthcheck_interval_ms}
                     onChange={(event) =>
@@ -1114,7 +1152,7 @@ export function Settings() {
                   />
                 </label>
                 <label className="settings-field">
-                  健康检查宽限
+                  {t("web.settings.healthcheck_grace", "健康检查宽限")}
                   <input
                     value={config.dev_supervisor.api_healthcheck_grace_ms}
                     onChange={(event) =>
@@ -1129,7 +1167,7 @@ export function Settings() {
                   />
                 </label>
                 <label className="settings-field">
-                  端口释放等待
+                  {t("web.settings.port_release_wait", "端口释放等待")}
                   <input
                     value={config.dev_supervisor.api_port_release_timeout_ms}
                     onChange={(event) =>
@@ -1144,7 +1182,7 @@ export function Settings() {
                   />
                 </label>
                 <label className="settings-field">
-                  子进程启动宽限
+                  {t("web.settings.child_startup_grace", "子进程启动宽限")}
                   <input
                     value={config.dev_supervisor.child_startup_grace_ms}
                     onChange={(event) =>
@@ -1159,7 +1197,7 @@ export function Settings() {
                   />
                 </label>
                 <label className="settings-field">
-                  Probe socket timeout
+                  {t("web.settings.probe_socket_timeout", "探测 socket 超时")}
                   <input
                     value={config.dev_supervisor.probe_socket_timeout_ms}
                     onChange={(event) =>
@@ -1250,10 +1288,10 @@ export function Settings() {
                           })
                         }
                       />
-                      {t("settings.runtime.dev_console.enabled", "开发模式镜像日志到命令窗口")}
+                      {t("web.settings.dev_console_enabled", "开发模式镜像日志到命令窗口")}
                     </label>
                     <label className="settings-field settings-field--wide">
-                      {t("settings.runtime.dev_console.level", "开发模式控制台级别")}
+                      {t("web.settings.dev_console_level", "开发模式控制台级别")}
                       <Select
                         value={config.logging.dev_console.level}
                         onChange={(value) =>

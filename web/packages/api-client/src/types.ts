@@ -1,20 +1,22 @@
 import type {
   ExtensionBehaviorContribution,
-  ExtensionCapabilityContribution,
   ExtensionDiagnostic,
-  ExtensionEntrypoint,
+  ExtensionEvent,
+  ExtensionEventContribution,
   ExtensionActionContribution,
+  ExtensionHookContribution,
   ExtensionLocaleContribution,
   ExtensionMemoryContribution,
+  ExtensionOperation,
+  ExtensionOperationContribution,
   ExtensionPageContribution,
   ExtensionPanelContribution,
   ExtensionProviderContribution,
-  ExtensionResourceTypeContribution,
   ExtensionScheduleActionContribution,
   ExtensionSettingField,
-  ExtensionSubscriptionContribution,
-  ExtensionSurfaceContribution,
   ExtensionThemeContribution,
+  ExtensionView,
+  ExtensionViewContribution,
   LocalizedText,
 } from "@ennoia/ui-sdk";
 
@@ -61,10 +63,9 @@ export type UiConfig = {
 export type UiRuntime = {
   ui_config: UiConfig;
   registry: {
-    resource_types: ExtensionResourceTypeContribution[];
-    capabilities: ExtensionCapabilityContribution[];
-    surfaces: ExtensionSurfaceContribution[];
-    subscriptions: ExtensionSubscriptionContribution[];
+    views: ExtensionViewContribution[];
+    operations: ExtensionOperationContribution[];
+    events: ExtensionEventContribution[];
     pages: ExtensionPageContribution[];
     panels: ExtensionPanelContribution[];
     themes: ExtensionThemeContribution[];
@@ -72,6 +73,7 @@ export type UiRuntime = {
     providers: ExtensionProviderContribution[];
     behaviors: ExtensionBehaviorContribution[];
     memories: ExtensionMemoryContribution[];
+    hooks: ExtensionHookContribution[];
     actions: ExtensionActionContribution[];
     schedule_actions: ExtensionScheduleActionContribution[];
   };
@@ -606,7 +608,6 @@ export type ExtensionRuntimeState = {
   name: string;
   enabled: boolean;
   status: string;
-  kind: string;
   source_mode: string;
   install_dir: string;
   source_root: string;
@@ -626,80 +627,27 @@ export type ExtensionRuntimeEvent = {
 
 export type ExtensionDetail = {
   id: string;
+  version?: string | null;
   name: string;
   description: string;
   docs?: string | null;
-  conversation: {
-    inject: boolean;
-    resource_types: string[];
-    capabilities: string[];
+  compat: {
+    ennoia?: string | null;
   };
-  kind: string;
+  conversation: {
+    visible: boolean;
+    resources: string[];
+    operations: string[];
+  };
   source_mode: string;
   source_root: string;
   install_dir: string;
   generation: number;
   health: string;
-  ui?: {
-    kind: string;
-    entry: string;
-    hmr: boolean;
-    version: string;
-  } | null;
-  worker?: {
-    kind: string;
-    entry: string;
-    abi: string;
-    protocol?: string | null;
-    status: string;
-  } | null;
-  permissions: {
-    storage?: string | null;
-    sqlite: boolean;
-    network: string[];
-    events: string[];
-    fs: string[];
-    env: string[];
-  };
-  runtime: {
-    startup: string;
-    timeout_ms: number;
-    memory_limit_mb: number;
-  };
-  capabilities: {
-    resource_types: boolean;
-    capabilities: boolean;
-    surfaces: boolean;
-    locales: boolean;
-    themes: boolean;
-    commands: boolean;
-    subscriptions: boolean;
-  };
-  resource_types: ExtensionResourceTypeContribution["resource_type"][];
-  capability_rows: ExtensionCapabilityContribution["capability"][];
-  surfaces: ExtensionSurfaceContribution["surface"][];
-  pages: ExtensionPageContribution["page"][];
-  panels: ExtensionPanelContribution["panel"][];
-  themes: ExtensionThemeContribution["theme"][];
-  locales: ExtensionLocaleContribution["locale"][];
-  commands: {
-    id: string;
-    title: LocalizedText;
-    action: string;
-    shortcut?: string | null;
-  }[];
-  entrypoints: ExtensionEntrypoint[];
+  views: ExtensionView[];
+  operations: ExtensionOperation[];
+  events: ExtensionEvent[];
   settings: ExtensionSettingField[];
-  providers: ExtensionProviderContribution["provider"][];
-  behaviors: ExtensionBehaviorContribution["behavior"][];
-  memories: ExtensionMemoryContribution["memory"][];
-  hooks: {
-    event: string;
-    handler?: string | null;
-  }[];
-  actions: ExtensionActionContribution["action"][];
-  schedule_actions: ExtensionScheduleActionContribution["schedule_action"][];
-  subscriptions: ExtensionSubscriptionContribution["subscription"][];
   diagnostics: ExtensionDiagnostic[];
 };
 
@@ -842,7 +790,7 @@ export type LogTraceQuery = {
 
 export type ActionImplementation = {
   extension_id: string;
-  capability_id: string;
+  operation: string;
   method: string;
   phase: string;
   priority: number;

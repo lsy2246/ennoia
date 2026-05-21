@@ -38,7 +38,8 @@ Web
 ## Agent 权限裁决
 
 - Agent 权限属于系统核心，不做成扩展，也不交给 Wasm / Process Worker 自行裁决。
-- 扩展只通过 `capabilities[].metadata.permission` 声明动作、目标类型、风险等级和作用域；最终允许、拒绝、审批都由宿主 `AgentPermissionStore` 决定。
+- 扩展 manifest 不声明底层权限边界；宿主按 operation 名称、调用参数和 `permission_actor` 上下文统一构造权限请求。
+- 最终允许、拒绝、审批都由宿主 `AgentPermissionStore` 决定。
 - 当前宿主会在两类入口做权限判断：
   - Action Router：当内部 Agent 以 `permission_actor` 身份调用 `conversation.*`、`memory.*`、`run.*` 等稳定动作时。
   - Provider 调用：Agent 真正发起 `provider.generate` 上游请求前。
@@ -59,8 +60,8 @@ Web
 
 - 系统不再为 conversation、memory、workflow 暴露固定产品 REST；产品动作统一通过 `/api/actions/{action}` 进入运行时。
 - 每个产品动作映射为一个接口键，例如 `conversation.list`、`message.append`、`run.create`、`task.list`。
-- 扩展通过 manifest 的 `capabilities[].metadata.action` 声明动作规则，规则携带 `key`、`phase`、`priority`、`result_mode` 和可选 `when`。
-- 同一个动作键可以同时挂多条规则；宿主按阶段和优先级执行，并按 `result_mode` 收敛返回值。
+- 扩展通过 manifest 的 `operations[]` 声明动作规则；`operation.name` 是 action key、Worker method 和事件投递目标。
+- 当前同一个动作键对应一个 operation 入口；后续组合策略仍由宿主动作管道统一收敛。
 - 当前系统接口管理入口包括：
   - `GET /api/extensions/actions`
   - `GET /api/actions`
@@ -131,24 +132,24 @@ Web
 - 事件总线异步把事件投递给已注册 Hook；扩展临时离线不会阻塞会话写入。
 - 系统不要求 memory / workflow 必须通过 Hook 互相耦合；跨域组合统一走事件链和宿主中立 runtime bridge（action、provider、runtime operation、permission）。
 
-## 扩展能力模型
+## 扩展契约模型
 
-- 扩展 manifest 只保留当前协议，不再声明独立协议版本号。
-- 扩展负责系统能力，可选声明 `ui` 和 `worker`，主声明模型统一为：`resource_types`、`capabilities`、`surfaces`、`entrypoints`、`settings`、`locales`、`themes`、`commands`、`subscriptions`。
-- `pages`、`panels`、`providers`、`behaviors`、`memories`、`actions`、`hooks`、`schedule_actions` 都是运行时派生视图，不再是 manifest 顶层主声明。
-- UI 工作台读取扩展快照时，同时获得通用声明和派生视图。
-- `entrypoints` 只表达“用户从哪里进入这个扩展”；入口名称、说明和优先级由扩展自身定义，主壳只负责展示与打开。
-- `settings` 表达扩展级配置字段；主壳按声明渲染表单，实际值保存在扩展私有数据目录，不上浮为系统级配置模型。
+- 扩展 manifest 只声明系统可见契约：`id`、`version`、`name`、`description`、`docs`、`compat`、`views`、`operations`、`events`、`settings`、`conversation`。
+- `views` 表达主壳可以打开或挂载的界面契约，当前稳定类型是 `page` 与 `panel`，不再单独设计 entry、surface 或入口列表。
+- `operations` 表达系统可调用动作；`operation.name` 是唯一调用名，同时作为 action key、Worker method 和事件投递目标。
+- `events` 只表达 `on -> operation` 的投递关系；事件先进入宿主持久化事件总线，再异步投递到目标 operation。
+- `settings` 表达扩展级配置字段；主壳按声明渲染表单，实际值保存在扩展级宿主配置文件，不上浮为系统级配置模型。
 - `workflow` 和 `memory` 都只是内置扩展实现；系统依赖接口键和动作 ID，不反向依赖具体扩展。
-- 扩展不自行开放端口；Provider、Behavior、Memory、Hook、Action 和 Schedule Action 的执行统一走宿主 Worker RPC，Worker 通过 Wasm ABI 或进程 stdio 协议接入。
+- 扩展不自行开放端口；operation 执行统一走宿主 Worker RPC，Worker 通过 Wasm ABI 或进程 stdio 协议接入。
 - 进程型 Worker 不再通过 localhost HTTP 回环访问宿主能力；统一通过 process stdio 控制消息发起平台级 host capability 调用，宿主复用既有 action、provider、runtime operation、extension state / record 与权限链路完成分发。
 - Provider 模型发现也不再挂在 `/api/model-endpoints/*/models` 这类产品路由下，而是走宿主提供的通用 provider runtime 代理。
 - 扩展 UI、语言、主题和业务配置归扩展自身所有；Web 主壳只按 runtime snapshot 发现并挂载，不在系统前端包中静态注册某个扩展页面或文案。
-- 扩展 UI 通过独立 ESM bundle 动态加载；主壳只导入 `/api/extensions/{extension_id}/ui/module` 暴露的模块包装器，再按 mount id 调用扩展自己的 `mount/unmount`。
-- 会话时间线同样只提供通用 record mount 槽位；主壳不再硬编码 workflow 专属卡片，任何扩展都可以把自己的 record 以会话附件或独立块渲染出来。
+- UI 与 service 入口由目录约定发现，属于宿主内部解析结果，不属于 manifest 契约，也不在扩展设计页面展示。
+- 扩展 UI 通过独立 ESM bundle 动态加载；主壳只导入 `/api/extensions/{extension_id}/ui/module` 暴露的模块包装器，再按 view name 调用扩展自己的 `mount/unmount`。
+- 会话时间线只提供通用 record mount 槽位；主壳不硬编码 workflow 专属卡片，扩展可以把自己的 record 以会话附件或独立块渲染出来。
 - 扩展主题通过 `ennoia.theme` 与主壳对接；主壳只消费稳定语义 token 和 dockview token，不把内部 class 结构暴露给扩展。
-- 扩展默认不进入会话目录；只有显式声明 `conversation.inject` 时，宿主才会把该扩展作为会话可见目录项暴露给模型。进入会话时只注入扩展自身的 `description`、受限资源/能力目录与 `docs` 入口，不自动注入 `docs` 正文。
-- 如需参与 Agent 权限裁决，扩展应在 capability metadata 中额外声明 `permission`，例如 `action`、`target_kind`、`scope_kind`；没有声明 `permission` 的 capability 不会自动进入 Agent 权限系统。
+- 扩展默认不进入会话目录；只有显式声明 `conversation.visible = true` 时，宿主才会把该扩展作为会话可见目录项暴露给模型。进入会话时只注入扩展自身的 `description`、受限资源/operation 目录与 `docs` 入口，不自动注入 `docs` 正文。
+- Agent 权限系统由宿主按 operation 和调用上下文统一裁决；扩展 manifest 不声明底层权限边界、SQLite、文件、网络或环境变量。
 - Agent 调用上游模型时，宿主统一构造结构化 `context`，至少包含 `runtime`、`conversation`、`extensions`、`skills` 四块，再由 provider 适配层渲染成模型可见消息；`metadata` 只保留给链路追踪和调试，不承担模型上下文职责。
 - 当前模型侧应优先使用 `runtime.workspace_root`、`runtime.artifacts_root` 与 `runtime.temp_root` 这些虚拟根；它们表示 Agent 自己的内部执行视图，不等同于用户项目工作区，也不应默认向用户主动播报宿主机绝对路径。
 

@@ -168,7 +168,7 @@ async function callWorkflowRpc<T>(
 }
 
 export async function getWorkflowWorkspaceSummary() {
-  return callWorkflowRpc<WorkflowWorkspaceSummary>("workspace");
+  return callWorkflowRpc<WorkflowWorkspaceSummary>("workflow.workspace");
 }
 
 export async function listWorkflowRuns(params?: {
@@ -178,11 +178,11 @@ export async function listWorkflowRuns(params?: {
   q?: string;
   limit?: number;
 }) {
-  return callWorkflowRpc<WorkflowRun[]>("workflow/runs/list-by-conversation", params);
+  return callWorkflowRpc<WorkflowRun[]>("run.list", params);
 }
 
 export async function getWorkflowRunDetail(runId: string) {
-  return callWorkflowRpc<WorkflowRunDetail>("workflow/runs/get", { run_id: runId });
+  return callWorkflowRpc<WorkflowRunDetail>("run.get", { run_id: runId });
 }
 
 export function createWorkflowStream(query?: {

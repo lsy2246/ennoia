@@ -965,8 +965,7 @@ fn spawn_process_log_pump(stderr: ChildStderr, log_path: PathBuf) {
 mod tests {
     use super::*;
     use ennoia_kernel::{
-        ExtensionCapabilities, ExtensionHealth, ExtensionKind, ExtensionPermissionSpec,
-        ExtensionRuntimeSpec, MemoryContribution, ResolvedWorkerEntry,
+        ExtensionHealth, ExtensionRuntimeSpec, MemoryContribution, ResolvedWorkerEntry,
     };
 
     #[test]
@@ -1064,11 +1063,12 @@ mod tests {
     fn test_extension(root: &Path, method_prefix: &str) -> ResolvedExtensionSnapshot {
         ResolvedExtensionSnapshot {
             id: "test".to_string(),
+            version: None,
             name: "Test".to_string(),
             description: String::new(),
             docs: None,
+            compat: ennoia_kernel::ExtensionCompatSpec::default(),
             conversation: ennoia_kernel::ExtensionConversationSpec::default(),
-            kind: ExtensionKind::SystemExtension,
             source_mode: ennoia_kernel::ExtensionSourceMode::Dev,
             source_root: root.to_string_lossy().replace('\\', "/"),
             install_dir: root.to_string_lossy().replace('\\', "/"),
@@ -1085,22 +1085,18 @@ mod tests {
                 protocol: None,
                 status: "ready".to_string(),
             }),
-            permissions: ExtensionPermissionSpec::default(),
             runtime: ExtensionRuntimeSpec {
                 timeout_ms: 1_000,
                 memory_limit_mb: 16,
                 ..ExtensionRuntimeSpec::default()
             },
-            capabilities: ExtensionCapabilities::default(),
-            resource_types: Vec::new(),
-            capability_rows: Vec::new(),
-            surfaces: Vec::new(),
+            views: Vec::new(),
+            operations: Vec::new(),
+            events: Vec::new(),
             pages: Vec::new(),
             panels: Vec::new(),
             themes: Vec::new(),
             locales: Vec::new(),
-            commands: Vec::new(),
-            entrypoints: Vec::new(),
             settings: Vec::new(),
             providers: Vec::new(),
             behaviors: Vec::new(),
@@ -1113,7 +1109,6 @@ mod tests {
             hooks: Vec::new(),
             actions: Vec::new(),
             schedule_actions: Vec::new(),
-            subscriptions: Vec::new(),
             diagnostics: Vec::new(),
         }
     }
