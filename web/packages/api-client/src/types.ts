@@ -229,11 +229,18 @@ export type AgentProfile = {
   working_dir?: string;
   artifacts_dir?: string;
   permission_profile: AgentPermissionProfile;
-  execution_environment: AgentExecutionEnvironment;
+  file_access: AgentFileAccessProfile;
 };
 
-export type AgentExecutionEnvironment = {
-  sandbox_enabled: boolean;
+export type AgentFileAccessProfile = {
+  default_root: string;
+  roots: AgentFileAccessRoot[];
+};
+
+export type AgentFileAccessRoot = {
+  id: string;
+  path: string;
+  mode: string;
 };
 
 export type SkillConfig = {

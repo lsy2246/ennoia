@@ -4,7 +4,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::extension::ProviderModelDescriptor;
 use crate::extension::{ExtensionSettingFieldSpec, ExtensionSettingValue};
-use crate::permission::{AgentExecutionEnvironment, AgentPermissionProfile};
+use crate::file_access::AgentFileAccessProfile;
+use crate::permission::AgentPermissionProfile;
 use crate::server_settings::{
     default_local_dev_origins, BackgroundRuntimeConfig, BodyLimitConfig, BootstrapState,
     CorsConfig, DevSupervisorConfig, ExtensionRuntimeDefaultsConfig, LoggingConfig,
@@ -321,8 +322,6 @@ pub struct AgentConfig {
     pub working_dir: String,
     #[serde(default)]
     pub artifacts_dir: String,
-    #[serde(default)]
-    pub execution_environment: AgentExecutionEnvironment,
 }
 
 /// AgentDocument stores one complete Agent package under `agents/<id>/agent.toml`.
@@ -332,6 +331,8 @@ pub struct AgentDocument {
     pub profile: AgentConfig,
     #[serde(default)]
     pub permission_profile: AgentPermissionProfile,
+    #[serde(default)]
+    pub file_access: AgentFileAccessProfile,
 }
 
 /// SkillManifest represents one installed skill package manifest.

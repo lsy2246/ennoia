@@ -1,7 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-use crate::policy::GlobPattern;
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct PermissionTarget {
     pub kind: String,
@@ -68,19 +66,7 @@ pub struct AgentPermissionRule {
     #[serde(default)]
     pub actions: Vec<String>,
     #[serde(default)]
-    pub target_scope: Vec<AgentPermissionCommandEntry>,
-    #[serde(default)]
-    pub extension_scope: Vec<String>,
-    #[serde(default)]
-    pub conversation_scope: Option<String>,
-    #[serde(default)]
-    pub run_scope: Option<String>,
-    #[serde(default)]
-    pub path_include: Vec<GlobPattern>,
-    #[serde(default)]
-    pub path_exclude: Vec<GlobPattern>,
-    #[serde(default)]
-    pub host_scope: Vec<GlobPattern>,
+    pub command_scope: Vec<AgentPermissionCommandEntry>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -150,7 +136,7 @@ impl AgentPermissionProfile {
         match mode.as_str() {
             "blacklist" => {
                 if !normalized_entries.is_empty() {
-                    rules.push(ask_target_rule(
+                    rules.push(ask_command_rule(
                         "runtime-command-blacklist-ask",
                         &["command.exec"],
                         normalized_entries,
@@ -163,7 +149,7 @@ impl AgentPermissionProfile {
             }
             _ => {
                 if !normalized_entries.is_empty() {
-                    rules.push(allow_target_rule(
+                    rules.push(allow_command_rule(
                         "runtime-command-whitelist-allow",
                         &["command.exec"],
                         normalized_entries,
@@ -228,10 +214,6 @@ fn default_permission_profile_mode() -> String {
     "whitelist".to_string()
 }
 
-fn default_execution_environment_sandbox_enabled() -> bool {
-    false
-}
-
 fn default_command_entry_match() -> String {
     "prefix".to_string()
 }
@@ -256,13 +238,7 @@ fn allow_rule(id: &str, actions: &[&str]) -> AgentPermissionRule {
         id: id.to_string(),
         effect: "allow".to_string(),
         actions: actions.iter().map(|item| (*item).to_string()).collect(),
-        target_scope: Vec::new(),
-        extension_scope: Vec::new(),
-        conversation_scope: None,
-        run_scope: None,
-        path_include: Vec::new(),
-        path_exclude: Vec::new(),
-        host_scope: Vec::new(),
+        command_scope: Vec::new(),
     }
 }
 
@@ -271,17 +247,11 @@ fn ask_rule(id: &str, actions: &[&str]) -> AgentPermissionRule {
         id: id.to_string(),
         effect: "ask".to_string(),
         actions: actions.iter().map(|item| (*item).to_string()).collect(),
-        target_scope: Vec::new(),
-        extension_scope: Vec::new(),
-        conversation_scope: None,
-        run_scope: None,
-        path_include: Vec::new(),
-        path_exclude: Vec::new(),
-        host_scope: Vec::new(),
+        command_scope: Vec::new(),
     }
 }
 
-fn allow_target_rule(
+fn allow_command_rule(
     id: &str,
     actions: &[&str],
     targets: Vec<AgentPermissionCommandEntry>,
@@ -290,17 +260,11 @@ fn allow_target_rule(
         id: id.to_string(),
         effect: "allow".to_string(),
         actions: actions.iter().map(|item| (*item).to_string()).collect(),
-        target_scope: targets,
-        extension_scope: Vec::new(),
-        conversation_scope: None,
-        run_scope: None,
-        path_include: Vec::new(),
-        path_exclude: Vec::new(),
-        host_scope: Vec::new(),
+        command_scope: targets,
     }
 }
 
-fn ask_target_rule(
+fn ask_command_rule(
     id: &str,
     actions: &[&str],
     targets: Vec<AgentPermissionCommandEntry>,
@@ -309,27 +273,7 @@ fn ask_target_rule(
         id: id.to_string(),
         effect: "ask".to_string(),
         actions: actions.iter().map(|item| (*item).to_string()).collect(),
-        target_scope: targets,
-        extension_scope: Vec::new(),
-        conversation_scope: None,
-        run_scope: None,
-        path_include: Vec::new(),
-        path_exclude: Vec::new(),
-        host_scope: Vec::new(),
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct AgentExecutionEnvironment {
-    #[serde(default = "default_execution_environment_sandbox_enabled")]
-    pub sandbox_enabled: bool,
-}
-
-impl Default for AgentExecutionEnvironment {
-    fn default() -> Self {
-        Self {
-            sandbox_enabled: default_execution_environment_sandbox_enabled(),
-        }
+        command_scope: targets,
     }
 }
 
@@ -400,14 +344,6 @@ mod tests {
             .iter()
             .find(|rule| rule.id == "runtime-command-blacklist-ask")
             .expect("compiled blacklist rule");
-        assert_eq!(rule.target_scope[0].value, r"^git\s+status$");
-    }
-
-    #[test]
-    fn sandbox_enabled_is_the_runtime_source_of_truth() {
-        let environment = AgentExecutionEnvironment {
-            sandbox_enabled: true,
-        };
-        assert!(environment.sandbox_enabled);
+        assert_eq!(rule.command_scope[0].value, r"^git\s+status$");
     }
 }

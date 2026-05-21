@@ -2457,7 +2457,7 @@ async fn continue_agent_reply_from_state(
         "lane_id": lane_id,
         "message_id": message_id,
         "run_id": run_id,
-        "sandbox_enabled": agent.execution_environment.sandbox_enabled,
+        "file_access": agent_file_access_context(),
         "agent_id": agent.id,
         "agent_display_name": agent.display_name,
     });
@@ -3521,11 +3521,10 @@ async fn build_agent_provider_context(
             "agent_id": agent.id,
             "agent_display_name": agent.display_name,
             "run_id": normalize_unknown(run_id),
-            "sandbox_enabled": agent.execution_environment.sandbox_enabled,
-            "execution_mode": if agent.execution_environment.sandbox_enabled { "sandbox" } else { "host" },
-            "workspace_root": if agent.execution_environment.sandbox_enabled { "/workspace".to_string() } else { normalize_display_dir(&agent.working_dir, runtime_paths.display_for_user(runtime_paths.agent_working_dir(&agent.id))) },
-            "artifacts_root": if agent.execution_environment.sandbox_enabled { "/artifacts".to_string() } else { normalize_display_dir(&agent.artifacts_dir, runtime_paths.display_for_user(runtime_paths.agent_artifacts_dir(&agent.id))) },
-            "temp_root": if agent.execution_environment.sandbox_enabled { "/tmp" } else { "系统临时目录" },
+            "workspace_root": "/workspace",
+            "artifacts_root": "/artifacts",
+            "temp_root": "/tmp",
+            "file_access": agent_file_access_context(),
         },
         "operator_profile": {
             "display_name": operator_profile.display_name,
@@ -3543,11 +3542,22 @@ async fn build_agent_provider_context(
         },
         "extensions": extract_conversation_extensions(&extensions_runtime),
         "skills": agent.skills,
-        "tools": build_agent_tool_contexts(&extensions_runtime, agent),
+        "tools": build_agent_tool_contexts(&extensions_runtime),
     })
 }
 
-fn build_agent_tool_contexts(snapshot: &JsonValue, agent: &AgentConfig) -> Vec<JsonValue> {
+fn agent_file_access_context() -> JsonValue {
+    serde_json::json!({
+        "default_root": "/workspace",
+        "roots": [
+            { "id": "workspace", "path": "/workspace", "mode": "read_write" },
+            { "id": "artifacts", "path": "/artifacts", "mode": "read_write" },
+            { "id": "temp", "path": "/tmp", "mode": "read_write" },
+        ],
+    })
+}
+
+fn build_agent_tool_contexts(snapshot: &JsonValue) -> Vec<JsonValue> {
     let mut tools = extract_conversation_extensions(snapshot)
         .into_iter()
         .flat_map(|extension| {
@@ -3589,11 +3599,7 @@ fn build_agent_tool_contexts(snapshot: &JsonValue, agent: &AgentConfig) -> Vec<J
             "extension_name": "Runtime",
             "capability_id": "command.exec",
             "label": "命令执行",
-            "summary": if agent.execution_environment.sandbox_enabled {
-                "执行系统命令，并返回 stdout、stderr 和退出码；需要读写文件或访问网络时，也通过命令完成。优先使用 /workspace、/artifacts、/tmp 这些路径。"
-            } else {
-                "执行系统命令，并返回 stdout、stderr 和退出码；需要读写文件或访问网络时，也通过命令完成。相对路径默认按当前工作目录解析，也可以直接使用宿主机绝对路径。"
-            },
+            "summary": "执行系统命令，并返回 stdout、stderr 和退出码；需要读写文件或访问网络时，也通过命令完成。工作目录优先使用 /workspace、/artifacts、/tmp 这些文件访问根。",
             "kind": "builtin",
             "contract": "command.exec",
         }),
@@ -3709,27 +3715,12 @@ fn build_agent_runtime_prompt(
     run_id: &str,
     operator_profile: &OperatorProfileSnapshot,
 ) -> String {
-    let execution_mode = if agent.execution_environment.sandbox_enabled {
-        "sandbox"
-    } else {
-        "host"
-    };
-    let workspace_root = if agent.execution_environment.sandbox_enabled {
-        "/workspace".to_string()
-    } else {
-        normalize_display_dir(&agent.working_dir, "当前工作目录".to_string())
-    };
-    let artifacts_root = if agent.execution_environment.sandbox_enabled {
-        "/artifacts".to_string()
-    } else {
-        normalize_display_dir(&agent.artifacts_dir, "当前产物目录".to_string())
-    };
     let mut sections = Vec::new();
     if !agent.system_prompt.trim().is_empty() {
         sections.push(agent.system_prompt.trim().to_string());
     }
     sections.push(format!(
-        "你当前运行在 Ennoia 会话系统中。\nagent_id：{}\nagent_name：{}\noperator_name：{}\noperator_time_zone：{}\noperator_operating_system：{}\nrun_id：{}\nsandbox_enabled：{}\nexecution_mode：{}\nworkspace_root：{}\nartifacts_root：{}\ntemp_root：{}\n{}\n除非用户明确需要，否则不要主动复述内部路径或实现细节。直接回答用户，不要伪装成“系统已接收”或“正在处理中”。",
+        "你当前运行在 Ennoia 会话系统中。\nagent_id：{}\nagent_name：{}\noperator_name：{}\noperator_time_zone：{}\noperator_operating_system：{}\nrun_id：{}\nworkspace_root：/workspace\nartifacts_root：/artifacts\ntemp_root：/tmp\nfile_access_roots：/workspace, /artifacts, /tmp\n文件访问只接受这些虚拟根及其子路径；除非用户明确需要，否则不要主动复述内部路径或实现细节。直接回答用户，不要伪装成“系统已接收”或“正在处理中”。",
         agent.id,
         agent.display_name,
         operator_profile.display_name,
@@ -3744,16 +3735,6 @@ fn build_agent_runtime_prompt(
             .filter(|value| !value.trim().is_empty())
             .unwrap_or("unknown"),
         if run_id.trim().is_empty() { "unknown" } else { run_id },
-        agent.execution_environment.sandbox_enabled,
-        execution_mode,
-        workspace_root,
-        artifacts_root,
-        if agent.execution_environment.sandbox_enabled { "/tmp" } else { "系统临时目录" },
-        if agent.execution_environment.sandbox_enabled {
-            "当前处于原生沙盒模式，只使用 /workspace、/artifacts、/tmp 这些虚拟路径。不要把宿主机绝对路径当作可直接访问的路径。"
-        } else {
-            "当前直接运行在宿主机环境。可以使用宿主机绝对路径；相对路径按当前工作目录解析。不要把普通的目录或命令错误解释成沙箱、容器或权限限制。"
-        },
     ));
     sections.push(
         "系统会额外提供结构化上下文。按字段理解并使用，不要向用户原样复述 JSON。".to_string(),
@@ -4140,17 +4121,8 @@ fn load_agent_configs(paths: &Arc<RuntimePaths>) -> Result<Vec<AgentConfig>, Str
         if agent.default_model.is_empty() && !agent.model_id.is_empty() {
             agent.default_model = agent.model_id.clone();
         }
-        if !agent.working_dir.is_empty() {
-            agent.working_dir = paths.display_for_user(paths.expand_home_token(&agent.working_dir));
-        } else {
-            agent.working_dir = paths.display_for_user(paths.agent_working_dir(&agent.id));
-        }
-        if !agent.artifacts_dir.is_empty() {
-            agent.artifacts_dir =
-                paths.display_for_user(paths.expand_home_token(&agent.artifacts_dir));
-        } else {
-            agent.artifacts_dir = paths.display_for_user(paths.agent_artifacts_dir(&agent.id));
-        }
+        agent.working_dir = "/workspace".to_string();
+        agent.artifacts_dir = "/artifacts".to_string();
     }
     Ok(agents)
 }
@@ -4207,14 +4179,6 @@ fn load_model_endpoint_configs(
     Ok(items)
 }
 
-fn normalize_display_dir(value: &str, fallback: String) -> String {
-    if value.trim().is_empty() {
-        fallback
-    } else {
-        value.trim().to_string()
-    }
-}
-
 fn normalize_unknown(value: &str) -> String {
     if value.trim().is_empty() {
         "unknown".to_string()
@@ -4234,17 +4198,17 @@ fn format_host_api_error_for_conversation(error: &HostApiError) -> String {
         || message.starts_with("请求超时")
         || message.starts_with("配置错误")
         || message.starts_with("扩展运行错误")
-        || message.starts_with("沙盒路径已拦截")
+        || message.starts_with("文件访问路径已拦截")
     {
         return message.to_string();
     }
 
     let normalized = message.to_lowercase();
-    let heading = if normalized.contains("native sandbox only accepts")
-        || normalized.contains("path cannot escape the selected execution root")
-        || normalized.contains("path must stay inside the selected execution root")
+    let heading = if normalized.contains("file access only accepts configured virtual roots")
+        || normalized.contains("path cannot escape the selected file access root")
+        || normalized.contains("path must stay inside the selected file access root")
     {
-        "沙盒路径已拦截"
+        "文件访问路径已拦截"
     } else if normalized.contains("openai api key is missing")
         || normalized.contains("openai request failed")
         || normalized.contains("upstream returned")

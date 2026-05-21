@@ -8,9 +8,9 @@ use std::time::Instant;
 use ennoia_assets::builtins;
 use ennoia_extension_host::{ExtensionRuntime, ExtensionRuntimeConfig};
 use ennoia_kernel::{
-    apply_server_log_env_overrides, AgentConfig, AgentDocument, AgentPermissionProfile,
-    ModelEndpointConfig, PlatformOverview, ServerConfig, SkillConfig, SkillManifest,
-    SkillRegistryEntry, SkillRegistryFile, SpaceSpec, UiConfig,
+    apply_server_log_env_overrides, AgentConfig, AgentDocument, AgentFileAccessProfile,
+    AgentPermissionProfile, ModelEndpointConfig, PlatformOverview, ServerConfig, SkillConfig,
+    SkillManifest, SkillRegistryEntry, SkillRegistryFile, SpaceSpec, UiConfig,
 };
 use ennoia_logs::{self, next_span_id, LogsGuard, TraceContext};
 use ennoia_paths::{default_home_dir, RuntimePaths};
@@ -605,14 +605,20 @@ pub fn normalize_agent_document(
 }
 
 pub fn write_agent_config(paths: &RuntimePaths, payload: &AgentConfig) -> Result<(), AppError> {
-    let permission_profile = load_agent_document(paths, &payload.id)?
-        .map(|document| document.permission_profile)
+    let existing = load_agent_document(paths, &payload.id)?;
+    let permission_profile = existing
+        .as_ref()
+        .map(|document| document.permission_profile.clone())
         .unwrap_or_else(AgentPermissionProfile::default_profile);
+    let file_access = existing
+        .map(|document| document.file_access)
+        .unwrap_or_default();
     write_agent_document(
         paths,
         &AgentDocument {
             profile: payload.clone(),
             permission_profile,
+            file_access,
         },
     )
 }
@@ -806,6 +812,7 @@ fn migrate_legacy_agent_layout(paths: &RuntimePaths) -> Result<(), AppError> {
                 &AgentDocument {
                     profile: agent,
                     permission_profile: AgentPermissionProfile::default_profile(),
+                    file_access: AgentFileAccessProfile::default(),
                 },
             )?;
             fs::remove_file(entry.path())?;
@@ -848,7 +855,6 @@ mod tests {
             skills_dir: String::new(),
             working_dir: String::new(),
             artifacts_dir: String::new(),
-            execution_environment: ennoia_kernel::AgentExecutionEnvironment::default(),
         }
     }
 
@@ -903,6 +909,7 @@ mod tests {
                     mode: "blacklist".to_string(),
                     ..AgentPermissionProfile::default_profile()
                 },
+                file_access: AgentFileAccessProfile::default(),
             },
         )
         .expect("seed agent document");
@@ -937,22 +944,8 @@ fn normalize_agent_config(paths: &RuntimePaths, agent: &mut AgentConfig) {
     if agent.default_model.is_empty() && !agent.model_id.is_empty() {
         agent.default_model = agent.model_id.clone();
     }
-    if agent.execution_environment.sandbox_enabled {
-        agent.working_dir = "/workspace".to_string();
-        agent.artifacts_dir = "/artifacts".to_string();
-    } else {
-        if !agent.working_dir.is_empty() {
-            agent.working_dir = paths.display_for_user(paths.expand_home_token(&agent.working_dir));
-        } else {
-            agent.working_dir = paths.display_for_user(paths.agent_working_dir(&agent.id));
-        }
-        if !agent.artifacts_dir.is_empty() {
-            agent.artifacts_dir =
-                paths.display_for_user(paths.expand_home_token(&agent.artifacts_dir));
-        } else {
-            agent.artifacts_dir = paths.display_for_user(paths.agent_artifacts_dir(&agent.id));
-        }
-    }
+    agent.working_dir = "/workspace".to_string();
+    agent.artifacts_dir = "/artifacts".to_string();
     if !agent.skills_dir.is_empty() {
         agent.skills_dir = paths.display_for_user(paths.expand_home_token(&agent.skills_dir));
     } else {

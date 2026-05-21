@@ -193,9 +193,9 @@
 - `generation_options`
 - `skills`
 - `enabled`
-- `execution_environment`
+- `file_access`
 
-`AgentConfig`、`AgentPermissionProfile` 与 `AgentExecutionEnvironment` 统一持久化在 `agents/<agent_id>/agent.toml`。`kind`、`default_model`、`skills_dir`、`working_dir`、`artifacts_dir` 作为运行时派生/内部字段存在，前端产品模型以显式字段为主。`working_dir` / `artifacts_dir` 表示 Agent 自己的运行目录，不等同于用户项目工作区；默认分别按 `agents/<agent_id>/work` 与 `agents/<agent_id>/artifacts` 自动派生。沙盒执行开启时，模型侧只看到 `/workspace`、`/artifacts`、`/tmp` 这些虚拟路径。
+`AgentConfig`、`AgentPermissionProfile` 与 `AgentFileAccessProfile` 统一持久化在 `agents/<agent_id>/agent.toml`。`kind`、`default_model`、`skills_dir`、`working_dir`、`artifacts_dir` 作为运行时派生/内部字段存在，前端产品模型以显式字段为主。`working_dir` / `artifacts_dir` 是模型侧可见的虚拟路径，默认展示为 `/workspace` 与 `/artifacts`，不等同于宿主机绝对路径。
 
 ## Agent 权限域
 
@@ -204,16 +204,25 @@
 - `mode`
 - `entries`
 
-## Agent 执行环境域
+## Agent 文件访问域
 
-`AgentExecutionEnvironment` 字段：
+`AgentFileAccessProfile` 字段：
 
-- `sandbox_enabled`
+- `default_root`
+- `roots`
+
+`AgentFileAccessRoot` 字段：
+
+- `id`
+- `path`
+- `mode`
 
 约定：
 
-- `sandbox_enabled = false` 表示 Agent 直接在宿主机运行时上执行。
-- `sandbox_enabled = true` 表示 Agent 使用原生沙盒语义；模型上下文和内置工具优先暴露 `/workspace`、`/artifacts`、`/tmp` 三个虚拟根，不再主动泄露宿主机绝对路径。
+- 默认文件访问根为 `/workspace`、`/artifacts`、`/tmp`，默认根是 `/workspace`。
+- `command.exec` 的 `cwd` 只接受配置过的虚拟根及其子路径；相对路径按 `default_root` 解析。
+- 文件访问配置只负责把模型侧虚拟路径解析到 Agent 自己的运行目录，不负责权限裁决。
+- 当前文件访问不是进程隔离，也不保证宿主进程无法访问其他宿主文件。
 
 运行时不再让用户直接维护底层规则。系统会把 `AgentPermissionProfile` 编译成内部 `AgentPermissionPolicy`：
 
@@ -223,7 +232,7 @@
   - `match`：`exact | prefix | regex`
   - `value`：用户自定义的命令匹配字符串
 - `entries[]` 匹配的是规范化后的完整命令调用串，例如 `git status`、`git diff --cached`、`node C:/tools/search-runner.mjs`
-- `sandbox_enabled` 与权限模型解耦；它只决定命令在哪个执行环境里运行，不参与白名单/黑名单判定
+- 文件访问与权限模型解耦；它只决定路径入口如何解析，不参与白名单/黑名单判定
 
 `PermissionApprovalRecord` 字段：
 
@@ -324,7 +333,7 @@
 
 - `config/` 保存声明性配置；`data/` 保存全部运行数据。
 - 核心系统配置：`~/.ennoia/config/*.toml`。
-- Agent 基础配置、权限配置与执行环境配置：`~/.ennoia/agents/{agent_id}/agent.toml`。
+- Agent 基础配置、权限配置与文件访问配置：`~/.ennoia/agents/{agent_id}/agent.toml`。
 - 定时计划：`~/.ennoia/data/system/schedules.json`。
 - Agent 权限事件与审批：`~/.ennoia/data/system/sqlite/permissions.db`。
 - 扩展通用运行态 state/record：`~/.ennoia/data/system/sqlite/extensions.db`。

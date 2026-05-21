@@ -17,7 +17,7 @@ use ennoia_kernel::{
     ExtensionRegistryFile, LoggingConfig, ServerConfig, SkillRegistryEntry, SkillRegistryFile,
 };
 use ennoia_paths::RuntimePaths;
-use ennoia_server::{bootstrap_app_state, default_app_state, execution, run_server};
+use ennoia_server::{bootstrap_app_state, default_app_state, run_server};
 use notify::{Config as NotifyConfig, RecommendedWatcher, RecursiveMode, Watcher};
 
 const WEB_DIR: &str = "web";
@@ -570,22 +570,11 @@ fn extension_subcommand_usage(subcommand: &str) -> String {
 }
 
 fn internal_usage() -> String {
-    [
-        "usage: ennoia internal <subcommand> [args]".to_string(),
-        String::new(),
-        "subcommands:".to_string(),
-        "  sandbox-worker <request.json> <response.json>".to_string(),
-    ]
-    .join("\n")
+    ["usage: ennoia internal <subcommand> [args]".to_string()].join("\n")
 }
 
-fn internal_subcommand_usage(subcommand: &str) -> String {
-    match subcommand {
-        "sandbox-worker" => {
-            "usage: ennoia internal sandbox-worker <request.json> <response.json>".to_string()
-        }
-        _ => internal_usage(),
-    }
+fn internal_subcommand_usage(_subcommand: &str) -> String {
+    internal_usage()
 }
 
 fn print_default_config() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -744,35 +733,10 @@ async fn internal_command(args: &[String]) -> Result<(), Box<dyn std::error::Err
         return Ok(());
     }
 
-    match subcommand {
-        "sandbox-worker" => {
-            let usage = internal_subcommand_usage("sandbox-worker");
-            let (request_path, response_path) = match subcommand_args {
-                [request_path, response_path] => (request_path.as_str(), response_path.as_str()),
-                [] | [_] => return Err(invalid_input_error(usage)),
-                [value, ..] if value.starts_with('-') => {
-                    return Err(invalid_input_error(format!(
-                        "unknown option for 'ennoia internal sandbox-worker': {value}\n\n{usage}"
-                    )))
-                }
-                _ => {
-                    return Err(invalid_input_error(format!(
-                        "too many arguments for 'ennoia internal sandbox-worker'\n\n{usage}"
-                    )))
-                }
-            };
-            execution::run_sandbox_worker(request_path, response_path)
-                .await
-                .map_err(io::Error::other)?;
-        }
-        other => {
-            return Err(invalid_input_error(format!(
-                "unknown internal subcommand: {other}\n\n{}",
-                internal_usage()
-            )));
-        }
-    }
-    Ok(())
+    Err(invalid_input_error(format!(
+        "unknown internal subcommand: {subcommand}\n\n{}",
+        internal_usage()
+    )))
 }
 
 const DEV_CHILD_LOG_TAIL_LINES: usize = 20;
@@ -2353,7 +2317,7 @@ mod tests {
 
     use super::{
         ensure_no_args, extension_subcommand_usage, extension_usage, home_command_usage,
-        internal_subcommand_usage, is_builtin_worker_reload_path, is_host_reload_path,
+        internal_usage, is_builtin_worker_reload_path, is_host_reload_path,
         parse_optional_home_arg, parse_optional_usize_arg, parse_required_arg, print_config_usage,
         should_mark_binary_asset_executable, summary_text, tail_log_file, unique_suffix,
     };
@@ -2519,8 +2483,7 @@ mod tests {
         assert!(dev_usage.contains("repository-local .dev directory"));
         assert!(start_usage.contains("does not accept a path argument"));
         assert!(extension_usage().contains("usage: ennoia ext <subcommand> [args]"));
-        assert!(internal_subcommand_usage("sandbox-worker")
-            .contains("sandbox-worker <request.json> <response.json>"));
+        assert!(internal_usage().contains("usage: ennoia internal"));
     }
 }
 

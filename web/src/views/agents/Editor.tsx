@@ -16,7 +16,7 @@ import {
   listPermissionEvents,
   listSkills,
   updateAgent,
-  type AgentExecutionEnvironment,
+  type AgentFileAccessProfile,
   type AgentPermissionCommandEntry,
   type AgentPermissionProfile,
   type AgentProfile,
@@ -33,6 +33,15 @@ import { useAgentsStore } from "@/stores/agents";
 import { useModelEndpointsStore } from "@/stores/modelEndpoints";
 import { useUiHelpers } from "@/stores/ui";
 
+const DEFAULT_FILE_ACCESS_PROFILE: AgentFileAccessProfile = {
+  default_root: "/workspace",
+  roots: [
+    { id: "workspace", path: "/workspace", mode: "read_write" },
+    { id: "artifacts", path: "/artifacts", mode: "read_write" },
+    { id: "temp", path: "/tmp", mode: "read_write" },
+  ],
+};
+
 const EMPTY_AGENT: AgentProfile = {
   id: "",
   display_name: "",
@@ -47,9 +56,7 @@ const EMPTY_AGENT: AgentProfile = {
     mode: "whitelist",
     entries: [],
   },
-  execution_environment: {
-    sandbox_enabled: false,
-  },
+  file_access: DEFAULT_FILE_ACCESS_PROFILE,
 };
 
 const EMPTY_PERMISSION_PROFILE: AgentPermissionProfile = {
@@ -456,45 +463,29 @@ export function AgentEditorView({
                   <strong>{formatRelativePath(form.skills_dir || "")}</strong>
                 </div>
                 <p className="helper-text">
-                  {form.execution_environment.sandbox_enabled
-                    ? "原生沙盒模式下，Agent 看到的是 /workspace、/artifacts、/tmp 这些虚拟路径。"
-                    : t("web.agents.working_dir_help", "Agent 工作目录自动派生到 agents/{agent_id}/work，无需单独配置。")}
+                  {t("web.agents.working_dir_help", "Agent 工作目录自动派生到 agents/{agent_id}/work，无需单独配置。")}
                 </p>
               </section>
 
               <>
                 <section className="details-panel agent-editor__section">
-                  <div className="panel-title">执行环境</div>
+                  <div className="panel-title">文件访问</div>
                   <p className="helper-text">
-                    这里只决定命令是在沙盒里运行还是直接在宿主机运行。
+                    command.exec 的工作目录只接受这些虚拟根及其子路径。
                   </p>
                   <div className="agent-policy-editor">
-                    <label>
-                      沙盒模式
-                      <Select
-                        value={form.execution_environment.sandbox_enabled ? "enabled" : "disabled"}
-                        onChange={(value) =>
-                          setForm((current) => ({
-                            ...current,
-                            execution_environment: normalizeExecutionEnvironment({
-                              sandbox_enabled: value === "enabled",
-                            }),
-                          }))}
-                        options={[
-                          { value: "disabled", label: "关闭，直接在宿主机运行" },
-                          { value: "enabled", label: "开启，在原生沙盒中运行" },
-                        ]}
-                      />
-                    </label>
                     <div className="resource-card agent-policy-rule">
                       <div className="agent-policy-rule__header">
-                        <strong>当前说明</strong>
+                        <strong>当前入口</strong>
                       </div>
-                      <p className="helper-text">
-                        {form.execution_environment.sandbox_enabled
-                          ? "命令会在原生沙盒中执行，文件路径使用 /workspace、/artifacts、/tmp 这些虚拟根。"
-                          : "命令会直接在宿主机环境里执行；相对路径按当前工作目录解析。"}
-                      </p>
+                      <div className="kv-list">
+                        <span>默认根</span>
+                        <strong>{normalizeFileAccessProfile(form.file_access).default_root}</strong>
+                        {normalizeFileAccessProfile(form.file_access).roots.flatMap((root) => [
+                          <span key={`${root.id}-label`}>{root.id}</span>,
+                          <strong key={`${root.id}-path`}>{root.path}</strong>,
+                        ])}
+                      </div>
                     </div>
                   </div>
                 </section>
@@ -502,7 +493,7 @@ export function AgentEditorView({
                 <section className="details-panel agent-editor__section">
                   <div className="panel-title">{t("web.permissions.profile", "权限模式")}</div>
                   <p className="helper-text">
-                    长期权限配置属于 Agent 本身；这里只定义 <code>command.exec</code> 的命令匹配策略，沙盒与否由上面的执行环境单独决定。
+                    长期权限配置属于 Agent 本身；这里只定义 <code>command.exec</code> 的命令匹配策略，文件访问由文件访问配置单独决定。
                   </p>
                   <div className="agent-policy-editor">
                     <label>
@@ -731,7 +722,7 @@ function normalizeAgentPayload(
     ...form,
     generation_options,
     permission_profile: normalizePermissionProfile(form.permission_profile),
-    execution_environment: normalizeExecutionEnvironment(form.execution_environment),
+    file_access: normalizeFileAccessProfile(form.file_access),
   };
 }
 
@@ -741,7 +732,7 @@ function normalizeAgentForm(form: AgentProfile): AgentProfile {
     skills: [...(form.skills ?? [])],
     generation_options: { ...(form.generation_options ?? {}) },
     permission_profile: normalizePermissionProfile(form.permission_profile),
-    execution_environment: normalizeExecutionEnvironment(form.execution_environment),
+    file_access: normalizeFileAccessProfile(form.file_access),
   };
 }
 
@@ -757,12 +748,31 @@ function normalizePermissionProfile(profile: AgentPermissionProfile | undefined)
   };
 }
 
-function normalizeExecutionEnvironment(
-  value: AgentExecutionEnvironment | undefined,
-): AgentExecutionEnvironment {
+function normalizeFileAccessProfile(
+  value: AgentFileAccessProfile | undefined,
+): AgentFileAccessProfile {
+  const roots = (value?.roots?.length ? value.roots : DEFAULT_FILE_ACCESS_PROFILE.roots)
+    .map((root) => ({
+      id: root.id.trim(),
+      path: normalizeVirtualRoot(root.path),
+      mode: root.mode.trim() || "read_write",
+    }))
+    .filter((root) => root.id.length > 0 && root.path.length > 0);
+  const defaultRoot = normalizeVirtualRoot(value?.default_root ?? DEFAULT_FILE_ACCESS_PROFILE.default_root);
   return {
-    sandbox_enabled: Boolean(value?.sandbox_enabled),
+    default_root: roots.some((root) => root.path === defaultRoot)
+      ? defaultRoot
+      : DEFAULT_FILE_ACCESS_PROFILE.default_root,
+    roots: roots.length > 0 ? roots : DEFAULT_FILE_ACCESS_PROFILE.roots,
   };
+}
+
+function normalizeVirtualRoot(value: string | undefined) {
+  const normalized = (value ?? "").trim().replaceAll("\\", "/").replace(/\/+$/u, "");
+  if (!normalized) {
+    return "/workspace";
+  }
+  return normalized.startsWith("/") ? normalized : `/${normalized}`;
 }
 
 function normalizeCommandPermissionMatch(value: string | undefined) {

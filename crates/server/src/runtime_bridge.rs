@@ -7,7 +7,7 @@ use ennoia_contract::ApiError;
 use ennoia_error_utils::normalize_error_message;
 use ennoia_extension_host::RegisteredProviderContribution;
 use ennoia_kernel::{
-    AgentConfig, ModelEndpointConfig, OperationPerformRequest, OperationPerformResponse,
+    AgentDocument, ModelEndpointConfig, OperationPerformRequest, OperationPerformResponse,
     OperationRecord, OperationStatus, PermissionRequest, PermissionScope, PermissionTarget,
     PermissionTrigger, RuntimeOperationRequest, RuntimeOperationTimeoutConfig,
 };
@@ -17,9 +17,7 @@ use serde_json::Value as JsonValue;
 use tokio::io::AsyncWriteExt;
 
 use crate::app::{live_server_config, AppState};
-use crate::execution::{
-    execute_native_operation, resolve_command_cwd, AgentExecutionPaths, SandboxOperation,
-};
+use crate::execution::{resolve_command_cwd, AgentFileAccessPaths};
 use crate::logs_store::{LogEntryWrite, LOGS_COMPONENT_HOST};
 use crate::realtime::RealtimeEvent;
 use crate::routes::actions::dispatch_hook_event;
@@ -217,10 +215,8 @@ pub async fn execute_runtime_operation(
     operation: &str,
     payload: RuntimeOperationRequest,
 ) -> Result<RuntimeOperationResult, ApiError> {
-    let agent = crate::app::load_agent_configs(&state.runtime_paths)
+    let agent = crate::app::load_agent_document(&state.runtime_paths, &payload.agent_id)
         .map_err(|error| scoped(ApiError::internal(error.to_string()), request))?
-        .into_iter()
-        .find(|agent| agent.id == payload.agent_id)
         .ok_or_else(|| {
             scoped(
                 ApiError::not_found(format!("agent '{}' not found", payload.agent_id)),
@@ -846,9 +842,10 @@ fn consume_runtime_grant(
 async fn execute_command_exec(
     state: &AppState,
     request: &RequestContext,
-    agent: &AgentConfig,
+    agent: &AgentDocument,
     payload: &RuntimeOperationRequest,
 ) -> Result<JsonValue, ApiError> {
+    let agent_profile = &agent.profile;
     let server_config = live_server_config(state);
     let command_name = required_string_argument(&payload.arguments, "command", request)?;
     let requested_args = string_array_argument(&payload.arguments, "args");
@@ -856,13 +853,9 @@ async fn execute_command_exec(
         normalize_command_exec_invocation(&command_name, &requested_args);
     let formatted_invocation = format_command_invocation(&effective_command_name, &effective_args);
     let cwd_value = string_argument(&payload.arguments, "cwd");
-    let execution_paths = AgentExecutionPaths::for_agent(state, agent, &payload.run_id);
-    let cwd = resolve_command_cwd(
-        &agent.execution_environment,
-        &execution_paths,
-        cwd_value.as_deref(),
-    )
-    .map_err(|error| scoped(error, request))?;
+    let file_access_paths = AgentFileAccessPaths::for_agent(state, agent_profile, &payload.run_id);
+    let cwd = resolve_command_cwd(&agent.file_access, &file_access_paths, cwd_value.as_deref())
+        .map_err(|error| scoped(error, request))?;
     let operation_config = &server_config.operations.command;
     let timeout_ms = resolve_command_timeout_ms(&payload.arguments, operation_config);
     fs::create_dir_all(&cwd.host_path).map_err(|error| {
@@ -874,7 +867,7 @@ async fn execute_command_exec(
     let grant_id = authorize_runtime_operation(
         state,
         request,
-        &agent.id,
+        &agent_profile.id,
         "command.exec",
         "command",
         &formatted_invocation,
@@ -896,70 +889,44 @@ async fn execute_command_exec(
         "invocation": formatted_invocation,
         "cwd": cwd.display_path,
         "timeout_ms": timeout_ms,
-        "sandbox_enabled": agent.execution_environment.sandbox_enabled,
         "invocation_normalized": invocation_normalized,
-        "agent_id": agent.id,
+        "agent_id": agent_profile.id,
         "conversation_id": payload.conversation_id,
         "run_id": payload.run_id,
         "message_id": payload.message_id,
     });
-    let content = if agent.execution_environment.sandbox_enabled {
-        execute_native_operation(
-            agent,
-            &execution_paths,
-            true,
-            SandboxOperation::CommandExec {
-                command: effective_command_name.clone(),
-                args: effective_args.clone(),
-                cwd_host_path: cwd.host_path.to_string_lossy().to_string(),
-                cwd_display_path: cwd.display_path.clone(),
-                timeout_ms,
-            },
-        )
+    let mut command = tokio::process::Command::new(&effective_command_name);
+    command
+        .args(&effective_args)
+        .current_dir(cwd.host_path.clone());
+    let output = tokio::time::timeout(Duration::from_millis(timeout_ms), command.output())
         .await
-        .map_err(|error| {
-            let message = error.message().to_string();
-            let api_error = if message.contains("timed out") {
-                ApiError::timeout(message)
-            } else {
-                ApiError::internal(message)
-            };
-            scoped(api_error.with_details(error_details.clone()), request)
+        .map_err(|_| {
+            scoped(
+                ApiError::timeout(format!("command exec timed out after {timeout_ms}ms"))
+                    .with_details(error_details.clone()),
+                request,
+            )
         })?
-    } else {
-        let mut command = tokio::process::Command::new(&effective_command_name);
-        command
-            .args(&effective_args)
-            .current_dir(cwd.host_path.clone());
-        let output = tokio::time::timeout(Duration::from_millis(timeout_ms), command.output())
-            .await
-            .map_err(|_| {
-                scoped(
-                    ApiError::timeout(format!("command exec timed out after {timeout_ms}ms"))
-                        .with_details(error_details.clone()),
-                    request,
-                )
-            })?
-            .map_err(|error| {
-                scoped(
-                    ApiError::internal(format!("spawn command failed: {error}"))
-                        .with_details(error_details.clone()),
-                    request,
-                )
-            })?;
-        serde_json::json!({
-            "ok": output.status.success(),
-            "tool": "command.exec",
-            "command": effective_command_name,
-            "args": effective_args,
-            "invocation": formatted_invocation,
-            "cwd": cwd.display_path,
-            "status": output.status.code(),
-            "stdout": String::from_utf8_lossy(&output.stdout).to_string(),
-            "stderr": String::from_utf8_lossy(&output.stderr).to_string(),
-        })
-        .to_string()
-    };
+        .map_err(|error| {
+            scoped(
+                ApiError::internal(format!("spawn command failed: {error}"))
+                    .with_details(error_details.clone()),
+                request,
+            )
+        })?;
+    let content = serde_json::json!({
+        "ok": output.status.success(),
+        "tool": "command.exec",
+        "command": effective_command_name,
+        "args": effective_args,
+        "invocation": formatted_invocation,
+        "cwd": cwd.display_path,
+        "status": output.status.code(),
+        "stdout": String::from_utf8_lossy(&output.stdout).to_string(),
+        "stderr": String::from_utf8_lossy(&output.stderr).to_string(),
+    })
+    .to_string();
     Ok(parse_runtime_content(&content))
 }
 

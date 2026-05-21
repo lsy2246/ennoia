@@ -1,5 +1,5 @@
 export type ConversationFailureSource =
-  | "sandbox"
+  | "file_access"
   | "approval"
   | "permission"
   | "provider"
@@ -16,11 +16,10 @@ export type ConversationFailureClassification = {
   detail: string;
 };
 
-const SANDBOX_PATTERNS = [
-  "native sandbox only accepts /workspace, /artifacts and /tmp paths",
-  "native sandbox only accepts",
-  "path cannot escape the selected execution root",
-  "path must stay inside the selected execution root",
+const FILE_ACCESS_PATTERNS = [
+  "file access only accepts configured virtual roots",
+  "path cannot escape the selected file access root",
+  "path must stay inside the selected file access root",
 ];
 
 const PROVIDER_PATTERNS = [
@@ -97,10 +96,10 @@ export function classifyConversationFailure(message: string): ConversationFailur
   const firstLine = lines[0] ?? "";
   const restLines = lines.slice(1);
 
-  if (firstLine === "沙盒路径已拦截") {
+  if (firstLine === "文件访问路径已拦截") {
     return {
-      source: "sandbox",
-      code: "sandbox_path_restricted",
+      source: "file_access",
+      code: "file_access_path_restricted",
       summary: summarizeLines(restLines) || firstLine,
       detail,
     };
@@ -146,10 +145,10 @@ export function classifyConversationFailure(message: string): ConversationFailur
     };
   }
 
-  if (includesAny(normalized, SANDBOX_PATTERNS)) {
+  if (includesAny(normalized, FILE_ACCESS_PATTERNS)) {
     return {
-      source: "sandbox",
-      code: "sandbox_path_restricted",
+      source: "file_access",
+      code: "file_access_path_restricted",
       summary: summarizeLines(lines),
       detail,
     };

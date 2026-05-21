@@ -47,14 +47,14 @@ Web
 - 当前产品层权限模型不再区分“网络 / 配置 / 扩展管理”等高风险分类，只保留两件事：命令默认模式和命令匹配条目。命令匹配条目只服务 `command.exec`，并按规范化后的完整命令调用串做 `exact | prefix | regex` 匹配，例如 `git status`、`git diff --cached`、`node C:/tools/search-runner.mjs`。
 - 系统默认只管 Agent 身份，不拦截操作者直接发起的 HTTP 调用。
 
-## Agent 执行环境
+## Agent 文件访问
 
-- Agent 执行环境与权限系统是两套独立机制。
-- 权限系统回答“允不允许”；执行环境回答“在哪里执行”。
-- 当前执行环境只保留一个布尔开关：
-  - `sandbox_enabled = false`：直接在宿主机运行时执行。
-  - `sandbox_enabled = true`：使用原生沙盒语义，模型与内置工具优先只看到 `/workspace`、`/artifacts`、`/tmp` 三个虚拟根。
-- Agent 当前只暴露一个原生操作能力：`command.exec`。文件读取、文件写入和网络访问都不再作为独立内置工具提供；如有需要，统一通过命令完成。`command.exec` 会先经过权限裁决，再进入执行环境层，不直接把宿主机绝对路径暴露给模型。
+- Agent 文件访问与权限系统是两套独立机制。
+- 权限系统回答“动作允不允许”；文件访问回答“Agent 可使用哪些虚拟文件入口”。
+- 当前文件访问配置固定暴露三类虚拟根：`/workspace`、`/artifacts`、`/tmp`。
+- Agent 当前只暴露一个原生操作能力：`command.exec`。文件读取、文件写入和网络访问都不再作为独立内置工具提供；如有需要，统一通过命令完成。
+- `command.exec` 会先经过权限裁决，再按 Agent 的 `file_access` 解析工作目录。路径解析只接受配置过的虚拟根及其子路径，不把宿主机绝对路径作为模型侧入口。
+- 当前文件访问不是进程隔离，也不保证已启动的宿主进程无法访问其他宿主文件；真正的执行进程隔离后续单独设计。
 
 ## 细粒度接口层
 
@@ -172,7 +172,7 @@ Web
 - 系统级事件总线：`~/.ennoia/data/system/sqlite/events.db`
 - Agent 权限事件与审批：`~/.ennoia/data/system/sqlite/permissions.db`
 - 扩展通用运行态 state/record：`~/.ennoia/data/system/sqlite/extensions.db`
-- Agent 基础配置、权限配置与执行环境配置：`~/.ennoia/agents/{agent_id}/agent.toml`
+- Agent 基础配置、权限配置与文件访问配置：`~/.ennoia/agents/{agent_id}/agent.toml`
 - 系统定时计划：`~/.ennoia/data/system/schedules.json`
 - 扩展私有数据：`~/.ennoia/data/extensions/{extension_id}/`
 - 扩展级宿主配置：`~/.ennoia/config/extensions/{extension_id}.toml`

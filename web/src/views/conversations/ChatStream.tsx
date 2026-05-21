@@ -666,13 +666,13 @@ function resolveFailurePresentation(
   const summary = failure?.summary ?? entry.failureSummary?.trim() ?? entry.body.trim();
   const detail = failure?.detail ?? entry.failureDetail?.trim() ?? entry.body.trim();
 
-  if (source === "sandbox" || entry.failureCode === "sandbox_path_restricted") {
+  if (source === "file_access" || entry.failureCode === "file_access_path_restricted") {
     return {
-      kind: "sandbox" as const,
-      title: t("web.conversations.sandbox_path_error_title", "沙盒路径已拦截"),
+      kind: "file_access" as const,
+      title: t("web.conversations.file_access_path_error_title", "文件访问路径已拦截"),
       summary: t(
-        "web.conversations.sandbox_path_error_summary",
-        "当前原生沙盒只允许访问 /workspace、/artifacts 和 /tmp，这次路径请求已被拦截。",
+        "web.conversations.file_access_path_error_summary",
+        "当前只允许访问配置的虚拟根，这次路径请求已被拦截。",
       ),
       detail: entry.failureDetail || entry.body,
     };
@@ -845,8 +845,8 @@ function renderToolResultBody(
     headline = t("web.conversations.extension_error_title", "扩展运行错误");
   } else if (classifiedFailure?.source === "system") {
     headline = t("web.conversations.system_error_title", "系统错误");
-  } else if (classifiedFailure?.source === "sandbox") {
-    headline = t("web.conversations.sandbox_path_error_title", "沙盒路径已拦截");
+  } else if (classifiedFailure?.source === "file_access") {
+    headline = t("web.conversations.file_access_path_error_title", "文件访问路径已拦截");
   } else if (classifiedFailure?.source === "permission") {
     headline = t("web.conversations.permission_error_title", "权限已拒绝");
   }
@@ -870,7 +870,7 @@ function renderToolResultBody(
   );
 }
 
-function SandboxBlockedBubble({
+function FileAccessBlockedBubble({
   title,
   t,
 }: {
@@ -878,15 +878,15 @@ function SandboxBlockedBubble({
   t: (key: string, fallback: string) => string;
 }) {
   return (
-    <div className="chat-sandbox-bubble">
-      <div className="chat-sandbox-bubble__header">
+    <div className="chat-file-access-bubble">
+      <div className="chat-file-access-bubble__header">
         <strong>{title}</strong>
       </div>
-      <div className="chat-sandbox-bubble__allowlist">
-        <span className="chat-sandbox-bubble__allowlist-label">
-          {t("web.conversations.sandbox_allowed_paths_label", "仅允许访问这些路径")}
+      <div className="chat-file-access-bubble__allowlist">
+        <span className="chat-file-access-bubble__allowlist-label">
+          {t("web.conversations.file_access_allowed_paths_label", "仅允许访问这些路径")}
         </span>
-        <div className="chat-sandbox-bubble__allowlist-items">
+        <div className="chat-file-access-bubble__allowlist-items">
           <code>/workspace</code>
           <code>/artifacts</code>
           <code>/tmp</code>
@@ -1340,8 +1340,8 @@ function MessageGroup({
         </div>
 
         {failurePresentation ? (
-          failurePresentation.kind === "sandbox" ? (
-            <SandboxBlockedBubble
+          failurePresentation.kind === "file_access" ? (
+            <FileAccessBlockedBubble
               title={failurePresentation.title}
               t={t}
             />

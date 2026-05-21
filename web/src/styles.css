@@ -2258,7 +2258,7 @@ label {
   color: var(--text-muted);
 }
 
-.chat-sandbox-bubble {
+.chat-file-access-bubble {
   align-self: flex-start;
   width: min(100%, var(--chat-bubble-max-width));
   display: flex;
@@ -2276,13 +2276,13 @@ label {
   box-shadow: var(--shadow-1);
 }
 
-.chat-sandbox-bubble__header {
+.chat-file-access-bubble__header {
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
 
-.chat-sandbox-bubble__allowlist {
+.chat-file-access-bubble__allowlist {
   display: flex;
   flex-direction: column;
   gap: 7px;
@@ -2292,19 +2292,19 @@ label {
   background: color-mix(in srgb, var(--bg-soft) 94%, transparent);
 }
 
-.chat-sandbox-bubble__allowlist-label {
+.chat-file-access-bubble__allowlist-label {
   color: var(--text-muted);
   font-size: 12px;
   line-height: 1.4;
 }
 
-.chat-sandbox-bubble__allowlist-items {
+.chat-file-access-bubble__allowlist-items {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
 }
 
-.chat-sandbox-bubble__allowlist-items code {
+.chat-file-access-bubble__allowlist-items code {
   display: inline-flex;
   align-items: center;
   padding: 5px 9px;

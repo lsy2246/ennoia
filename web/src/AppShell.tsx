@@ -110,8 +110,8 @@ export function AppShell() {
           return t("web.conversations.configuration_error_title", "配置错误");
         case "extension":
           return t("web.conversations.extension_error_title", "扩展运行错误");
-        case "sandbox":
-          return t("web.conversations.sandbox_path_error_title", "沙盒路径已拦截");
+        case "file_access":
+          return t("web.conversations.file_access_path_error_title", "文件访问路径已拦截");
         case "approval":
           return t("web.conversations.permission_approval_title", "等待审批");
         case "permission":

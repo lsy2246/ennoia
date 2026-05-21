@@ -5,6 +5,7 @@ pub mod context;
 pub mod decision;
 pub mod domain;
 pub mod extension;
+pub mod file_access;
 pub mod gate;
 pub mod overview;
 pub mod permission;
@@ -55,12 +56,13 @@ pub use extension::{
     HOOK_EVENT_PERMISSION_APPROVAL_RESOLVED, HOOK_EVENT_RUN_REQUESTED,
     HOOK_EVENT_RUN_STAGE_CHANGED,
 };
+pub use file_access::{AgentFileAccessProfile, AgentFileAccessRoot};
 pub use gate::{GateRecord, GateSeverity, GateVerdict};
 pub use overview::{core_modules, PlatformOverview};
 pub use permission::{
-    AgentExecutionEnvironment, AgentPermissionCommandEntry, AgentPermissionPolicy,
-    AgentPermissionProfile, AgentPermissionRule, PermissionApprovalRecord, PermissionDecision,
-    PermissionEventRecord, PermissionRequest, PermissionScope, PermissionTarget, PermissionTrigger,
+    AgentPermissionCommandEntry, AgentPermissionPolicy, AgentPermissionProfile,
+    AgentPermissionRule, PermissionApprovalRecord, PermissionDecision, PermissionEventRecord,
+    PermissionRequest, PermissionScope, PermissionTarget, PermissionTrigger,
 };
 pub use policy::{
     GlobPattern, MemoryPolicy, RuntimeRule, RuntimeRuleCondition, RuntimeRuleTarget, StagePolicy,

@@ -66,37 +66,17 @@ pub(super) fn rule_matches(rule: &AgentPermissionRule, request: &PermissionReque
     {
         return false;
     }
-    if !rule.extension_scope.is_empty() {
-        let Some(extension_id) = &request.scope.extension_id else {
-            return false;
-        };
-        if !rule.extension_scope.iter().any(|item| item == extension_id) {
-            return false;
-        }
-    }
-    if !matches_target_scope(rule, request) {
-        return false;
-    }
-    if !matches_conversation_scope(rule.conversation_scope.as_deref(), request) {
-        return false;
-    }
-    if !matches_run_scope(rule.run_scope.as_deref(), request) {
-        return false;
-    }
-    if !matches_path_scope(rule, request) {
-        return false;
-    }
-    if !matches_host_scope(rule, request) {
+    if !matches_command_scope(rule, request) {
         return false;
     }
     true
 }
 
-fn matches_target_scope(rule: &AgentPermissionRule, request: &PermissionRequest) -> bool {
-    if rule.target_scope.is_empty() {
+fn matches_command_scope(rule: &AgentPermissionRule, request: &PermissionRequest) -> bool {
+    if rule.command_scope.is_empty() {
         return true;
     }
-    rule.target_scope
+    rule.command_scope
         .iter()
         .any(|entry| matches_command_entry(entry, request.target.id.as_str()))
 }
@@ -116,93 +96,6 @@ fn matches_command_entry(entry: &AgentPermissionCommandEntry, candidate: &str) -
 
 fn normalize_command_match_value(value: &str) -> String {
     value.trim().replace('\\', "/")
-}
-
-fn matches_conversation_scope(scope: Option<&str>, request: &PermissionRequest) -> bool {
-    match scope.unwrap_or("").trim().to_ascii_lowercase().as_str() {
-        "" | "any" => true,
-        "current" | "same_conversation" => {
-            let Some(current) = &request.scope.conversation_id else {
-                return false;
-            };
-            request
-                .target
-                .conversation_id
-                .as_ref()
-                .or(Some(&request.target.id))
-                .map(|target| target == current)
-                .unwrap_or(false)
-        }
-        _ => false,
-    }
-}
-
-fn matches_run_scope(scope: Option<&str>, request: &PermissionRequest) -> bool {
-    match scope.unwrap_or("").trim().to_ascii_lowercase().as_str() {
-        "" | "any" => true,
-        "current" | "same_run" => {
-            let Some(current) = &request.scope.run_id else {
-                return false;
-            };
-            request
-                .target
-                .run_id
-                .as_ref()
-                .or(Some(&request.target.id))
-                .map(|target| target == current)
-                .unwrap_or(false)
-        }
-        _ => false,
-    }
-}
-
-fn matches_path_scope(rule: &AgentPermissionRule, request: &PermissionRequest) -> bool {
-    let candidate = request
-        .target
-        .path
-        .as_deref()
-        .or(request.scope.path.as_deref())
-        .map(normalize_path);
-    if !rule.path_include.is_empty() {
-        let Some(candidate) = candidate.as_deref() else {
-            return false;
-        };
-        if !rule
-            .path_include
-            .iter()
-            .any(|pattern| pattern.matches(candidate))
-        {
-            return false;
-        }
-    }
-    if !rule.path_exclude.is_empty() {
-        let Some(candidate) = candidate.as_deref() else {
-            return true;
-        };
-        if rule
-            .path_exclude
-            .iter()
-            .any(|pattern| pattern.matches(candidate))
-        {
-            return false;
-        }
-    }
-    true
-}
-
-fn matches_host_scope(rule: &AgentPermissionRule, request: &PermissionRequest) -> bool {
-    if rule.host_scope.is_empty() {
-        return true;
-    }
-    let candidate = request
-        .target
-        .host
-        .as_deref()
-        .or(request.scope.host.as_deref())
-        .unwrap_or_default();
-    rule.host_scope
-        .iter()
-        .any(|pattern| pattern.matches(candidate))
 }
 
 pub(super) fn grant_matches(grant: &PermissionGrantRecord, request: &PermissionRequest) -> bool {
@@ -260,10 +153,6 @@ fn same_scope_without_run(
 
 pub(super) fn namespace(action: &str) -> &str {
     action.split('.').next().unwrap_or(action)
-}
-
-pub(super) fn normalize_path(value: &str) -> String {
-    value.replace('\\', "/")
 }
 
 pub(super) fn now_iso() -> String {

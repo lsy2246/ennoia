@@ -14,6 +14,8 @@ pub struct AgentRecord {
     pub profile: AgentConfig,
     #[serde(default)]
     pub permission_profile: ennoia_kernel::AgentPermissionProfile,
+    #[serde(default)]
+    pub file_access: ennoia_kernel::AgentFileAccessProfile,
 }
 
 impl From<ennoia_kernel::AgentDocument> for AgentRecord {
@@ -21,6 +23,7 @@ impl From<ennoia_kernel::AgentDocument> for AgentRecord {
         Self {
             profile: value.profile,
             permission_profile: value.permission_profile,
+            file_access: value.file_access,
         }
     }
 }
@@ -59,6 +62,7 @@ pub(super) async fn agent_create(
         &ennoia_kernel::AgentDocument {
             profile: payload.profile.clone(),
             permission_profile: payload.permission_profile.clone(),
+            file_access: payload.file_access.clone(),
         },
     )
     .map_err(|error| ApiError::internal(error.to_string()))?;
@@ -84,6 +88,7 @@ pub(super) async fn agent_update(
         &ennoia_kernel::AgentDocument {
             profile: payload.profile.clone(),
             permission_profile: payload.permission_profile.clone(),
+            file_access: payload.file_access.clone(),
         },
     )
     .map_err(|error| ApiError::internal(error.to_string()))?;
