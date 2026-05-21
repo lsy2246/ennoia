@@ -437,9 +437,9 @@ export function App() {
       return {
         ...descriptor,
         titleKey: "web.agents.new",
-        titleFallback: "新建 Agent",
+        titleFallback: t("web.agents.new", "新建 Agent"),
         subtitleKey: descriptor.subtitle ? "web.agents.edit" : descriptor.subtitleKey,
-        subtitleFallback: descriptor.subtitle ? "编辑 Agent" : descriptor.subtitleFallback,
+        subtitleFallback: descriptor.subtitle ? t("web.agents.edit", "编辑 Agent") : descriptor.subtitleFallback,
       };
     }
 
@@ -447,14 +447,14 @@ export function App() {
       return {
         ...descriptor,
         titleKey: "web.model_endpoints.new",
-        titleFallback: "新建模型接入",
+        titleFallback: t("web.model_endpoints.new", "新建模型接入"),
         subtitleKey: descriptor.subtitle ? "web.model_endpoints.edit" : descriptor.subtitleKey,
-        subtitleFallback: descriptor.subtitle ? "编辑模型接入" : descriptor.subtitleFallback,
+        subtitleFallback: descriptor.subtitle ? t("web.model_endpoints.edit", "编辑模型接入") : descriptor.subtitleFallback,
       };
     }
 
     return descriptor;
-  }, []);
+  }, [t]);
 
   const dockComponents = useMemo(
     () => ({

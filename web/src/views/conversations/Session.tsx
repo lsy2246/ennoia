@@ -227,7 +227,10 @@ function appendTextSegment(segments: ComposerSegment[], value: string) {
   segments.push({ kind: "text", value: normalized });
 }
 
-function readComposerSnapshot(root: HTMLElement | null): ComposerSnapshot {
+function readComposerSnapshot(
+  root: HTMLElement | null,
+  fallbackDispatchLabel = "insert",
+): ComposerSnapshot {
   if (!root) {
     return { body: "", addressedAgents: [], segments: [] };
   }
@@ -280,7 +283,7 @@ function readComposerSnapshot(root: HTMLElement | null): ComposerSnapshot {
       segments.push({
         kind: "dispatch",
         mode,
-        label: node.dataset.tokenDisplayLabel ?? node.dataset.tokenLabel ?? "插入",
+        label: node.dataset.tokenDisplayLabel ?? node.dataset.tokenLabel ?? fallbackDispatchLabel,
       });
       return;
     }
@@ -1253,7 +1256,7 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
   }, [handleConversationMissing, notifyChanged, sessionId, streamDisconnectedMessage]);
 
   const syncComposerState = useCallback(() => {
-    const snapshot = readComposerSnapshot(editorRef.current);
+    const snapshot = readComposerSnapshot(editorRef.current, t("web.conversations.insert_badge", "插入"));
     setComposerSnapshot(snapshot);
     editorRef.current?.setAttribute("data-empty", String(isComposerSnapshotVisuallyEmpty(snapshot)));
     const context = extractComposerTrigger(editorRef.current);
@@ -1272,7 +1275,7 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
       query: context.query,
       selectedIndex: current.mode === mode ? current.selectedIndex : 0,
     }));
-  }, [canMention]);
+  }, [canMention, t]);
 
   useEffect(() => {
     syncComposerState();
@@ -1492,6 +1495,11 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
     texts: {
       typingLabel: t("web.conversations.status_ai_thinking", "思考中"),
       typingDetail: t("web.conversations.status_ai_thinking_detail", "Agent 已接到消息，正在组织回复与处理工具步骤。"),
+      operationGenerating: t("web.conversations.operation_generating", "正在生成回复。"),
+      operationCommand: t("web.conversations.operation_command", "正在执行命令。"),
+      operationFileWrite: t("web.conversations.operation_file_write", "正在写入文件。"),
+      operationFileRead: t("web.conversations.operation_file_read", "正在读取文件。"),
+      operationNetwork: t("web.conversations.operation_network", "正在请求网络资源。"),
     },
   }), [agentMap, t, visibleOperations]);
 
@@ -1713,7 +1721,7 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
     if (!conversation) {
       return;
     }
-    const snapshot = readComposerSnapshot(editorRef.current);
+    const snapshot = readComposerSnapshot(editorRef.current, t("web.conversations.insert_badge", "插入"));
     if (!snapshot.body.trim()) {
       return;
     }
@@ -1808,10 +1816,10 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
 
   const approvalReplyActionLabel = useCallback((approval: PermissionApprovalRecord) => {
     if (approval.action === "command.exec") {
-      return "本次回复允许该命令";
+      return t("web.permissions.grant_mode_reply_command", "本次回复允许该命令");
     }
-    return "本次回复允许该操作";
-  }, []);
+    return t("web.permissions.grant_mode_reply_action", "本次回复允许同类操作");
+  }, [t]);
 
   const revokeGrant = useCallback(async (grantId: string) => {
     setError(null);
@@ -2398,7 +2406,7 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
                                 {approvalReplyActionLabel(approval)}
                               </button>
                               <button type="button" className="secondary" onClick={() => void resolveApproval(approval.approval_id, "allow_conversation_all")}>
-                                本会话允许全部操作
+                                {t("web.permissions.grant_mode_conversation_all", "本会话允许全部操作")}
                               </button>
                               <button type="button" className="secondary" onClick={() => void resolveApproval(approval.approval_id, "deny")}>
                                 {t("web.action.reject", "拒绝")}

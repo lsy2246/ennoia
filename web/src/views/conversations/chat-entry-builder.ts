@@ -10,23 +10,28 @@ import { classifyConversationFailure, isLikelyFailureMessage } from "./error-cla
 type StatusTexts = {
   typingLabel: string;
   typingDetail: string;
+  operationGenerating: string;
+  operationCommand: string;
+  operationFileWrite: string;
+  operationFileRead: string;
+  operationNetwork: string;
 };
 
-function describeOperationStep(operation: OperationRecord) {
+function describeOperationStep(operation: OperationRecord, texts: StatusTexts) {
   if (operation.kind === "provider" && operation.name === "generate") {
-    return "正在生成回复。";
+    return texts.operationGenerating;
   }
   if (operation.kind === "runtime" && operation.name === "command.exec") {
-    return "正在执行命令。";
+    return texts.operationCommand;
   }
   if (operation.kind === "runtime" && operation.name === "fs.write") {
-    return "正在写入文件。";
+    return texts.operationFileWrite;
   }
   if (operation.kind === "runtime" && operation.name === "fs.read") {
-    return "正在读取文件。";
+    return texts.operationFileRead;
   }
   if (operation.kind === "runtime" && operation.name === "net.fetch") {
-    return "正在请求网络资源。";
+    return texts.operationNetwork;
   }
   return undefined;
 }
@@ -395,7 +400,7 @@ export function buildStatusEntries(params: {
       title: params.texts.typingLabel,
       label: params.texts.typingLabel,
       branchId: operation.branch_id ?? operation.lane_id ?? undefined,
-      detail: describeOperationStep(operation) ?? params.texts.typingDetail,
+      detail: describeOperationStep(operation, params.texts) ?? params.texts.typingDetail,
       animation: "typing",
       body: params.texts.typingDetail,
       createdAt: operation.updated_at,

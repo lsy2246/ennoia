@@ -725,10 +725,10 @@ export function ModelEndpointEditorView({ modelEndpointId, panelId }: { modelEnd
           </p>
         </label>
         <label>
-          请求超时毫秒
+          {t("web.model_endpoints.request_timeout_ms", "请求超时毫秒")}
           <input
             value={form.request_timeout_ms ?? ""}
-            placeholder="默认 0，表示不限制"
+            placeholder={t("web.model_endpoints.request_timeout_placeholder", "默认 0，表示不限制")}
             onChange={(event) =>
               setForm({
                 ...form,
@@ -738,7 +738,9 @@ export function ModelEndpointEditorView({ modelEndpointId, panelId }: { modelEnd
               })
             }
           />
-          <p className="helper-text">默认值为 0，表示不限制；填写其他值时至少为 1000ms，并且只覆盖当前接入实例。</p>
+          <p className="helper-text">
+            {t("web.model_endpoints.request_timeout_help", "默认值为 0，表示不限制；填写其他值时至少为 1000ms，并且只覆盖当前接入实例。")}
+          </p>
         </label>
         <div className="form-grid">
           <label>

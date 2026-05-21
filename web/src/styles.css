@@ -2022,8 +2022,8 @@ label {
 }
 
 .message-bubble--tool {
-  background: color-mix(in srgb, #9b7bff 5%, var(--bg-soft));
-  border-color: color-mix(in srgb, #9b7bff 22%, transparent);
+  background: color-mix(in srgb, var(--accent) 5%, var(--bg-soft));
+  border-color: color-mix(in srgb, var(--accent) 22%, transparent);
 }
 
 .message-bubble--typing {
@@ -2472,8 +2472,8 @@ label {
 }
 
 .message-accessory--tool {
-  border-color: color-mix(in srgb, #9b7bff 26%, transparent);
-  background: color-mix(in srgb, #9b7bff 5%, var(--bg-soft));
+  border-color: color-mix(in srgb, var(--accent) 26%, transparent);
+  background: color-mix(in srgb, var(--accent) 5%, var(--bg-soft));
 }
 
 .message-accessory--error {
@@ -2604,8 +2604,8 @@ label {
   padding: 1px 8px;
   margin: 0 2px;
   border-radius: 999px;
-  background: color-mix(in srgb, #9b7bff 18%, transparent);
-  color: #7a5cff;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent);
   font-weight: 600;
   vertical-align: baseline;
 }
@@ -2680,7 +2680,7 @@ label {
 }
 
 .message-pre--json {
-  background: color-mix(in srgb, #9b7bff 4%, var(--bg));
+  background: color-mix(in srgb, var(--accent) 4%, var(--bg));
 }
 
 .message-markdown__table-wrap {
@@ -2722,7 +2722,7 @@ label {
   font-size: var(--text-xs);
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: #7a5cff;
+  color: var(--accent);
 }
 
 .composer {
@@ -3167,13 +3167,13 @@ label {
 }
 
 .composer-status--warn {
-  border-color: color-mix(in srgb, #ffb020 26%, transparent);
-  background: color-mix(in srgb, #ffb020 8%, var(--bg-elevated));
+  border-color: color-mix(in srgb, var(--warn) 26%, transparent);
+  background: color-mix(in srgb, var(--warn) 8%, var(--bg-elevated));
 }
 
 .composer-status--danger {
-  border-color: color-mix(in srgb, #d83b01 26%, transparent);
-  background: color-mix(in srgb, #d83b01 8%, var(--bg-elevated));
+  border-color: color-mix(in srgb, var(--danger) 26%, transparent);
+  background: color-mix(in srgb, var(--danger) 8%, var(--bg-elevated));
 }
 
 .queue-panel {
@@ -3272,8 +3272,8 @@ label {
   padding: 2px 8px;
   margin: 0 2px;
   border-radius: 999px;
-  background: color-mix(in srgb, #9b7bff 14%, transparent);
-  color: #7a5cff;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
   font-weight: 600;
 }
 
@@ -3283,8 +3283,8 @@ label {
   padding: 2px 8px;
   margin: 0 2px;
   border-radius: 999px;
-  background: color-mix(in srgb, #ffb54a 16%, transparent);
-  color: #9a5a00;
+  background: color-mix(in srgb, var(--warn) 16%, transparent);
+  color: var(--warn);
   font-weight: 600;
 }
 
@@ -3738,16 +3738,16 @@ label {
   inset: 14px auto 14px 0;
   width: 3px;
   border-radius: 999px;
-  background: #cfd9e8;
+  background: var(--line-strong);
 }
 
 .logs-feed-card--error::before {
-  background: rgba(194, 65, 45, 0.9);
+  background: color-mix(in srgb, var(--danger) 88%, transparent);
 }
 
 .logs-feed-card--warn::before,
 .logs-feed-card--slow::before {
-  background: rgba(183, 121, 31, 0.9);
+  background: color-mix(in srgb, var(--warn) 88%, transparent);
 }
 
 .logs-feed-card__header {
@@ -3986,21 +3986,21 @@ label {
 }
 
 .logs-layout .badge--success {
-  background: #eef9f2;
-  border-color: #d8eddf;
-  color: #18794e;
+  background: color-mix(in srgb, var(--success) 10%, var(--logs-card-bg));
+  border-color: color-mix(in srgb, var(--success) 28%, var(--logs-line));
+  color: var(--success);
 }
 
 .logs-layout .badge--warn {
-  background: #fff7ea;
-  border-color: #f2dfbf;
-  color: #af6b14;
+  background: color-mix(in srgb, var(--warn) 10%, var(--logs-card-bg));
+  border-color: color-mix(in srgb, var(--warn) 28%, var(--logs-line));
+  color: var(--warn);
 }
 
 .logs-layout .badge--danger {
-  background: #fff2ef;
-  border-color: #f2d4ce;
-  color: #c2412d;
+  background: color-mix(in srgb, var(--danger) 10%, var(--logs-card-bg));
+  border-color: color-mix(in srgb, var(--danger) 28%, var(--logs-line));
+  color: var(--danger);
 }
 
 .logs-layout .badge--muted {
@@ -4911,15 +4911,15 @@ label {
 }
 
 .extensions-diagnostic-card--danger::before {
-  background: rgba(194, 65, 45, 0.9);
+  background: color-mix(in srgb, var(--danger) 88%, transparent);
 }
 
 .extensions-diagnostic-card--warn::before {
-  background: rgba(183, 121, 31, 0.9);
+  background: color-mix(in srgb, var(--warn) 88%, transparent);
 }
 
 .extensions-diagnostic-card--success::before {
-  background: rgba(24, 121, 78, 0.9);
+  background: color-mix(in srgb, var(--success) 88%, transparent);
 }
 
 .extensions-diagnostic-card__header,

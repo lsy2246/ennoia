@@ -5,6 +5,7 @@ import {
   resolvePauseNotificationsOnHover,
   resolveSuccessAutoDismissMs,
 } from "@/lib/uiDefaults";
+import { useUiHelpers } from "@/stores/ui";
 
 type StatusNoticeTone = "error" | "success";
 
@@ -38,6 +39,7 @@ export function StatusNotice({
   onDismiss?: () => void;
   durationMs?: number;
 }) {
+  const { t } = useUiHelpers();
   const [target, setTarget] = useState<HTMLElement | null>(null);
   const [isHovering, setIsHovering] = useState(false);
   const [timerCycle, setTimerCycle] = useState(0);
@@ -105,9 +107,9 @@ export function StatusNotice({
           type="button"
           className="status-toast__close"
           onClick={onDismiss}
-          aria-label="关闭提示"
+          aria-label={t("web.common.close_notice", "关闭提示")}
         >
-          关闭
+          {t("web.common.close", "关闭")}
         </button>
       ) : null}
     </section>,

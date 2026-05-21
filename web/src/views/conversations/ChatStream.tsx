@@ -776,14 +776,18 @@ function formatToolResultBody(result: unknown) {
   }
 }
 
-function formatDurationLabel(startedAt: string, endedAt?: string) {
+function formatDurationLabel(
+  startedAt: string,
+  endedAt: string | undefined,
+  t: (key: string, fallback: string) => string,
+) {
   const start = Date.parse(startedAt);
   const end = endedAt ? Date.parse(endedAt) : Number.NaN;
   if (Number.isNaN(start) || Number.isNaN(end) || end <= start) {
     return "";
   }
   const seconds = Math.max(1, Math.round((end - start) / 1000));
-  return `${seconds} 秒`;
+  return t("web.common.seconds", "{count} 秒").replace("{count}", String(seconds));
 }
 
 function renderToolResultBody(
@@ -1535,7 +1539,7 @@ function ProcessSummary({
   const endedAt =
     turn.finalReplyGroup?.timestamp
     ?? turn.processGroups[turn.processGroups.length - 1]?.timestamp;
-  const duration = formatDurationLabel(turn.operatorGroup.timestamp, endedAt);
+  const duration = formatDurationLabel(turn.operatorGroup.timestamp, endedAt, t);
   const parts = [
     t("web.conversations.process_steps", "过程 {count} 步").replace("{count}", String(summary.stepCount)),
     summary.toolCallCount > 0

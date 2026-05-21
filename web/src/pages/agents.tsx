@@ -57,10 +57,10 @@ export function Agents() {
                 entityId: `new-${Date.now()}`,
                 title: t("web.agents.new", "新建 Agent"),
                 titleKey: "web.agents.new",
-                titleFallback: "新建 Agent",
+                titleFallback: t("web.agents.new", "新建 Agent"),
                 subtitle: t("web.agents.edit", "编辑 Agent"),
                 subtitleKey: "web.agents.edit",
-                subtitleFallback: "编辑 Agent",
+                subtitleFallback: t("web.agents.edit", "编辑 Agent"),
               })}
           >
             {t("web.agents.new", "新建 Agent")}

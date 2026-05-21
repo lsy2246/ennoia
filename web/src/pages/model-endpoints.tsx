@@ -62,10 +62,10 @@ export function ModelEndpointsPage({ embedded = false }: { embedded?: boolean })
                 entityId: `new-${Date.now()}`,
                 title: t("web.model_endpoints.new", "新建模型接入"),
                 titleKey: "web.model_endpoints.new",
-                titleFallback: "新建模型接入",
+                titleFallback: t("web.model_endpoints.new", "新建模型接入"),
                 subtitle: t("web.model_endpoints.edit", "编辑模型接入"),
                 subtitleKey: "web.model_endpoints.edit",
-                subtitleFallback: "编辑模型接入",
+                subtitleFallback: t("web.model_endpoints.edit", "编辑模型接入"),
               })}
           >
             {t("web.model_endpoints.new", "新建模型接入")}

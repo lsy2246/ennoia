@@ -64,11 +64,15 @@ const EMPTY_PERMISSION_PROFILE: AgentPermissionProfile = {
   entries: [],
 };
 
-const COMMAND_PERMISSION_MATCH_OPTIONS = [
-  { value: "prefix", label: "前缀匹配" },
-  { value: "exact", label: "完整匹配" },
-  { value: "regex", label: "正则匹配" },
-];
+function buildCommandPermissionMatchOptions(
+  t: (key: string, fallback: string, params?: Record<string, string | number>) => string,
+) {
+  return [
+    { value: "prefix", label: t("web.permissions.match_prefix", "前缀匹配") },
+    { value: "exact", label: t("web.permissions.match_exact", "完整匹配") },
+    { value: "regex", label: t("web.permissions.match_regex", "正则匹配") },
+  ];
+}
 
 export function AgentEditorView({
   agentId,
@@ -151,7 +155,7 @@ export function AgentEditorView({
 
       const current = nextAgents.find((item) => item.id === agentId);
       if (!current) {
-        setError("未找到对应 Agent。");
+        setError(t("web.agents.not_found", "未找到对应 Agent。"));
         return;
       }
 
@@ -161,7 +165,7 @@ export function AgentEditorView({
     } catch (err) {
       setError(String(err));
     }
-  }, [agentId, hydratePermissions, isNew, providerContributions]);
+  }, [agentId, hydratePermissions, isNew, providerContributions, t]);
 
   useEffect(() => {
     void hydrate();
@@ -448,7 +452,7 @@ export function AgentEditorView({
                   ))}
                 </div>
                 <p className="helper-text">
-                  技能是否自动随 Agent 带上由各自的 <code>mount.mode</code> 决定；这里仅管理分配关系。
+                  {t("web.agents.skills_mount_help", "技能是否自动随 Agent 带上由各自的 mount.mode 决定；这里仅管理分配关系。")}
                 </p>
               </section>
             </div>
@@ -469,17 +473,17 @@ export function AgentEditorView({
 
               <>
                 <section className="details-panel agent-editor__section">
-                  <div className="panel-title">文件访问</div>
+                  <div className="panel-title">{t("web.agents.file_access", "文件访问")}</div>
                   <p className="helper-text">
-                    command.exec 的工作目录只接受这些虚拟根及其子路径。
+                    {t("web.agents.file_access_help", "command.exec 的工作目录只接受这些虚拟根及其子路径。")}
                   </p>
                   <div className="agent-policy-editor">
                     <div className="resource-card agent-policy-rule">
                       <div className="agent-policy-rule__header">
-                        <strong>当前入口</strong>
+                        <strong>{t("web.agents.file_access_current_entry", "当前入口")}</strong>
                       </div>
                       <div className="kv-list">
-                        <span>默认根</span>
+                        <span>{t("web.agents.file_access_default_root", "默认根")}</span>
                         <strong>{normalizeFileAccessProfile(form.file_access).default_root}</strong>
                         {normalizeFileAccessProfile(form.file_access).roots.flatMap((root) => [
                           <span key={`${root.id}-label`}>{root.id}</span>,
@@ -493,11 +497,11 @@ export function AgentEditorView({
                 <section className="details-panel agent-editor__section">
                   <div className="panel-title">{t("web.permissions.profile", "权限模式")}</div>
                   <p className="helper-text">
-                    长期权限配置属于 Agent 本身；这里只定义 <code>command.exec</code> 的命令匹配策略，文件访问由文件访问配置单独决定。
+                    {t("web.permissions.profile_help", "长期权限配置属于 Agent 本身；这里只定义 command.exec 的命令匹配策略，文件访问由文件访问配置单独决定。")}
                   </p>
                   <div className="agent-policy-editor">
                     <label>
-                      命令默认策略
+                      {t("web.permissions.command_default_policy", "命令默认策略")}
                       <Select
                         value={policyForm.mode}
                         onChange={(value) =>
@@ -506,8 +510,8 @@ export function AgentEditorView({
                             mode: value,
                           }))}
                         options={[
-                          { value: "whitelist", label: "白名单模式：默认询问，命中规则直接允许" },
-                          { value: "blacklist", label: "黑名单模式：默认允许，命中规则改为询问" },
+                          { value: "whitelist", label: t("web.permissions.mode_whitelist", "白名单模式：默认询问，命中规则直接允许") },
+                          { value: "blacklist", label: t("web.permissions.mode_blacklist", "黑名单模式：默认允许，命中规则改为询问") },
                         ]}
                       />
                     </label>
@@ -515,12 +519,12 @@ export function AgentEditorView({
                     <div className="agent-policy-editor__rules">
                       <div className="resource-card agent-policy-rule">
                         <div className="agent-policy-rule__header">
-                          <strong>命令匹配条目</strong>
+                          <strong>{t("web.permissions.command_entries", "命令匹配条目")}</strong>
                         </div>
                         <p className="helper-text">
                           {policyForm.mode === "blacklist"
-                            ? "这里填写需要改成询问的命令调用。未命中的命令默认直接运行。"
-                            : "这里填写可以直接运行的命令调用。未命中的命令默认进入询问。"}
+                            ? t("web.permissions.entries_blacklist_help", "这里填写需要改成询问的命令调用。未命中的命令默认直接运行。")
+                            : t("web.permissions.entries_whitelist_help", "这里填写可以直接运行的命令调用。未命中的命令默认进入询问。")}
                         </p>
                         <CommandPermissionEntriesEditor
                           t={t}
@@ -535,19 +539,19 @@ export function AgentEditorView({
 
                       <div className="resource-card agent-policy-rule">
                         <div className="agent-policy-rule__header">
-                          <strong>当前行为</strong>
+                          <strong>{t("web.permissions.current_behavior", "当前行为")}</strong>
                         </div>
                         <p className="helper-text">
                           {policyForm.mode === "blacklist"
-                            ? "command.exec 默认直接运行；只有命中这些条目的命令调用才会先询问。"
-                            : "command.exec 默认先询问；只有命中这些条目的命令调用才会直接运行。"}
+                            ? t("web.permissions.behavior_blacklist", "command.exec 默认直接运行；只有命中这些条目的命令调用才会先询问。")
+                            : t("web.permissions.behavior_whitelist", "command.exec 默认先询问；只有命中这些条目的命令调用才会直接运行。")}
                         </p>
                       </div>
                     </div>
                   </div>
                   {isNew ? (
                     <p className="helper-text">
-                      新建 Agent 时，这里的配置会和基础信息一起在点击底部“保存”后创建。
+                      {t("web.permissions.new_agent_save_hint", "新建 Agent 时，这里的配置会和基础信息一起在点击底部“保存”后创建。")}
                     </p>
                   ) : (
                     <div className="button-row button-row--wrap">
@@ -822,11 +826,11 @@ function CommandPermissionEntriesEditor({
                   handleItemChange(itemIndex, {
                     match: normalizeCommandPermissionMatch(value),
                   })}
-                options={COMMAND_PERMISSION_MATCH_OPTIONS}
+                options={buildCommandPermissionMatchOptions(t)}
               />
               <input
                 value={entry.value}
-                placeholder={commandPermissionEntryPlaceholder(entry.match)}
+                placeholder={commandPermissionEntryPlaceholder(entry.match, t)}
                 onChange={(event) =>
                   handleItemChange(itemIndex, { value: event.target.value })}
               />
@@ -835,7 +839,7 @@ function CommandPermissionEntriesEditor({
                 className="secondary"
                 onClick={() => handleItemRemove(itemIndex)}
               >
-                删除
+                {t("web.action.delete", "删除")}
               </button>
             </div>
           ))
@@ -846,20 +850,23 @@ function CommandPermissionEntriesEditor({
           </div>
         )}
         <button type="button" className="secondary" onClick={handleItemAdd}>
-          新增条目
+          {t("web.permissions.add_entry", "新增条目")}
         </button>
       </div>
     </div>
   );
 }
 
-function commandPermissionEntryPlaceholder(match: string | undefined) {
+function commandPermissionEntryPlaceholder(
+  match: string | undefined,
+  t: (key: string, fallback: string, params?: Record<string, string | number>) => string,
+) {
   switch (normalizeCommandPermissionMatch(match)) {
     case "exact":
-      return '例如 git status';
+      return t("web.permissions.entry_placeholder_exact", "例如 git status");
     case "regex":
-      return String.raw`例如 ^git\s+(push|pull)(\s|$)`;
+      return t("web.permissions.entry_placeholder_regex", String.raw`例如 ^git\s+(push|pull)(\s|$)`);
     default:
-      return "例如 git";
+      return t("web.permissions.entry_placeholder_prefix", "例如 git");
   }
 }

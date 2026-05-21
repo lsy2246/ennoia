@@ -341,8 +341,12 @@ export function useUiHelpers() {
   const resolveText = (text: LocalizedText) =>
     resolveLocalizedText(text, locale, builtinI18nRegistry);
   const localizeBuiltinThemeLabel = (themeId: string, fallback: string) => {
-    const themeKey = `settings.theme.${themeId.replace(/[^a-zA-Z0-9]+/g, "_")}`;
-    return translate(locale, themeKey, fallback, builtinI18nRegistry);
+    const directKey = `settings.theme.${themeId}`;
+    const normalizedKey = `settings.theme.${themeId.replace(/[^a-zA-Z0-9]+/g, "_")}`;
+    return (
+      translate(locale, directKey, "", builtinI18nRegistry)
+      || translate(locale, normalizedKey, fallback, builtinI18nRegistry)
+    );
   };
 
   return {

@@ -135,21 +135,27 @@ function describeExecutor(executor: ScheduleExecutor) {
   return `${executor.agent.agent_id}${model}`;
 }
 
-function describeDeliveryMode(value?: string | null) {
+function describeDeliveryMode(
+  value: string | null | undefined,
+  t: (key: string, fallback: string) => string,
+) {
   switch (value) {
     case "summary":
-      return "摘要";
+      return t("web.schedules.delivery_content_summary", "摘要");
     case "conclusion":
-      return "最终结论";
+      return t("web.schedules.delivery_content_conclusion", "最终结论");
     case "full":
     default:
-      return "完整结果";
+      return t("web.schedules.delivery_content_full", "完整结果");
   }
 }
 
-function requireScheduleDefaults(serverConfig: ServerConfig | null): ServerConfig["schedules"] {
+function requireScheduleDefaults(
+  serverConfig: ServerConfig | null,
+  t: (key: string, fallback: string) => string,
+): ServerConfig["schedules"] {
   if (!serverConfig) {
-    throw new Error("调度运行时配置尚未加载完成，请稍后再试。");
+    throw new Error(t("web.schedules.defaults_loading", "调度运行时配置尚未加载完成，请稍后再试。"));
   }
   return serverConfig.schedules;
 }
@@ -343,7 +349,7 @@ export function Schedules() {
   }
 
   async function loadSchedule(schedule: ScheduleRecord) {
-    const scheduleDefaults = requireScheduleDefaults(serverConfig);
+    const scheduleDefaults = requireScheduleDefaults(serverConfig, t);
     const nextForm = createDefaultForm(agents, serverConfig);
     nextForm.name = schedule.name ?? "";
     nextForm.description = schedule.description ?? "";
@@ -442,7 +448,7 @@ export function Schedules() {
       if (!form.commandText.trim()) {
         throw new Error(t("web.schedules.command_required", "请输入要运行的命令。"));
       }
-      const timeoutDefaults = requireScheduleDefaults(serverConfig).command;
+      const timeoutDefaults = requireScheduleDefaults(serverConfig, t).command;
       return {
         kind: "command",
         command: {
@@ -484,7 +490,7 @@ export function Schedules() {
   }
 
   function buildPayload(): SchedulePayload {
-    const retryDefaults = requireScheduleDefaults(serverConfig).retry;
+    const retryDefaults = requireScheduleDefaults(serverConfig, t).retry;
     return {
       name: form.name.trim() || null,
       description: form.description.trim() || null,
@@ -956,7 +962,7 @@ export function Schedules() {
                     <span>{t("web.schedules.delivery_content", "投递内容")}</span>
                     <strong>
                       {deliveryConversationId
-                        ? describeDeliveryMode(schedule.delivery?.content_mode)
+                        ? describeDeliveryMode(schedule.delivery?.content_mode, t)
                         : "—"}
                     </strong>
                     <span>{t("web.schedules.trigger", "触发器")}</span>
