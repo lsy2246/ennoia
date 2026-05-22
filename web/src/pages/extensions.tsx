@@ -93,6 +93,13 @@ function extensionSortWeight(extension: ExtensionRuntimeState) {
   return 2;
 }
 
+function sharedOperationValue(values: Array<string | null | undefined>) {
+  if (values.length === 0 || !values[0]) {
+    return null;
+  }
+  return values.every((value) => value === values[0]) ? values[0] : null;
+}
+
 export function Extensions() {
   const { formatDateTime, resolveText, runtime, t } = useUiHelpers();
   const workbenchApi = useWorkbenchStore((state) => state.api);
@@ -392,46 +399,44 @@ export function Extensions() {
   const totalDisabled = extensions.filter((extension) => !extension.enabled).length;
   const logsButtonLabel = selected && logsState.extensionId === selected.id && logsState.status === "ready"
     ? t("web.action.refresh", "刷新")
-    : t("web.extensions.view_logs", "查看日志");
+    : t("web.extensions.view_logs", "查看诊断文本");
+  const selectedConversationResourceCount = selectedConversation?.resources.length ?? 0;
+  const selectedConversationOperationCount = selectedConversation?.operations.length ?? 0;
+  const selectedCapabilityCount = selectedViews.length + selectedOperations.length + selectedEvents.length;
+  const selectedVersion = detail?.version ?? t("web.common.none", "无");
+  const selectedGeneration = detail?.generation ?? t("web.common.none", "无");
+  const hasDiagnostics = selectedDiagnostics.length > 0;
+  const allOperationsAgent = selectedOperations.length > 0 && selectedOperations.every((operation) => operation.agent);
+  const allOperationsScheduled = selectedOperations.length > 0 && selectedOperations.every((operation) => operation.schedule);
+  const sharedOperationProvider = sharedOperationValue(selectedOperations.map((operation) => operation.provider?.kind));
+  const sharedOperationInput = sharedOperationValue(selectedOperations.map((operation) => operation.input));
+  const sharedOperationOutput = sharedOperationValue(selectedOperations.map((operation) => operation.output));
+  const showAgentOperationTags = selectedOperations.some((operation) => operation.agent) && !allOperationsAgent;
+  const showScheduleOperationTags = selectedOperations.some((operation) => operation.schedule) && !allOperationsScheduled;
+  const showProviderOperationTags = selectedOperations.some((operation) => operation.provider) && !sharedOperationProvider;
+  const showInputOperationTags = selectedOperations.some((operation) => operation.input) && !sharedOperationInput;
+  const showOutputOperationTags = selectedOperations.some((operation) => operation.output) && !sharedOperationOutput;
 
   return (
     <div className="extensions-page">
       <StatusNotice message={error} tone="error" onDismiss={() => setError(null)} />
-      <section className="work-panel extensions-toolbar">
+      <section className="work-panel extensions-toolbar extensions-toolbar--compact">
         <div className="extensions-toolbar__row">
           <div className="page-heading">
             <span>{t("web.extensions.eyebrow", "Extensions")}</span>
             <h1>{t("web.extensions.title", "扩展是系统级能力包。")}</h1>
-            <p>{t("web.extensions.description", "这里查看扩展声明给系统的视图、操作、事件、配置和会话可见性。")}</p>
           </div>
-          <div className="extensions-toolbar__actions">
+          <div className="extensions-toolbar__side">
+            <div className="extensions-overview-strip" aria-label={t("web.extensions.runtime_overview", "运行概览")}>
+              <span><strong>{extensions.length}</strong>{t("web.extensions.summary_total", "扩展总数")}</span>
+              <span><strong>{totalReady}</strong>{t("web.extensions.summary_ready", "就绪")}</span>
+              <span><strong>{totalError}</strong>{t("web.extensions.summary_error", "异常")}</span>
+              <span><strong>{totalDisabled}</strong>{t("web.extensions.summary_disabled", "停用")}</span>
+            </div>
             <button type="button" className="secondary" onClick={() => void refresh(selected?.id)} disabled={busy}>
               {busy ? t("web.common.loading", "加载中...") : t("web.action.rescan", "重新扫描")}
             </button>
           </div>
-        </div>
-
-        <div className="extensions-overview-grid">
-          <article className="metric-card extensions-metric-card">
-            <span>{t("web.extensions.summary_total", "扩展总数")}</span>
-            <strong>{extensions.length}</strong>
-            <small>{t("web.extensions.catalog", "扩展目录")}</small>
-          </article>
-          <article className="metric-card extensions-metric-card">
-            <span>{t("web.extensions.summary_ready", "就绪")}</span>
-            <strong>{totalReady}</strong>
-            <small>{t("web.extensions.runtime_overview", "运行概览")}</small>
-          </article>
-          <article className="metric-card extensions-metric-card">
-            <span>{t("web.extensions.summary_error", "异常")}</span>
-            <strong>{totalError}</strong>
-            <small>{t("web.extensions.diagnostics", "诊断")}</small>
-          </article>
-          <article className="metric-card extensions-metric-card">
-            <span>{t("web.extensions.summary_disabled", "停用")}</span>
-            <strong>{totalDisabled}</strong>
-            <small>{t("web.common.disabled", "停用")}</small>
-          </article>
         </div>
       </section>
 
@@ -441,7 +446,6 @@ export function Extensions() {
             <div className="page-heading">
               <span>{t("web.extensions.catalog", "扩展目录")}</span>
               <h1>{t("web.extensions.catalog_title", "按状态定位扩展")}</h1>
-              <p>{t("web.extensions.catalog_description", "先筛选扩展，再在右侧查看它声明给系统的契约。")}</p>
             </div>
             <span className="extensions-catalog-count">
               {`${filteredExtensions.length} ${t("web.extensions.catalog_count", "项")}`}
@@ -517,7 +521,7 @@ export function Extensions() {
                     <span className="badge badge--muted">{localizeSourceMode(selected.source_mode, t)}</span>
                   </div>
                   <h2>{selected.name}</h2>
-                  <p>{detail?.description || t("web.extensions.description_empty", "这个扩展没有提供描述。")}</p>
+                  {detail?.description ? <p>{detail.description}</p> : null}
                 </div>
                 <div className="extensions-detail-hero__actions">
                   <button
@@ -545,22 +549,33 @@ export function Extensions() {
                     {t("web.action.restart", "重启")}
                   </button>
                 </div>
+                <div className="extensions-detail-hero__facts">
+                  <span><strong>{selectedVersion}</strong>{t("web.extensions.version", "版本")}</span>
+                  <span><strong>{selectedCapabilityCount}</strong>{t("web.extensions.capability_total", "能力")}</span>
+                  <span><strong>{selectedSettings.length}</strong>{t("web.extensions.settings", "配置")}</span>
+                  <span>
+                    <strong>{selectedConversation?.visible ? t("web.common.enabled", "启用") : t("web.common.disabled", "停用")}</strong>
+                    {t("web.extensions.conversation", "会话")}
+                  </span>
+                  <span><strong>{selectedDiagnostics.length}</strong>{t("web.extensions.issues", "问题")}</span>
+                </div>
               </section>
 
-              <section className="extensions-section">
+              <section className="extensions-section extensions-section--compact">
                 <div className="extensions-section__header">
                   <div className="stack">
-                    <div className="panel-title">{t("web.extensions.views", "视图")}</div>
-                    <p className="helper-text">{t("web.extensions.views_description", "视图是主壳可以打开或挂载的界面契约。")}</p>
+                    <div className="panel-title">{t("web.extensions.capabilities", "能力清单")}</div>
                   </div>
-                  <span className="badge badge--muted">{selectedViews.length}</span>
+                  <div className="extensions-section__meta">
+                    {allOperationsAgent ? <span className="badge badge--muted">agent</span> : null}
+                    {allOperationsScheduled ? <span className="badge badge--muted">schedule</span> : null}
+                    {sharedOperationProvider ? <span className="badge badge--muted">{`provider:${sharedOperationProvider}`}</span> : null}
+                    {sharedOperationInput ? <span className="badge badge--muted">{`in:${sharedOperationInput}`}</span> : null}
+                    {sharedOperationOutput ? <span className="badge badge--muted">{`out:${sharedOperationOutput}`}</span> : null}
+                  </div>
                 </div>
-                {selectedViews.length === 0 ? (
-                  <div className="empty-card extensions-empty-state">
-                    <strong>{t("web.extensions.views_empty_title", "没有视图")}</strong>
-                    <p>{t("web.extensions.views_empty", "这个扩展没有声明视图。")}</p>
-                  </div>
-                ) : (
+
+                {selectedViews.length > 0 ? (
                   <div className="extensions-view-list">
                     {selectedViews.map((view) => {
                       const page = selectedPages.find((item) => item.id === view.name);
@@ -593,67 +608,84 @@ export function Extensions() {
                       );
                     })}
                   </div>
-                )}
-              </section>
+                ) : null}
 
-              <section className="extensions-section">
-                <div className="extensions-section__header">
-                  <div className="stack">
-                    <div className="panel-title">{t("web.extensions.operations", "操作")}</div>
-                    <p className="helper-text">{t("web.extensions.operations_description", "Operation 名称就是系统调用扩展的唯一边界。")}</p>
-                  </div>
-                  <span className="badge badge--muted">{selectedOperations.length}</span>
-                </div>
                 {selectedOperations.length === 0 ? (
-                  <div className="empty-card extensions-empty-state">
+                  <div className="extensions-compact-empty">
                     <strong>{t("web.extensions.operations_empty_title", "没有操作")}</strong>
-                    <p>{t("web.extensions.operations_empty", "这个扩展没有声明可调用操作。")}</p>
                   </div>
                 ) : (
-                  <div className="extensions-summary-grid">
-                    {selectedOperations.map((operation) => (
-                      <article key={operation.name} className="extensions-summary-card">
-                        <div className="extensions-summary-card__header">
-                          <div className="extensions-summary-card__title">
-                            <span>{operation.title ? resolveText(operation.title) : operation.name}</span>
+                  <div className="extensions-operation-list">
+                    {selectedOperations.map((operation) => {
+                      const operationTitle = operation.title ? resolveText(operation.title) : "";
+                      const hasDistinctTitle = Boolean(operationTitle && operationTitle !== operation.name);
+                      return (
+                        <article key={operation.name} className="extensions-operation-row">
+                          <div className="extensions-operation-row__main">
                             <strong>{operation.name}</strong>
+                            {hasDistinctTitle ? <span>{operationTitle}</span> : null}
+                            {operation.description ? <small>{operation.description}</small> : null}
+                          </div>
+                          <div className="extensions-operation-row__tags">
+                            {showAgentOperationTags && operation.agent ? <span className="chip chip--active">agent</span> : null}
+                            {showScheduleOperationTags && operation.schedule ? <span className="chip chip--active">schedule</span> : null}
+                            {showProviderOperationTags && operation.provider ? <span className="chip chip--active">{`provider:${operation.provider.kind}`}</span> : null}
+                            {showInputOperationTags && operation.input ? <span className="chip">{`in:${operation.input}`}</span> : null}
+                            {showOutputOperationTags && operation.output ? <span className="chip">{`out:${operation.output}`}</span> : null}
+                          </div>
+                        </article>
+                      );
+                    })}
+                  </div>
+                )}
+
+                <div className="extensions-detail-inline">
+                  {selectedEvents.length > 0 ? (
+                    <details className="extensions-detail-drawer">
+                      <summary>
+                        <span>{t("web.extensions.events", "事件")}</span>
+                        <strong>{selectedEvents.length}</strong>
+                      </summary>
+                      <div className="kv-list extensions-kv-list extensions-kv-list--compact">
+                        {selectedEvents.flatMap((event) => [
+                          <span key={`${event.on}:on`}>{event.on}</span>,
+                          <strong key={`${event.on}:operation`}>{event.operation}</strong>,
+                        ])}
+                      </div>
+                    </details>
+                  ) : null}
+
+                  {selectedConversation?.visible || selectedConversationResourceCount > 0 || selectedConversationOperationCount > 0 ? (
+                    <details className="extensions-detail-drawer">
+                      <summary>
+                        <span>{t("web.extensions.conversation_context", "会话上下文")}</span>
+                        <strong>{selectedConversation?.visible ? t("web.common.enabled", "启用") : t("web.common.disabled", "停用")}</strong>
+                      </summary>
+                      <div className="extensions-conversation-compact">
+                        <div>
+                          <span>{t("web.extensions.conversation_resources", "资源")}</span>
+                          <div className="extensions-chip-row">
+                            {selectedConversation?.resources.length ? selectedConversation.resources.map((item) => (
+                              <span key={item} className="chip chip--active">{item}</span>
+                            )) : (
+                              <span className="badge badge--muted">{t("web.common.none", "无")}</span>
+                            )}
                           </div>
                         </div>
-                        {operation.description ? <p className="helper-text">{operation.description}</p> : null}
-                        <div className="chip-grid extensions-summary-card__chips">
-                          {operation.agent ? <span className="chip chip--active">agent</span> : null}
-                          {operation.schedule ? <span className="chip chip--active">schedule</span> : null}
-                          {operation.provider ? <span className="chip chip--active">{`provider:${operation.provider.kind}`}</span> : null}
-                          {operation.input ? <span className="chip">{`in:${operation.input}`}</span> : null}
-                          {operation.output ? <span className="chip">{`out:${operation.output}`}</span> : null}
+                        <div>
+                          <span>{t("web.extensions.conversation_operations", "操作")}</span>
+                          <div className="extensions-chip-row">
+                            {selectedConversation?.operations.length ? selectedConversation.operations.map((item) => (
+                              <span key={item} className="chip chip--active">{item}</span>
+                            )) : (
+                              <span className="badge badge--muted">{t("web.common.none", "无")}</span>
+                            )}
+                          </div>
                         </div>
-                      </article>
-                    ))}
-                  </div>
-                )}
-              </section>
-
-              <section className="extensions-section">
-                <div className="extensions-section__header">
-                  <div className="stack">
-                    <div className="panel-title">{t("web.extensions.events", "事件")}</div>
-                    <p className="helper-text">{t("web.extensions.events_description", "事件只表达系统事件发生后调用哪个 operation。")}</p>
-                  </div>
-                  <span className="badge badge--muted">{selectedEvents.length}</span>
+                      </div>
+                    </details>
+                  ) : null}
                 </div>
-                {selectedEvents.length === 0 ? (
-                  <div className="empty-card extensions-empty-state">
-                    <strong>{t("web.extensions.events_empty_title", "没有事件投递")}</strong>
-                    <p>{t("web.extensions.events_empty", "这个扩展没有声明系统事件投递。")}</p>
-                  </div>
-                ) : (
-                  <div className="kv-list extensions-kv-list">
-                    {selectedEvents.flatMap((event) => [
-                      <span key={`${event.on}:on`}>{event.on}</span>,
-                      <strong key={`${event.on}:operation`}>{event.operation}</strong>,
-                    ])}
-                  </div>
-                )}
               </section>
 
               {selectedSettings.length > 0 ? (
@@ -661,7 +693,6 @@ export function Extensions() {
                   <div className="extensions-section__header">
                     <div className="stack">
                       <div className="panel-title">{t("web.extensions.settings", "配置")}</div>
-                      <p className="helper-text">{t("web.extensions.settings_description", "这里显示扩展声明给系统的可配置字段。")}</p>
                     </div>
                     <button
                       type="button"
@@ -742,64 +773,18 @@ export function Extensions() {
                 </section>
               ) : null}
 
-              <section className="extensions-section">
+              <section className="extensions-section extensions-section--compact">
                 <div className="extensions-section__header">
                   <div className="stack">
-                    <div className="panel-title">{t("web.extensions.conversation", "会话")}</div>
-                    <p className="helper-text">{t("web.extensions.conversation_description", "会话声明只决定扩展是否进入会话上下文，以及开放哪些资源和 operation 名称。")}</p>
+                    <div className="panel-title">{t("web.extensions.runtime_diagnostics", "启动检查")}</div>
                   </div>
-                  <span className={`badge ${selectedConversation?.visible ? "badge--success" : "badge--muted"}`}>
-                    {selectedConversation?.visible ? t("web.common.enabled", "启用") : t("web.common.disabled", "停用")}
+                  <span className={`badge ${hasDiagnostics ? "badge--warn" : statusBadgeClass(selectedHealth)}`}>
+                    {hasDiagnostics ? selectedDiagnostics.length : localizeExtensionStatus(selectedHealth, t)}
                   </span>
                 </div>
-                <div className="extensions-summary-grid">
-                  <article className="extensions-summary-card">
-                    <div className="extensions-summary-card__header">
-                      <div className="extensions-summary-card__title">
-                        <span>{t("web.extensions.conversation_resources", "Resources")}</span>
-                        <strong>{selectedConversation?.resources.length ?? 0}</strong>
-                      </div>
-                    </div>
-                    <div className="chip-grid extensions-summary-card__chips">
-                      {selectedConversation?.resources.length ? selectedConversation.resources.map((item) => (
-                        <span key={item} className="chip chip--active">{item}</span>
-                      )) : (
-                        <span className="badge badge--muted">{t("web.common.none", "无")}</span>
-                      )}
-                    </div>
-                  </article>
-                  <article className="extensions-summary-card">
-                    <div className="extensions-summary-card__header">
-                      <div className="extensions-summary-card__title">
-                        <span>{t("web.extensions.conversation_operations", "Operations")}</span>
-                        <strong>{selectedConversation?.operations.length ?? 0}</strong>
-                      </div>
-                    </div>
-                    <div className="chip-grid extensions-summary-card__chips">
-                      {selectedConversation?.operations.length ? selectedConversation.operations.map((item) => (
-                        <span key={item} className="chip chip--active">{item}</span>
-                      )) : (
-                        <span className="badge badge--muted">{t("web.common.none", "无")}</span>
-                      )}
-                    </div>
-                  </article>
-                </div>
-              </section>
-
-              <section className="extensions-section">
-                <div className="extensions-section__header">
-                  <div className="stack">
-                    <div className="panel-title">{t("web.extensions.diagnostics", "诊断")}</div>
-                    <p className="helper-text">{t("web.extensions.diagnostics_description", "先看诊断摘要，再决定是否重载、重启或查看日志。")}</p>
-                  </div>
-                  <span className={`badge ${selectedDiagnostics.length > 0 ? "badge--warn" : "badge--muted"}`}>
-                    {selectedDiagnostics.length}
-                  </span>
-                </div>
-                {selectedDiagnostics.length === 0 ? (
-                  <div className="empty-card extensions-empty-state">
-                    <strong>{t("web.extensions.diagnostics_empty_title", "当前状态正常")}</strong>
-                    <p>{t("web.extensions.diagnostics_empty", "当前没有诊断。")}</p>
+                {!hasDiagnostics ? (
+                  <div className="extensions-status-line">
+                    <span>{t("web.extensions.diagnostics_empty", "扫描与注册未发现问题。")}</span>
                   </div>
                 ) : (
                   <div className="extensions-diagnostic-list">
@@ -819,64 +804,59 @@ export function Extensions() {
                     ))}
                   </div>
                 )}
-              </section>
 
-              <section className="extensions-section">
-                <div className="extensions-section__header">
-                  <div className="stack">
-                    <div className="panel-title">{t("web.extensions.advanced", "高级信息")}</div>
-                    <p className="helper-text">{t("web.extensions.advanced_description", "只保留扩展定位、状态和文档入口。")}</p>
+                <details className="extensions-detail-drawer extensions-technical-drawer">
+                  <summary>
+                    <span>{t("web.extensions.advanced", "技术信息")}</span>
+                    <strong>{`${t("web.extensions.generation", "扫描批次")} ${selectedGeneration}`}</strong>
+                  </summary>
+                  <div className="kv-list extensions-kv-list">
+                    <span>ID</span><strong>{selected.id}</strong>
+                    <span>{t("web.extensions.version", "版本")}</span><strong>{selectedVersion}</strong>
+                    <span>{t("web.extensions.compat", "兼容要求")}</span><strong>{selectedCompat?.ennoia ?? t("web.common.none", "无")}</strong>
+                    <span>{t("web.common.status", "状态")}</span><strong>{localizeExtensionStatus(selected.status, t)}</strong>
+                    <span>{t("web.extensions.health", "健康状态")}</span><strong>{localizeExtensionStatus(selectedHealth, t)}</strong>
+                    <span>{t("web.extensions.generation", "扫描批次")}</span><strong>{selectedGeneration}</strong>
+                    <span>{t("web.extensions.install_dir", "扩展目录")}</span><strong>{formatRelativePath(selected.install_dir)}</strong>
+                    <span>{t("web.extensions.source_root", "来源目录")}</span><strong>{formatRelativePath(selected.source_root)}</strong>
+                    <span>{t("web.extensions.docs", "文档入口")}</span><strong>{detail?.docs ? formatRelativePath(detail.docs) : t("web.common.none", "无")}</strong>
                   </div>
-                </div>
-                <div className="kv-list extensions-kv-list">
-                  <span>ID</span><strong>{selected.id}</strong>
-                  <span>{t("web.extensions.version", "版本")}</span><strong>{detail?.version ?? t("web.common.none", "无")}</strong>
-                  <span>{t("web.extensions.compat", "兼容要求")}</span><strong>{selectedCompat?.ennoia ?? t("web.common.none", "无")}</strong>
-                  <span>{t("web.common.status", "状态")}</span><strong>{localizeExtensionStatus(selected.status, t)}</strong>
-                  <span>{t("web.extensions.health", "健康状态")}</span><strong>{localizeExtensionStatus(selectedHealth, t)}</strong>
-                  <span>{t("web.extensions.generation", "快照代次")}</span><strong>{detail?.generation ?? t("web.common.none", "无")}</strong>
-                  <span>{t("web.extensions.install_dir", "扩展目录")}</span><strong>{formatRelativePath(selected.install_dir)}</strong>
-                  <span>{t("web.extensions.source_root", "来源目录")}</span><strong>{formatRelativePath(selected.source_root)}</strong>
-                  <span>{t("web.extensions.docs", "文档入口")}</span><strong>{detail?.docs ? formatRelativePath(detail.docs) : t("web.common.none", "无")}</strong>
-                </div>
-              </section>
+                </details>
 
-              <section className="extensions-section">
-                <div className="extensions-section__header">
-                  <div className="stack">
-                    <div className="panel-title">{t("web.extensions.logs", "运行日志")}</div>
-                    <p className="helper-text">{t("web.extensions.logs_description", "日志用于确认扩展启动、重载和运行期是否出现具体错误。")}</p>
-                  </div>
-                  <button
-                    type="button"
-                    className="secondary"
-                    onClick={() => void loadLogs(selected.id)}
-                    disabled={logsState.status === "loading"}
-                  >
-                    {logsState.status === "loading" ? t("web.common.loading", "加载中...") : logsButtonLabel}
-                  </button>
-                </div>
-                {logsState.status === "idle" ? (
-                  <div className="empty-card extensions-empty-state extensions-logs-empty">
-                    <strong>{t("web.extensions.log_empty_title", "日志尚未加载")}</strong>
-                    <p>{t("web.extensions.log_empty", "选择“查看日志”加载扩展日志。")}</p>
-                  </div>
-                ) : logsState.status === "loading" ? (
-                  <div className="empty-card extensions-empty-state extensions-logs-empty">
-                    <strong>{t("web.extensions.log_loading_title", "正在读取日志")}</strong>
-                    <p>{t("web.extensions.log_loading", "正在加载扩展日志。")}</p>
-                  </div>
-                ) : logsState.status === "error" ? (
-                  <div className="error">{logsState.content}</div>
-                ) : (
-                  <div className="extensions-log-panel">
-                    <div className="extensions-log-panel__meta">
-                      <strong>{selected.name}</strong>
-                      <span>{`${t("web.extensions.log_for", "当前日志属于")} ${selected.name}`}</span>
+                {hasDiagnostics ? (
+                  <>
+                    <div className="extensions-log-request">
+                      <div>
+                        <strong>{t("web.extensions.logs", "诊断文本")}</strong>
+                        <span>{t("web.extensions.logs_description", "把当前诊断条目整理为文本，方便复制排查。")}</span>
+                      </div>
+                      <button
+                        type="button"
+                        className="secondary"
+                        onClick={() => void loadLogs(selected.id)}
+                        disabled={logsState.status === "loading"}
+                      >
+                        {logsState.status === "loading" ? t("web.common.loading", "加载中...") : logsButtonLabel}
+                      </button>
                     </div>
-                    <pre className="log-view extensions-log-view">{logsState.content}</pre>
-                  </div>
-                )}
+                    {logsState.status === "loading" ? (
+                      <div className="extensions-status-line">
+                        <strong>{t("web.extensions.log_loading_title", "正在读取诊断")}</strong>
+                        <span>{t("web.extensions.log_loading", "正在生成诊断文本。")}</span>
+                      </div>
+                    ) : logsState.status === "error" ? (
+                      <div className="error">{logsState.content}</div>
+                    ) : logsState.status === "ready" ? (
+                      <div className="extensions-log-panel">
+                        <div className="extensions-log-panel__meta">
+                          <strong>{selected.name}</strong>
+                          <span>{`${t("web.extensions.log_for", "诊断文本属于")} ${selected.name}`}</span>
+                        </div>
+                        <pre className="log-view extensions-log-view">{logsState.content}</pre>
+                      </div>
+                    ) : null}
+                  </>
+                ) : null}
               </section>
             </div>
           ) : (
