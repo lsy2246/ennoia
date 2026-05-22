@@ -335,7 +335,11 @@ pub struct AgentDocument {
     pub file_access: AgentFileAccessProfile,
 }
 
-/// SkillManifest represents one installed skill package manifest.
+/// SkillManifest represents one resolved skill package definition.
+///
+/// On disk, Ennoia skills use `SKILL.md` for standard skill metadata and
+/// `config.toml` for Ennoia runtime bindings. This type is the merged shape
+/// returned to the server, UI, and runtime.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SkillManifest {
     pub id: String,
@@ -351,6 +355,38 @@ pub struct SkillManifest {
     pub settings: Vec<ExtensionSettingFieldSpec>,
     #[serde(default)]
     pub diagnostics: SkillDiagnosticsSpec,
+    #[serde(default)]
+    pub prepare: Option<SkillCommandSpec>,
+}
+
+/// SkillPackageConfig stores Ennoia-specific runtime bindings from `config.toml`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SkillPackageConfig {
+    #[serde(default = "default_skill_version")]
+    pub version: String,
+    #[serde(default)]
+    pub mount: SkillMountConfig,
+    #[serde(default)]
+    pub actions: Vec<SkillActionConfig>,
+    #[serde(default)]
+    pub settings: Vec<ExtensionSettingFieldSpec>,
+    #[serde(default)]
+    pub diagnostics: SkillDiagnosticsSpec,
+    #[serde(default)]
+    pub prepare: Option<SkillCommandSpec>,
+}
+
+impl Default for SkillPackageConfig {
+    fn default() -> Self {
+        Self {
+            version: default_skill_version(),
+            mount: SkillMountConfig::default(),
+            actions: Vec::new(),
+            settings: Vec::new(),
+            diagnostics: SkillDiagnosticsSpec::default(),
+            prepare: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -396,6 +432,8 @@ pub struct SkillConfig {
     pub settings: Vec<ExtensionSettingFieldSpec>,
     #[serde(default)]
     pub diagnostics: SkillDiagnosticsSpec,
+    #[serde(default)]
+    pub prepare: Option<SkillCommandSpec>,
     #[serde(default)]
     pub readiness: SkillReadinessSummary,
 }

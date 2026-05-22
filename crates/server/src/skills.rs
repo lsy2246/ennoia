@@ -7,14 +7,16 @@ use chrono::Utc;
 use ennoia_kernel::{
     ExtensionSettingFieldSpec, ExtensionSettingFieldType, ExtensionSettingValue, SkillCheckAction,
     SkillCheckCategory, SkillCheckItem, SkillCheckItemStatus, SkillCheckResult, SkillConfig,
-    SkillManifest, SkillReadinessSummary, SkillRegistryFile, SkillRuntimeStatus,
-    SkillSettingsPayload, SkillSettingsRecord,
+    SkillManifest, SkillPackageConfig, SkillReadinessSummary, SkillRegistryFile,
+    SkillRuntimeStatus, SkillSettingsPayload, SkillSettingsRecord,
 };
 use ennoia_paths::RuntimePaths;
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 
 const DEFAULT_SKILL_CHECK_TIMEOUT_MS: u64 = 15_000;
+pub const SKILL_MARKDOWN_FILE: &str = "SKILL.md";
+pub const SKILL_CONFIG_FILE: &str = "config.toml";
 const SKILL_STATUS_FILE: &str = "status.json";
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -23,14 +25,106 @@ struct SkillSettingsFile {
     values: BTreeMap<String, ExtensionSettingValue>,
 }
 
+#[derive(Debug, Deserialize)]
+struct SkillMarkdownMetadata {
+    name: String,
+    description: String,
+}
+
 pub fn load_skill_manifest(
     paths: &RuntimePaths,
     skill_id: &str,
     allow_dev_sources: bool,
 ) -> io::Result<SkillManifest> {
-    let descriptor_path =
-        resolve_skill_root(paths, skill_id, allow_dev_sources)?.join("skill.toml");
-    let contents = fs::read_to_string(descriptor_path)?;
+    let root = resolve_skill_root(paths, skill_id, allow_dev_sources)?;
+    load_skill_manifest_from_root(&root)
+}
+
+pub fn load_skill_manifest_from_root(root: &Path) -> io::Result<SkillManifest> {
+    let metadata = load_skill_markdown_metadata(&root.join(SKILL_MARKDOWN_FILE))?;
+    let config = load_skill_package_config(&root.join(SKILL_CONFIG_FILE))?;
+
+    Ok(SkillManifest {
+        id: metadata.name,
+        version: config.version,
+        description: metadata.description,
+        mount: config.mount,
+        actions: config.actions,
+        settings: config.settings,
+        diagnostics: config.diagnostics,
+        prepare: config.prepare,
+    })
+}
+
+pub fn is_skill_package_root(root: &Path) -> bool {
+    root.join(SKILL_MARKDOWN_FILE).exists() && root.join(SKILL_CONFIG_FILE).exists()
+}
+
+fn load_skill_markdown_metadata(path: &Path) -> io::Result<SkillMarkdownMetadata> {
+    let contents = fs::read_to_string(path)?;
+    let frontmatter = extract_skill_frontmatter(&contents).ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "{} must start with YAML frontmatter containing name and description",
+                path.display()
+            ),
+        )
+    })?;
+    let metadata: SkillMarkdownMetadata =
+        serde_yaml::from_str(frontmatter).map_err(io::Error::other)?;
+    if metadata.name.trim().is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "{} frontmatter field 'name' cannot be empty",
+                path.display()
+            ),
+        ));
+    }
+    if metadata.description.trim().is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "{} frontmatter field 'description' cannot be empty",
+                path.display()
+            ),
+        ));
+    }
+    Ok(SkillMarkdownMetadata {
+        name: metadata.name.trim().to_string(),
+        description: metadata.description.trim().to_string(),
+    })
+}
+
+fn extract_skill_frontmatter(contents: &str) -> Option<&str> {
+    let normalized = contents.strip_prefix('\u{feff}').unwrap_or(contents);
+    let mut lines = normalized.lines();
+    if lines.next()?.trim() != "---" {
+        return None;
+    }
+
+    let start = normalized.find('\n')? + 1;
+    let mut offset = start;
+    for line in lines {
+        let line_len = line.len();
+        if line.trim() == "---" {
+            return Some(normalized[start..offset].trim());
+        }
+        offset += line_len;
+        if normalized.as_bytes().get(offset) == Some(&b'\r') {
+            offset += 1;
+        }
+        if normalized.as_bytes().get(offset) == Some(&b'\n') {
+            offset += 1;
+        }
+    }
+
+    None
+}
+
+fn load_skill_package_config(path: &Path) -> io::Result<SkillPackageConfig> {
+    let contents = fs::read_to_string(path)?;
     toml::from_str(&contents).map_err(io::Error::other)
 }
 
@@ -193,8 +287,14 @@ pub async fn run_skill_check(
         return Ok(result);
     };
 
-    let mut process =
-        build_skill_check_command(paths, manifest, &values, command, allow_dev_sources)?;
+    let mut process = build_skill_command(
+        paths,
+        manifest,
+        &values,
+        command,
+        allow_dev_sources,
+        "diagnostics",
+    )?;
     let timeout_ms = command.timeout_ms.unwrap_or(DEFAULT_SKILL_CHECK_TIMEOUT_MS);
     let output = tokio::time::timeout(
         std::time::Duration::from_millis(timeout_ms),
@@ -216,6 +316,73 @@ pub async fn run_skill_check(
     Ok(result)
 }
 
+pub async fn run_skill_prepare(
+    paths: &RuntimePaths,
+    manifest: &SkillManifest,
+    allow_dev_sources: bool,
+) -> io::Result<SkillCheckResult> {
+    let Some(command) = manifest.prepare.as_ref() else {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("skill '{}' does not define a prepare workflow", manifest.id),
+        ));
+    };
+
+    let values = load_effective_skill_settings(paths, manifest);
+    if let Some(mut result) = config_missing_result(manifest, &values) {
+        result.checked_at = Some(now_iso());
+        if manifest.diagnostics.manual_check {
+            ensure_manual_check_action(&mut result);
+        }
+        write_skill_status_file(skill_status_path(paths, &manifest.id), &result)?;
+        return Ok(result);
+    }
+
+    let mut process = build_skill_command(
+        paths,
+        manifest,
+        &values,
+        command,
+        allow_dev_sources,
+        "prepare",
+    )?;
+    let timeout_ms = command.timeout_ms.unwrap_or(DEFAULT_SKILL_CHECK_TIMEOUT_MS);
+    let output = tokio::time::timeout(
+        std::time::Duration::from_millis(timeout_ms),
+        process.output(),
+    )
+    .await
+    .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "skill prepare timed out"))??;
+
+    if !output.status.success() {
+        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        let mut result = parse_skill_check_output(&stdout, &stderr, false)?;
+        if manifest.diagnostics.manual_check {
+            ensure_manual_check_action(&mut result);
+        }
+        write_skill_status_file(skill_status_path(paths, &manifest.id), &result)?;
+        return Ok(result);
+    }
+
+    if manifest.diagnostics.check.is_some() {
+        return run_skill_check(paths, manifest, allow_dev_sources).await;
+    }
+
+    let mut result = SkillCheckResult {
+        status: SkillRuntimeStatus::Ready,
+        summary: "准备完成。".to_string(),
+        checked_at: Some(now_iso()),
+        items: Vec::new(),
+        actions: Vec::new(),
+    };
+    if manifest.diagnostics.manual_check {
+        ensure_manual_check_action(&mut result);
+    }
+    write_skill_status_file(skill_status_path(paths, &manifest.id), &result)?;
+    Ok(result)
+}
+
 pub fn skill_config_with_readiness(paths: &RuntimePaths, mut skill: SkillConfig) -> SkillConfig {
     skill.readiness = load_skill_readiness_summary(
         paths,
@@ -227,21 +394,23 @@ pub fn skill_config_with_readiness(paths: &RuntimePaths, mut skill: SkillConfig)
             actions: skill.actions.clone(),
             settings: skill.settings.clone(),
             diagnostics: skill.diagnostics.clone(),
+            prepare: skill.prepare.clone(),
         },
     );
     skill
 }
 
-fn build_skill_check_command(
+fn build_skill_command(
     paths: &RuntimePaths,
     manifest: &SkillManifest,
     values: &BTreeMap<String, ExtensionSettingValue>,
-    diagnostics: &ennoia_kernel::SkillCommandSpec,
+    command_spec: &ennoia_kernel::SkillCommandSpec,
     allow_dev_sources: bool,
+    command_kind: &str,
 ) -> io::Result<Command> {
     let skill_root = resolve_skill_root(paths, &manifest.id, allow_dev_sources)?;
-    let entry_path = resolve_skill_entry_path(&skill_root, &diagnostics.entry)?;
-    let runner = diagnostics.runner.trim().to_lowercase();
+    let entry_path = resolve_skill_entry_path(&skill_root, &command_spec.entry)?;
+    let runner = command_spec.runner.trim().to_lowercase();
     let mut command = match runner.as_str() {
         "node" => {
             let mut item = Command::new("node");
@@ -262,15 +431,16 @@ fn build_skill_check_command(
         other => {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                format!("unsupported skill diagnostics runner '{other}'"),
+                format!("unsupported skill {command_kind} runner '{other}'"),
             ));
         }
     };
 
-    for arg in &diagnostics.args {
+    for arg in &command_spec.args {
         command.arg(arg);
     }
 
+    fs::create_dir_all(paths.skill_state_dir(&manifest.id))?;
     command.current_dir(&skill_root);
     command.env("ENNOIA_HOME", paths.home());
     command.env("ENNOIA_SKILL_ID", &manifest.id);
@@ -302,14 +472,14 @@ fn resolve_skill_root(
             .filter(|source| source.enabled && source.id == skill_id)
         {
             let root = PathBuf::from(source.path);
-            if root.join("skill.toml").exists() {
+            if is_skill_package_root(&root) {
                 return Ok(root);
             }
         }
     }
 
     let installed_root = paths.skill_dir(skill_id);
-    if installed_root.join("skill.toml").exists() {
+    if is_skill_package_root(&installed_root) {
         return Ok(installed_root);
     }
 
@@ -335,7 +505,7 @@ fn resolve_skill_entry_path(skill_root: &Path, entry: &str) -> io::Result<PathBu
     if !canonical_entry.starts_with(&canonical_root) {
         return Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
-            "skill diagnostics entry must stay inside the skill root",
+            "skill command entry must stay inside the skill root",
         ));
     }
     Ok(canonical_entry)
@@ -610,7 +780,41 @@ mod tests {
                     timeout_ms: None,
                 }),
             },
+            prepare: None,
         }
+    }
+
+    fn write_sample_skill_package(root: &Path, version: &str, description: &str) {
+        fs::create_dir_all(root).expect("skill dir");
+        fs::write(
+            root.join(SKILL_MARKDOWN_FILE),
+            format!(
+                r#"---
+name: sample
+description: {description}
+---
+
+# Sample
+"#
+            ),
+        )
+        .expect("write skill markdown");
+        fs::write(
+            root.join(SKILL_CONFIG_FILE),
+            format!(
+                r#"
+version = "{version}"
+
+[mount]
+mode = "auto"
+
+[[actions]]
+id = "run"
+entry = "scripts/run.mjs"
+"#
+            ),
+        )
+        .expect("write skill config");
     }
 
     #[test]
@@ -640,28 +844,10 @@ mod tests {
             Utc::now().timestamp_nanos_opt().unwrap_or_default()
         ));
         let paths = RuntimePaths::new(&home);
-        fs::create_dir_all(paths.skill_dir("sample")).expect("installed skill dir");
-        fs::write(
-            paths.skill_dir("sample").join("skill.toml"),
-            r#"
-id = "sample"
-version = "1.0.0"
-description = "installed"
-"#,
-        )
-        .expect("write installed manifest");
+        write_sample_skill_package(&paths.skill_dir("sample"), "1.0.0", "installed");
 
         let dev_root = home.parent().unwrap_or(&home).join("sample-dev");
-        fs::create_dir_all(&dev_root).expect("dev skill dir");
-        fs::write(
-            dev_root.join("skill.toml"),
-            r#"
-id = "sample"
-version = "2.0.0"
-description = "dev"
-"#,
-        )
-        .expect("write dev manifest");
+        write_sample_skill_package(&dev_root, "2.0.0", "dev");
         fs::create_dir_all(paths.config_dir()).expect("config dir");
         fs::write(
             paths.skills_registry_file(),
@@ -684,5 +870,113 @@ enabled = true
 
         let _ = fs::remove_dir_all(home);
         let _ = fs::remove_dir_all(dev_root);
+    }
+
+    #[test]
+    fn load_skill_manifest_merges_skill_markdown_and_config_toml() {
+        let root = std::env::temp_dir().join(format!(
+            "ennoia-skill-package-{}",
+            Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        write_sample_skill_package(&root, "3.0.0", "merged package");
+
+        let manifest = load_skill_manifest_from_root(&root).expect("load package");
+
+        assert_eq!(manifest.id, "sample");
+        assert_eq!(manifest.version, "3.0.0");
+        assert_eq!(manifest.description, "merged package");
+        assert_eq!(manifest.actions.len(), 1);
+        assert_eq!(manifest.actions[0].entry, "scripts/run.mjs");
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[tokio::test]
+    async fn run_skill_prepare_executes_declared_command_and_refreshes_status() {
+        let home = std::env::temp_dir().join(format!(
+            "ennoia-skill-prepare-{}",
+            Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        let paths = RuntimePaths::new(&home);
+        let skill_root = paths.skill_dir("sample");
+        let scripts_dir = skill_root.join("scripts");
+        fs::create_dir_all(&scripts_dir).expect("scripts dir");
+        write_sample_skill_package(&skill_root, "1.0.0", "prepare sample");
+        fs::write(
+            scripts_dir.join("prepare.js"),
+            r#"
+const fs = require("node:fs");
+const path = require("node:path");
+fs.writeFileSync(path.join(process.env.ENNOIA_SKILL_DATA_DIR, "prepared.txt"), "ready");
+"#,
+        )
+        .expect("write prepare script");
+        fs::write(
+            scripts_dir.join("doctor.js"),
+            r#"
+console.log(JSON.stringify({
+  status: "ready",
+  summary: "prepared",
+  items: [],
+  actions: []
+}));
+"#,
+        )
+        .expect("write doctor script");
+
+        let mut manifest =
+            load_skill_manifest(&paths, "sample", false).expect("load prepared manifest");
+        manifest.diagnostics = SkillDiagnosticsSpec {
+            manual_check: true,
+            check: Some(SkillCommandSpec {
+                runner: "node".to_string(),
+                entry: "scripts/doctor.js".to_string(),
+                args: Vec::new(),
+                timeout_ms: Some(10_000),
+            }),
+        };
+        manifest.prepare = Some(SkillCommandSpec {
+            runner: "node".to_string(),
+            entry: "scripts/prepare.js".to_string(),
+            args: Vec::new(),
+            timeout_ms: Some(10_000),
+        });
+
+        let result = run_skill_prepare(&paths, &manifest, false)
+            .await
+            .expect("run prepare");
+
+        assert_eq!(result.status, SkillRuntimeStatus::Ready);
+        assert_eq!(result.summary, "prepared");
+        assert!(paths
+            .skill_state_dir("sample")
+            .join("prepared.txt")
+            .exists());
+        assert!(skill_status_path(&paths, "sample").exists());
+
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[tokio::test]
+    async fn run_skill_prepare_rejects_skills_without_prepare_command() {
+        let home = std::env::temp_dir().join(format!(
+            "ennoia-skill-prepare-missing-{}",
+            Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        let paths = RuntimePaths::new(&home);
+        let skill_root = paths.skill_dir("sample");
+        write_sample_skill_package(&skill_root, "1.0.0", "prepare sample");
+        let manifest = load_skill_manifest(&paths, "sample", false).expect("load manifest");
+
+        let error = run_skill_prepare(&paths, &manifest, false)
+            .await
+            .expect_err("missing prepare should fail");
+
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        assert!(error
+            .to_string()
+            .contains("does not define a prepare workflow"));
+
+        let _ = fs::remove_dir_all(home);
     }
 }

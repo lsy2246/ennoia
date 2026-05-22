@@ -1,0 +1,75 @@
+version = "1.0.0"
+
+[mount]
+mode = "auto"
+
+[[actions]]
+id = "search"
+description = "统一网页搜索入口，可返回候选结果并按需提取候选页面正文。"
+entry = "scripts/search-runner.mjs"
+
+[[settings]]
+key = "browser_control"
+label = { key = "skill.web_search.browser_control", fallback = "浏览器控制方式" }
+description = { key = "skill.web_search.browser_control.help", fallback = "选择 web-search 控制浏览器的方式：默认使用本地自动化浏览器；也可以连接本技能配置的 MCP 浏览器服务。" }
+type = "select"
+default_value = "local"
+required = true
+options = [
+  { label = { key = "skill.web_search.browser_control.local", fallback = "本地自动化浏览器" }, value = "local" },
+  { label = { key = "skill.web_search.browser_control.mcp", fallback = "MCP 浏览器连接" }, value = "mcp" },
+]
+
+[[settings]]
+key = "browser_kernel"
+label = { key = "skill.web_search.browser_kernel", fallback = "本地浏览器内核来源" }
+description = { key = "skill.web_search.browser_kernel.help", fallback = "仅在“本地自动化浏览器”方式下使用。三选一且互斥：使用已准备的 Ennoia 内置 CloakBrowser Chromium 缓存、自动查找系统浏览器，或手动填写浏览器可执行文件路径。" }
+type = "select"
+default_value = "builtin"
+required = true
+options = [
+  { label = { key = "skill.web_search.browser_kernel.builtin", fallback = "内置 CloakBrowser" }, value = "builtin" },
+  { label = { key = "skill.web_search.browser_kernel.system_auto", fallback = "自动查找系统浏览器" }, value = "system_auto" },
+  { label = { key = "skill.web_search.browser_kernel.system_path", fallback = "手动填写系统浏览器路径" }, value = "system_path" },
+]
+
+[[settings]]
+key = "browser_executable_path"
+label = { key = "skill.web_search.browser_executable_path", fallback = "浏览器可执行文件路径" }
+description = { key = "skill.web_search.browser_executable_path.help", fallback = "仅在“本地自动化浏览器 + 手动填写系统浏览器路径”时使用。路径不存在时直接报配置错误，不回退到内置或自动查找。" }
+type = "text"
+placeholder = "C:/Program Files/Google/Chrome/Application/chrome.exe"
+required = false
+
+[[settings]]
+key = "mcp_transport"
+label = { key = "skill.web_search.mcp_transport", fallback = "MCP 传输方式" }
+description = { key = "skill.web_search.mcp_transport.help", fallback = "仅在“MCP 浏览器连接”方式下使用。选择 MCP 服务的 HTTP 传输方式；默认使用 streamable-http。" }
+type = "select"
+default_value = "streamable-http"
+required = true
+options = [
+  { label = { key = "skill.web_search.mcp_transport.streamable_http", fallback = "Streamable HTTP" }, value = "streamable-http" },
+  { label = { key = "skill.web_search.mcp_transport.sse", fallback = "SSE" }, value = "sse" },
+]
+
+[[settings]]
+key = "mcp_url"
+label = { key = "skill.web_search.mcp_url", fallback = "MCP 服务地址" }
+description = { key = "skill.web_search.mcp_url.help", fallback = "仅在“MCP 浏览器连接”方式下使用。填写本地或远程 MCP 浏览器服务 URL，例如 http://127.0.0.1:12306/mcp 或 https://example.com/mcp。" }
+type = "text"
+placeholder = "http://127.0.0.1:12306/mcp"
+required = false
+
+[diagnostics]
+manual_check = true
+
+[diagnostics.check]
+runner = "node"
+entry = "scripts/doctor.mjs"
+timeout_ms = 15000
+
+[prepare]
+runner = "node"
+entry = "scripts/prepare-browser.mjs"
+timeout_ms = 300000

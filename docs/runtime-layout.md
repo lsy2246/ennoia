@@ -63,7 +63,7 @@
 │     ├─ artifacts/            # Agent 产物目录
 │     └─ skills/               # Agent 私有技能目录
 ├─ extensions/                 # 扩展安装内容根目录
-├─ skills/                     # 技能安装内容根目录
+├─ skills/                     # 技能安装内容根目录，每个技能包固定包含 SKILL.md + config.toml
 ├─ data/
 │  ├─ system/
 │  │  ├─ schedules.json        # 系统 scheduler 的计划记录
@@ -109,12 +109,13 @@
   - `workflow` 扩展在自己的目录中维护 run / task / artifact / handoff 等运行数据。
 - `data/skills/{skill_id}/`：技能私有运行数据根目录。
   - `status.json`：最近一次技能检测结果缓存，供技能页展示“是否就绪 / 缺什么 / 为什么不可用”。
+  - `web-search/cloakbrowser/`：`web-search` 在 local + `builtin` 模式下使用的浏览器内核缓存，由 `ennoia skill prepare web-search` 准备；搜索运行时只使用已准备好的内核缓存。
 
 ## 目录职责
 
 - `agents/`：Agent 的统一目录根；每个 Agent 的基础配置、权限配置、文件访问配置、工作目录、技能目录和产物目录都收敛在自己的子目录里。
 - `extensions/`：运行态扩展真实内容目录；开发态内置扩展直接从 `dev_sources` 指向的源码目录加载。
-- `skills/`：运行态技能真实内容目录；开发态内置技能直接从 `dev_sources` 指向的源码目录加载。
+- `skills/`：运行态技能真实内容目录；每个技能目录固定包含 `SKILL.md` 与 `config.toml`。开发态内置技能直接从 `dev_sources` 指向的源码目录加载。
 - `data/system/logs/`：文本日志与开发日志输出目录，不等同于系统日志数据库。
 
 ## 懒创建目录
@@ -130,7 +131,9 @@
 
 ## 初始化行为
 
-`cargo run -p ennoia-cli -- init` 会自动创建运行目录、基础配置、扩展与技能运行时覆盖文件、`data/system/logs/`、`data/system/pids/` 等基础目录，并同步未被 `blocked_builtin_sync` 屏蔽的内置扩展与技能。初始化不会预先写入会话数据、记忆数据、定时计划或运行数据。
+`cargo run -p ennoia-cli -- init` 会自动创建运行目录、基础配置、扩展与技能运行时覆盖文件、`data/system/logs/`、`data/system/pids/` 等基础目录，并同步未被 `blocked_builtin_sync` 屏蔽的内置扩展与技能。未被屏蔽的内置技能目录按当前内置资产重建，只保留 `SKILL.md + config.toml` 这一种技能包格式。初始化不会预先写入会话数据、记忆数据、定时计划或运行数据。
+
+`cargo run -p ennoia-cli -- skill prepare web-search` 会为默认网页搜索技能准备 local + `builtin` 浏览器内核，把 CloakBrowser Chromium 下载并解压到 `data/skills/web-search/cloakbrowser/`。准备失败时，`web-search` 不会在搜索运行时临时下载内核，也不会自动回退到系统浏览器。选择 MCP 浏览器控制方式时，技能读取 `mcp_transport` 与 `mcp_url`，不使用这个本地内核缓存。
 
 `cargo run -p ennoia-cli -- dev` 会在当前仓库根目录自动创建 `.dev/`，并在该目录下初始化开发态所需的配置、日志、pid 和数据目录。开发态会把 `assets/extensions/*` 与 `assets/skills/*` 注册到对应的 `dev_sources`，不物化内置扩展/技能包，并会清理旧版本留下的内置包副本目录；热加载状态、扩展设置和技能设置都写入 `.dev/`。
 

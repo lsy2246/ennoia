@@ -6,7 +6,7 @@ use crate::app::{
 use crate::realtime::RealtimeEvent;
 use crate::skills::{
     load_skill_manifest, load_skill_settings, load_skill_status, run_skill_check,
-    save_skill_settings, validate_skill_settings_payload,
+    run_skill_prepare, save_skill_settings, validate_skill_settings_payload,
 };
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentRecord {
@@ -247,6 +247,31 @@ pub(super) async fn skill_check(
         .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))
 }
 
+pub(super) async fn skill_prepare(
+    State(state): State<AppState>,
+    Extension(request): Extension<RequestContext>,
+    Path(skill_id): Path<String>,
+) -> ApiResult<SkillCheckResult> {
+    let manifest = load_skill_manifest(&state.runtime_paths, &skill_id, state.allow_dev_sources)
+        .map_err(|error| {
+            scoped(
+                ApiError::not_found(format!("skill '{skill_id}' not found: {error}")),
+                &request,
+            )
+        })?;
+    run_skill_prepare(&state.runtime_paths, &manifest, state.allow_dev_sources)
+        .await
+        .map(Json)
+        .map_err(|error| {
+            let api_error = if error.kind() == std::io::ErrorKind::InvalidInput {
+                ApiError::bad_request(error.to_string())
+            } else {
+                ApiError::internal(error.to_string())
+            };
+            scoped(api_error, &request)
+        })
+}
+
 pub(super) async fn model_endpoints(
     State(state): State<AppState>,
 ) -> Json<Vec<ModelEndpointConfig>> {
@@ -386,7 +411,90 @@ pub(super) fn validate_model_endpoint_request_timeout_ms(
 
 #[cfg(test)]
 mod tests {
-    use super::validate_model_endpoint_request_timeout_ms;
+    use super::{skill_prepare, validate_model_endpoint_request_timeout_ms};
+    use crate::app::default_app_state;
+    use axum::extract::{Path, State};
+    use axum::Extension;
+    use ennoia_logs::RequestContext;
+    use ennoia_paths::RuntimePaths;
+    use std::fs;
+    use std::sync::Arc;
+    use tempfile::tempdir;
+
+    fn test_request_context() -> RequestContext {
+        RequestContext {
+            request_id: "req_test".to_string(),
+            trace_id: "trace_test".to_string(),
+            span_id: "span_test".to_string(),
+            parent_span_id: None,
+            sampled: true,
+            source: "test".to_string(),
+        }
+    }
+
+    fn write_skill_package_with_prepare(root: &std::path::Path, include_prepare: bool) {
+        fs::create_dir_all(root.join("scripts")).expect("create scripts dir");
+        fs::write(
+            root.join("SKILL.md"),
+            r#"---
+name: sample
+description: sample skill
+---
+
+# Sample
+"#,
+        )
+        .expect("write skill markdown");
+        let prepare = if include_prepare {
+            r#"
+[prepare]
+runner = "node"
+entry = "scripts/prepare.js"
+timeout_ms = 10000
+"#
+        } else {
+            ""
+        };
+        fs::write(
+            root.join("config.toml"),
+            format!(
+                r#"
+version = "1.0.0"
+
+[mount]
+mode = "auto"
+
+[diagnostics]
+manual_check = true
+
+[diagnostics.check]
+runner = "node"
+entry = "scripts/doctor.js"
+timeout_ms = 10000
+
+{prepare}
+"#
+            ),
+        )
+        .expect("write skill config");
+        fs::write(
+            root.join("scripts").join("prepare.js"),
+            r#"const fs = require("node:fs"); const path = require("node:path"); fs.writeFileSync(path.join(process.env.ENNOIA_SKILL_DATA_DIR, "prepared.txt"), "ready");"#,
+        )
+        .expect("write prepare script");
+        fs::write(
+            root.join("scripts").join("doctor.js"),
+            r#"console.log(JSON.stringify({ status: "ready", summary: "prepared", items: [], actions: [] }));"#,
+        )
+        .expect("write doctor script");
+    }
+
+    fn state_for_paths(paths: RuntimePaths) -> crate::app::AppState {
+        let mut state = default_app_state();
+        state.runtime_paths = Arc::new(paths);
+        state.allow_dev_sources = false;
+        state
+    }
 
     #[test]
     fn allows_unlimited_model_endpoint_timeout() {
@@ -401,6 +509,53 @@ mod tests {
     #[test]
     fn allows_model_endpoint_timeout_at_minimum() {
         assert!(validate_model_endpoint_request_timeout_ms(Some(1_000)).is_ok());
+    }
+
+    #[tokio::test]
+    async fn skill_prepare_handler_runs_declared_prepare_and_returns_latest_status() {
+        let temp = tempdir().expect("temp dir");
+        let paths = RuntimePaths::new(temp.path().join("home"));
+        paths.ensure_layout().expect("layout");
+        write_skill_package_with_prepare(&paths.skill_dir("sample"), true);
+        let state = state_for_paths(paths.clone());
+
+        let response = skill_prepare(
+            State(state),
+            Extension(test_request_context()),
+            Path("sample".to_string()),
+        )
+        .await
+        .expect("prepare response")
+        .0;
+
+        assert_eq!(response.status, ennoia_kernel::SkillRuntimeStatus::Ready);
+        assert_eq!(response.summary, "prepared");
+        assert!(paths
+            .skill_state_dir("sample")
+            .join("prepared.txt")
+            .exists());
+    }
+
+    #[tokio::test]
+    async fn skill_prepare_handler_rejects_skill_without_prepare() {
+        let temp = tempdir().expect("temp dir");
+        let paths = RuntimePaths::new(temp.path().join("home"));
+        paths.ensure_layout().expect("layout");
+        write_skill_package_with_prepare(&paths.skill_dir("sample"), false);
+        let state = state_for_paths(paths);
+
+        let error = skill_prepare(
+            State(state),
+            Extension(test_request_context()),
+            Path("sample".to_string()),
+        )
+        .await
+        .expect_err("prepare should fail");
+
+        assert_eq!(error.code(), ennoia_contract::ErrorCode::BadRequest);
+        assert!(error
+            .message()
+            .contains("does not define a prepare workflow"));
     }
 }
 

@@ -22,6 +22,11 @@ UI 入口、service 入口、SQLite、缓存、内部权限边界、构建产物
 - 是否启用、是否阻止内置同步统一登记在 `~/.ennoia/config/extensions.toml` 与 `~/.ennoia/config/skills.toml`。
 - 开发态把 `assets/extensions/*` 与 `assets/skills/*` 注册到 `.dev/config/extensions.toml` 与 `.dev/config/skills.toml` 的 `dev_sources`，不把内置包复制到 `.dev/extensions/*` 或 `.dev/skills/*`，并会清理旧版本留下的内置包副本目录。
 
+内置浏览器能力由 `web-search` 一个技能承载：
+
+- `web-search` 是默认网页搜索技能，`browser_control = "local"` 时使用 CloakBrowser 自动化浏览器；本地浏览器内核来源在内置 Chromium、系统自动查找、手动路径之间三选一。
+- `browser_control = "mcp"` 时，`web-search` 直接连接本技能配置的 MCP 浏览器服务；技能配置保存 `mcp_transport` 与 `mcp_url`，不保存浏览器工具名。
+
 推荐扩展目录：
 
 ```text
@@ -34,6 +39,19 @@ UI 入口、service 入口、SQLite、缓存、内部权限边界、构建产物
 ├─ data/                 # 可选：schema、私有模型、资源
 └─ model-endpoint-presets/ # 可选：初始化模型接入实例
 ```
+
+推荐技能目录：
+
+```text
+<skill_id>/
+├─ SKILL.md              # 必需：传统 Skill 入口，frontmatter 包含 name / description
+├─ config.toml           # 必需：Ennoia 增强配置
+├─ scripts/              # 可选：action、diagnostics、prepare 等脚本入口
+├─ references/           # 可选：较长参考资料
+└─ assets/               # 可选：技能私有静态资源
+```
+
+Skill 的产品化配置只放在 `config.toml`。`SKILL.md` 保持传统技能语义，描述使用场景、调用方式、输入输出和注意事项；宿主在运行时把两者合成为内部 `SkillManifest`。
 
 ## Manifest
 

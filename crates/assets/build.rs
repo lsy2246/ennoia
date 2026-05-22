@@ -43,6 +43,9 @@ fn collect_assets(root: &Path, current: &Path) -> Vec<(String, String)> {
 
     for entry in entries {
         let path = entry.path();
+        if should_skip_asset_path(&path) {
+            continue;
+        }
         if path.is_dir() {
             assets.extend(collect_assets(root, &path));
             continue;
@@ -60,6 +63,16 @@ fn collect_assets(root: &Path, current: &Path) -> Vec<(String, String)> {
     }
 
     assets
+}
+
+fn should_skip_asset_path(path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(|item| item.to_str()) else {
+        return false;
+    };
+
+    matches!(name, "node_modules" | ".runtime" | ".cache")
+        || name.ends_with(".test.mjs")
+        || name.ends_with(".test.js")
 }
 
 fn collect_prefixed_assets(prefix_root: &Path, roots: &[PathBuf]) -> Vec<(String, String)> {

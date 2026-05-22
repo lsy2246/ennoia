@@ -11,7 +11,7 @@ use ennoia_extension_host::{ExtensionRuntime, ExtensionRuntimeConfig};
 use ennoia_kernel::{
     apply_server_log_env_overrides, AgentConfig, AgentDocument, AgentFileAccessProfile,
     AgentPermissionProfile, ModelEndpointConfig, PlatformOverview, ServerConfig, SkillConfig,
-    SkillManifest, SkillRegistryEntry, SkillRegistryFile, SpaceSpec, UiConfig,
+    SkillManifest, SkillPackageConfig, SkillRegistryEntry, SkillRegistryFile, SpaceSpec, UiConfig,
 };
 use ennoia_logs::{self, next_span_id, LogsGuard, TraceContext};
 use ennoia_paths::{default_home_dir, RuntimePaths};
@@ -30,7 +30,10 @@ use crate::middleware::RateLimitState;
 use crate::operations::OperationStore;
 use crate::realtime::RealtimeHub;
 use crate::routes::{build_router, run_due_schedules_once};
-use crate::skills::load_skill_readiness_summary;
+use crate::skills::{
+    is_skill_package_root, load_skill_manifest_from_root, load_skill_readiness_summary,
+    SKILL_CONFIG_FILE, SKILL_MARKDOWN_FILE,
+};
 
 type AppError = Box<dyn std::error::Error + Send + Sync>;
 
@@ -665,10 +668,10 @@ pub fn load_skill_configs(
                 continue;
             }
             let root = entry.path();
-            if !root.join("skill.toml").exists() {
+            if !is_skill_package_root(&root) {
                 continue;
             }
-            let manifest = load_skill_manifest_from_path(&root.join("skill.toml"))?;
+            let manifest = load_skill_manifest_from_root(&root)?;
             resolved_by_id.insert(
                 manifest.id.clone(),
                 skill_config_from_manifest(paths, manifest, &enabled_by_id, &blocked, true),
@@ -679,10 +682,10 @@ pub fn load_skill_configs(
     if allow_dev_sources {
         for entry in registry.dev_sources.into_iter().filter(|item| item.enabled) {
             let root = PathBuf::from(&entry.path);
-            if !root.join("skill.toml").exists() {
+            if !is_skill_package_root(&root) {
                 continue;
             }
-            let manifest = load_skill_manifest_from_path(&root.join("skill.toml"))?;
+            let manifest = load_skill_manifest_from_root(&root)?;
             let enabled = enabled_by_id
                 .get(&manifest.id)
                 .copied()
@@ -730,6 +733,7 @@ fn skill_config_from_manifest_with_enabled(
         builtin_sync_blocked: blocked.contains(&manifest.id),
         settings: manifest.settings,
         diagnostics: manifest.diagnostics,
+        prepare: manifest.prepare,
         readiness,
     }
 }
@@ -800,11 +804,6 @@ where
         items.push(item);
     }
     Ok(items)
-}
-
-fn load_skill_manifest_from_path(path: &Path) -> Result<SkillManifest, AppError> {
-    let contents = fs::read_to_string(path)?;
-    Ok(toml::from_str(&contents)?)
 }
 
 pub fn load_agent_documents(paths: &RuntimePaths) -> Result<Vec<AgentDocument>, AppError> {
@@ -911,12 +910,26 @@ mod tests {
         }
     }
 
-    fn sample_skill_manifest(id: &str, version: &str, description: &str) -> String {
-        format!(
-            r#"
-id = "{id}"
+    fn write_sample_skill_package(root: &Path, id: &str, version: &str, description: &str) {
+        fs::create_dir_all(root).expect("skill dir");
+        fs::write(
+            root.join(SKILL_MARKDOWN_FILE),
+            format!(
+                r#"---
+name: {id}
+description: {description}
+---
+
+# {id}
+"#
+            ),
+        )
+        .expect("write skill markdown");
+        fs::write(
+            root.join(SKILL_CONFIG_FILE),
+            format!(
+                r#"
 version = "{version}"
-description = "{description}"
 
 [mount]
 mode = "auto"
@@ -925,7 +938,9 @@ mode = "auto"
 id = "run"
 entry = "scripts/run.mjs"
 "#
+            ),
         )
+        .expect("write skill config");
     }
 
     #[test]
@@ -935,20 +950,10 @@ entry = "scripts/run.mjs"
         paths.ensure_layout().expect("runtime layout");
 
         let installed_root = paths.skill_dir("web-search");
-        fs::create_dir_all(&installed_root).expect("installed skill dir");
-        fs::write(
-            installed_root.join("skill.toml"),
-            sample_skill_manifest("web-search", "0.1.0", "installed copy"),
-        )
-        .expect("write installed manifest");
+        write_sample_skill_package(&installed_root, "web-search", "0.1.0", "installed copy");
 
         let dev_root = temp.path().join("assets").join("skills").join("web-search");
-        fs::create_dir_all(&dev_root).expect("dev skill dir");
-        fs::write(
-            dev_root.join("skill.toml"),
-            sample_skill_manifest("web-search", "9.9.9", "dev source"),
-        )
-        .expect("write dev manifest");
+        write_sample_skill_package(&dev_root, "web-search", "9.9.9", "dev source");
 
         fs::create_dir_all(paths.config_dir()).expect("config dir");
         fs::write(
@@ -1106,15 +1111,18 @@ pub fn upsert_skill_package(paths: &RuntimePaths, payload: &SkillConfig) -> Resu
     let skill_dir = paths.skill_dir(&payload.id);
     fs::create_dir_all(&skill_dir)?;
     fs::write(
-        skill_dir.join("skill.toml"),
-        toml::to_string_pretty(&SkillManifest {
-            id: payload.id.clone(),
+        skill_dir.join(SKILL_MARKDOWN_FILE),
+        render_skill_markdown(&payload.id, &payload.description)?,
+    )?;
+    fs::write(
+        skill_dir.join(SKILL_CONFIG_FILE),
+        toml::to_string_pretty(&SkillPackageConfig {
             version: payload.version.clone(),
-            description: payload.description.clone(),
             mount: payload.mount.clone(),
             actions: payload.actions.clone(),
             settings: payload.settings.clone(),
             diagnostics: payload.diagnostics.clone(),
+            prepare: payload.prepare.clone(),
         })?,
     )?;
 
@@ -1168,12 +1176,26 @@ fn sort_skill_registry_entries(entries: &mut [SkillRegistryEntry]) {
 fn builtin_skill_ids() -> Vec<String> {
     let mut ids = builtins::skills()
         .into_iter()
-        .filter(|asset| asset.logical_path.ends_with("/skill.toml"))
+        .filter(|asset| asset.logical_path.ends_with("/SKILL.md"))
         .filter_map(|asset| asset.logical_path.split('/').nth(1).map(str::to_string))
         .collect::<Vec<_>>();
     ids.sort();
     ids.dedup();
     ids
+}
+
+#[derive(serde::Serialize)]
+struct SkillMarkdownFrontmatter<'a> {
+    name: &'a str,
+    description: &'a str,
+}
+
+fn render_skill_markdown(id: &str, description: &str) -> Result<String, AppError> {
+    let frontmatter = serde_yaml::to_string(&SkillMarkdownFrontmatter {
+        name: id,
+        description,
+    })?;
+    Ok(format!("---\n{frontmatter}---\n\n# {id}\n"))
 }
 
 pub(crate) fn record_trace_span(state: &AppState, entry: LogTraceWrite) {

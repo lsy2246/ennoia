@@ -156,10 +156,10 @@ Web
 ## Skill 模型
 
 - Skill 是标准能力包，不再承担系统能力声明；系统只关心它有哪些 action、每个 action 的入口在哪、当前是否启用。
-- Skill manifest 只保留 `id`、`version`、`description`、`mount.mode` 与 `actions[]`；具体调用说明统一写在 skill 目录下的 `README.md`。
+- Skill 磁盘格式固定为 `SKILL.md + config.toml`。`SKILL.md` 是传统技能入口，YAML frontmatter 提供 `name` 与 `description`；`config.toml` 保存 Ennoia 增强配置，包括 `version`、`mount.mode`、`actions[]`、`settings[]`、`diagnostics` 与可选 `prepare`。
 - 默认一个 Skill 只对外暴露一个 action。只有当用户可感知为多个独立能力，或审批/权限、输入输出契约明确不同，才拆成多 action；内部脚本、子流程和调试入口不直接等于 action。
 - Skill action 的调用协议固定为 `skill_id + action_id + input -> output`；宿主不在 manifest 里强定义输入输出类型。
-- Skill 如果被 Agent 启用，会进入结构化 `context.skills`；模型看到的是 skill 摘要与 action 摘要，需要细看时再去读 `README.md`。
+- Skill 如果被 Agent 启用，会进入结构化 `context.skills`；模型看到的是 skill 摘要与 action 摘要，需要细看时再去读技能目录下的 `SKILL.md`。
 - 扩展可以带自己的能力说明文档，但扩展说明不等于 skill；前者回答“系统里这块能力是什么”，后者回答“Agent 怎么调用这包里的动作”。
 
 ## 存储划分

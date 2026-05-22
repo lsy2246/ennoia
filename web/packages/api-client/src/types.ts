@@ -255,6 +255,7 @@ export type SkillConfig = {
   builtin_sync_blocked: boolean;
   settings: ExtensionSettingField[];
   diagnostics: SkillDiagnosticsSpec;
+  prepare?: SkillCommandSpec | null;
   readiness: SkillReadinessSummary;
 };
 

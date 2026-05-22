@@ -98,6 +98,13 @@ export async function runSkillCheck(skillId: string) {
   });
 }
 
+export async function runSkillPrepare(skillId: string) {
+  return fetchJson<SkillCheckResult>(`/api/skills/${skillId}/prepare`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
 export async function listModelEndpoints() {
   return fetchJson<ModelEndpointConfig[]>(MODEL_ENDPOINTS_API);
 }

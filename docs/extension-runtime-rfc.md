@@ -15,7 +15,7 @@
 
 ## 当前协议
 
-Extension 使用 `extension.toml` 描述系统能力。Skill 使用 `skill.toml` 描述工具与用法，两者互不兼容、互不混用。
+Extension 使用 `extension.toml` 描述系统能力。Skill 使用传统 `SKILL.md` 描述工具与用法，并使用同目录 `config.toml` 保存 Ennoia 增强配置；Extension 与 Skill 两者互不兼容、互不混用。
 
 Extension descriptor 包含：
 
@@ -31,13 +31,10 @@ Extension descriptor 包含：
 - `settings`
 - `conversation`
 
-Skill descriptor 包含：
+Skill 磁盘包包含：
 
-- `id`
-- `version`
-- `description`
-- `mount.mode`
-- `actions[]`
+- `SKILL.md`：传统技能入口，YAML frontmatter 必须包含 `name` 与 `description`
+- `config.toml`：Ennoia 增强配置，包含 `version`、`mount.mode`、`actions[]`、`settings[]`、`diagnostics` 与可选 `prepare`
 
 主声明模型统一只有一层：`views`、`operations`、`events`、`settings`、`conversation`。
 
@@ -45,7 +42,7 @@ Skill descriptor 包含：
 
 UI 与 service 入口由目录约定发现，属于宿主内部解析结果，不属于 manifest 契约，也不在扩展设计界面展示。
 
-Skill 不声明系统能力入口。它只声明动作入口；CLI 参数、调用示例、平台限制和常见输入输出统一保留在 skill 目录下的 `README.md` 中。
+Skill 不声明系统能力入口。它只声明动作入口；CLI 参数、调用示例、平台限制和常见输入输出统一保留在 skill 目录下的 `SKILL.md` 中。
 
 Extension 默认不进入会话目录。只有显式声明了 `conversation.visible = true` 时，宿主才会把它作为会话可见目录项暴露给模型；`conversation.resources` 和 `conversation.operations` 用于限定进入会话时附带的资源范围和操作入口。进入会话时复用扩展唯一那份 `description`，`docs` 仍然只作为按需查阅入口。
 

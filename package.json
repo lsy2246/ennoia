@@ -14,6 +14,7 @@
     "start": "node ./scripts/cli-launcher.mjs start",
     "stop": "node ./scripts/cli-launcher.mjs stop",
     "build:web": "bun run --cwd web build",
+    "build:workers": "node ./scripts/build-workers.mjs",
     "check:web": "bun run --cwd web typecheck",
     "pack:npm": "node ./scripts/pack-npm.mjs",
     "docker:build": "docker compose build"

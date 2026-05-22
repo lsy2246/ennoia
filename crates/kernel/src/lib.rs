@@ -22,9 +22,9 @@ pub use config::{
     ExtensionRegistryFile, ModelEndpointConfig, ModelEndpointModelDiscoveryConfig, ServerConfig,
     SkillActionConfig, SkillCheckAction, SkillCheckCategory, SkillCheckItem, SkillCheckItemStatus,
     SkillCheckResult, SkillCommandSpec, SkillConfig, SkillDevSourceEntry, SkillDiagnosticsSpec,
-    SkillManifest, SkillMountConfig, SkillReadinessSummary, SkillRegistryEntry, SkillRegistryFile,
-    SkillRuntimeStatus, SkillSettingsPayload, SkillSettingsRecord, UiApiConfig, UiConfig,
-    UiNotificationConfig,
+    SkillManifest, SkillMountConfig, SkillPackageConfig, SkillReadinessSummary, SkillRegistryEntry,
+    SkillRegistryFile, SkillRuntimeStatus, SkillSettingsPayload, SkillSettingsRecord, UiApiConfig,
+    UiConfig, UiNotificationConfig,
 };
 pub use context::{ContextFrame, ContextLayer, RunContext};
 pub use decision::{Decision, DecisionSnapshot, NextAction};

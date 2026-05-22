@@ -311,13 +311,15 @@
 
 ## Skill 域
 
-`SkillManifest` 字段：`id`、`version`、`description`、`mount.mode`、`actions[]`。
+Skill 磁盘格式固定为 `SKILL.md + config.toml`。`SKILL.md` 的 YAML frontmatter 提供 `name` 与 `description`；`config.toml` 提供 Ennoia 增强配置。运行时把两者合成为 `SkillManifest`。
+
+`SkillManifest` 字段：`id`、`version`、`description`、`mount.mode`、`actions[]`、`settings[]`、`diagnostics`、`prepare`。
 
 `actions[]` 字段：`id`、`description`、`entry`。
 
 约定：`actions[]` 表示 skill 的对外可调用入口，不等于 skill 内部的所有脚本或子流程；默认一个 skill 只暴露一个 action。
 
-`SkillConfig` 是运行时返回对象，在 manifest 基础上额外附带：`enabled`、`builtin_sync_blocked`。
+`SkillConfig` 是运行时返回对象，在合成后的 manifest 基础上额外附带：`enabled`、`builtin_sync_blocked`、`readiness`。
 
 ## 模型接入域
 

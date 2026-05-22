@@ -18,6 +18,7 @@ use ennoia_kernel::{
     SkillRegistryFile,
 };
 use ennoia_paths::RuntimePaths;
+use ennoia_server::skills::{is_skill_package_root, load_skill_manifest, SKILL_MARKDOWN_FILE};
 use ennoia_server::{bootstrap_app_state, default_app_state, run_server};
 use notify::{Config as NotifyConfig, RecommendedWatcher, RecursiveMode, Watcher};
 
@@ -151,6 +152,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                 print_extension_usage();
             } else {
                 extension_command(&args[1..]).await?;
+            }
+        }
+        Some("skill") => {
+            if args.get(1).is_some_and(|value| is_help_flag(value)) {
+                print_skill_usage();
+            } else {
+                skill_command(&args[1..]).await?;
             }
         }
         Some(other) => {
@@ -476,6 +484,7 @@ fn summary_text() -> String {
         "  ennoia ext logs [limit]".to_string(),
         "  ennoia ext doctor <id>".to_string(),
         "  ennoia ext graph".to_string(),
+        "  ennoia skill prepare web-search".to_string(),
         String::new(),
     ]
     .join("\n")
@@ -505,6 +514,10 @@ fn print_home_command_usage(command: &str) {
 
 fn print_extension_usage() {
     println!("{}", extension_usage());
+}
+
+fn print_skill_usage() {
+    println!("{}", skill_usage());
 }
 
 fn print_internal_usage() {
@@ -569,6 +582,23 @@ fn extension_subcommand_usage(subcommand: &str) -> String {
         "doctor" => "usage: ennoia ext doctor <id>".to_string(),
         "graph" => "usage: ennoia ext graph".to_string(),
         _ => extension_usage(),
+    }
+}
+
+fn skill_usage() -> String {
+    [
+        "usage: ennoia skill <subcommand> [args]".to_string(),
+        String::new(),
+        "subcommands:".to_string(),
+        "  prepare <skill_id>".to_string(),
+    ]
+    .join("\n")
+}
+
+fn skill_subcommand_usage(subcommand: &str) -> String {
+    match subcommand {
+        "prepare" => "usage: ennoia skill prepare <skill_id>".to_string(),
+        _ => skill_usage(),
     }
 }
 
@@ -718,6 +748,245 @@ async fn extension_command(
     }
 
     Ok(())
+}
+
+async fn skill_command(args: &[String]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    if args.is_empty() {
+        print_skill_usage();
+        return Ok(());
+    }
+
+    let subcommand = args.first().map(String::as_str).unwrap_or_default();
+    let subcommand_args = &args[1..];
+    if subcommand_args
+        .first()
+        .is_some_and(|value| is_help_flag(value))
+    {
+        println!("{}", skill_subcommand_usage(subcommand));
+        return Ok(());
+    }
+
+    match subcommand {
+        "prepare" => {
+            let id = parse_required_arg(
+                "skill prepare",
+                subcommand_args,
+                &skill_subcommand_usage("prepare"),
+            )?;
+            prepare_skill(id)?;
+        }
+        other => {
+            return Err(invalid_input_error(format!(
+                "unknown skill subcommand: {other}\n\n{}",
+                skill_usage()
+            )));
+        }
+    }
+
+    Ok(())
+}
+
+fn prepare_skill(skill_id: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let paths = RuntimePaths::resolve(None);
+    init_home_template(&paths)?;
+    let manifest = load_skill_manifest(&paths, skill_id, false)?;
+    let Some(prepare) = manifest.prepare.as_ref() else {
+        return Err(invalid_input_error(format!(
+            "skill '{skill_id}' does not define a prepare workflow\n\n{}",
+            skill_subcommand_usage("prepare")
+        )));
+    };
+
+    let skill_root = paths.skill_dir(skill_id);
+    let entry_path = resolve_skill_entry_path(&skill_root, &prepare.entry)?;
+
+    let runner = prepare.runner.trim().to_ascii_lowercase();
+    if matches!(runner.as_str(), "node" | "bun") {
+        ensure_skill_node_dependencies(&skill_root)?;
+    }
+
+    let mut command = match runner.as_str() {
+        "node" => {
+            let mut item = Command::new("node");
+            item.arg(&entry_path);
+            item
+        }
+        "bun" => {
+            let mut item = Command::new("bun");
+            item.arg(&entry_path);
+            item
+        }
+        "python" => {
+            let mut item = Command::new("python");
+            item.arg(&entry_path);
+            item
+        }
+        "direct" => Command::new(&entry_path),
+        other => {
+            return Err(invalid_input_error(format!(
+                "unsupported prepare runner for skill '{skill_id}': {other}"
+            )));
+        }
+    };
+
+    for arg in &prepare.args {
+        command.arg(arg);
+    }
+    command.current_dir(&skill_root);
+    command.env("ENNOIA_HOME", paths.home());
+    command.env("ENNOIA_SKILL_ID", skill_id);
+    command.env("ENNOIA_SKILL_ROOT", &skill_root);
+    command.env("ENNOIA_SKILL_DATA_DIR", paths.skill_state_dir(skill_id));
+
+    let status = wait_for_child_status(
+        command.spawn()?,
+        prepare.timeout_ms,
+        &format!("skill '{skill_id}' prepare"),
+    )?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(io::Error::other(format!(
+            "skill '{skill_id}' prepare failed with status {status}"
+        ))
+        .into())
+    }
+}
+
+fn ensure_skill_node_dependencies(skill_root: &Path) -> io::Result<()> {
+    if !skill_root.join("package.json").exists() {
+        return Ok(());
+    }
+    if skill_root.join("node_modules").exists() {
+        return Ok(());
+    }
+
+    let package_manager = resolve_node_package_manager()?;
+    println!(
+        "installing skill dependencies with {} in {}",
+        package_manager.name,
+        skill_root.display()
+    );
+    let status = if package_manager.name == "bun" {
+        Command::new(&package_manager.command)
+            .args(["install", "--ignore-scripts"])
+            .current_dir(skill_root)
+            .status()?
+    } else {
+        Command::new(&package_manager.command)
+            .args(["install", "--ignore-scripts"])
+            .current_dir(skill_root)
+            .status()?
+    };
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(io::Error::other(format!(
+            "{} install failed with status {status}",
+            package_manager.name
+        )))
+    }
+}
+
+fn resolve_skill_entry_path(skill_root: &Path, entry: &str) -> io::Result<PathBuf> {
+    if entry.trim().is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "skill prepare entry cannot be empty",
+        ));
+    }
+    let candidate = skill_root.join(entry);
+    let canonical_root = fs::canonicalize(skill_root)?;
+    let canonical_entry = fs::canonicalize(&candidate)?;
+    if !canonical_entry.starts_with(&canonical_root) {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "skill prepare entry must stay inside the skill root",
+        ));
+    }
+    Ok(canonical_entry)
+}
+
+fn wait_for_child_status(
+    mut child: Child,
+    timeout_ms: Option<u64>,
+    label: &str,
+) -> io::Result<ExitStatus> {
+    let Some(timeout_ms) = timeout_ms else {
+        return child.wait();
+    };
+    let timeout = Duration::from_millis(timeout_ms);
+    let started = Instant::now();
+    loop {
+        if let Some(status) = child.try_wait()? {
+            return Ok(status);
+        }
+        if started.elapsed() >= timeout {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                format!("{label} timed out after {}ms", timeout_ms),
+            ));
+        }
+        thread::sleep(Duration::from_millis(100));
+    }
+}
+
+#[derive(Debug, Clone)]
+struct ResolvedCommand {
+    name: &'static str,
+    command: PathBuf,
+}
+
+fn resolve_node_package_manager() -> io::Result<ResolvedCommand> {
+    for name in ["bun", "npm"] {
+        if let Some(command) = find_command_on_path(name) {
+            return Ok(ResolvedCommand { name, command });
+        }
+    }
+
+    Err(io::Error::new(
+        io::ErrorKind::NotFound,
+        "neither bun nor npm was found on PATH",
+    ))
+}
+
+fn find_command_on_path(command: &str) -> Option<PathBuf> {
+    let path_dirs = env::var_os("PATH")
+        .map(|path| env::split_paths(&path).collect::<Vec<_>>())
+        .unwrap_or_default();
+    find_command_on_path_with_dirs(command, &path_dirs, cfg!(windows))
+}
+
+fn find_command_on_path_with_dirs(
+    command: &str,
+    path_dirs: &[PathBuf],
+    windows: bool,
+) -> Option<PathBuf> {
+    let candidates = command_candidates(command, windows);
+    path_dirs
+        .iter()
+        .flat_map(|dir| candidates.iter().map(|candidate| dir.join(candidate)))
+        .find(|path| path.is_file())
+}
+
+fn command_candidates(command: &str, windows: bool) -> Vec<String> {
+    if !windows {
+        return vec![command.to_string()];
+    }
+
+    if Path::new(command).extension().is_some() {
+        return vec![command.to_string()];
+    }
+
+    ["exe", "cmd", "bat", "com"]
+        .into_iter()
+        .map(|extension| format!("{command}.{extension}"))
+        .chain(std::iter::once(command.to_string()))
+        .collect()
 }
 
 async fn internal_command(args: &[String]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -1698,14 +1967,28 @@ fn is_host_reload_path(repo_root: &Path, path: &Path) -> bool {
         return true;
     }
     if relative.starts_with("assets") {
-        return !relative.starts_with(Path::new("assets").join("extensions"))
-            && !relative.starts_with(Path::new("assets").join("skills"))
-            && has_host_reload_extension(path);
+        if relative.starts_with(Path::new("assets").join("extensions")) {
+            return false;
+        }
+        if relative.starts_with(Path::new("assets").join("skills")) {
+            return is_builtin_skill_reload_relative_path(relative);
+        }
+        return has_host_reload_extension(path);
     }
     if !relative.starts_with("crates") {
         return false;
     }
     has_host_reload_extension(path)
+}
+
+fn is_builtin_skill_reload_relative_path(relative: &Path) -> bool {
+    if !relative.starts_with(Path::new("assets").join("skills")) {
+        return false;
+    }
+    matches!(
+        relative.file_name().and_then(|value| value.to_str()),
+        Some(SKILL_MARKDOWN_FILE | "config.toml")
+    )
 }
 
 fn is_builtin_worker_reload_path(repo_root: &Path, path: &Path) -> bool {
@@ -2128,7 +2411,7 @@ fn auto_attach_dev_skills(paths: &RuntimePaths) -> io::Result<()> {
             continue;
         }
         let root = entry.path();
-        if !root.join("skill.toml").exists() {
+        if !is_skill_package_root(&root) {
             continue;
         }
         let normalized = root.to_string_lossy().replace('\\', "/");
@@ -2247,6 +2530,7 @@ fn sync_builtin_registries(paths: &RuntimePaths) -> io::Result<()> {
 fn materialize_builtin_packages(paths: &RuntimePaths) -> io::Result<()> {
     let extension_registry = read_extension_registry(paths)?;
     let skill_registry = read_skill_registry(paths)?;
+    let builtin_skill_ids = builtin_skill_ids();
 
     for asset in builtins::extensions() {
         let Some(id) = builtin_package_id(asset.logical_path) else {
@@ -2265,6 +2549,13 @@ fn materialize_builtin_packages(paths: &RuntimePaths) -> io::Result<()> {
             continue;
         }
         write_binary_asset(paths.home(), asset.logical_path, asset.contents)?;
+    }
+
+    for id in &builtin_skill_ids {
+        if is_blocked_builtin_skill(&skill_registry, id) {
+            continue;
+        }
+        remove_package_dir_if_inside_root(&paths.skills_dir(), &paths.skill_dir(id))?;
     }
 
     for asset in builtins::skills() {
@@ -2333,7 +2624,7 @@ fn builtin_extension_ids() -> Vec<String> {
 }
 
 fn builtin_skill_ids() -> Vec<String> {
-    builtin_package_ids_from_assets(builtins::skills(), "skill.toml")
+    builtin_package_ids_from_assets(builtins::skills(), SKILL_MARKDOWN_FILE)
 }
 
 fn builtin_package_ids_from_assets(
@@ -2416,11 +2707,12 @@ mod tests {
     use std::{fs, path::Path};
 
     use super::{
-        ensure_no_args, extension_subcommand_usage, extension_usage, home_command_usage,
-        init_dev_home_template, internal_usage, is_builtin_worker_reload_path, is_host_reload_path,
+        ensure_no_args, extension_subcommand_usage, extension_usage,
+        find_command_on_path_with_dirs, home_command_usage, init_dev_home_template,
+        init_home_template, internal_usage, is_builtin_worker_reload_path, is_host_reload_path,
         parse_optional_home_arg, parse_optional_usize_arg, parse_required_arg, print_config_usage,
         should_mark_binary_asset_executable, summary_text, tail_log_file, unique_suffix,
-        RuntimePaths,
+        RuntimePaths, SKILL_MARKDOWN_FILE,
     };
 
     fn as_args(values: &[&str]) -> Vec<String> {
@@ -2443,7 +2735,7 @@ mod tests {
             "extensions/workflow/worker/workflow.wasm"
         ));
         assert!(!should_mark_binary_asset_executable(
-            "skills/example/skill.toml"
+            "skills/example/SKILL.md"
         ));
     }
 
@@ -2473,7 +2765,10 @@ mod tests {
             .extension_dir("workflow")
             .join("extension.toml")
             .exists());
-        assert!(!paths.skill_dir("web-search").join("skill.toml").exists());
+        assert!(!paths
+            .skill_dir("web-search")
+            .join(SKILL_MARKDOWN_FILE)
+            .exists());
 
         let _ = fs::remove_dir_all(home);
     }
@@ -2497,14 +2792,24 @@ mod tests {
         )
         .expect("write stale extension manifest");
         fs::write(
-            stale_builtin_skill.join("skill.toml"),
-            "id = \"web-search\"\n",
+            stale_builtin_skill.join(SKILL_MARKDOWN_FILE),
+            "---\nname: web-search\ndescription: stale\n---\n",
         )
-        .expect("write stale skill manifest");
+        .expect("write stale skill markdown");
+        fs::write(
+            stale_builtin_skill.join("config.toml"),
+            "version = \"1.0.0\"\n",
+        )
+        .expect("write stale skill config");
         fs::write(custom_extension.join("extension.toml"), "id = \"custom\"\n")
             .expect("write custom extension manifest");
-        fs::write(custom_skill.join("skill.toml"), "id = \"custom-skill\"\n")
-            .expect("write custom skill manifest");
+        fs::write(
+            custom_skill.join(SKILL_MARKDOWN_FILE),
+            "---\nname: custom-skill\ndescription: custom\n---\n",
+        )
+        .expect("write custom skill markdown");
+        fs::write(custom_skill.join("config.toml"), "version = \"1.0.0\"\n")
+            .expect("write custom skill config");
 
         init_dev_home_template(&paths).expect("init dev home");
 
@@ -2517,6 +2822,46 @@ mod tests {
     }
 
     #[test]
+    fn home_template_replaces_stale_builtin_skill_package_contents() {
+        let home =
+            std::env::temp_dir().join(format!("ennoia-home-skill-cleanup-{}", unique_suffix()));
+        let paths = RuntimePaths::new(&home);
+        let builtin_skill = paths.skill_dir("web-search");
+
+        fs::create_dir_all(&builtin_skill).expect("builtin skill dir");
+        fs::write(builtin_skill.join("README.md"), "# Old web search\n")
+            .expect("write stale readme");
+        fs::write(
+            builtin_skill.join("skill.toml"),
+            "id = \"web-search\"\nversion = \"0.0.1\"\n",
+        )
+        .expect("write stale skill manifest");
+
+        init_home_template(&paths).expect("init home");
+
+        assert!(builtin_skill.join(SKILL_MARKDOWN_FILE).exists());
+        assert!(builtin_skill.join("config.toml").exists());
+        assert!(!builtin_skill.join("README.md").exists());
+        assert!(!builtin_skill.join("skill.toml").exists());
+
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn windows_command_resolution_prefers_launchable_shims() {
+        let dir = std::env::temp_dir().join(format!("ennoia-command-path-{}", unique_suffix()));
+        fs::create_dir_all(&dir).expect("create temp path dir");
+        fs::write(dir.join("bun"), "").expect("write extensionless shim");
+        fs::write(dir.join("bun.cmd"), "").expect("write cmd shim");
+
+        let resolved = find_command_on_path_with_dirs("bun", &[dir.clone()], true)
+            .expect("resolve bun command");
+
+        assert_eq!(resolved, dir.join("bun.cmd"));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn host_reload_ignores_builtin_extension_sources() {
         let repo_root = Path::new("C:/repo");
         assert!(!is_host_reload_path(
@@ -2524,6 +2869,19 @@ mod tests {
             &repo_root.join(
                 "assets/extensions/workflow/plugins/workflow-service/src/conversation_hooks.rs"
             )
+        ));
+    }
+
+    #[test]
+    fn host_reload_includes_builtin_skill_descriptors() {
+        let repo_root = Path::new("C:/repo");
+        assert!(is_host_reload_path(
+            repo_root,
+            &repo_root.join("assets/skills/web-search/SKILL.md")
+        ));
+        assert!(is_host_reload_path(
+            repo_root,
+            &repo_root.join("assets/skills/web-search/config.toml")
         ));
     }
 

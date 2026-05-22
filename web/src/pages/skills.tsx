@@ -3,10 +3,17 @@ import { useEffect, useState } from "react";
 import {
   getSkill,
   getSkillSettings,
+  getSkillStatus,
   listSkills,
+  runSkillCheck,
+  runSkillPrepare,
   saveSkillSettings,
   updateSkill,
+  type SkillCheckAction,
+  type SkillCheckItem,
+  type SkillCheckResult,
   type SkillConfig,
+  type SkillRuntimeStatus,
 } from "@ennoia/api-client";
 import { StatusNotice } from "@/components/StatusNotice";
 import { useUiHelpers } from "@/stores/ui";
@@ -14,12 +21,104 @@ import { useUiHelpers } from "@/stores/ui";
 type SkillDetailState = {
   status: "idle" | "loading" | "ready" | "error";
   skill: SkillConfig | null;
+  check: SkillCheckResult | null;
   values: Record<string, string | number | boolean>;
+  runningAction: string | null;
   message: { tone: "success" | "error"; text: string } | null;
 };
 
 function getSkillSettingFields(skill: SkillConfig | null | undefined) {
   return skill?.settings ?? [];
+}
+
+function skillStatusLabel(status: SkillRuntimeStatus) {
+  switch (status) {
+    case "ready":
+      return "已就绪";
+    case "partial":
+      return "部分就绪";
+    case "missing_config":
+      return "缺少配置";
+    case "env_missing":
+      return "环境缺失";
+    case "error":
+      return "异常";
+    case "unknown":
+      return "未知";
+    default:
+      return status;
+  }
+}
+
+function skillStatusBadgeClass(status: SkillRuntimeStatus) {
+  switch (status) {
+    case "ready":
+      return "badge--success";
+    case "partial":
+    case "missing_config":
+    case "env_missing":
+      return "badge--warn";
+    case "error":
+      return "badge--danger";
+    default:
+      return "badge--muted";
+  }
+}
+
+function skillItemStatusLabel(status: SkillCheckItem["status"]) {
+  switch (status) {
+    case "ok":
+      return "通过";
+    case "missing":
+      return "缺失";
+    case "warning":
+      return "警告";
+    case "error":
+      return "异常";
+    case "skipped":
+      return "跳过";
+    default:
+      return status;
+  }
+}
+
+function skillItemStatusBadgeClass(status: SkillCheckItem["status"]) {
+  switch (status) {
+    case "ok":
+      return "badge--success";
+    case "missing":
+    case "warning":
+      return "badge--warn";
+    case "error":
+      return "badge--danger";
+    default:
+      return "badge--muted";
+  }
+}
+
+function skillCategoryLabel(category: SkillCheckItem["category"]) {
+  switch (category) {
+    case "config":
+      return "配置";
+    case "environment":
+      return "环境";
+    case "permission":
+      return "权限";
+    case "dependency":
+      return "依赖";
+    case "connectivity":
+      return "连接";
+    default:
+      return category;
+  }
+}
+
+function formatCheckedAt(value: string | null | undefined) {
+  if (!value) {
+    return "尚未检测";
+  }
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 }
 
 export function Skills() {
@@ -31,7 +130,9 @@ export function Skills() {
   const [detailState, setDetailState] = useState<SkillDetailState>({
     status: "idle",
     skill: null,
+    check: null,
     values: {},
+    runningAction: null,
     message: null,
   });
   const [savingSettings, setSavingSettings] = useState(false);
@@ -51,10 +152,14 @@ export function Skills() {
   }
 
   async function refreshSelectedSkill(skillId: string) {
-    const nextSkill = await getSkill(skillId);
+    const [nextSkill, nextCheck] = await Promise.all([
+      getSkill(skillId),
+      getSkillStatus(skillId),
+    ]);
     setDetailState((current) => ({
       ...current,
       skill: nextSkill,
+      check: nextCheck,
     }));
   }
 
@@ -63,25 +168,32 @@ export function Skills() {
     setDetailState({
       status: "loading",
       skill: null,
+      check: null,
       values: {},
+      runningAction: null,
       message: null,
     });
     try {
-      const [skill, settings] = await Promise.all([
+      const [skill, settings, check] = await Promise.all([
         getSkill(skillId),
         getSkillSettings(skillId),
+        getSkillStatus(skillId),
       ]);
       setDetailState({
         status: "ready",
         skill,
+        check,
         values: settings.values,
+        runningAction: null,
         message: null,
       });
     } catch (err) {
       setDetailState({
         status: "error",
         skill: null,
+        check: null,
         values: {},
+        runningAction: null,
         message: {
           tone: "error",
           text: String(err),
@@ -95,7 +207,9 @@ export function Skills() {
     setDetailState({
       status: "idle",
       skill: null,
+      check: null,
       values: {},
+      runningAction: null,
       message: null,
     });
   }
@@ -164,10 +278,74 @@ export function Skills() {
     }
   }
 
+  async function runSkillDiagnosticAction(action: SkillCheckAction) {
+    if (!detailState.skill) {
+      return;
+    }
+    const skillId = detailState.skill.id;
+    const runAction = action.kind === "recheck"
+      ? runSkillCheck
+      : action.kind === "prepare"
+        ? runSkillPrepare
+        : null;
+    if (!runAction) {
+      setDetailState((current) => ({
+        ...current,
+        message: {
+          tone: "error",
+          text: `暂不支持的技能动作：${action.kind}`,
+        },
+      }));
+      return;
+    }
+
+    setDetailState((current) => ({
+      ...current,
+      runningAction: action.key,
+      message: null,
+    }));
+    setError(null);
+    try {
+      const result = await runAction(skillId);
+      const [nextSkills, nextSkill] = await Promise.all([
+        listSkills(),
+        getSkill(skillId),
+      ]);
+      setSkills(nextSkills);
+      setDetailState((current) => ({
+        ...current,
+        status: "ready",
+        skill: nextSkill,
+        check: result,
+        runningAction: null,
+      }));
+    } catch (err) {
+      const message = String(err);
+      setError(message);
+      setDetailState((current) => ({
+        ...current,
+        runningAction: null,
+        message: {
+          tone: "error",
+          text: message,
+        },
+      }));
+    }
+  }
+
   const enabledCount = skills.filter((item) => item.enabled).length;
   const configurableCount = skills.filter((item) => getSkillSettingFields(item).length > 0).length;
   const totalActions = skills.reduce((sum, item) => sum + item.actions.length, 0);
   const selectedSkillSettings = getSkillSettingFields(detailState.skill);
+  const selectedSkillCheck = detailState.check ?? (detailState.skill
+    ? {
+        status: detailState.skill.readiness.status,
+        summary: detailState.skill.readiness.summary,
+        checked_at: detailState.skill.readiness.checked_at,
+        items: [],
+        actions: [],
+      }
+    : null);
 
   return (
     <div className="skills-page">
@@ -235,7 +413,12 @@ export function Skills() {
                   <div className="skills-card__header">
                     <div className="stack skills-card__title">
                       <strong>{skill.id}</strong>
-                      <small>{skill.version}</small>
+                      <span className="skills-card__status-row">
+                        <small>{skill.version}</small>
+                        <span className={`badge ${skillStatusBadgeClass(skill.readiness.status)}`}>
+                          {skillStatusLabel(skill.readiness.status)}
+                        </span>
+                      </span>
                     </div>
                     <div className="skills-card__actions">
                       <button
@@ -319,6 +502,75 @@ export function Skills() {
               <div className="error">{detailState.message?.text ?? t("web.skills.config_load_error", "技能配置读取失败。")}</div>
             ) : detailState.skill ? (
               <div className="skill-config-modal__content">
+                {selectedSkillCheck ? (
+                  <section className="skill-config-modal__section">
+                    <div className="skill-config-modal__section-header">
+                      <div className="stack">
+                        <div className="panel-title">{t("web.skills.runtime_status", "运行状态")}</div>
+                        <p className="helper-text">{t("web.skills.runtime_status_description", "这里展示技能自己返回的诊断结果；宿主只负责执行和展示。")}</p>
+                      </div>
+                      <span className={`badge ${skillStatusBadgeClass(selectedSkillCheck.status)}`}>
+                        {skillStatusLabel(selectedSkillCheck.status)}
+                      </span>
+                    </div>
+
+                    <div className="skill-config-modal__summary">
+                      <strong>{selectedSkillCheck.summary}</strong>
+                      <small>
+                        {t("web.skills.checked_at", "检测时间")}：{formatCheckedAt(selectedSkillCheck.checked_at)}
+                      </small>
+                    </div>
+
+                    {selectedSkillCheck.actions.length > 0 ? (
+                      <div className="skill-check-actions">
+                        {selectedSkillCheck.actions.map((action) => (
+                          <button
+                            key={action.key}
+                            type="button"
+                            className="secondary"
+                            disabled={detailState.runningAction !== null}
+                            onClick={() => void runSkillDiagnosticAction(action)}
+                          >
+                            {detailState.runningAction === action.key
+                              ? t("web.common.running", "执行中")
+                              : action.label}
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+
+                    {selectedSkillCheck.items.length === 0 ? (
+                      <div className="skills-inline-empty">
+                        {t("web.skills.check_items_empty", "没有需要展示的检查项。")}
+                      </div>
+                    ) : (
+                      <div className="skill-check-list">
+                        {selectedSkillCheck.items.map((item) => (
+                          <article
+                            key={item.key}
+                            className={`skill-check-card skill-check-card--${item.status}`}
+                          >
+                            <div className="skill-check-card__header">
+                              <div className="stack">
+                                <strong>{item.label}</strong>
+                                <small>
+                                  {skillCategoryLabel(item.category)}
+                                  {item.required ? ` / ${t("web.skills.required", "必填")}` : ""}
+                                </small>
+                              </div>
+                              <span className={`badge ${skillItemStatusBadgeClass(item.status)}`}>
+                                {skillItemStatusLabel(item.status)}
+                              </span>
+                            </div>
+                            {item.message ? <p>{item.message}</p> : null}
+                            {item.fix_hint ? <small>{item.fix_hint}</small> : null}
+                          </article>
+                        ))}
+                      </div>
+                    )}
+                  </section>
+                ) : null}
+
                 <section className="skill-config-modal__section">
                   <div className="skill-config-modal__section-header">
                     <div className="stack">

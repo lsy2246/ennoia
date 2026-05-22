@@ -232,6 +232,7 @@ pub fn build_router(state: AppState) -> Router {
         )
         .route("/api/skills/{skill_id}/status", get(skill_status))
         .route("/api/skills/{skill_id}/check", post(skill_check))
+        .route("/api/skills/{skill_id}/prepare", post(skill_prepare))
         .route(
             "/api/model-endpoints",
             get(model_endpoints).post(model_endpoint_create),

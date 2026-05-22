@@ -7,7 +7,7 @@
 - 工作台：核心只提供宿主、配置、路径、日志、权限、事件总线、动作管道与 Worker RPC；业务能力由扩展提供。
 - Agents：维护协作者档案、模型接入、模型、技能和启用状态。
 - Agent 权限：系统级权限策略、审批和事件记录统一由宿主裁决；扩展 manifest 不声明底层权限边界，宿主按 operation 与调用上下文裁决。
-- 技能：Agent 可挂载的标准能力包；skill 默认对外暴露单一能力入口，内部脚本不直接等同于 action，具体调用说明写在各自的 `README.md` 中。
+- 技能：Agent 可挂载的标准能力包；每个技能目录以传统 `SKILL.md` 作为说明入口，Ennoia 增强配置放在同目录 `config.toml`，skill 默认对外暴露单一能力入口，内部脚本不直接等同于 action。
 - API 模型接入：Agent 绑定的具体模型访问实例。
 - 扩展：扩展包，manifest 只声明系统可见契约：`id`、`version`、`name`、`description`、`docs`、`compat`、`views`、`operations`、`events`、`settings`、`conversation`。扩展自己的 UI / service 入口、数据库、缓存和内部实现由目录约定与扩展代码自行负责，不进入系统级设计界面。宿主把扩展/技能目录整理成结构化 `context` 交给 model provider 渲染，不再把它们直接硬拼进自然语言 prompt，也不自动注入文档正文。
 - 会话：前端通过通用 `/api/actions/{action}` 分发 `conversation.*`、`message.*`、`lane.*` 等动作，底层由内置 `conversation` 扩展实现。
@@ -48,8 +48,10 @@
 ## 内置能力源码
 
 - `assets/extensions/*`：官方内置扩展源码
-- `assets/skills/*`：官方内置技能源码
+- `assets/skills/*`：官方内置技能源码；每个技能包固定使用 `SKILL.md + config.toml`
+- `assets/skills/web-search`：默认网页搜索技能，支持本地自动化浏览器或 MCP 浏览器连接；本地模式下内核来源在内置 Chromium、系统自动查找、手动路径之间三选一
 - 运行态初始化会把未被 `blocked_builtin_sync` 屏蔽的内置包同步到 `~/.ennoia/extensions/*` 与 `~/.ennoia/skills/*`
+- `web-search` 的默认 local + `builtin` 内核需要通过 `ennoia skill prepare web-search` 预先下载到 `~/.ennoia/data/skills/web-search/cloakbrowser/`，搜索运行时只使用已准备好的缓存；选择 MCP 控制方式时在技能配置中填写 MCP 传输方式和本地或远程服务地址
 - 开发态会把内置扩展和技能源码分别挂到仓库 `.dev/config/extensions.toml` 与 `.dev/config/skills.toml` 的 `dev_sources`
 - 开发态只生成配置、日志、pid 和状态数据，不把内置扩展/技能包复制到 `.dev/extensions/*` 与 `.dev/skills/*`，并会清理旧版本留下的内置包副本目录
 - `config/extensions.toml` 与 `config/skills.toml` 保存运行时覆盖状态；其中 `dev_sources` 仅用于开发态
@@ -99,6 +101,12 @@ npm run stop -- dev
 
 ```bash
 cargo run -p ennoia-cli -- init
+```
+
+准备默认网页搜索内置浏览器：
+
+```bash
+cargo run -p ennoia-cli -- skill prepare web-search
 ```
 
 启动默认运行目录：
