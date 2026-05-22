@@ -20,6 +20,7 @@ UI 入口、service 入口、SQLite、缓存、内部权限边界、构建产物
 - 官方内置技能源码放在 `assets/skills/<skill_id>/`。
 - 运行目录里的真实包内容分别落在 `~/.ennoia/extensions/<id>/` 与 `~/.ennoia/skills/<id>/`。
 - 是否启用、是否阻止内置同步统一登记在 `~/.ennoia/config/extensions.toml` 与 `~/.ennoia/config/skills.toml`。
+- 开发态把 `assets/extensions/*` 与 `assets/skills/*` 注册到 `.dev/config/extensions.toml` 与 `.dev/config/skills.toml` 的 `dev_sources`，不把内置包复制到 `.dev/extensions/*` 或 `.dev/skills/*`，并会清理旧版本留下的内置包副本目录。
 
 推荐扩展目录：
 
@@ -236,11 +237,11 @@ Process service 推荐放在 `bin/`。Wasm worker 推荐放在 `worker/`，当�
 ## 运行链路
 
 1. CLI 初始化运行目录。
-2. CLI 同步未被 `blocked_builtin_sync` 屏蔽的内置扩展到 `<ENNOIA_HOME>/extensions/<extension_id>/`，并更新 `config/extensions.toml`。
-3. 开发模式下 CLI 把仓库内 `assets/extensions/*` 追加到 `config/extensions.toml` 的 `dev_sources`。
-4. Extension Host 扫描扩展并解析 manifest 契约。
+2. 运行态 `init/start/serve` 同步未被 `blocked_builtin_sync` 屏蔽的内置扩展和技能到 `<ENNOIA_HOME>/extensions/<extension_id>/` 与 `<ENNOIA_HOME>/skills/<skill_id>/`，并更新 `config/extensions.toml` 与 `config/skills.toml`。
+3. 开发态 `dev` 只初始化配置、日志、pid 和数据目录，把仓库内 `assets/extensions/*` 与 `assets/skills/*` 追加到对应注册表的 `dev_sources`，不复制内置扩展/技能包，并清理旧版本留下的内置包副本目录。
+4. Extension Host 扫描扩展并解析 manifest 契约；Server 加载技能时在开发态优先使用启用的 `dev_sources`。
 5. Extension Host 按目录约定发现 UI / service 入口，生成 runtime snapshot。
-6. Server 暴露 runtime snapshot、事件流、诊断、日志、scheduler API、action API 和 Worker RPC。
+6. Server 暴露 runtime snapshot、事件流、诊断、日志、scheduler API、action API、技能资源 API 和 Worker RPC。
 7. Web 工作台根据 runtime snapshot 动态导入扩展 UI 模块，并按 view name 挂载页面和面板；会话时间线记录按扩展 record kind 挂载。
 
 ## 沙箱与权限

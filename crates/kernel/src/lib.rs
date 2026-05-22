@@ -21,8 +21,8 @@ pub use config::{
     AgentConfig, AgentDocument, ExtensionDevSourceEntry, ExtensionRegistryEntry,
     ExtensionRegistryFile, ModelEndpointConfig, ModelEndpointModelDiscoveryConfig, ServerConfig,
     SkillActionConfig, SkillCheckAction, SkillCheckCategory, SkillCheckItem, SkillCheckItemStatus,
-    SkillCheckResult, SkillCommandSpec, SkillConfig, SkillDiagnosticsSpec, SkillManifest,
-    SkillMountConfig, SkillReadinessSummary, SkillRegistryEntry, SkillRegistryFile,
+    SkillCheckResult, SkillCommandSpec, SkillConfig, SkillDevSourceEntry, SkillDiagnosticsSpec,
+    SkillManifest, SkillMountConfig, SkillReadinessSummary, SkillRegistryEntry, SkillRegistryFile,
     SkillRuntimeStatus, SkillSettingsPayload, SkillSettingsRecord, UiApiConfig, UiConfig,
     UiNotificationConfig,
 };

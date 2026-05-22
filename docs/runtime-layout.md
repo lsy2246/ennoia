@@ -18,16 +18,16 @@
 - `ennoia dev` 固定使用当前仓库根目录下的 `.dev/`
 - 开发态不读取命令行 `home` 参数
 - 开发态不默认读取 `ENNOIA_HOME`
-- 开发态才会读取 `config/extensions.toml` 中的 `dev_sources`
-- `ennoia start` / `ennoia serve` 会忽略 `dev_sources`，只使用运行目录中的安装扩展
+- 开发态才会读取 `config/extensions.toml` 与 `config/skills.toml` 中的 `dev_sources`
+- `ennoia start` / `ennoia serve` 会忽略 `dev_sources`，只使用运行目录中的安装扩展和技能
 
 ## 开发态目录
 
 ```text
 <repo>/.dev/
 ├─ config/
-├─ extensions/
-├─ skills/
+├─ extensions/           # 开发态可存在；内置扩展旧副本会被清理，源码真源是 assets/extensions/*
+├─ skills/               # 开发态可存在；内置技能旧副本会被清理，源码真源是 assets/skills/*
 └─ data/
    ├─ system/
    │  ├─ logs/
@@ -38,7 +38,7 @@
 
 - 开发日志、pid、扩展设置、扩展私有数据、技能私有数据、热加载过程中的运行状态都写入 `.dev/`
 - `.dev/` 属于仓库内开发目录，应由 `.gitignore` 屏蔽
-- `config/extensions.toml` 中的 `dev_sources` 只用于开发态
+- `config/extensions.toml` 与 `config/skills.toml` 中的 `dev_sources` 只用于开发态
 
 ## 运行态落地目录
 
@@ -89,8 +89,8 @@
 
 - `config/server.toml`：HTTP、中间件、内置工具超时、上游默认超时、流式轮询间隔、后台循环间隔、扩展运行时默认值、调度默认值、开发态 supervisor 参数和 bootstrap 状态等系统配置。
 - `config/ui.toml`：Web 标题、语言主题、默认操作者名、默认时区、本地化默认值、可选的前端 API 默认超时和通知默认行为。
-- `config/extensions.toml`：扩展运行时覆盖状态，记录 `enabled` 与 `blocked_builtin_sync`；开发态目录中额外保存 `dev_sources`。
-- `config/skills.toml`：技能运行时覆盖状态，记录 `enabled` 与 `blocked_builtin_sync`。
+- `config/extensions.toml`：扩展运行时覆盖状态，记录 `enabled` 与 `blocked_builtin_sync`；开发态目录中额外保存 `dev_sources`，指向 `assets/extensions/*` 等源码目录。
+- `config/skills.toml`：技能运行时覆盖状态，记录 `enabled` 与 `blocked_builtin_sync`；开发态目录中额外保存 `dev_sources`，指向 `assets/skills/*` 等源码目录。
 - `config/extensions/{extension_id}.toml`：扩展级宿主配置，例如声明过的 `settings[]`。
 - `config/skills/{skill_id}.toml`：技能级宿主配置，保存技能声明过的设置字段值。
 
@@ -113,8 +113,8 @@
 ## 目录职责
 
 - `agents/`：Agent 的统一目录根；每个 Agent 的基础配置、权限配置、文件访问配置、工作目录、技能目录和产物目录都收敛在自己的子目录里。
-- `extensions/`：扩展真实内容目录。
-- `skills/`：技能真实内容目录。
+- `extensions/`：运行态扩展真实内容目录；开发态内置扩展直接从 `dev_sources` 指向的源码目录加载。
+- `skills/`：运行态技能真实内容目录；开发态内置技能直接从 `dev_sources` 指向的源码目录加载。
 - `data/system/logs/`：文本日志与开发日志输出目录，不等同于系统日志数据库。
 
 ## 懒创建目录
@@ -132,6 +132,6 @@
 
 `cargo run -p ennoia-cli -- init` 会自动创建运行目录、基础配置、扩展与技能运行时覆盖文件、`data/system/logs/`、`data/system/pids/` 等基础目录，并同步未被 `blocked_builtin_sync` 屏蔽的内置扩展与技能。初始化不会预先写入会话数据、记忆数据、定时计划或运行数据。
 
-`cargo run -p ennoia-cli -- dev` 会在当前仓库根目录自动创建 `.dev/`，并在该目录下初始化开发态所需的配置、日志、pid 和数据目录。开发态的扩展源码覆盖、热加载状态和扩展设置都写入 `.dev/`。
+`cargo run -p ennoia-cli -- dev` 会在当前仓库根目录自动创建 `.dev/`，并在该目录下初始化开发态所需的配置、日志、pid 和数据目录。开发态会把 `assets/extensions/*` 与 `assets/skills/*` 注册到对应的 `dev_sources`，不物化内置扩展/技能包，并会清理旧版本留下的内置包副本目录；热加载状态、扩展设置和技能设置都写入 `.dev/`。
 
 系统配置始终走 TOML；系统日志与系统事件总线都走独立 SQLite；定时计划走 `data/system/schedules.json`；会话、记忆和运行等业务数据始终由扩展实现维护。

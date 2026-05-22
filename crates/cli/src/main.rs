@@ -14,7 +14,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use ennoia_assets::{builtins, templates};
 use ennoia_kernel::{
     apply_server_log_env_overrides, ExtensionDevSourceEntry, ExtensionRegistryEntry,
-    ExtensionRegistryFile, LoggingConfig, ServerConfig, SkillRegistryEntry, SkillRegistryFile,
+    ExtensionRegistryFile, LoggingConfig, ServerConfig, SkillDevSourceEntry, SkillRegistryEntry,
+    SkillRegistryFile,
 };
 use ennoia_paths::RuntimePaths;
 use ennoia_server::{bootstrap_app_state, default_app_state, run_server};
@@ -109,7 +110,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             let repo_root = env::current_dir()?;
             ensure_no_args("dev", &args[1..], &home_command_usage("dev"))?;
             let paths = RuntimePaths::new(repo_root.join(".dev"));
-            init_home_template(&paths)?;
+            init_dev_home_template(&paths)?;
             let mut server_config: ServerConfig =
                 read_toml_or_default(&paths.server_config_file())?;
             server_config = server_config.normalize();
@@ -122,6 +123,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             )?;
             ensure_builtin_process_workers(&repo_root)?;
             auto_attach_dev_extensions(&paths)?;
+            sync_builtin_provider_presets(&paths, true)?;
+            auto_attach_dev_skills(&paths)?;
             run_dev_supervisor(paths, server_config).await?;
         }
         Some("start") | Some("serve") => {
@@ -2111,6 +2114,42 @@ fn auto_attach_dev_extensions(paths: &RuntimePaths) -> io::Result<()> {
     Ok(())
 }
 
+fn auto_attach_dev_skills(paths: &RuntimePaths) -> io::Result<()> {
+    let builtin_skills_dir = env::current_dir()?.join("assets").join("skills");
+    if !builtin_skills_dir.exists() {
+        return Ok(());
+    }
+
+    let mut registry = read_skill_registry(paths)?;
+
+    for entry in fs::read_dir(builtin_skills_dir)? {
+        let entry = entry?;
+        if !entry.file_type()?.is_dir() {
+            continue;
+        }
+        let root = entry.path();
+        if !root.join("skill.toml").exists() {
+            continue;
+        }
+        let normalized = root.to_string_lossy().replace('\\', "/");
+        let id = entry.file_name().to_string_lossy().to_string();
+        if registry.blocked_builtin_sync.iter().any(|item| item == &id)
+            || registry.dev_sources.iter().any(|item| item.id == id)
+        {
+            continue;
+        }
+        registry.dev_sources.push(SkillDevSourceEntry {
+            id,
+            path: normalized,
+            enabled: true,
+        });
+    }
+
+    sort_skill_dev_sources(&mut registry.dev_sources);
+    write_skill_registry(paths, &registry)?;
+    Ok(())
+}
+
 fn init_home_template(paths: &RuntimePaths) -> io::Result<()> {
     paths.ensure_layout()?;
 
@@ -2119,8 +2158,52 @@ fn init_home_template(paths: &RuntimePaths) -> io::Result<()> {
     migrate_ui_config(&paths.ui_config_file())?;
     sync_builtin_registries(paths)?;
     materialize_builtin_packages(paths)?;
-    sync_builtin_provider_presets(paths)?;
+    sync_builtin_provider_presets(paths, false)?;
     Ok(())
+}
+
+fn init_dev_home_template(paths: &RuntimePaths) -> io::Result<()> {
+    paths.ensure_layout()?;
+
+    write_if_missing(&paths.server_config_file(), templates::server_config())?;
+    write_if_missing(&paths.ui_config_file(), templates::ui_config())?;
+    migrate_ui_config(&paths.ui_config_file())?;
+    sync_builtin_registries(paths)?;
+    remove_dev_builtin_package_copies(paths)
+}
+
+fn remove_dev_builtin_package_copies(paths: &RuntimePaths) -> io::Result<()> {
+    for id in builtin_extension_ids() {
+        remove_package_dir_if_inside_root(&paths.extensions_dir(), &paths.extension_dir(&id))?;
+    }
+    for id in builtin_skill_ids() {
+        remove_package_dir_if_inside_root(&paths.skills_dir(), &paths.skill_dir(&id))?;
+    }
+    Ok(())
+}
+
+fn remove_package_dir_if_inside_root(root: &Path, target: &Path) -> io::Result<()> {
+    if !target.exists() {
+        return Ok(());
+    }
+    if !fs::metadata(target)?.is_dir() {
+        return Ok(());
+    }
+
+    let canonical_root = fs::canonicalize(root)?;
+    let canonical_target = fs::canonicalize(target)?;
+    if canonical_target == canonical_root || !canonical_target.starts_with(&canonical_root) {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!(
+                "refusing to remove package directory outside root: root={}, target={}",
+                root.display(),
+                target.display()
+            ),
+        ));
+    }
+
+    fs::remove_dir_all(target)
 }
 
 fn sync_builtin_registries(paths: &RuntimePaths) -> io::Result<()> {
@@ -2197,32 +2280,49 @@ fn materialize_builtin_packages(paths: &RuntimePaths) -> io::Result<()> {
     Ok(())
 }
 
-fn sync_builtin_provider_presets(paths: &RuntimePaths) -> io::Result<()> {
+fn sync_builtin_provider_presets(
+    paths: &RuntimePaths,
+    include_dev_sources: bool,
+) -> io::Result<()> {
     let extension_registry = read_extension_registry(paths)?;
 
-    for entry in extension_registry
+    for root in extension_registry
         .extensions
         .iter()
         .filter(|item| item.enabled)
+        .filter(|entry| !is_blocked_builtin_extension(&extension_registry, &entry.id))
+        .map(|entry| paths.extension_dir(&entry.id))
     {
-        if is_blocked_builtin_extension(&extension_registry, &entry.id) {
-            continue;
-        }
-        let root = paths.extension_dir(&entry.id);
-        let presets_dir = root.join("model-endpoint-presets");
-        if !presets_dir.exists() {
-            continue;
-        }
+        sync_provider_presets_from_root(paths, &root)?;
+    }
 
-        for preset in fs::read_dir(presets_dir)? {
-            let preset = preset?;
-            if !preset.file_type()?.is_file() {
-                continue;
-            }
-            let destination = paths.model_endpoints_config_dir().join(preset.file_name());
-            let contents = fs::read_to_string(preset.path())?;
-            write_if_missing(&destination, &contents)?;
+    if include_dev_sources {
+        for entry in extension_registry
+            .dev_sources
+            .iter()
+            .filter(|item| item.enabled)
+        {
+            sync_provider_presets_from_root(paths, &PathBuf::from(&entry.path))?;
         }
+    }
+
+    Ok(())
+}
+
+fn sync_provider_presets_from_root(paths: &RuntimePaths, root: &Path) -> io::Result<()> {
+    let presets_dir = root.join("model-endpoint-presets");
+    if !presets_dir.exists() {
+        return Ok(());
+    }
+
+    for preset in fs::read_dir(presets_dir)? {
+        let preset = preset?;
+        if !preset.file_type()?.is_file() {
+            continue;
+        }
+        let destination = paths.model_endpoints_config_dir().join(preset.file_name());
+        let contents = fs::read_to_string(preset.path())?;
+        write_if_missing(&destination, &contents)?;
     }
 
     Ok(())
@@ -2317,9 +2417,10 @@ mod tests {
 
     use super::{
         ensure_no_args, extension_subcommand_usage, extension_usage, home_command_usage,
-        internal_usage, is_builtin_worker_reload_path, is_host_reload_path,
+        init_dev_home_template, internal_usage, is_builtin_worker_reload_path, is_host_reload_path,
         parse_optional_home_arg, parse_optional_usize_arg, parse_required_arg, print_config_usage,
         should_mark_binary_asset_executable, summary_text, tail_log_file, unique_suffix,
+        RuntimePaths,
     };
 
     fn as_args(values: &[&str]) -> Vec<String> {
@@ -2355,6 +2456,64 @@ mod tests {
 
         assert_eq!(lines, vec!["line-3".to_string(), "line-4".to_string()]);
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn dev_home_template_skips_builtin_package_materialization() {
+        let home = std::env::temp_dir().join(format!("ennoia-dev-home-{}", unique_suffix()));
+        let paths = RuntimePaths::new(&home);
+
+        init_dev_home_template(&paths).expect("init dev home");
+
+        assert!(paths.server_config_file().exists());
+        assert!(paths.ui_config_file().exists());
+        assert!(paths.extensions_registry_file().exists());
+        assert!(paths.skills_registry_file().exists());
+        assert!(!paths
+            .extension_dir("workflow")
+            .join("extension.toml")
+            .exists());
+        assert!(!paths.skill_dir("web-search").join("skill.toml").exists());
+
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn dev_home_template_removes_stale_builtin_package_copies() {
+        let home = std::env::temp_dir().join(format!("ennoia-dev-cleanup-{}", unique_suffix()));
+        let paths = RuntimePaths::new(&home);
+        let stale_builtin_extension = paths.extension_dir("workflow");
+        let stale_builtin_skill = paths.skill_dir("web-search");
+        let custom_extension = paths.extension_dir("custom-extension");
+        let custom_skill = paths.skill_dir("custom-skill");
+
+        fs::create_dir_all(&stale_builtin_extension).expect("stale builtin extension dir");
+        fs::create_dir_all(&stale_builtin_skill).expect("stale builtin skill dir");
+        fs::create_dir_all(&custom_extension).expect("custom extension dir");
+        fs::create_dir_all(&custom_skill).expect("custom skill dir");
+        fs::write(
+            stale_builtin_extension.join("extension.toml"),
+            "id = \"workflow\"\n",
+        )
+        .expect("write stale extension manifest");
+        fs::write(
+            stale_builtin_skill.join("skill.toml"),
+            "id = \"web-search\"\n",
+        )
+        .expect("write stale skill manifest");
+        fs::write(custom_extension.join("extension.toml"), "id = \"custom\"\n")
+            .expect("write custom extension manifest");
+        fs::write(custom_skill.join("skill.toml"), "id = \"custom-skill\"\n")
+            .expect("write custom skill manifest");
+
+        init_dev_home_template(&paths).expect("init dev home");
+
+        assert!(!stale_builtin_extension.exists());
+        assert!(!stale_builtin_skill.exists());
+        assert!(custom_extension.exists());
+        assert!(custom_skill.exists());
+
+        let _ = fs::remove_dir_all(home);
     }
 
     #[test]
@@ -2535,6 +2694,14 @@ fn sort_extension_registry_entries(entries: &mut [ExtensionRegistryEntry]) {
 
 fn sort_skill_registry_entries(entries: &mut [SkillRegistryEntry]) {
     entries.sort_by(|left, right| left.id.cmp(&right.id));
+}
+
+fn sort_skill_dev_sources(entries: &mut [SkillDevSourceEntry]) {
+    entries.sort_by(|left, right| {
+        left.id
+            .cmp(&right.id)
+            .then_with(|| left.path.cmp(&right.path))
+    });
 }
 
 fn sort_extension_dev_sources(entries: &mut [ExtensionDevSourceEntry]) {

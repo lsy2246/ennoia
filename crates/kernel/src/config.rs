@@ -551,12 +551,23 @@ pub struct SkillRegistryFile {
     pub blocked_builtin_sync: Vec<String>,
     #[serde(default)]
     pub skills: Vec<SkillRegistryEntry>,
+    #[serde(default)]
+    pub dev_sources: Vec<SkillDevSourceEntry>,
 }
 
 /// SkillRegistryEntry records one installed skill's runtime state.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SkillRegistryEntry {
     pub id: String,
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
+}
+
+/// SkillDevSourceEntry records one attached development source.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SkillDevSourceEntry {
+    pub id: String,
+    pub path: String,
     #[serde(default = "default_enabled")]
     pub enabled: bool,
 }

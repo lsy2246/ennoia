@@ -7,8 +7,8 @@ use chrono::Utc;
 use ennoia_kernel::{
     ExtensionSettingFieldSpec, ExtensionSettingFieldType, ExtensionSettingValue, SkillCheckAction,
     SkillCheckCategory, SkillCheckItem, SkillCheckItemStatus, SkillCheckResult, SkillConfig,
-    SkillManifest, SkillReadinessSummary, SkillRuntimeStatus, SkillSettingsPayload,
-    SkillSettingsRecord,
+    SkillManifest, SkillReadinessSummary, SkillRegistryFile, SkillRuntimeStatus,
+    SkillSettingsPayload, SkillSettingsRecord,
 };
 use ennoia_paths::RuntimePaths;
 use serde::{Deserialize, Serialize};
@@ -23,8 +23,13 @@ struct SkillSettingsFile {
     values: BTreeMap<String, ExtensionSettingValue>,
 }
 
-pub fn load_skill_manifest(paths: &RuntimePaths, skill_id: &str) -> io::Result<SkillManifest> {
-    let descriptor_path = paths.skill_dir(skill_id).join("skill.toml");
+pub fn load_skill_manifest(
+    paths: &RuntimePaths,
+    skill_id: &str,
+    allow_dev_sources: bool,
+) -> io::Result<SkillManifest> {
+    let descriptor_path =
+        resolve_skill_root(paths, skill_id, allow_dev_sources)?.join("skill.toml");
     let contents = fs::read_to_string(descriptor_path)?;
     toml::from_str(&contents).map_err(io::Error::other)
 }
@@ -156,6 +161,7 @@ pub fn load_skill_readiness_summary(
 pub async fn run_skill_check(
     paths: &RuntimePaths,
     manifest: &SkillManifest,
+    allow_dev_sources: bool,
 ) -> io::Result<SkillCheckResult> {
     let values = load_effective_skill_settings(paths, manifest);
     if let Some(mut result) = config_missing_result(manifest, &values) {
@@ -187,7 +193,8 @@ pub async fn run_skill_check(
         return Ok(result);
     };
 
-    let mut process = build_skill_check_command(paths, manifest, &values, command)?;
+    let mut process =
+        build_skill_check_command(paths, manifest, &values, command, allow_dev_sources)?;
     let timeout_ms = command.timeout_ms.unwrap_or(DEFAULT_SKILL_CHECK_TIMEOUT_MS);
     let output = tokio::time::timeout(
         std::time::Duration::from_millis(timeout_ms),
@@ -230,8 +237,9 @@ fn build_skill_check_command(
     manifest: &SkillManifest,
     values: &BTreeMap<String, ExtensionSettingValue>,
     diagnostics: &ennoia_kernel::SkillCommandSpec,
+    allow_dev_sources: bool,
 ) -> io::Result<Command> {
-    let skill_root = paths.skill_dir(&manifest.id);
+    let skill_root = resolve_skill_root(paths, &manifest.id, allow_dev_sources)?;
     let entry_path = resolve_skill_entry_path(&skill_root, &diagnostics.entry)?;
     let runner = diagnostics.runner.trim().to_lowercase();
     let mut command = match runner.as_str() {
@@ -279,6 +287,45 @@ fn build_skill_check_command(
         );
     }
     Ok(command)
+}
+
+fn resolve_skill_root(
+    paths: &RuntimePaths,
+    skill_id: &str,
+    allow_dev_sources: bool,
+) -> io::Result<PathBuf> {
+    let registry = read_skill_registry(paths)?;
+    if allow_dev_sources {
+        for source in registry
+            .dev_sources
+            .into_iter()
+            .filter(|source| source.enabled && source.id == skill_id)
+        {
+            let root = PathBuf::from(source.path);
+            if root.join("skill.toml").exists() {
+                return Ok(root);
+            }
+        }
+    }
+
+    let installed_root = paths.skill_dir(skill_id);
+    if installed_root.join("skill.toml").exists() {
+        return Ok(installed_root);
+    }
+
+    Err(io::Error::new(
+        io::ErrorKind::NotFound,
+        format!("skill '{skill_id}' not found"),
+    ))
+}
+
+fn read_skill_registry(paths: &RuntimePaths) -> io::Result<SkillRegistryFile> {
+    let path = paths.skills_registry_file();
+    if !path.exists() {
+        return Ok(SkillRegistryFile::default());
+    }
+    let contents = fs::read_to_string(path)?;
+    toml::from_str(&contents).map_err(io::Error::other)
 }
 
 fn resolve_skill_entry_path(skill_root: &Path, entry: &str) -> io::Result<PathBuf> {
@@ -584,5 +631,58 @@ mod tests {
             ExtensionSettingValue::String("secret".to_string()),
         );
         assert!(validate_skill_settings_payload(&manifest, &payload).is_ok());
+    }
+
+    #[test]
+    fn load_skill_manifest_prefers_enabled_dev_source() {
+        let home = std::env::temp_dir().join(format!(
+            "ennoia-skill-manifest-{}",
+            Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        let paths = RuntimePaths::new(&home);
+        fs::create_dir_all(paths.skill_dir("sample")).expect("installed skill dir");
+        fs::write(
+            paths.skill_dir("sample").join("skill.toml"),
+            r#"
+id = "sample"
+version = "1.0.0"
+description = "installed"
+"#,
+        )
+        .expect("write installed manifest");
+
+        let dev_root = home.parent().unwrap_or(&home).join("sample-dev");
+        fs::create_dir_all(&dev_root).expect("dev skill dir");
+        fs::write(
+            dev_root.join("skill.toml"),
+            r#"
+id = "sample"
+version = "2.0.0"
+description = "dev"
+"#,
+        )
+        .expect("write dev manifest");
+        fs::create_dir_all(paths.config_dir()).expect("config dir");
+        fs::write(
+            paths.skills_registry_file(),
+            format!(
+                r#"
+[[dev_sources]]
+id = "sample"
+path = "{}"
+enabled = true
+"#,
+                dev_root.to_string_lossy().replace('\\', "/")
+            ),
+        )
+        .expect("write registry");
+
+        let manifest = load_skill_manifest(&paths, "sample", true).expect("load manifest");
+
+        assert_eq!(manifest.version, "2.0.0");
+        assert_eq!(manifest.description, "dev");
+
+        let _ = fs::remove_dir_all(home);
+        let _ = fs::remove_dir_all(dev_root);
     }
 }

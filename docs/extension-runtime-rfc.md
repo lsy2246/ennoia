@@ -5,6 +5,7 @@
 ## 当前目录
 
 - 扩展注册表：`<ENNOIA_HOME>/config/extensions.toml`
+- 技能注册表：`<ENNOIA_HOME>/config/skills.toml`
 - 安装扩展：`<ENNOIA_HOME>/extensions/<extension_id>/`
 - 安装技能：`<ENNOIA_HOME>/skills/<skill_id>/`
 - 扩展级宿主配置：`<ENNOIA_HOME>/config/extensions/<extension_id>.toml`
@@ -51,11 +52,11 @@ Extension 默认不进入会话目录。只有显式声明了 `conversation.visi
 ## 运行流程
 
 1. CLI 初始化运行目录和默认配置。
-2. CLI 同步未被 `blocked_builtin_sync` 屏蔽的内置扩展到 `<ENNOIA_HOME>/extensions/*`，并写入 `config/extensions.toml`。
-3. 开发模式下 CLI 把仓库内 `assets/extensions/*` 追加到 `config/extensions.toml` 的 `dev_sources`。
-4. Extension Host 扫描 `<ENNOIA_HOME>/extensions/*` 中已安装扩展，并叠加 `config/extensions.toml` 的 `enabled` 与 `dev_sources` 状态。
+2. 运行态 `init/start/serve` 同步未被 `blocked_builtin_sync` 屏蔽的内置扩展和技能到 `<ENNOIA_HOME>/extensions/*` 与 `<ENNOIA_HOME>/skills/*`，并写入 `config/extensions.toml` 与 `config/skills.toml`。
+3. 开发态 `dev` 只初始化配置、日志、pid 和数据目录，把仓库内 `assets/extensions/*` 与 `assets/skills/*` 追加到对应注册表的 `dev_sources`，不复制内置扩展/技能包，并清理旧版本留下的内置包副本目录。
+4. Extension Host 扫描 `<ENNOIA_HOME>/extensions/*` 中已安装扩展，并在开发态叠加 `config/extensions.toml` 的 `dev_sources`；Server 加载技能时在开发态优先使用 `config/skills.toml` 中启用的 `dev_sources`。
 5. Extension Host 解析 manifest 契约，并按目录约定发现 UI / service 入口，生成 runtime snapshot。
-6. Server 暴露 runtime snapshot、事件、诊断、日志、资源贡献接口、动作规则视图、scheduler API 和 Worker RPC。
+6. Server 暴露 runtime snapshot、事件、诊断、日志、资源贡献接口、动作规则视图、技能资源接口、scheduler API 和 Worker RPC。
 7. Web 工作台通过 runtime snapshot 动态挂载扩展贡献。
 
 ## Operation 与事件
@@ -86,6 +87,7 @@ operation = "workflow.conversation.message.created"
 ## 开发热加载
 
 - CLI 开发模式监听 `crates/`、`assets/`、`Cargo.toml` 和 `Cargo.lock`，命中后重建并重启 API；内置扩展后端源码由独立 watcher 监听 `assets/extensions/*/(data|plugins|worker)/`，命中后重建并复制 builtin worker，不再把这类改动混进 API 热重载。
+- 开发态的内置扩展和技能从 `assets/extensions/*` 与 `assets/skills/*` 直接加载；`ennoia dev` 初始化会清理旧版本留下的内置包副本，修改源码后不需要手动删除 `.dev/extensions/*` 或 `.dev/skills/*`。
 - `node scripts/build-extension-ui.mjs --watch` 会把 `assets/extensions/*/ui/entry.*` 构建到各自的 `ui/dist/entry.js`。
 - Server 运行时按 2 秒轮询刷新扩展注册表和 manifest；UI bundle 文件版本变化会更新 runtime snapshot。
 - Worker runtime 会缓存编译后的 Wasm Module，并在 `.wasm` mtime 或文件大小变化时自动重新编译。

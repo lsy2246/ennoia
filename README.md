@@ -31,7 +31,7 @@
 - `ennoia dev` / `npm run dev`：开发态，固定使用仓库根目录下的 `.dev/`
 - `ennoia stop`：停止当前开发态或运行态进程；`ennoia stop dev` 显式停止仓库 `.dev/`，`ennoia stop [home]` 停止指定运行目录
 - 开发态不会默认读写 `~/.ennoia`，开发日志、扩展设置、热加载状态和扩展私有数据都留在仓库内的 `.dev/` 下
-- `start/serve` 不读取 `dev_sources`，只消费运行目录中的已安装扩展；`dev_sources` 仅在 `ennoia dev` 下生效
+- `start/serve` 不读取 `dev_sources`，只消费运行目录中的已安装扩展和技能；`dev_sources` 仅在 `ennoia dev` 下生效
 
 ## 核心模块
 
@@ -50,7 +50,8 @@
 - `assets/extensions/*`：官方内置扩展源码
 - `assets/skills/*`：官方内置技能源码
 - 运行态初始化会把未被 `blocked_builtin_sync` 屏蔽的内置包同步到 `~/.ennoia/extensions/*` 与 `~/.ennoia/skills/*`
-- 开发态会把内置扩展源码挂到仓库 `.dev/config/extensions.toml` 的 `dev_sources`
+- 开发态会把内置扩展和技能源码分别挂到仓库 `.dev/config/extensions.toml` 与 `.dev/config/skills.toml` 的 `dev_sources`
+- 开发态只生成配置、日志、pid 和状态数据，不把内置扩展/技能包复制到 `.dev/extensions/*` 与 `.dev/skills/*`，并会清理旧版本留下的内置包副本目录
 - `config/extensions.toml` 与 `config/skills.toml` 保存运行时覆盖状态；其中 `dev_sources` 仅用于开发态
 
 ## 存储边界

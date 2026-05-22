@@ -1,3 +1,4 @@
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -59,6 +60,7 @@ pub struct AppState {
     pub extension_runtime_store: Arc<ExtensionRuntimeStore>,
     pub realtime: Arc<RealtimeHub>,
     pub logs_guard: Option<Arc<LogsGuard>>,
+    pub allow_dev_sources: bool,
 }
 
 pub fn default_app_state() -> AppState {
@@ -101,6 +103,7 @@ pub fn default_app_state() -> AppState {
         extension_runtime_store,
         realtime,
         logs_guard: None,
+        allow_dev_sources: false,
     }
 }
 
@@ -123,13 +126,14 @@ pub async fn bootstrap_app_state(home_dir: impl AsRef<Path>) -> Result<AppState,
     info!(home = %runtime_paths.home().display(), "bootstrapping app state");
 
     let agents = load_agent_configs(&runtime_paths)?;
-    let skills = load_skill_configs(&runtime_paths)?;
+    let allow_dev_sources = allow_dev_sources_from_env();
+    let skills = load_skill_configs(&runtime_paths, allow_dev_sources)?;
     let model_endpoints = load_model_endpoint_configs(&runtime_paths)?;
     let spaces = default_spaces();
     let extensions = ExtensionRuntime::bootstrap(extension_runtime_config(
         &runtime_paths,
         &server_config,
-        allow_dev_sources_from_env(),
+        allow_dev_sources,
     ))?;
     let logs = Arc::new(LogsStore::new(&runtime_paths)?);
     let event_bus = Arc::new(EventBusStore::new(&runtime_paths)?);
@@ -179,6 +183,7 @@ pub async fn bootstrap_app_state(home_dir: impl AsRef<Path>) -> Result<AppState,
         extension_runtime_store,
         realtime,
         logs_guard,
+        allow_dev_sources,
     })
 }
 
@@ -637,18 +642,22 @@ pub fn delete_agent_config(paths: &RuntimePaths, agent_id: &str) -> Result<bool,
     Ok(true)
 }
 
-pub fn load_skill_configs(paths: &RuntimePaths) -> Result<Vec<SkillConfig>, AppError> {
+pub fn load_skill_configs(
+    paths: &RuntimePaths,
+    allow_dev_sources: bool,
+) -> Result<Vec<SkillConfig>, AppError> {
     let registry = load_skill_registry(paths)?;
     let blocked = registry
         .blocked_builtin_sync
-        .into_iter()
-        .collect::<std::collections::BTreeSet<_>>();
+        .iter()
+        .cloned()
+        .collect::<BTreeSet<_>>();
     let enabled_by_id = registry
         .skills
-        .into_iter()
-        .map(|entry| (entry.id, entry.enabled))
-        .collect::<std::collections::BTreeMap<_, _>>();
-    let mut skills = Vec::new();
+        .iter()
+        .map(|entry| (entry.id.clone(), entry.enabled))
+        .collect::<BTreeMap<_, _>>();
+    let mut resolved_by_id = BTreeMap::<String, SkillConfig>::new();
     if paths.skills_dir().exists() {
         for entry in fs::read_dir(paths.skills_dir())? {
             let entry = entry?;
@@ -656,29 +665,73 @@ pub fn load_skill_configs(paths: &RuntimePaths) -> Result<Vec<SkillConfig>, AppE
                 continue;
             }
             let root = entry.path();
-            let descriptor_path = root.join("skill.toml");
-            if !descriptor_path.exists() {
+            if !root.join("skill.toml").exists() {
                 continue;
             }
-            let manifest = load_skill_manifest_from_path(&descriptor_path)?;
-            let enabled = enabled_by_id.get(&manifest.id).copied().unwrap_or(true);
-            let readiness = load_skill_readiness_summary(paths, &manifest);
-            skills.push(SkillConfig {
-                id: manifest.id.clone(),
-                version: manifest.version,
-                description: manifest.description,
-                mount: manifest.mount,
-                actions: manifest.actions,
-                enabled,
-                builtin_sync_blocked: blocked.contains(&manifest.id),
-                settings: manifest.settings,
-                diagnostics: manifest.diagnostics,
-                readiness,
-            });
+            let manifest = load_skill_manifest_from_path(&root.join("skill.toml"))?;
+            resolved_by_id.insert(
+                manifest.id.clone(),
+                skill_config_from_manifest(paths, manifest, &enabled_by_id, &blocked, true),
+            );
         }
     }
+
+    if allow_dev_sources {
+        for entry in registry.dev_sources.into_iter().filter(|item| item.enabled) {
+            let root = PathBuf::from(&entry.path);
+            if !root.join("skill.toml").exists() {
+                continue;
+            }
+            let manifest = load_skill_manifest_from_path(&root.join("skill.toml"))?;
+            let enabled = enabled_by_id
+                .get(&manifest.id)
+                .copied()
+                .unwrap_or(entry.enabled);
+            resolved_by_id.insert(
+                manifest.id.clone(),
+                skill_config_from_manifest_with_enabled(paths, manifest, enabled, &blocked),
+            );
+        }
+    }
+
+    let mut skills = resolved_by_id.into_values().collect::<Vec<_>>();
     skills.sort_by(|left, right| left.id.cmp(&right.id));
     Ok(skills)
+}
+
+fn skill_config_from_manifest(
+    paths: &RuntimePaths,
+    manifest: SkillManifest,
+    enabled_by_id: &BTreeMap<String, bool>,
+    blocked: &BTreeSet<String>,
+    default_enabled: bool,
+) -> SkillConfig {
+    let enabled = enabled_by_id
+        .get(&manifest.id)
+        .copied()
+        .unwrap_or(default_enabled);
+    skill_config_from_manifest_with_enabled(paths, manifest, enabled, blocked)
+}
+
+fn skill_config_from_manifest_with_enabled(
+    paths: &RuntimePaths,
+    manifest: SkillManifest,
+    enabled: bool,
+    blocked: &BTreeSet<String>,
+) -> SkillConfig {
+    let readiness = load_skill_readiness_summary(paths, &manifest);
+    SkillConfig {
+        id: manifest.id.clone(),
+        version: manifest.version,
+        description: manifest.description,
+        mount: manifest.mount,
+        actions: manifest.actions,
+        enabled,
+        builtin_sync_blocked: blocked.contains(&manifest.id),
+        settings: manifest.settings,
+        diagnostics: manifest.diagnostics,
+        readiness,
+    }
 }
 
 pub fn load_skill_registry(paths: &RuntimePaths) -> Result<SkillRegistryFile, AppError> {
@@ -856,6 +909,74 @@ mod tests {
             working_dir: String::new(),
             artifacts_dir: String::new(),
         }
+    }
+
+    fn sample_skill_manifest(id: &str, version: &str, description: &str) -> String {
+        format!(
+            r#"
+id = "{id}"
+version = "{version}"
+description = "{description}"
+
+[mount]
+mode = "auto"
+
+[[actions]]
+id = "run"
+entry = "scripts/run.mjs"
+"#
+        )
+    }
+
+    #[test]
+    fn load_skill_configs_prefers_enabled_dev_source_over_installed_copy() {
+        let temp = tempdir().expect("temp dir");
+        let paths = RuntimePaths::new(temp.path().join("home"));
+        paths.ensure_layout().expect("runtime layout");
+
+        let installed_root = paths.skill_dir("web-search");
+        fs::create_dir_all(&installed_root).expect("installed skill dir");
+        fs::write(
+            installed_root.join("skill.toml"),
+            sample_skill_manifest("web-search", "0.1.0", "installed copy"),
+        )
+        .expect("write installed manifest");
+
+        let dev_root = temp.path().join("assets").join("skills").join("web-search");
+        fs::create_dir_all(&dev_root).expect("dev skill dir");
+        fs::write(
+            dev_root.join("skill.toml"),
+            sample_skill_manifest("web-search", "9.9.9", "dev source"),
+        )
+        .expect("write dev manifest");
+
+        fs::create_dir_all(paths.config_dir()).expect("config dir");
+        fs::write(
+            paths.skills_registry_file(),
+            format!(
+                r#"
+[[skills]]
+id = "web-search"
+enabled = true
+
+[[dev_sources]]
+id = "web-search"
+path = "{}"
+enabled = true
+"#,
+                dev_root.to_string_lossy().replace('\\', "/")
+            ),
+        )
+        .expect("write skill registry");
+
+        let skills = load_skill_configs(&paths, true).expect("load skills");
+        let skill = skills
+            .into_iter()
+            .find(|item| item.id == "web-search")
+            .expect("web-search skill");
+
+        assert_eq!(skill.version, "9.9.9");
+        assert_eq!(skill.description, "dev source");
     }
 
     #[test]

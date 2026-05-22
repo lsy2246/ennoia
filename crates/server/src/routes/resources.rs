@@ -118,14 +118,14 @@ pub(super) async fn agent_delete(
 }
 
 pub(super) async fn skills(State(state): State<AppState>) -> Json<Vec<SkillConfig>> {
-    Json(load_skill_configs(&state.runtime_paths).unwrap_or_default())
+    Json(load_skill_configs(&state.runtime_paths, state.allow_dev_sources).unwrap_or_default())
 }
 
 pub(super) async fn skill_detail(
     State(state): State<AppState>,
     Path(skill_id): Path<String>,
 ) -> Result<Json<SkillConfig>, ApiError> {
-    let skills = load_skill_configs(&state.runtime_paths)
+    let skills = load_skill_configs(&state.runtime_paths, state.allow_dev_sources)
         .map_err(|error| ApiError::internal(error.to_string()))?;
     skills
         .into_iter()
@@ -140,7 +140,7 @@ pub(super) async fn skill_create(
 ) -> Result<Json<SkillConfig>, ApiError> {
     upsert_skill_package(&state.runtime_paths, &payload)
         .map_err(|error| ApiError::internal(error.to_string()))?;
-    let skills = load_skill_configs(&state.runtime_paths)
+    let skills = load_skill_configs(&state.runtime_paths, state.allow_dev_sources)
         .map_err(|error| ApiError::internal(error.to_string()))?;
     skills
         .into_iter()
@@ -157,7 +157,7 @@ pub(super) async fn skill_update(
     payload.id = skill_id.clone();
     upsert_skill_package(&state.runtime_paths, &payload)
         .map_err(|error| ApiError::internal(error.to_string()))?;
-    let skills = load_skill_configs(&state.runtime_paths)
+    let skills = load_skill_configs(&state.runtime_paths, state.allow_dev_sources)
         .map_err(|error| ApiError::internal(error.to_string()))?;
     skills
         .into_iter()
@@ -184,12 +184,13 @@ pub(super) async fn skill_settings(
     Extension(request): Extension<RequestContext>,
     Path(skill_id): Path<String>,
 ) -> ApiResult<SkillSettingsRecord> {
-    let manifest = load_skill_manifest(&state.runtime_paths, &skill_id).map_err(|error| {
-        scoped(
-            ApiError::not_found(format!("skill '{skill_id}' not found: {error}")),
-            &request,
-        )
-    })?;
+    let manifest = load_skill_manifest(&state.runtime_paths, &skill_id, state.allow_dev_sources)
+        .map_err(|error| {
+            scoped(
+                ApiError::not_found(format!("skill '{skill_id}' not found: {error}")),
+                &request,
+            )
+        })?;
     Ok(Json(load_skill_settings(&state.runtime_paths, &manifest)))
 }
 
@@ -199,12 +200,13 @@ pub(super) async fn skill_settings_put(
     Path(skill_id): Path<String>,
     Json(payload): Json<SkillSettingsPayload>,
 ) -> ApiResult<SkillSettingsRecord> {
-    let manifest = load_skill_manifest(&state.runtime_paths, &skill_id).map_err(|error| {
-        scoped(
-            ApiError::not_found(format!("skill '{skill_id}' not found: {error}")),
-            &request,
-        )
-    })?;
+    let manifest = load_skill_manifest(&state.runtime_paths, &skill_id, state.allow_dev_sources)
+        .map_err(|error| {
+            scoped(
+                ApiError::not_found(format!("skill '{skill_id}' not found: {error}")),
+                &request,
+            )
+        })?;
     validate_skill_settings_payload(&manifest, &payload)
         .map_err(|error| scoped(ApiError::bad_request(error), &request))?;
     save_skill_settings(&state.runtime_paths, &manifest, &payload)
@@ -217,12 +219,13 @@ pub(super) async fn skill_status(
     Extension(request): Extension<RequestContext>,
     Path(skill_id): Path<String>,
 ) -> ApiResult<SkillCheckResult> {
-    let manifest = load_skill_manifest(&state.runtime_paths, &skill_id).map_err(|error| {
-        scoped(
-            ApiError::not_found(format!("skill '{skill_id}' not found: {error}")),
-            &request,
-        )
-    })?;
+    let manifest = load_skill_manifest(&state.runtime_paths, &skill_id, state.allow_dev_sources)
+        .map_err(|error| {
+            scoped(
+                ApiError::not_found(format!("skill '{skill_id}' not found: {error}")),
+                &request,
+            )
+        })?;
     Ok(Json(load_skill_status(&state.runtime_paths, &manifest)))
 }
 
@@ -231,13 +234,14 @@ pub(super) async fn skill_check(
     Extension(request): Extension<RequestContext>,
     Path(skill_id): Path<String>,
 ) -> ApiResult<SkillCheckResult> {
-    let manifest = load_skill_manifest(&state.runtime_paths, &skill_id).map_err(|error| {
-        scoped(
-            ApiError::not_found(format!("skill '{skill_id}' not found: {error}")),
-            &request,
-        )
-    })?;
-    run_skill_check(&state.runtime_paths, &manifest)
+    let manifest = load_skill_manifest(&state.runtime_paths, &skill_id, state.allow_dev_sources)
+        .map_err(|error| {
+            scoped(
+                ApiError::not_found(format!("skill '{skill_id}' not found: {error}")),
+                &request,
+            )
+        })?;
+    run_skill_check(&state.runtime_paths, &manifest, state.allow_dev_sources)
         .await
         .map(Json)
         .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))
