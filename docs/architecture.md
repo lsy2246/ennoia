@@ -52,7 +52,7 @@ Web
 - Agent 文件访问与权限系统是两套独立机制。
 - 权限系统回答“动作允不允许”；文件访问回答“Agent 可使用哪些虚拟文件入口”。
 - 当前文件访问配置固定暴露三类虚拟根：`/workspace`、`/artifacts`、`/tmp`。
-- Agent 当前只暴露一个原生操作能力：`command.exec`。文件读取、文件写入和网络访问都不再作为独立内置工具提供；如有需要，统一通过命令完成。
+- Agent 当前暴露一个原生操作能力：`command.exec`。文件读取、文件写入和网络访问都不再作为独立内置工具提供；如有需要，统一通过命令完成。Agent 启用的 Skill action 可以被编译成模型侧工具，并通过宿主 `skill.<skill_id>.<action_id>` runtime operation 执行。
 - `command.exec` 会先经过权限裁决，再按 Agent 的 `file_access` 解析工作目录。路径解析只接受配置过的虚拟根及其子路径，不把宿主机绝对路径作为模型侧入口。
 - 当前文件访问不是进程隔离，也不保证已启动的宿主进程无法访问其他宿主文件；真正的执行进程隔离后续单独设计。
 
@@ -150,7 +150,7 @@ Web
 - 扩展主题通过 `ennoia.theme` 与主壳对接；主壳只消费稳定语义 token 和 dockview token，不把内部 class 结构暴露给扩展。
 - 扩展默认不进入会话目录；只有显式声明 `conversation.visible = true` 时，宿主才会把该扩展作为会话可见目录项暴露给模型。进入会话时只注入扩展自身的 `description`、受限资源/operation 目录与 `docs` 入口，不自动注入 `docs` 正文。
 - Agent 权限系统由宿主按 operation 和调用上下文统一裁决；扩展 manifest 不声明底层权限边界、SQLite、文件、网络或环境变量。
-- Agent 调用上游模型时，宿主统一构造结构化 `context`，至少包含 `runtime`、`conversation`、`extensions`、`skills` 四块，再由 provider 适配层渲染成模型可见消息；`metadata` 只保留给链路追踪和调试，不承担模型上下文职责。
+- Agent 调用上游模型时，宿主统一构造结构化 `context`，至少包含 `runtime`、`conversation`、`extensions`、`skills` 与 `tools`，再由 provider 适配层渲染成模型可见消息；`metadata` 只保留给链路追踪和调试，不承担模型上下文职责。
 - 当前模型侧应优先使用 `runtime.workspace_root`、`runtime.artifacts_root` 与 `runtime.temp_root` 这些虚拟根；它们表示 Agent 自己的内部执行视图，不等同于用户项目工作区，也不应默认向用户主动播报宿主机绝对路径。
 
 ## Skill 模型
@@ -159,7 +159,7 @@ Web
 - Skill 磁盘格式固定为 `SKILL.md + config.toml`。`SKILL.md` 是传统技能入口，YAML frontmatter 提供 `name` 与 `description`；`config.toml` 保存 Ennoia 增强配置，包括 `version`、`mount.mode`、`actions[]`、`settings[]`、`diagnostics` 与可选 `prepare`。
 - 默认一个 Skill 只对外暴露一个 action。只有当用户可感知为多个独立能力，或审批/权限、输入输出契约明确不同，才拆成多 action；内部脚本、子流程和调试入口不直接等于 action。
 - Skill action 的调用协议固定为 `skill_id + action_id + input -> output`；宿主不在 manifest 里强定义输入输出类型。
-- Skill 如果被 Agent 启用，会进入结构化 `context.skills`；模型看到的是 skill 摘要与 action 摘要，需要细看时再去读技能目录下的 `SKILL.md`。
+- Skill 如果被 Agent 启用，会进入结构化 `context.skills`，可执行 action 会进入结构化 `context.tools`，并按 provider 支持情况编译为模型侧工具。模型请求返回 tool call 后，workflow 通过宿主 runtime operation 执行对应 `skill.<skill_id>.<action_id>`。
 - 扩展可以带自己的能力说明文档，但扩展说明不等于 skill；前者回答“系统里这块能力是什么”，后者回答“Agent 怎么调用这包里的动作”。
 
 ## 存储划分

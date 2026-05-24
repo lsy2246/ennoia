@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type FormEvent,
 } from "react";
@@ -32,37 +33,16 @@ import { formatRelativePath } from "@/lib/pathDisplay";
 import { useAgentsStore } from "@/stores/agents";
 import { useModelEndpointsStore } from "@/stores/modelEndpoints";
 import { useUiHelpers } from "@/stores/ui";
-
-const DEFAULT_FILE_ACCESS_PROFILE: AgentFileAccessProfile = {
-  default_root: "/workspace",
-  roots: [
-    { id: "workspace", path: "/workspace", mode: "read_write" },
-    { id: "artifacts", path: "/artifacts", mode: "read_write" },
-    { id: "temp", path: "/tmp", mode: "read_write" },
-  ],
-};
-
-const EMPTY_AGENT: AgentProfile = {
-  id: "",
-  display_name: "",
-  description: "",
-  system_prompt: "",
-  model_endpoint_id: "",
-  model_id: "",
-  generation_options: {},
-  skills: [],
-  enabled: true,
-  permission_profile: {
-    mode: "whitelist",
-    entries: [],
-  },
-  file_access: DEFAULT_FILE_ACCESS_PROFILE,
-};
-
-const EMPTY_PERMISSION_PROFILE: AgentPermissionProfile = {
-  mode: "whitelist",
-  entries: [],
-};
+import {
+  DEFAULT_FILE_ACCESS_PROFILE,
+  EMPTY_AGENT,
+  EMPTY_PERMISSION_PROFILE,
+  createDefaultAgentDraft,
+  defaultGenerationOptions,
+  findProviderContribution,
+  resolveAgentModelId,
+  shouldInitializeAgentDraft,
+} from "./draft";
 
 function buildCommandPermissionMatchOptions(
   t: (key: string, fallback: string, params?: Record<string, string | number>) => string,
@@ -96,6 +76,7 @@ export function AgentEditorView({
   const [busy, setBusy] = useState(false);
   const [policyBusy, setPolicyBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const initializedNewAgentIdRef = useRef<string | null>(null);
   const isNew = agentId.startsWith("new-");
 
   const selectedProvider = useMemo(
@@ -139,23 +120,23 @@ export function AgentEditorView({
       setModelEndpoints(nextModelEndpoints);
 
       if (isNew) {
-        setForm({
-          ...EMPTY_AGENT,
-          model_endpoint_id: nextModelEndpoints[0]?.id ?? "",
-          model_id: resolveAgentModelId(nextModelEndpoints[0] ?? null, ""),
-          generation_options: defaultGenerationOptions(
-            findProviderContribution(providerContributions, nextModelEndpoints[0] ?? null),
-          ),
-        });
-        setPolicyForm(EMPTY_PERMISSION_PROFILE);
-        setPermissionApprovals([]);
-        setPermissionEvents([]);
+        if (shouldInitializeAgentDraft({
+          agentId,
+          initializedAgentId: initializedNewAgentIdRef.current,
+        })) {
+          setForm(createDefaultAgentDraft(nextModelEndpoints, providerContributions));
+          setPolicyForm(EMPTY_PERMISSION_PROFILE);
+          setPermissionApprovals([]);
+          setPermissionEvents([]);
+          initializedNewAgentIdRef.current = agentId;
+        }
         return;
       }
 
+      initializedNewAgentIdRef.current = null;
       const current = nextAgents.find((item) => item.id === agentId);
       if (!current) {
-        setError(t("web.agents.not_found", "未找到对应 Agent。"));
+        setError("未找到对应 Agent。");
         return;
       }
 
@@ -165,7 +146,15 @@ export function AgentEditorView({
     } catch (err) {
       setError(String(err));
     }
-  }, [agentId, hydratePermissions, isNew, providerContributions, t]);
+  }, [agentId, hydratePermissions, isNew, providerContributions]);
+
+  useEffect(() => {
+    initializedNewAgentIdRef.current = null;
+    setForm(EMPTY_AGENT);
+    setPolicyForm(EMPTY_PERMISSION_PROFILE);
+    setPermissionApprovals([]);
+    setPermissionEvents([]);
+  }, [agentId]);
 
   useEffect(() => {
     void hydrate();
@@ -657,30 +646,6 @@ function permissionDecisionClass(decision: string) {
   return "badge--danger";
 }
 
-function findProviderContribution(
-  contributions: ExtensionProviderContribution[],
-  provider: ModelEndpointConfig | null,
-) {
-  if (!provider) {
-    return null;
-  }
-
-  const matches = contributions.filter((item) => item.provider.kind === provider.kind);
-  return matches.length === 1 ? matches[0] : null;
-}
-
-function resolveAgentModelId(provider: ModelEndpointConfig | null, currentModelId: string) {
-  const normalizedCurrentModelId = currentModelId.trim();
-  const models = provider?.available_models ?? [];
-  if (normalizedCurrentModelId && models.some((model) => model.id === normalizedCurrentModelId)) {
-    return normalizedCurrentModelId;
-  }
-  if (provider?.default_model?.trim()) {
-    return provider.default_model.trim();
-  }
-  return models[0]?.id ?? normalizedCurrentModelId;
-}
-
 function buildAgentModelOptions(
   provider: ModelEndpointConfig | null,
   currentModelId: string,
@@ -698,14 +663,6 @@ function buildAgentModelOptions(
     },
     ...options,
   ];
-}
-
-function defaultGenerationOptions(contribution: ExtensionProviderContribution | null) {
-  return Object.fromEntries(
-    (contribution?.provider.generation_options ?? [])
-      .filter((option: ExtensionProviderContribution["provider"]["generation_options"][number]) => option.default_value)
-      .map((option: ExtensionProviderContribution["provider"]["generation_options"][number]) => [option.id, option.default_value!]),
-  );
 }
 
 function normalizeAgentPayload(

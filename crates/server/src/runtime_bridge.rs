@@ -23,8 +23,7 @@ use crate::realtime::RealtimeEvent;
 use crate::routes::actions::dispatch_hook_event;
 use crate::routes::extensions::invoke_provider_json_with_request;
 use crate::routes::scoped;
-
-const MIN_COMMAND_TIMEOUT_MS: u64 = 120_000;
+use crate::skills::{load_skill_manifest, run_skill_action};
 
 const PROVIDER_NODE_RUNNER: &str = r#"
 import { pathToFileURL } from 'node:url';
@@ -225,6 +224,9 @@ pub async fn execute_runtime_operation(
         })?;
     let content = match operation {
         "command.exec" => execute_command_exec(state, request, &agent, &payload).await?,
+        other if other.starts_with("skill.") => {
+            execute_skill_action(state, request, &agent, other, &payload).await?
+        }
         other => {
             return Err(scoped(
                 ApiError::bad_request(format!("unsupported runtime operation '{other}'")),
@@ -565,7 +567,7 @@ async fn execute_operation_payload(
         ("provider", "generate") => {
             execute_provider_generate_operation(state, request, payload).await
         }
-        ("runtime", "command.exec") => {
+        ("runtime", name) if name == "command.exec" || name.starts_with("skill.") => {
             let result = execute_runtime_operation(
                 state,
                 request,
@@ -712,10 +714,7 @@ fn resolve_command_timeout_ms(
 ) -> u64 {
     integer_argument(arguments, "timeout_ms")
         .unwrap_or(config.default_timeout_ms as i64)
-        .clamp(
-            config.default_timeout_ms.max(MIN_COMMAND_TIMEOUT_MS) as i64,
-            config.max_timeout_ms.max(MIN_COMMAND_TIMEOUT_MS) as i64,
-        ) as u64
+        .clamp(config.min_timeout_ms as i64, config.max_timeout_ms as i64) as u64
 }
 
 fn normalize_command_exec_invocation(
@@ -930,6 +929,131 @@ async fn execute_command_exec(
     Ok(parse_runtime_content(&content))
 }
 
+async fn execute_skill_action(
+    state: &AppState,
+    request: &RequestContext,
+    agent: &AgentDocument,
+    operation: &str,
+    payload: &RuntimeOperationRequest,
+) -> Result<JsonValue, ApiError> {
+    let (skill_id, action_id) = parse_skill_operation(operation, request)?;
+    let agent_profile = &agent.profile;
+    if !agent_profile
+        .skills
+        .iter()
+        .any(|item| item.trim() == skill_id)
+    {
+        return Err(scoped(
+            ApiError::forbidden(format!(
+                "agent '{}' is not configured for skill '{skill_id}'",
+                agent_profile.id
+            )),
+            request,
+        ));
+    }
+    let skill = crate::app::load_skill_configs(&state.runtime_paths, state.allow_dev_sources)
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), request))?
+        .into_iter()
+        .find(|item| item.id == skill_id)
+        .ok_or_else(|| {
+            scoped(
+                ApiError::not_found(format!("skill '{skill_id}' not found")),
+                request,
+            )
+        })?;
+    if !skill.enabled {
+        return Err(scoped(
+            ApiError::forbidden(format!("skill '{skill_id}' is disabled")),
+            request,
+        ));
+    }
+    if !skill.actions.iter().any(|item| item.id == action_id) {
+        return Err(scoped(
+            ApiError::not_found(format!("skill '{skill_id}' action '{action_id}' not found")),
+            request,
+        ));
+    }
+    let args = skill_action_args(skill_id, action_id, &payload.arguments, request)?;
+    let grant_id = authorize_runtime_operation(
+        state,
+        request,
+        &agent_profile.id,
+        operation,
+        "skill",
+        &format!("{skill_id}.{action_id}"),
+        &payload.conversation_id,
+        &payload.run_id,
+        payload.message_id.as_deref(),
+        None,
+        None,
+        "runtime.operation",
+    )?;
+    consume_runtime_grant(state, request, grant_id)?;
+    let manifest = load_skill_manifest(&state.runtime_paths, skill_id, state.allow_dev_sources)
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), request))?;
+    run_skill_action(
+        &state.runtime_paths,
+        &manifest,
+        action_id,
+        args,
+        state.allow_dev_sources,
+    )
+    .await
+    .map_err(|error| scoped(ApiError::internal(error.to_string()), request))
+}
+
+fn parse_skill_operation<'a>(
+    operation: &'a str,
+    request: &RequestContext,
+) -> Result<(&'a str, &'a str), ApiError> {
+    operation
+        .strip_prefix("skill.")
+        .and_then(|value| value.rsplit_once('.'))
+        .filter(|(skill_id, action_id)| !skill_id.trim().is_empty() && !action_id.trim().is_empty())
+        .ok_or_else(|| {
+            scoped(
+                ApiError::bad_request(format!("invalid skill operation '{operation}'")),
+                request,
+            )
+        })
+}
+
+fn skill_action_args(
+    skill_id: &str,
+    action_id: &str,
+    arguments: &JsonValue,
+    request: &RequestContext,
+) -> Result<Vec<String>, ApiError> {
+    match (skill_id, action_id) {
+        ("web-search", "search") => web_search_action_args(arguments, request),
+        _ => Err(scoped(
+            ApiError::bad_request(format!("unsupported skill action '{skill_id}.{action_id}'")),
+            request,
+        )),
+    }
+}
+
+fn web_search_action_args(
+    arguments: &JsonValue,
+    request: &RequestContext,
+) -> Result<Vec<String>, ApiError> {
+    let query = required_string_argument(arguments, "query", request)?;
+    let mut args = vec![query];
+    if let Some(limit) = integer_argument(arguments, "limit") {
+        args.push("--limit".to_string());
+        args.push(limit.to_string());
+    }
+    if let Some(pages) = integer_argument(arguments, "pages") {
+        args.push("--pages".to_string());
+        args.push(pages.to_string());
+    }
+    if let Some(format) = string_argument(arguments, "format") {
+        args.push("--format".to_string());
+        args.push(format);
+    }
+    Ok(args)
+}
+
 fn required_string_argument(
     arguments: &JsonValue,
     key: &str,
@@ -1030,7 +1154,12 @@ fn read_windows_environment_value(hive: &winreg::RegKey, path: &str, name: &str)
 
 #[cfg(test)]
 mod tests {
-    use super::{format_command_invocation, normalize_command_exec_invocation};
+    use super::{
+        format_command_invocation, normalize_command_exec_invocation, resolve_command_timeout_ms,
+        web_search_action_args,
+    };
+    use ennoia_kernel::RuntimeOperationTimeoutConfig;
+    use ennoia_logs::RequestContext;
 
     #[test]
     fn format_command_invocation_normalizes_windows_paths_and_quotes_spaces() {
@@ -1069,5 +1198,55 @@ mod tests {
             assert_eq!(args, vec!["echo".to_string(), "hi".to_string()]);
             assert!(!normalized);
         }
+    }
+
+    #[test]
+    fn command_timeout_respects_tool_requested_value_above_configured_minimum() {
+        let config = RuntimeOperationTimeoutConfig {
+            default_timeout_ms: 120_000,
+            min_timeout_ms: 1_000,
+            max_timeout_ms: 3_600_000,
+        };
+
+        let timeout_ms =
+            resolve_command_timeout_ms(&serde_json::json!({ "timeout_ms": 30_000 }), &config);
+
+        assert_eq!(timeout_ms, 30_000);
+    }
+
+    #[test]
+    fn web_search_action_args_maps_json_input_to_cli_args() {
+        let request = RequestContext {
+            request_id: "req-test".to_string(),
+            trace_id: "trace-test".to_string(),
+            span_id: "span-test".to_string(),
+            parent_span_id: None,
+            sampled: false,
+            source: "test".to_string(),
+        };
+
+        let args = web_search_action_args(
+            &serde_json::json!({
+                "query": "openai responses api",
+                "limit": 4,
+                "pages": 2,
+                "format": "markdown",
+            }),
+            &request,
+        )
+        .expect("map args");
+
+        assert_eq!(
+            args,
+            vec![
+                "openai responses api",
+                "--limit",
+                "4",
+                "--pages",
+                "2",
+                "--format",
+                "markdown"
+            ]
+        );
     }
 }

@@ -10,7 +10,7 @@ export const provider = {
     {
       id: "reasoning_effort",
       type: "select",
-      values: ["low", "medium", "high"],
+      values: ["low", "medium", "high", "xhigh"],
       default: "medium",
     },
   ],
@@ -125,13 +125,13 @@ function normalizeModelEndpointConfig(config) {
   const baseUrl = trimTrailingSlash(config.base_url || DEFAULT_BASE_URL);
   const directApiKey = typeof config.api_key === "string" ? config.api_key.trim() : "";
   const rawApiKeyEnv = typeof config.api_key_env === "string" ? config.api_key_env.trim() : "";
-  const apiKeyEnv = isLikelyEnvName(rawApiKeyEnv) ? rawApiKeyEnv : "OPENAI_API_KEY";
+  const apiKeyEnv = isLikelyEnvName(rawApiKeyEnv) ? rawApiKeyEnv : "";
   const inlineApiKeyFromEnvField = !directApiKey && rawApiKeyEnv && !isLikelyEnvName(rawApiKeyEnv)
     ? rawApiKeyEnv
     : "";
-  const apiKey = directApiKey || inlineApiKeyFromEnvField || process.env[apiKeyEnv];
+  const apiKey = directApiKey || inlineApiKeyFromEnvField || (apiKeyEnv ? process.env[apiKeyEnv] : "");
   if (!apiKey) {
-    throw new Error(`OpenAI API key is missing; set ${apiKeyEnv}`);
+    throw new Error(apiKeyEnv ? `OpenAI API key is missing; set ${apiKeyEnv}` : "OpenAI API key is missing");
   }
 
   return {

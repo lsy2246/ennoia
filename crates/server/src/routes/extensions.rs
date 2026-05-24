@@ -510,34 +510,10 @@ pub(super) async fn extension_ui_module(
         )
     })?;
 
-    let body = match ui.kind.as_str() {
-        "url" => format!(
-            "export {{ default }} from {url:?}; export * from {url:?};",
-            url = ui.entry
-        ),
-        "file" | "module" => {
-            let source_root = PathBuf::from(&extension.source_root);
-            let entry_path = PathBuf::from(&ui.entry);
-            let public_path = extension_asset_relative_path(&source_root, &entry_path)
-                .map_err(|error| scoped(ApiError::bad_request(error.to_string()), &request))?;
-            let import_url = format!(
-                "/api/extensions/{}/ui/assets/{}?v={}",
-                extension_id,
-                encode_asset_url_path(&public_path),
-                encode_url_query_component(&ui.version),
-            );
-            format!(
-                "export {{ default }} from {url:?}; export * from {url:?};",
-                url = import_url
-            )
-        }
-        _ => {
-            return Err(scoped(
-                ApiError::bad_request(format!("unsupported ui kind '{}'", ui.kind)),
-                &request,
-            ))
-        }
-    };
+    let source_root = PathBuf::from(&extension.source_root);
+    let import_url = extension_ui_import_url(&extension_id, &source_root, &ui)
+        .map_err(|error| scoped(error, &request))?;
+    let body = extension_ui_module_export_body(&import_url);
 
     Ok((
         [
@@ -548,6 +524,52 @@ pub(super) async fn extension_ui_module(
             (header::CACHE_CONTROL, "no-store"),
         ],
         body,
+    ))
+}
+
+fn extension_ui_module_export_body(import_url: &str) -> String {
+    format!("export {{ default }} from {import_url:?}; export * from {import_url:?};")
+}
+
+fn extension_ui_import_url(
+    extension_id: &str,
+    source_root: &StdPath,
+    ui: &ennoia_kernel::ResolvedUiEntry,
+) -> Result<String, ApiError> {
+    match ui.kind.as_str() {
+        "url" => Ok(ui.entry.clone()),
+        "file" => extension_ui_asset_import_url(extension_id, source_root, ui),
+        "module" if ui.hmr => {
+            let entry_path = PathBuf::from(&ui.entry);
+            extension_asset_relative_path(source_root, &entry_path)
+                .map_err(|error| ApiError::bad_request(error.to_string()))?;
+            Ok(format!(
+                "/@fs/{}?v={}",
+                vite_fs_import_path(&entry_path),
+                encode_url_query_component(&ui.version),
+            ))
+        }
+        "module" => extension_ui_asset_import_url(extension_id, source_root, ui),
+        _ => Err(ApiError::bad_request(format!(
+            "unsupported ui kind '{}'",
+            ui.kind
+        ))),
+    }
+}
+
+fn extension_ui_asset_import_url(
+    extension_id: &str,
+    source_root: &StdPath,
+    ui: &ennoia_kernel::ResolvedUiEntry,
+) -> Result<String, ApiError> {
+    let entry_path = PathBuf::from(&ui.entry);
+    let public_path = extension_asset_relative_path(source_root, &entry_path)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    Ok(format!(
+        "/api/extensions/{}/ui/assets/{}?v={}",
+        extension_id,
+        encode_asset_url_path(&public_path),
+        encode_url_query_component(&ui.version),
     ))
 }
 
@@ -1089,6 +1111,17 @@ fn encode_asset_url_path(path: &str) -> String {
         .join("/")
 }
 
+fn vite_fs_import_path(path: &StdPath) -> String {
+    let mut display = path.to_string_lossy().replace('\\', "/");
+    if let Some(stripped) = display.strip_prefix("//?/") {
+        display = stripped.to_string();
+    }
+    if let Some(stripped) = display.strip_prefix("//") {
+        return format!("/{}", stripped);
+    }
+    display
+}
+
 fn encode_url_query_component(value: &str) -> String {
     value
         .bytes()
@@ -1131,4 +1164,51 @@ fn resolve_provider_contribution(
         return matches.pop();
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use ennoia_kernel::ResolvedUiEntry;
+    use tempfile::tempdir;
+
+    #[test]
+    fn dev_ui_import_url_uses_vite_fs_for_hmr_source_entry() {
+        let temp = tempdir().expect("temp dir");
+        let extension_root = temp.path().join("sample");
+        let ui_dir = extension_root.join("ui");
+        fs::create_dir_all(&ui_dir).expect("create ui dir");
+        let entry = ui_dir.join("entry.tsx");
+        fs::write(&entry, "export default {};\n").expect("write ui entry");
+
+        let url = extension_ui_import_url(
+            "sample",
+            &extension_root,
+            &ResolvedUiEntry {
+                kind: "module".to_string(),
+                entry: entry.to_string_lossy().replace('\\', "/"),
+                hmr: true,
+                version: "123 456".to_string(),
+            },
+        )
+        .expect("dev ui import url");
+
+        assert!(
+            url.starts_with("/@fs/"),
+            "dev HMR ui entries must import through Vite /@fs, got: {url}"
+        );
+        assert!(
+            url.contains("ui/entry.tsx"),
+            "url should point at source entry: {url}"
+        );
+        assert!(
+            url.ends_with("?v=123%20456"),
+            "url should keep the cache-busting version query encoded: {url}"
+        );
+        assert!(
+            !url.contains("/api/extensions/sample/ui/assets/ui/entry.tsx"),
+            "dev HMR ui entries must not serve raw TSX through extension assets: {url}"
+        );
+    }
 }

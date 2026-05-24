@@ -6,15 +6,17 @@ use std::path::{Path, PathBuf};
 use chrono::Utc;
 use ennoia_kernel::{
     ExtensionSettingFieldSpec, ExtensionSettingFieldType, ExtensionSettingValue, SkillCheckAction,
-    SkillCheckCategory, SkillCheckItem, SkillCheckItemStatus, SkillCheckResult, SkillConfig,
-    SkillManifest, SkillPackageConfig, SkillReadinessSummary, SkillRegistryFile,
+    SkillCheckCategory, SkillCheckItem, SkillCheckItemStatus, SkillCheckResult, SkillCommandSpec,
+    SkillConfig, SkillManifest, SkillPackageConfig, SkillReadinessSummary, SkillRegistryFile,
     SkillRuntimeStatus, SkillSettingsPayload, SkillSettingsRecord,
 };
 use ennoia_paths::RuntimePaths;
 use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
 use tokio::process::Command;
 
 const DEFAULT_SKILL_CHECK_TIMEOUT_MS: u64 = 15_000;
+const DEFAULT_SKILL_ACTION_TIMEOUT_MS: u64 = 300_000;
 pub const SKILL_MARKDOWN_FILE: &str = "SKILL.md";
 pub const SKILL_CONFIG_FILE: &str = "config.toml";
 const SKILL_STATUS_FILE: &str = "status.json";
@@ -398,6 +400,84 @@ pub fn skill_config_with_readiness(paths: &RuntimePaths, mut skill: SkillConfig)
         },
     );
     skill
+}
+
+pub async fn run_skill_action(
+    paths: &RuntimePaths,
+    manifest: &SkillManifest,
+    action_id: &str,
+    args: Vec<String>,
+    allow_dev_sources: bool,
+) -> io::Result<JsonValue> {
+    let values = load_effective_skill_settings(paths, manifest);
+    if let Some(result) = config_missing_result(manifest, &values) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("skill '{}' is not ready: {}", manifest.id, result.summary),
+        ));
+    }
+    let action = manifest
+        .actions
+        .iter()
+        .find(|item| item.id == action_id)
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("skill '{}' action '{action_id}' not found", manifest.id),
+            )
+        })?;
+    let command = SkillCommandSpec {
+        runner: infer_skill_action_runner(&action.entry)?,
+        entry: action.entry.clone(),
+        args,
+        timeout_ms: Some(DEFAULT_SKILL_ACTION_TIMEOUT_MS),
+    };
+    let mut process = build_skill_command(
+        paths,
+        manifest,
+        &values,
+        &command,
+        allow_dev_sources,
+        "action",
+    )?;
+    let output = tokio::time::timeout(
+        std::time::Duration::from_millis(DEFAULT_SKILL_ACTION_TIMEOUT_MS),
+        process.output(),
+    )
+    .await
+    .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "skill action timed out"))??;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    if !output.status.success() {
+        let detail = if !stderr.is_empty() { stderr } else { stdout };
+        return Err(io::Error::other(if detail.is_empty() {
+            format!("skill action exited with status {}", output.status)
+        } else {
+            detail
+        }));
+    }
+    if stdout.is_empty() {
+        return Ok(JsonValue::Null);
+    }
+    Ok(serde_json::from_str(&stdout).unwrap_or(JsonValue::String(stdout)))
+}
+
+fn infer_skill_action_runner(entry: &str) -> io::Result<String> {
+    let extension = Path::new(entry)
+        .extension()
+        .and_then(|item| item.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    match extension.as_str() {
+        "js" | "mjs" | "cjs" => Ok("node".to_string()),
+        "py" => Ok("python".to_string()),
+        "" => Ok("direct".to_string()),
+        other => Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("cannot infer runner for skill action entry extension '{other}'"),
+        )),
+    }
 }
 
 fn build_skill_command(

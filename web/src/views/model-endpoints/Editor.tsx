@@ -131,7 +131,7 @@ function applyTemplateToDraft(
     kind,
     base_url: template?.base_url ?? base.base_url,
     api_key: base.api_key,
-    api_key_env: template?.api_key_env ?? base.api_key_env,
+    api_key_env: kind === "openai" ? "" : template?.api_key_env ?? base.api_key_env,
     request_timeout_ms: template?.request_timeout_ms ?? base.request_timeout_ms,
     default_model: defaultModel,
     available_models: models,
@@ -383,6 +383,7 @@ export function ModelEndpointEditorView({ modelEndpointId, panelId }: { modelEnd
           : null;
       const payload = {
         ...form,
+        api_key_env: form.kind === "openai" ? "" : form.api_key_env.trim(),
         request_timeout_ms:
           normalizedRequestTimeoutMs == null || normalizedRequestTimeoutMs < 0
             ? 0
@@ -712,18 +713,18 @@ export function ModelEndpointEditorView({ modelEndpointId, panelId }: { modelEnd
             {t("web.model_endpoints.api_key_help", "可直接保存并使用 API Key；如果已填写这里，会优先于环境变量。")}
           </p>
         </label>
-        <label>
-          {t("web.model_endpoints.api_key_env", "API Key 环境变量")}
-          <input
-            value={form.api_key_env}
-            onChange={(event) => setForm({ ...form, api_key_env: event.target.value })}
-          />
-          <p className="helper-text">
-            {form.kind === "openai"
-              ? t("web.model_endpoints.api_key_env_help_openai", "OpenAI 默认读取 OPENAI_API_KEY；这里填写服务进程里的环境变量名。")
-              : t("web.model_endpoints.api_key_env_help", "这里填写服务进程里的环境变量名。")}
-          </p>
-        </label>
+        {form.kind === "openai" ? null : (
+          <label>
+            {t("web.model_endpoints.api_key_env", "API Key 环境变量")}
+            <input
+              value={form.api_key_env}
+              onChange={(event) => setForm({ ...form, api_key_env: event.target.value })}
+            />
+            <p className="helper-text">
+              {t("web.model_endpoints.api_key_env_help", "这里填写服务进程里的环境变量名。")}
+            </p>
+          </label>
+        )}
         <label>
           {t("web.model_endpoints.request_timeout_ms", "请求超时毫秒")}
           <input

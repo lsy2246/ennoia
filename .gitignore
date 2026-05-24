@@ -11,6 +11,7 @@ Thumbs.db
 !/.env.example
 coverage/
 tmp/
+.tmp/
 .turbo/
 .tmp-tests/
 packaging/npm/vendor/

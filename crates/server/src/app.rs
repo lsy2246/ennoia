@@ -16,6 +16,7 @@ use ennoia_kernel::{
 use ennoia_logs::{self, next_span_id, LogsGuard, TraceContext};
 use ennoia_paths::{default_home_dir, RuntimePaths};
 use tokio::net::TcpListener;
+use tokio::select;
 use tracing::info;
 
 use crate::agent_permissions::AgentPermissionStore;
@@ -311,7 +312,7 @@ where
     F: Fn(&ennoia_kernel::BackgroundRuntimeConfig) -> u64,
 {
     let delay_ms = resolve_delay_ms(&live_server_config(state).background);
-    tokio::select! {
+    select! {
         _ = tokio::time::sleep(Duration::from_millis(delay_ms)) => true,
         changed = cancel.changed() => !(changed.is_err() || *cancel.borrow()),
     }

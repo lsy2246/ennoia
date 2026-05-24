@@ -22,6 +22,13 @@ use ennoia_server::skills::{is_skill_package_root, load_skill_manifest, SKILL_MA
 use ennoia_server::{bootstrap_app_state, default_app_state, run_server};
 use notify::{Config as NotifyConfig, RecommendedWatcher, RecursiveMode, Watcher};
 
+#[cfg(windows)]
+use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, STILL_ACTIVE};
+#[cfg(windows)]
+use windows_sys::Win32::System::Threading::{
+    GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+};
+
 const WEB_DIR: &str = "web";
 const ENNOIA_ALLOW_DEV_SOURCES_ENV: &str = "ENNOIA_ALLOW_DEV_SOURCES";
 static DEV_CONSOLE_OUTPUT_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -383,13 +390,30 @@ fn force_kill_process(pid: u32) -> io::Result<()> {
 fn is_process_running(pid: u32) -> io::Result<bool> {
     #[cfg(windows)]
     {
-        let output = Command::new("tasklist")
-            .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .output()?;
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        Ok(stdout.contains(&format!("\"{pid}\"")))
+        let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+        if handle.is_null() {
+            let error = unsafe { GetLastError() };
+            const ERROR_ACCESS_DENIED: u32 = 5;
+            const ERROR_INVALID_PARAMETER: u32 = 87;
+            if error == ERROR_INVALID_PARAMETER {
+                return Ok(false);
+            }
+            if error == ERROR_ACCESS_DENIED {
+                return Ok(true);
+            }
+            return Err(io::Error::last_os_error());
+        }
+
+        let mut exit_code = 0;
+        let result = unsafe { GetExitCodeProcess(handle, &mut exit_code) };
+        let close_result = unsafe { CloseHandle(handle) };
+        if result == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        if close_result == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(exit_code == STILL_ACTIVE as u32)
     }
 
     #[cfg(not(windows))]
@@ -1102,32 +1126,42 @@ async fn run_dev_supervisor(
                 if saw_builtin_worker_change {
                     pending_builtin_worker_change = Some(Instant::now());
                 }
-                if pending_host_change
+                let host_reload_ready = pending_host_change
                     .map(|changed_at| {
                         changed_at.elapsed()
                             >= Duration::from_millis(
                                 server_config.dev_supervisor.host_reload_debounce_ms,
                             )
                     })
-                    .unwrap_or(false)
+                    .unwrap_or(false);
+                let builtin_worker_reload_ready = pending_builtin_worker_change
+                    .map(|changed_at| {
+                        changed_at.elapsed()
+                            >= Duration::from_millis(
+                                server_config.dev_supervisor.host_reload_debounce_ms,
+                            )
+                    })
+                    .unwrap_or(false);
+                if let Some(action) =
+                    next_dev_reload_action(host_reload_ready, builtin_worker_reload_ready)
                 {
-                    pending_host_change = None;
-                    if let Err(error) = api.rebuild_and_restart().await {
-                        eprintln!("host hot reload failed: {error}");
+                    if host_reload_ready {
+                        pending_host_change = None;
                     }
-                }
-                if pending_builtin_worker_change
-                    .map(|changed_at| {
-                        changed_at.elapsed()
-                            >= Duration::from_millis(
-                                server_config.dev_supervisor.host_reload_debounce_ms,
-                            )
-                    })
-                    .unwrap_or(false)
-                {
-                    pending_builtin_worker_change = None;
-                    if let Err(error) = ensure_builtin_process_workers(&repo_root) {
-                        eprintln!("builtin worker hot reload failed: {error}");
+                    if builtin_worker_reload_ready {
+                        pending_builtin_worker_change = None;
+                    }
+                    match action {
+                        DevReloadAction::RebuildHost => {
+                            if let Err(error) = api.rebuild_and_restart().await {
+                                eprintln!("host hot reload failed: {error}");
+                            }
+                        }
+                        DevReloadAction::RefreshBuiltinWorkers => {
+                            if let Err(error) = api.refresh_builtin_workers_and_restart().await {
+                                eprintln!("builtin worker hot reload failed: {error}");
+                            }
+                        }
                     }
                 }
             }
@@ -1137,6 +1171,25 @@ async fn run_dev_supervisor(
     api.stop();
     drop(dev_processes);
     Ok(())
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DevReloadAction {
+    RebuildHost,
+    RefreshBuiltinWorkers,
+}
+
+fn next_dev_reload_action(
+    host_reload_ready: bool,
+    builtin_worker_reload_ready: bool,
+) -> Option<DevReloadAction> {
+    if host_reload_ready {
+        return Some(DevReloadAction::RebuildHost);
+    }
+    if builtin_worker_reload_ready {
+        return Some(DevReloadAction::RefreshBuiltinWorkers);
+    }
+    None
 }
 
 async fn wait_for_dev_stop_signal() -> io::Result<()> {
@@ -1208,7 +1261,7 @@ impl ApiDevProcess {
 
     async fn rebuild_and_restart(&mut self) -> io::Result<()> {
         println!("host change detected; rebuilding API...");
-        ensure_builtin_process_workers(&self.repo_root)?;
+        build_builtin_process_workers(&self.repo_root)?;
         let built = match self.build_api_binary() {
             Ok(path) => path,
             Err(error) => {
@@ -1228,8 +1281,17 @@ impl ApiDevProcess {
         if let Some(child) = self.current.as_mut() {
             child.stop();
         }
-        self.current = None;
-        self.wait_for_api_port_release().await?;
+        let port_release = self.wait_for_api_port_release().await;
+        clear_api_current_after_port_release(&mut self.current, port_release)?;
+        if let Err(error) = install_builtin_process_workers(&self.repo_root) {
+            eprintln!("builtin worker install failed; attempting rollback: {error}");
+            if let Some(previous_snapshot) = previous_snapshot {
+                self.current = Some(self.launch_snapshot(previous_snapshot).await?);
+                self.reset_health_watch();
+                eprintln!("rolled back to previous API binary");
+            }
+            return Err(error);
+        }
 
         match self.launch_snapshot(snapshot.clone()).await {
             Ok(child) => {
@@ -1249,6 +1311,36 @@ impl ApiDevProcess {
                 Err(error)
             }
         }
+    }
+
+    async fn refresh_builtin_workers_and_restart(&mut self) -> io::Result<()> {
+        println!("builtin worker change detected; rebuilding workers...");
+        build_builtin_process_workers(&self.repo_root)?;
+        let snapshot = self
+            .current
+            .as_ref()
+            .map(|child| child.snapshot_path.clone())
+            .ok_or_else(|| {
+                io::Error::other("current API snapshot missing during builtin worker reload")
+            })?;
+        if let Some(child) = self.current.as_mut() {
+            child.stop();
+        }
+        let port_release = self.wait_for_api_port_release().await;
+        clear_api_current_after_port_release(&mut self.current, port_release)?;
+        if let Err(error) = install_builtin_process_workers(&self.repo_root) {
+            eprintln!("builtin worker install failed; restarting previous API snapshot: {error}");
+            self.current = Some(self.launch_snapshot(snapshot).await?);
+            self.reset_health_watch();
+            return Err(error);
+        }
+        self.current = Some(self.launch_snapshot(snapshot.clone()).await?);
+        self.reset_health_watch();
+        println!(
+            "restarted api after builtin worker refresh from {}",
+            snapshot.display()
+        );
+        Ok(())
     }
 
     async fn ensure_healthy(&mut self) -> io::Result<()> {
@@ -1319,8 +1411,8 @@ impl ApiDevProcess {
         if let Some(child) = self.current.as_mut() {
             child.stop();
         }
-        self.current = None;
-        self.wait_for_api_port_release().await?;
+        let port_release = self.wait_for_api_port_release().await;
+        clear_api_current_after_port_release(&mut self.current, port_release)?;
         self.current = Some(self.launch_snapshot(snapshot.clone()).await?);
         self.reset_health_watch();
         println!("restarted unhealthy api from {}", snapshot.display());
@@ -1506,6 +1598,15 @@ impl ApiChild {
         stop_child_process(&mut self.child);
         println!("stopped api");
     }
+}
+
+fn clear_api_current_after_port_release<T>(
+    current: &mut Option<T>,
+    port_release: io::Result<()>,
+) -> io::Result<()> {
+    port_release?;
+    *current = None;
+    Ok(())
 }
 
 impl Drop for ApiDevProcess {
@@ -2184,6 +2285,11 @@ fn terminate_windows_process_tree(pid: u32) -> io::Result<()> {
 }
 
 fn ensure_builtin_process_workers(repo_root: &Path) -> io::Result<()> {
+    build_builtin_process_workers(repo_root)?;
+    install_builtin_process_workers(repo_root)
+}
+
+fn build_builtin_process_workers(repo_root: &Path) -> io::Result<()> {
     let cargo = env::var_os("CARGO").unwrap_or_else(|| {
         if cfg!(windows) {
             "cargo.exe".into()
@@ -2205,6 +2311,10 @@ fn ensure_builtin_process_workers(repo_root: &Path) -> io::Result<()> {
         return Err(io::Error::other("failed to build builtin process workers"));
     }
 
+    Ok(())
+}
+
+fn install_builtin_process_workers(repo_root: &Path) -> io::Result<()> {
     let conversation_root = repo_root
         .join("assets")
         .join("extensions")
@@ -2704,15 +2814,16 @@ fn should_mark_binary_asset_executable(logical_path: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, path::Path};
+    use std::{fs, io, path::Path};
 
     use super::{
-        ensure_no_args, extension_subcommand_usage, extension_usage,
-        find_command_on_path_with_dirs, home_command_usage, init_dev_home_template,
-        init_home_template, internal_usage, is_builtin_worker_reload_path, is_host_reload_path,
-        parse_optional_home_arg, parse_optional_usize_arg, parse_required_arg, print_config_usage,
+        clear_api_current_after_port_release, ensure_no_args, extension_subcommand_usage,
+        extension_usage, find_command_on_path_with_dirs, home_command_usage,
+        init_dev_home_template, init_home_template, internal_usage, is_builtin_worker_reload_path,
+        is_host_reload_path, next_dev_reload_action, parse_optional_home_arg,
+        parse_optional_usize_arg, parse_required_arg, print_config_usage,
         should_mark_binary_asset_executable, summary_text, tail_log_file, unique_suffix,
-        RuntimePaths, SKILL_MARKDOWN_FILE,
+        DevReloadAction, RuntimePaths, SKILL_MARKDOWN_FILE,
     };
 
     fn as_args(values: &[&str]) -> Vec<String> {
@@ -2923,6 +3034,36 @@ mod tests {
             repo_root,
             &repo_root.join("assets/extensions/workflow/extension.toml")
         ));
+    }
+
+    #[test]
+    fn builtin_worker_reload_uses_api_restart_path() {
+        assert_eq!(
+            next_dev_reload_action(false, true),
+            Some(DevReloadAction::RefreshBuiltinWorkers)
+        );
+        assert_eq!(
+            next_dev_reload_action(true, false),
+            Some(DevReloadAction::RebuildHost)
+        );
+        assert_eq!(
+            next_dev_reload_action(true, true),
+            Some(DevReloadAction::RebuildHost)
+        );
+        assert_eq!(next_dev_reload_action(false, false), None);
+    }
+
+    #[test]
+    fn api_current_is_preserved_when_port_release_fails() {
+        let mut current = Some("api-snapshot");
+
+        let result = clear_api_current_after_port_release(
+            &mut current,
+            Err(io::Error::new(io::ErrorKind::AddrInUse, "port still busy")),
+        );
+
+        assert!(result.is_err());
+        assert_eq!(current, Some("api-snapshot"));
     }
 
     #[test]

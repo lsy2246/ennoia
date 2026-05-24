@@ -2503,49 +2503,29 @@ async fn continue_agent_reply_from_state(
                     .as_deref()
                     .is_some_and(|value| value.starts_with("runtime."))
                 {
-                    let tool_call = state.pending_tool_calls.first().cloned().ok_or_else(|| {
-                        internal_error("missing pending tool call for resumed operation")
-                    })?;
-                    state.pending_operation_id = None;
-                    state.pending_operation_kind = None;
-                    if operation.status == ennoia_kernel::OperationStatus::Succeeded {
-                        let result = operation.output.clone().ok_or_else(|| {
-                            internal_error("resumed tool operation returned no output")
-                        })?;
-                        let body = serialize_tool_message_envelope(&tool_call, Ok(result.clone()))
-                            .map_err(|error| {
-                                internal_error(format!("serialize tool message failed: {error}"))
-                            })?;
-                        let _ = append_tool_result_message(
-                            client,
+                    let body =
+                        apply_resumed_runtime_tool_operation_to_state(&mut state, &operation)?;
+                    let _ = append_tool_result_message(
+                        client,
+                        conversation_id,
+                        lane_id,
+                        message_id,
+                        agent_id,
+                        &body,
+                    )
+                    .await;
+                    if let Some(store) = direct_state_store {
+                        persist_direct_reply_loop_state(
+                            store,
                             conversation_id,
                             lane_id,
                             message_id,
                             agent_id,
-                            &body,
+                            run_id,
+                            &state,
                         )
-                        .await;
-                        state.pending_tool_calls.remove(0);
-                        state.messages.push(serde_json::json!({
-                            "role": "tool",
-                            "tool_call_id": tool_call.id,
-                            "content": body,
-                        }));
-                        if let Some(store) = direct_state_store {
-                            persist_direct_reply_loop_state(
-                                store,
-                                conversation_id,
-                                lane_id,
-                                message_id,
-                                agent_id,
-                                run_id,
-                                &state,
-                            )
-                            .await
-                            .map_err(internal_error)?;
-                        }
-                    } else {
-                        return Err(internal_error(operation_error_message(&operation)));
+                        .await
+                        .map_err(internal_error)?;
                     }
                 }
             }
@@ -2564,6 +2544,7 @@ async fn continue_agent_reply_from_state(
             );
             match execute_builtin_tool(
                 client,
+                agent,
                 agent_id,
                 conversation_id,
                 lane_id,
@@ -2884,6 +2865,7 @@ async fn apply_provider_response(
 
 async fn execute_builtin_tool(
     client: &HostApiClient,
+    agent: &AgentConfig,
     agent_id: &str,
     conversation_id: &str,
     _lane_id: Option<&str>,
@@ -2905,9 +2887,24 @@ async fn execute_builtin_tool(
                 )
                 .await
         }
-        other => Err(bad_request_error(format!(
-            "unsupported agent tool '{other}'"
-        ))),
+        other => {
+            if let Some(operation) = agent_tool_runtime_operation(agent, other) {
+                return client
+                    .execute_operation_deferred(
+                        &operation,
+                        agent_id,
+                        conversation_id,
+                        _lane_id,
+                        run_id,
+                        message_id,
+                        tool_call.arguments.clone(),
+                    )
+                    .await;
+            }
+            Err(bad_request_error(format!(
+                "unsupported agent tool '{other}'"
+            )))
+        }
     }
 }
 
@@ -3542,7 +3539,7 @@ async fn build_agent_provider_context(
         },
         "extensions": extract_conversation_extensions(&extensions_runtime),
         "skills": agent.skills,
-        "tools": build_agent_tool_contexts(&extensions_runtime),
+        "tools": build_agent_tool_contexts(&extensions_runtime, agent),
     })
 }
 
@@ -3557,7 +3554,7 @@ fn agent_file_access_context() -> JsonValue {
     })
 }
 
-fn build_agent_tool_contexts(snapshot: &JsonValue) -> Vec<JsonValue> {
+fn build_agent_tool_contexts(snapshot: &JsonValue, agent: &AgentConfig) -> Vec<JsonValue> {
     let mut tools = extract_conversation_extensions(snapshot)
         .into_iter()
         .flat_map(|extension| {
@@ -3604,6 +3601,7 @@ fn build_agent_tool_contexts(snapshot: &JsonValue) -> Vec<JsonValue> {
             "contract": "command.exec",
         }),
     ]);
+    tools.extend(build_agent_skill_tool_contexts(agent));
     tools
 }
 
@@ -3664,6 +3662,103 @@ fn serialize_tool_message_envelope(
         }
     };
     serde_json::to_string(&envelope)
+}
+
+fn apply_resumed_runtime_tool_operation_to_state(
+    state: &mut AgentReplyLoopState,
+    operation: &OperationRecord,
+) -> Result<String, HostApiError> {
+    let tool_call = state
+        .pending_tool_calls
+        .first()
+        .cloned()
+        .ok_or_else(|| internal_error("missing pending tool call for resumed operation"))?;
+    let body = serialize_runtime_tool_operation_message(&tool_call, operation)
+        .map_err(|error| internal_error(format!("serialize tool message failed: {error}")))?;
+    state.pending_operation_id = None;
+    state.pending_operation_kind = None;
+    state.pending_tool_calls.remove(0);
+    state.messages.push(serde_json::json!({
+        "role": "tool",
+        "tool_call_id": tool_call.id,
+        "content": body,
+    }));
+    Ok(body)
+}
+
+fn serialize_runtime_tool_operation_message(
+    tool_call: &AgentToolCall,
+    operation: &OperationRecord,
+) -> Result<String, serde_json::Error> {
+    if operation.status == ennoia_kernel::OperationStatus::Succeeded {
+        let result = operation.output.clone().unwrap_or(JsonValue::Null);
+        return serialize_tool_message_envelope(tool_call, Ok(result));
+    }
+    let details = runtime_tool_operation_error_details(operation);
+    let error = HostApiError {
+        body: ApiErrorBody {
+            code: runtime_tool_operation_error_code(operation, &details),
+            message: operation_error_message(operation),
+            request_id: None,
+            trace_id: None,
+            details,
+            retryable: matches!(
+                operation.status,
+                ennoia_kernel::OperationStatus::Failed | ennoia_kernel::OperationStatus::Blocked
+            ),
+        },
+    };
+    serialize_tool_message_envelope(tool_call, Err(&error))
+}
+
+fn runtime_tool_operation_error_details(operation: &OperationRecord) -> JsonValue {
+    match operation.error.clone() {
+        Some(JsonValue::Object(mut error)) => {
+            error
+                .entry("operation_id")
+                .or_insert_with(|| JsonValue::String(operation.id.clone()));
+            error.entry("operation").or_insert_with(|| {
+                JsonValue::String(format!("{}.{}", operation.kind, operation.name))
+            });
+            JsonValue::Object(error)
+        }
+        Some(error) => serde_json::json!({
+            "operation_id": operation.id,
+            "operation": format!("{}.{}", operation.kind, operation.name),
+            "error": error,
+        }),
+        None => serde_json::json!({
+            "operation_id": operation.id,
+            "operation": format!("{}.{}", operation.kind, operation.name),
+            "status": operation.status.as_str(),
+        }),
+    }
+}
+
+fn runtime_tool_operation_error_code(
+    operation: &OperationRecord,
+    details: &JsonValue,
+) -> ErrorCode {
+    if operation.status == ennoia_kernel::OperationStatus::Cancelled {
+        return ErrorCode::Forbidden;
+    }
+    if operation.status == ennoia_kernel::OperationStatus::Blocked {
+        return ErrorCode::Forbidden;
+    }
+    let message = operation_error_message(operation).to_ascii_lowercase();
+    let detail_code = details
+        .get("code")
+        .and_then(JsonValue::as_str)
+        .map(parse_host_error_code)
+        .unwrap_or(ErrorCode::Internal);
+    if detail_code != ErrorCode::Internal {
+        return detail_code;
+    }
+    if message.contains("timed out") || message.contains("timeout") {
+        ErrorCode::Timeout
+    } else {
+        ErrorCode::Internal
+    }
 }
 
 fn serialize_reasoning_message_envelope(reasoning: &str) -> Result<String, serde_json::Error> {
@@ -3740,15 +3835,18 @@ fn build_agent_runtime_prompt(
         "系统会额外提供结构化上下文。按字段理解并使用，不要向用户原样复述 JSON。".to_string(),
     );
     sections.push("如果用户明确询问你有哪些工具或能力，优先依据上下文里的 tools 字段回答，使用 label 和 summary 做自然语言说明；不要把原始 JSON 对象或 `[object Object]` 直接输出给用户。".to_string());
-    sections.push("当用户要求你与操作系统交互时，优先使用 tools 字段里提供的命令执行能力完成任务，例如读取文件、写入文件、运行脚本或发起网络请求。只有在工具调用被权限系统拒绝或需要审批时，才解释阻塞原因。遇到普通的命令执行错误时，按实际错误原因说明。".to_string());
+    sections.push("当用户要求你与本地操作系统交互时，使用 tools 字段里的 command_exec 完成任务，例如读取文件、写入文件、运行脚本、检查本地环境或执行用户明确要求的命令。只有在工具调用被权限系统拒绝或需要审批时，才解释阻塞原因。遇到普通的命令执行错误时，按实际错误原因说明。".to_string());
+    if agent_has_skill(agent, "web-search") {
+        sections.push("当用户要求搜索网页资料、访问网站、查看官网、文档、公告、新闻或网页正文时，可以使用 web_search_search。web_search_search 和 command_exec 都是 runtime 工具；工具执行失败时，系统会把结构化错误作为 tool 结果返回给你继续处理。".to_string());
+    }
     sections.join("\n\n")
 }
 
-fn build_agent_builtin_tool_specs(_agent: &AgentConfig) -> Vec<ToolSpec> {
-    vec![
+fn build_agent_builtin_tool_specs(agent: &AgentConfig) -> Vec<ToolSpec> {
+    let mut tools = vec![
         ToolSpec {
             name: "command_exec".to_string(),
-            description: "执行系统命令；需要读写文件、发起网络请求或运行脚本时，都通过命令完成。command 只填可执行程序名，参数拆到 args 里。".to_string(),
+            description: "执行本地系统命令；需要读写文件、运行脚本、检查本地环境或执行用户明确要求的命令时使用。command 只填可执行程序名，参数拆到 args 里。".to_string(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -3761,7 +3859,71 @@ fn build_agent_builtin_tool_specs(_agent: &AgentConfig) -> Vec<ToolSpec> {
                 "additionalProperties": false
             }),
         },
-    ]
+    ];
+    tools.extend(build_agent_skill_tool_specs(agent));
+    tools
+}
+
+fn build_agent_skill_tool_specs(agent: &AgentConfig) -> Vec<ToolSpec> {
+    if !agent_has_skill(agent, "web-search") {
+        return Vec::new();
+    }
+    vec![ToolSpec {
+        name: "web_search_search".to_string(),
+        description: "搜索网页资料，返回候选结果；需要最新信息、官网、文档、公告、新闻、访问网站或网页正文时使用。".to_string(),
+        parameters: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "要搜索的关键词或问题。"
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "搜索结果数量，默认 5，范围 1-20。"
+                },
+                "pages": {
+                    "type": "integer",
+                    "description": "继续抓取候选结果页正文的数量，默认 3，范围 0-10。"
+                },
+                "format": {
+                    "type": "string",
+                    "enum": ["json", "markdown"],
+                    "description": "输出格式，默认 json。"
+                }
+            },
+            "required": ["query"],
+            "additionalProperties": false
+        }),
+    }]
+}
+
+fn build_agent_skill_tool_contexts(agent: &AgentConfig) -> Vec<JsonValue> {
+    if !agent_has_skill(agent, "web-search") {
+        return Vec::new();
+    }
+    vec![serde_json::json!({
+        "extension_id": "skill:web-search",
+        "extension_name": "Web Search",
+        "capability_id": "web-search.search",
+        "label": "网页搜索",
+        "summary": "搜索网页资料，并按需提取候选页面正文、标题、摘要、时间和链接。",
+        "kind": "skill",
+        "contract": "skill.web-search.search",
+    })]
+}
+
+fn agent_tool_runtime_operation(agent: &AgentConfig, tool_name: &str) -> Option<String> {
+    match tool_name {
+        "web_search_search" if agent_has_skill(agent, "web-search") => {
+            Some("skill.web-search.search".to_string())
+        }
+        _ => None,
+    }
+}
+
+fn agent_has_skill(agent: &AgentConfig, skill_id: &str) -> bool {
+    agent.skills.iter().any(|item| item.trim() == skill_id)
 }
 
 fn normalize_conversation_messages_for_provider(
@@ -4400,6 +4562,144 @@ mod tests {
         );
     }
 
+    #[test]
+    fn failed_runtime_tool_operation_serializes_as_tool_error_message() {
+        let tool_call = AgentToolCall {
+            id: "call-1".to_string(),
+            name: "command_exec".to_string(),
+            arguments: serde_json::json!({
+                "command": "bash",
+                "args": ["-lc", "sleep 120"],
+                "timeout_ms": 30_000,
+            }),
+        };
+        let operation = OperationRecord {
+            id: "op-1".to_string(),
+            extension_id: "workflow".to_string(),
+            agent_id: "lsy".to_string(),
+            conversation_id: "conv-1".to_string(),
+            branch_id: None,
+            lane_id: None,
+            run_id: "direct-lsy-msg-1".to_string(),
+            message_id: Some("msg-1".to_string()),
+            kind: "runtime".to_string(),
+            name: "command.exec".to_string(),
+            status: ennoia_kernel::OperationStatus::Failed,
+            input: tool_call.arguments.clone(),
+            output: None,
+            error: Some(serde_json::json!({
+                "message": "command exec timed out after 30000ms",
+                "operation_id": "op-1",
+                "timeout_ms": 30000,
+            })),
+            created_at: "2026-05-23T21:12:50Z".to_string(),
+            updated_at: "2026-05-23T21:13:20Z".to_string(),
+        };
+
+        let serialized =
+            serialize_runtime_tool_operation_message(&tool_call, &operation).expect("serialize");
+        let parsed: JsonValue = serde_json::from_str(&serialized).expect("parse envelope");
+
+        assert_eq!(
+            parsed.get("status").and_then(JsonValue::as_str),
+            Some("failed")
+        );
+        assert_eq!(
+            parsed
+                .get("error")
+                .and_then(|value| value.get("code"))
+                .and_then(JsonValue::as_str),
+            Some("timeout")
+        );
+        assert_eq!(
+            parsed
+                .get("error")
+                .and_then(|value| value.get("message"))
+                .and_then(JsonValue::as_str),
+            Some("command exec timed out after 30000ms")
+        );
+    }
+
+    #[test]
+    fn failed_runtime_tool_operation_is_returned_to_agent_and_clears_pending_state() {
+        let tool_call = AgentToolCall {
+            id: "call-1".to_string(),
+            name: "command_exec".to_string(),
+            arguments: serde_json::json!({
+                "command": "bash",
+                "args": ["-lc", "sleep 120"],
+                "timeout_ms": 30_000,
+            }),
+        };
+        let operation = OperationRecord {
+            id: "op-1".to_string(),
+            extension_id: "workflow".to_string(),
+            agent_id: "lsy".to_string(),
+            conversation_id: "conv-1".to_string(),
+            branch_id: None,
+            lane_id: None,
+            run_id: "direct-lsy-msg-1".to_string(),
+            message_id: Some("msg-1".to_string()),
+            kind: "runtime".to_string(),
+            name: "command.exec".to_string(),
+            status: ennoia_kernel::OperationStatus::Failed,
+            input: tool_call.arguments.clone(),
+            output: None,
+            error: Some(serde_json::json!({
+                "message": "command exec timed out after 30000ms",
+                "timeout_ms": 30000,
+            })),
+            created_at: "2026-05-23T21:12:50Z".to_string(),
+            updated_at: "2026-05-23T21:13:20Z".to_string(),
+        };
+        let mut state = AgentReplyLoopState {
+            messages: vec![serde_json::json!({
+                "role": "assistant",
+                "tool_calls": [{
+                    "id": "call-1",
+                    "name": "command_exec",
+                }],
+            })],
+            pending_tool_calls: vec![tool_call],
+            pending_operation_id: Some("op-1".to_string()),
+            pending_operation_kind: Some("runtime.command.exec".to_string()),
+            next_iteration: 1,
+            last_process_text: None,
+        };
+
+        let body = apply_resumed_runtime_tool_operation_to_state(&mut state, &operation)
+            .expect("apply failed operation to state");
+
+        assert_eq!(state.pending_operation_id, None);
+        assert_eq!(state.pending_operation_kind, None);
+        assert!(state.pending_tool_calls.is_empty());
+        let message = state.messages.last().expect("tool message");
+        assert_eq!(
+            message.get("role").and_then(JsonValue::as_str),
+            Some("tool")
+        );
+        assert_eq!(
+            message.get("tool_call_id").and_then(JsonValue::as_str),
+            Some("call-1")
+        );
+        assert_eq!(
+            message.get("content").and_then(JsonValue::as_str),
+            Some(body.as_str())
+        );
+        let parsed: JsonValue = serde_json::from_str(&body).expect("parse tool envelope");
+        assert_eq!(
+            parsed.get("status").and_then(JsonValue::as_str),
+            Some("failed")
+        );
+        assert_eq!(
+            parsed
+                .get("error")
+                .and_then(|value| value.get("code"))
+                .and_then(JsonValue::as_str),
+            Some("timeout")
+        );
+    }
+
     #[tokio::test]
     async fn missing_direct_run_resume_does_not_error() {
         let pool = SqlitePool::connect("sqlite::memory:")
@@ -4480,5 +4780,89 @@ mod tests {
             .expect("reclaim claim");
 
         assert!(claimed);
+    }
+
+    #[test]
+    fn configured_web_search_skill_is_exposed_as_agent_tool() {
+        let agent = AgentConfig {
+            id: "researcher".to_string(),
+            display_name: "Researcher".to_string(),
+            description: String::new(),
+            system_prompt: String::new(),
+            model_endpoint_id: "openai".to_string(),
+            model_id: "gpt-5.4".to_string(),
+            generation_options: Default::default(),
+            skills: vec!["web-search".to_string()],
+            enabled: true,
+            kind: "agent".to_string(),
+            default_model: String::new(),
+            skills_dir: String::new(),
+            working_dir: String::new(),
+            artifacts_dir: String::new(),
+        };
+
+        let tools = build_agent_builtin_tool_specs(&agent);
+
+        assert!(
+            tools.iter().any(|tool| tool.name == "web_search_search"),
+            "expected configured web-search skill to be visible as web_search_search tool, got {:?}",
+            tools.iter().map(|tool| tool.name.as_str()).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn web_search_skill_is_exposed_without_disabling_command_exec() {
+        let agent = AgentConfig {
+            id: "researcher".to_string(),
+            display_name: "Researcher".to_string(),
+            description: String::new(),
+            system_prompt: String::new(),
+            model_endpoint_id: "openai".to_string(),
+            model_id: "gpt-5.4".to_string(),
+            generation_options: Default::default(),
+            skills: vec!["web-search".to_string()],
+            enabled: true,
+            kind: "agent".to_string(),
+            default_model: String::new(),
+            skills_dir: String::new(),
+            working_dir: String::new(),
+            artifacts_dir: String::new(),
+        };
+        let operator_profile = OperatorProfileSnapshot {
+            display_name: "Operator".to_string(),
+            time_zone: Some("Asia/Shanghai".to_string()),
+            operating_system: Some("Windows".to_string()),
+        };
+
+        let prompt = build_agent_runtime_prompt(&agent, "run-1", &operator_profile);
+        assert!(
+            prompt.contains("web_search_search"),
+            "expected runtime prompt to name web_search_search when web-search is enabled, got: {prompt}"
+        );
+        assert!(
+            prompt.contains("command_exec"),
+            "expected runtime prompt to keep command_exec visible when web-search is enabled, got: {prompt}"
+        );
+
+        let tools = build_agent_builtin_tool_specs(&agent);
+        let command_tool = tools
+            .iter()
+            .find(|tool| tool.name == "command_exec")
+            .expect("command_exec tool spec");
+        assert!(
+            command_tool.description.contains("执行本地系统命令"),
+            "command_exec should remain described as a valid runtime tool: {}",
+            command_tool.description
+        );
+
+        let web_search_tool = tools
+            .iter()
+            .find(|tool| tool.name == "web_search_search")
+            .expect("web_search_search tool spec");
+        assert!(
+            !web_search_tool.description.contains("不要用 command_exec"),
+            "web_search_search should be exposed without implying command_exec is invalid: {}",
+            web_search_tool.description
+        );
     }
 }

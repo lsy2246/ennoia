@@ -11,5 +11,5 @@ ennoia = ">=0.1.0"
 name = "openai.generate"
 description = "调用 OpenAI 兼容上游生成内容。"
 provider = { kind = "openai", interfaces = ["generate", "tools", "models"], model_discovery = true, manual_model = true, generation_options = [
-  { id = "reasoning_effort", label = { key = "ext.openai.option.reasoning_effort", fallback = "Reasoning effort" }, value_type = "select", required = false, default_value = "medium", allowed_values = ["low", "medium", "high"] },
+  { id = "reasoning_effort", label = { key = "ext.openai.option.reasoning_effort", fallback = "Reasoning effort" }, value_type = "select", required = false, default_value = "medium", allowed_values = ["low", "medium", "high", "xhigh"] },
 ] }

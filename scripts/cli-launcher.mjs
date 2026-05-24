@@ -190,15 +190,6 @@ function removePidFileIfMatches(pidPath, pid) {
 }
 
 function isProcessRunning(pid) {
-  if (isWindows) {
-    const result = spawnSync("tasklist", ["/FI", `PID eq ${pid}`, "/FO", "CSV", "/NH"], {
-      stdio: ["ignore", "pipe", "ignore"],
-      encoding: "utf8",
-    });
-    const stdout = result.stdout ?? "";
-    return stdout.includes(`"${pid}"`);
-  }
-
   try {
     process.kill(pid, 0);
     return true;
