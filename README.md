@@ -44,6 +44,8 @@
 - `assets/extensions/conversation`：内置会话扩展，声明原生会话事实接口
 - `assets/extensions/memory`：内置记忆扩展，声明记忆、上下文、审查与图谱接口
 - `assets/extensions/workflow`：内置编排扩展，声明 run/task/artifact 接口
+- `assets/extensions/html-reply`：内置 HTML 回复扩展，只负责 Agent 普通回复的 HTML 排版记录与渲染。
+- `assets/extensions/artifact-runner`：内置产物运行扩展，负责 HTML 产物预览和 Python 代码产物展示；Python 真运行后续通过受权限约束的 operation 接入。
 
 ## 内置能力源码
 

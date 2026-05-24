@@ -1,0 +1,21 @@
+id = "html-reply"
+version = "0.1.0"
+name = "HTML Reply"
+description = "提供 Agent 普通回复的 HTML 富排版展示。"
+docs = "docs/overview.md"
+
+[compat]
+ennoia = ">=0.1.0"
+
+[conversation]
+visible = true
+resources = ["html-reply.message"]
+operations = []
+
+[[views]]
+name = "html-reply.panel"
+type = "panel"
+title = { key = "ext.html_reply.panel", fallback = "HTML 回复" }
+slot = "right"
+icon = "layout-template"
+priority = 20

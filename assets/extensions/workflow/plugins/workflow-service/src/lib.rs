@@ -4,6 +4,7 @@
 //! artifact emission. Core only hosts and proxies the extension process.
 
 pub mod conversation_hooks;
+pub mod extension_outputs;
 pub mod host_bridge;
 pub mod orchestrator;
 pub mod pipeline;

@@ -181,3 +181,60 @@ async fn backfill_branch_rows(pool: &SqlitePool) -> Result<(), sqlx::Error> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+
+    async fn test_pool() -> SqlitePool {
+        SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(
+                SqliteConnectOptions::new()
+                    .filename(":memory:")
+                    .create_if_missing(true),
+            )
+            .await
+            .expect("connect in-memory conversation db")
+    }
+
+    #[tokio::test]
+    async fn initializes_schema_without_rewriting_message_bodies() {
+        let pool = test_pool().await;
+        initialize_conversation_schema(&pool)
+            .await
+            .expect("initialize schema");
+        sqlx::query(
+            "INSERT INTO conversations
+             (id, topology, owner_kind, owner_id, title, default_lane_id, created_at, updated_at)
+             VALUES ('conv-1', 'direct', 'agent', 'agent 1', 'Session', 'lane-1', 't1', 't1')",
+        )
+        .execute(&pool)
+        .await
+        .expect("insert conversation");
+        sqlx::query(
+            "INSERT INTO messages
+             (id, conversation_id, branch_id, lane_id, sender, role, body, mentions_json, created_at)
+             VALUES ('msg-1', 'conv-1', 'lane-1', 'lane-1', 'agent 1', 'agent', ?, '[]', 't1')",
+        )
+        .bind("![shot](/api/agents/agent%201/artifacts/screenshots/bilibili.png)")
+        .execute(&pool)
+        .await
+        .expect("insert message");
+
+        initialize_conversation_schema(&pool)
+            .await
+            .expect("rerun schema migration");
+
+        let body: String = sqlx::query("SELECT body FROM messages WHERE id = 'msg-1'")
+            .fetch_one(&pool)
+            .await
+            .expect("load message")
+            .get("body");
+        assert_eq!(
+            body,
+            "![shot](/api/agents/agent%201/artifacts/screenshots/bilibili.png)"
+        );
+    }
+}

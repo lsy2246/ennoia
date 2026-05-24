@@ -30,7 +30,17 @@ import { useSessionCommandsStore } from "@/stores/sessionCommands";
 import { useUiHelpers } from "@/stores/ui";
 import { useWorkbenchStore } from "@/stores/workbench";
 import { ChatStream } from "./ChatStream";
-import { buildChatEntries, buildStatusEntries } from "./chat-entry-builder";
+import {
+  buildChatEntries,
+  buildPendingReplyStatusEntries,
+  buildStatusEntries,
+} from "./chat-entry-builder";
+import { resolveActiveConversationBranch } from "./session-branch";
+import {
+  areComposerPickerStatesEqual,
+  areComposerSnapshotsEqual,
+} from "./session-composer";
+import { mergeConversationAppendResponse } from "./session-detail";
 import type {
   ComposerSegment,
   LocalMessageDraft,
@@ -956,14 +966,15 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
     return agents.filter((agent) => ids.has(agent.id));
   }, [agents, detail]);
   const conversation = detail?.conversation ?? null;
-  const activeBranch = useMemo(
-    () => detail?.branches.find((branch) => branch.id === detail.conversation.active_branch_id) ?? detail?.branches[0] ?? null,
-    [detail],
+  const activeBranchState = useMemo(
+    () => resolveActiveConversationBranch({
+      conversationActiveBranchId: conversation?.active_branch_id,
+      branches: detail?.branches ?? [],
+    }),
+    [conversation?.active_branch_id, detail?.branches],
   );
-  const activeConversationBranchId = useMemo(
-    () => normalizeConversationBranchId(activeBranch?.id, conversation?.active_branch_id),
-    [activeBranch?.id, conversation?.active_branch_id],
-  );
+  const activeBranch = activeBranchState.branch;
+  const activeConversationBranchId = activeBranchState.branchId;
   const branchManagerTree = useMemo(
     () => {
       const branches = detail?.branches ?? [];
@@ -1255,27 +1266,33 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
     };
   }, [handleConversationMissing, notifyChanged, sessionId, streamDisconnectedMessage]);
 
+  const insertBadgeLabel = t("web.conversations.insert_badge", "插入");
   const syncComposerState = useCallback(() => {
-    const snapshot = readComposerSnapshot(editorRef.current, t("web.conversations.insert_badge", "插入"));
-    setComposerSnapshot(snapshot);
+    const snapshot = readComposerSnapshot(editorRef.current, insertBadgeLabel);
+    setComposerSnapshot((current) => areComposerSnapshotsEqual(current, snapshot) ? current : snapshot);
     editorRef.current?.setAttribute("data-empty", String(isComposerSnapshotVisuallyEmpty(snapshot)));
     const context = extractComposerTrigger(editorRef.current);
     if (!context) {
-      setPickerState(EMPTY_PICKER_STATE);
+      setPickerState((current) =>
+        areComposerPickerStatesEqual(current, EMPTY_PICKER_STATE) ? current : EMPTY_PICKER_STATE);
       return;
     }
     if (context.kind === "mention" && !canMention) {
-      setPickerState(EMPTY_PICKER_STATE);
+      setPickerState((current) =>
+        areComposerPickerStatesEqual(current, EMPTY_PICKER_STATE) ? current : EMPTY_PICKER_STATE);
       return;
     }
     const mode = context.kind as ComposerPickerMode;
-    setPickerState((current) => ({
-      open: true,
-      mode,
-      query: context.query,
-      selectedIndex: current.mode === mode ? current.selectedIndex : 0,
-    }));
-  }, [canMention, t]);
+    setPickerState((current) => {
+      const next = {
+        open: true,
+        mode,
+        query: context.query,
+        selectedIndex: current.mode === mode ? current.selectedIndex : 0,
+      };
+      return areComposerPickerStatesEqual(current, next) ? current : next;
+    });
+  }, [canMention, insertBadgeLabel]);
 
   useEffect(() => {
     syncComposerState();
@@ -1489,10 +1506,7 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
     [activeConversationBranchId, detail?.operations],
   );
 
-  const statusEntries = useMemo(() => buildStatusEntries({
-    operations: visibleOperations,
-    resolveAgent: (agentId) => agentMap.get(agentId),
-    texts: {
+  const statusTexts = useMemo(() => ({
       typingLabel: t("web.conversations.status_ai_thinking", "思考中"),
       typingDetail: t("web.conversations.status_ai_thinking_detail", "Agent 已接到消息，正在组织回复与处理工具步骤。"),
       operationGenerating: t("web.conversations.operation_generating", "正在生成回复。"),
@@ -1500,8 +1514,22 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
       operationFileWrite: t("web.conversations.operation_file_write", "正在写入文件。"),
       operationFileRead: t("web.conversations.operation_file_read", "正在读取文件。"),
       operationNetwork: t("web.conversations.operation_network", "正在请求网络资源。"),
-    },
-  }), [agentMap, t, visibleOperations]);
+  }), [t]);
+
+  const statusEntries = useMemo(() => [
+    ...buildStatusEntries({
+      operations: visibleOperations,
+      resolveAgent: (agentId) => agentMap.get(agentId),
+      texts: statusTexts,
+    }),
+    ...buildPendingReplyStatusEntries({
+      pendingReplies,
+      activeBranchId: activeConversationBranchId,
+      operations: detail?.operations ?? [],
+      resolveAgent: (agentId) => agentMap.get(agentId),
+      texts: statusTexts,
+    }),
+  ], [activeConversationBranchId, agentMap, detail?.operations, pendingReplies, statusTexts, visibleOperations]);
 
   const streamEntries = useMemo(
     () => [...chatEntries, ...statusEntries],
@@ -1662,40 +1690,14 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
           sourceMessageId: response.message.id,
         }] : []),
       ));
+      conversationUpdatedAtRef.current = response.conversation.updated_at;
+      setDetail((current) => current ? mergeConversationAppendResponse(current, response) : current);
       const switchedBranch = response.conversation.active_branch_id !== conversation.active_branch_id;
       if (switchedBranch) {
-        conversationUpdatedAtRef.current = response.conversation.updated_at;
-        setDetail((current) => current ? {
-          ...current,
-          conversation: response.conversation,
-        } : current);
         notifyChanged();
         await refreshThread();
         return;
       }
-      conversationUpdatedAtRef.current = response.conversation.updated_at;
-      setDetail((current) => {
-        if (!current) {
-          return current;
-        }
-        const nextLane = response.lane;
-        const nextBranch = response.branch;
-        const nextMessages = current.messages.some((message) => message.id === response.message.id)
-          ? current.messages
-          : [...current.messages, response.message].sort((left, right) =>
-            left.created_at.localeCompare(right.created_at));
-        return {
-          ...current,
-          conversation: response.conversation,
-          lanes: current.lanes.some((lane) => lane.id === nextLane.id)
-            ? current.lanes.map((lane) => lane.id === nextLane.id ? nextLane : lane)
-            : [...current.lanes, nextLane],
-          branches: current.branches.some((branch) => branch.id === nextBranch.id)
-            ? current.branches.map((branch) => branch.id === nextBranch.id ? nextBranch : branch)
-            : [...current.branches, nextBranch],
-          messages: nextMessages,
-        };
-      });
       notifyChanged();
     } catch (err) {
       if (isMountedRef.current) {

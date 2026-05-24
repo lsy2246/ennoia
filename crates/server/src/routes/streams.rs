@@ -2,7 +2,7 @@ use crate::agent_permissions::PermissionApprovalsQuery;
 use crate::app::{dispatch_extension_rpc, live_server_config};
 use crate::realtime::RealtimeEvent;
 use crate::routes::actions::dispatch_action_value;
-use ennoia_kernel::ExtensionRpcRequest;
+use ennoia_kernel::{ExtensionRecordEntry, ExtensionRecordListQuery, ExtensionRpcRequest};
 
 use super::*;
 const WORKFLOW_EXTENSION_ID: &str = "workflow";
@@ -38,6 +38,10 @@ pub(super) async fn conversation_stream(
         let mut last_event_seq = state.event_bus.latest_conversation_seq(&conversation_id).unwrap_or(0);
         let mut last_approval_seq = state.agent_permissions.latest_conversation_approval_seq(&conversation_id).unwrap_or(0);
         let mut last_operation_seq = state.operations.latest_conversation_seq(&conversation_id).unwrap_or(0);
+        let mut last_record_updated_at = state
+            .extension_runtime_store
+            .latest_conversation_record_updated_at(&conversation_id)
+            .unwrap_or(None);
 
         loop {
             if first {
@@ -49,12 +53,21 @@ pub(super) async fn conversation_stream(
                 let next_event_seq = state.event_bus.latest_conversation_seq(&conversation_id).unwrap_or(last_event_seq);
                 let next_approval_seq = state.agent_permissions.latest_conversation_approval_seq(&conversation_id).unwrap_or(last_approval_seq);
                 let next_operation_seq = state.operations.latest_conversation_seq(&conversation_id).unwrap_or(last_operation_seq);
-                if next_event_seq == last_event_seq && next_approval_seq == last_approval_seq && next_operation_seq == last_operation_seq {
+                let next_record_updated_at = state
+                    .extension_runtime_store
+                    .latest_conversation_record_updated_at(&conversation_id)
+                    .unwrap_or(last_record_updated_at.clone());
+                if next_event_seq == last_event_seq
+                    && next_approval_seq == last_approval_seq
+                    && next_operation_seq == last_operation_seq
+                    && next_record_updated_at == last_record_updated_at
+                {
                     continue;
                 }
                 last_event_seq = next_event_seq;
                 last_approval_seq = next_approval_seq;
                 last_operation_seq = next_operation_seq;
+                last_record_updated_at = next_record_updated_at;
             }
 
             match build_conversation_stream_snapshot(&state, &request, &conversation_id).await {
@@ -195,6 +208,19 @@ async fn build_conversation_stream_snapshot(
         }),
     )
     .await?;
+    let records = state
+        .extension_runtime_store
+        .list_records(&ExtensionRecordListQuery {
+            extension_id: None,
+            namespace: None,
+            scope_type: Some("conversation".to_string()),
+            scope_id: Some(conversation_id.to_string()),
+            kind: None,
+            related_message_id: None,
+            open_only: None,
+            limit: Some(120),
+        })
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), request))?;
     let approvals = state
         .agent_permissions
         .list_approvals(&PermissionApprovalsQuery {
@@ -212,7 +238,7 @@ async fn build_conversation_stream_snapshot(
         })
         .map_err(|error| scoped(ApiError::internal(error.to_string()), request))?;
     Ok(serde_json::json!({
-        "detail": detail,
+        "detail": conversation_stream_detail_with_records(detail, records),
         "approvals": approvals,
         "operations": operations,
     })
@@ -317,4 +343,67 @@ fn stream_signal_payload(topic: &str) -> String {
         "at": chrono::Utc::now().to_rfc3339(),
     })
     .to_string()
+}
+
+fn conversation_stream_detail_with_records(
+    mut detail: JsonValue,
+    records: Vec<ExtensionRecordEntry>,
+) -> JsonValue {
+    if let Some(object) = detail.as_object_mut() {
+        object.insert(
+            "records".to_string(),
+            serde_json::to_value(records).unwrap_or_else(|_| serde_json::json!([])),
+        );
+    }
+    detail
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn conversation_stream_detail_includes_extension_records() {
+        let detail = serde_json::json!({
+            "conversation": {
+                "id": "conv-1",
+                "topology": "direct",
+                "title": "Session"
+            },
+            "messages": []
+        });
+        let record = ExtensionRecordEntry {
+            id: "extrec-1".to_string(),
+            extension_id: "artifact-runner".to_string(),
+            namespace: "artifact-runner/conversation/conv-1".to_string(),
+            scope_type: "conversation".to_string(),
+            scope_id: "conv-1".to_string(),
+            kind: "artifact-runner.artifact".to_string(),
+            status: Some("ready".to_string()),
+            title: Some("Canvas".to_string()),
+            summary: Some("Canvas".to_string()),
+            payload: serde_json::json!({ "type": "html-preview" }),
+            related_message_id: Some("msg-1".to_string()),
+            parent_id: None,
+            created_at: "2026-05-24T16:29:54Z".to_string(),
+            updated_at: "2026-05-24T16:29:54Z".to_string(),
+            closed_at: None,
+        };
+
+        let detail = conversation_stream_detail_with_records(detail, vec![record]);
+
+        assert_eq!(
+            detail
+                .get("records")
+                .and_then(JsonValue::as_array)
+                .map(Vec::len),
+            Some(1)
+        );
+        assert_eq!(
+            detail
+                .pointer("/records/0/kind")
+                .and_then(JsonValue::as_str),
+            Some("artifact-runner.artifact")
+        );
+    }
 }

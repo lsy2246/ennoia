@@ -19,8 +19,9 @@ use sqlx::{Row, SqlitePool};
 use tokio::sync::mpsc;
 
 use crate::conversation_hooks::{
-    handle_conversation_message_created, handle_operation_updated,
-    recover_stale_conversation_receipts,
+    handle_artifact_created, handle_conversation_message_created, handle_job_due,
+    handle_operation_updated, handle_permission_approval_resolved, handle_run_requested,
+    handle_run_stage_changed, recover_stale_conversation_receipts,
 };
 use crate::host_bridge::HostBridge;
 use crate::orchestrator::OrchestratorService;
@@ -343,10 +344,68 @@ async fn handle_invocation(
                 Err(error) => error,
             }
         }
+        "workflow.permission.approval.resolved" => {
+            handle_hook_invocation(
+                invocation.params,
+                "permission_approval_hook_failed",
+                |payload| handle_permission_approval_resolved(payload),
+            )
+            .await
+        }
+        "workflow.run.requested" => {
+            handle_hook_invocation(invocation.params, "run_requested_hook_failed", |payload| {
+                handle_run_requested(payload)
+            })
+            .await
+        }
+        "workflow.run.stage.changed" => {
+            handle_hook_invocation(
+                invocation.params,
+                "run_stage_changed_hook_failed",
+                |payload| handle_run_stage_changed(payload),
+            )
+            .await
+        }
+        "workflow.artifact.created" => {
+            handle_hook_invocation(
+                invocation.params,
+                "artifact_created_hook_failed",
+                |payload| handle_artifact_created(payload),
+            )
+            .await
+        }
+        "workflow.job.due" => {
+            handle_hook_invocation(invocation.params, "job_due_hook_failed", |payload| {
+                handle_job_due(payload)
+            })
+            .await
+        }
         _ => ExtensionRpcResponse::failure(
             "method_not_found",
             format!("workflow worker method '{path}' not found"),
         ),
+    }
+}
+
+async fn handle_hook_invocation<F, Fut>(
+    params: JsonValue,
+    error_code: &'static str,
+    handler: F,
+) -> ExtensionRpcResponse
+where
+    F: FnOnce(ennoia_kernel::HookEventEnvelope) -> Fut,
+    Fut: std::future::Future<Output = Result<ennoia_kernel::HookDispatchResponse, String>>,
+{
+    match parse_json::<ennoia_kernel::HookEventEnvelope>(params) {
+        Ok(payload) => match handler(payload).await {
+            Ok(response) => ExtensionRpcResponse::success(
+                serde_json::to_value(response).unwrap_or(serde_json::json!({
+                    "handled": true,
+                })),
+            ),
+            Err(error) => ExtensionRpcResponse::failure(error_code, error),
+        },
+        Err(error) => error,
     }
 }
 

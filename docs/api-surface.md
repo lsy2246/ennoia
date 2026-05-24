@@ -25,10 +25,13 @@
 - `GET /api/agents/{agent_id}`
 - `PUT /api/agents/{agent_id}`
 - `DELETE /api/agents/{agent_id}`
+- `GET /api/agents/{agent_id}/artifacts/{*artifact_path}`
 
 约定：
 
 - `GET /api/agents`、`POST /api/agents`、`GET /api/agents/{agent_id}`、`PUT /api/agents/{agent_id}` 返回或接收的 Agent 主模型里同时包含 `permission_profile` 与 `file_access` 字段；当前 `permission_profile` 固定使用 `mode + entries[]`，其中 `entries[]` 为 `{ match, value }` 命令匹配条目，`file_access` 固定使用 `default_root + roots[]` 文件访问配置。
+- `GET /api/agents/{agent_id}/artifacts/{*artifact_path}` 只读返回该 Agent `/artifacts` 虚拟根下的文件内容，用于会话消息中的图片预览和附件下载；路径解析复用 Agent 文件访问根校验，不能逃逸到 artifacts 根之外。会话消息里引用产物时统一使用这个 HTTP 路由；`/artifacts` 只作为 Agent 内部文件访问根使用。
+- Artifact 链接不是一次性 token，也不保存独立引用表；URL 的有效性由对应 Agent 与文件是否存在决定。默认响应使用 `Content-Disposition: inline` 供 Markdown 图片预览；带 `download=1` 查询参数时响应使用 `attachment`，供普通链接触发下载。
 
 - `GET /api/skills`
 - `POST /api/skills`

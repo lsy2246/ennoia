@@ -1,0 +1,21 @@
+id = "artifact-runner"
+version = "0.1.0"
+name = "Artifact Runner"
+description = "提供 HTML 产物预览和 Python 代码产物展示，后续承载受权限约束的运行能力。"
+docs = "docs/overview.md"
+
+[compat]
+ennoia = ">=0.1.0"
+
+[conversation]
+visible = true
+resources = ["artifact-runner.artifact"]
+operations = []
+
+[[views]]
+name = "artifact-runner.panel"
+type = "panel"
+title = { key = "ext.artifact_runner.panel", fallback = "产物运行" }
+slot = "right"
+icon = "play-square"
+priority = 19

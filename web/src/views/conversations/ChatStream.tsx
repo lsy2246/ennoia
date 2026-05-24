@@ -22,6 +22,7 @@ import type {
   ChatToolResultEntry,
   ConversationMessageEntry,
 } from "./chat-types";
+import { isReasoningEntry, shouldKeepStandaloneAccessoryGroup } from "./chat-visibility";
 
 type ChatAccessoryEntry =
   | ChatErrorEntry
@@ -549,14 +550,35 @@ function summarizeProcess(groups: ChatGroup[]) {
   };
 }
 
-function countMeaningfulProcessEntries(groups: ChatGroup[]) {
+function entryMatchesVisibility(entry: ChatAccessoryEntry, params: {
+  showThinking: boolean;
+  showToolCalls: boolean;
+}) {
+  if (isReasoningEntry(entry)) {
+    return params.showThinking;
+  }
+  if (entry.kind === "tool_result") {
+    return params.showToolCalls;
+  }
+  return true;
+}
+
+function countMeaningfulProcessEntries(
+  groups: ChatGroup[],
+  params: {
+    showThinking: boolean;
+    showToolCalls: boolean;
+  },
+) {
   let count = 0;
 
   for (const group of groups) {
     if (group.anchor) {
       count += 1;
     }
-    const visibleAccessories = collapseSupersededAccessories(group.accessories);
+    const visibleAccessories = collapseSupersededAccessories(
+      group.accessories.filter((entry) => entryMatchesVisibility(entry, params)),
+    );
     count += visibleAccessories.filter((entry) => entry.kind !== "status").length;
   }
 
@@ -1148,7 +1170,12 @@ function AccessoryBlock({
           <small>{absoluteAt}</small>
         </summary>
         <div className="message-accessory__body">
-          <ChatContent body={entry.body} format={entry.format} agents={agents} skills={skills} />
+          <ChatContent
+            body={entry.body}
+            format={entry.format}
+            agents={agents}
+            skills={skills}
+          />
         </div>
       </details>
     );
@@ -1188,7 +1215,12 @@ function AccessoryBlock({
           <small>{absoluteAt}</small>
         </summary>
         <div className="message-accessory__body">
-          <ChatContent body={entry.body} format={entry.format} agents={agents} skills={skills} />
+          <ChatContent
+            body={entry.body}
+            format={entry.format}
+            agents={agents}
+            skills={skills}
+          />
         </div>
       </details>
     );
@@ -1288,15 +1320,8 @@ function MessageGroup({
     .join(" ");
   const absoluteAt = formatAbsoluteDateTime(anchor.createdAt);
   const showSenderLabel = !isOperator && Boolean(senderLabel);
-  const visibleAccessories = group.accessories.filter((entry) => {
-    if (entry.kind === "status" || entry.kind === "reasoning") {
-      return showThinking;
-    }
-    if (entry.kind === "tool_result") {
-      return showToolCalls;
-    }
-    return true;
-  });
+  const visibleAccessories = group.accessories.filter((entry) =>
+    entryMatchesVisibility(entry, { showThinking, showToolCalls }));
   const mergedAccessories = hideAccessories
     ? []
     : collapseSupersededAccessories(visibleAccessories);
@@ -1477,15 +1502,8 @@ function StandaloneGroup({
   showToolCalls: boolean;
   conversationId: string;
 }) {
-  const visibleAccessories = group.accessories.filter((entry) => {
-    if (entry.kind === "status" || entry.kind === "reasoning") {
-      return showThinking;
-    }
-    if (entry.kind === "tool_result") {
-      return showToolCalls;
-    }
-    return true;
-  });
+  const visibleAccessories = group.accessories.filter((entry) =>
+    entryMatchesVisibility(entry, { showThinking, showToolCalls }));
   const mergedAccessories = collapseSupersededAccessories(visibleAccessories);
   if (mergedAccessories.length === 0) {
     return null;
@@ -1554,11 +1572,17 @@ function ProcessSummary({
   return <span>{[agentLabel, ...parts].filter(Boolean).join(" · ")}</span>;
 }
 
-function hasCollapsibleProcess(turn: ChatTurn) {
+function hasCollapsibleProcess(
+  turn: ChatTurn,
+  params: {
+    showThinking: boolean;
+    showToolCalls: boolean;
+  },
+) {
   if (!turn.finalReplyGroup || turn.processGroups.length === 0) {
     return false;
   }
-  return countMeaningfulProcessEntries(turn.processGroups) > 1;
+  return countMeaningfulProcessEntries(turn.processGroups, params) > 1;
 }
 
 function ProcessGroupList({
@@ -1657,7 +1681,7 @@ function TurnProcessPanel({
   onRemove: (id: string) => void;
   conversationId: string;
 }) {
-  if (!hasCollapsibleProcess(turn)) {
+  if (!hasCollapsibleProcess(turn, { showThinking, showToolCalls })) {
     return null;
   }
 
@@ -1867,10 +1891,11 @@ export function ChatStream({
     if (group.anchor) {
       return true;
     }
-    const hasThinking = showThinking && group.accessories.some((entry) => entry.kind === "status");
-    const hasToolCalls = showToolCalls && group.accessories.some((entry) => entry.kind === "tool_result");
-    const hasOtherAccessories = group.accessories.some((entry) => entry.kind !== "status" && entry.kind !== "tool_result");
-    return hasThinking || hasToolCalls || hasOtherAccessories;
+    return shouldKeepStandaloneAccessoryGroup({
+      accessories: group.accessories,
+      showThinking,
+      showToolCalls,
+    });
   });
   const blocks = buildChatTurns(groups);
   const approvalsById = new Map(approvals.map((approval) => [approval.approval_id, approval]));

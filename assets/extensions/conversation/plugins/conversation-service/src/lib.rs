@@ -874,6 +874,7 @@ async fn append_message(
     } else {
         None
     };
+    let will_create_branch = branch_mode.is_some();
     let mut conversation = conversation;
     if let Some(mode) = branch_mode {
         let source_message_id = payload
@@ -969,9 +970,22 @@ async fn append_message(
             ExtensionRpcResponse::failure("message_append_failed", error.to_string())
         })?;
 
+    let should_activate_branch = should_activate_message_branch(
+        role,
+        will_create_branch,
+        conversation.active_branch_id.as_deref(),
+    );
     let conversation = ConversationSpec {
-        active_branch_id: Some(branch.id.clone()),
-        default_lane_id: Some(lane.id.clone()),
+        active_branch_id: if should_activate_branch {
+            Some(branch.id.clone())
+        } else {
+            conversation.active_branch_id.clone()
+        },
+        default_lane_id: if should_activate_branch {
+            Some(lane.id.clone())
+        } else {
+            conversation.default_lane_id.clone()
+        },
         updated_at: now.clone(),
         ..conversation
     };
@@ -1428,6 +1442,14 @@ fn normalize_branch_delete_mode(mode: Option<&str>) -> &'static str {
     }
 }
 
+fn should_activate_message_branch(
+    role: MessageRole,
+    created_branch: bool,
+    current_active_branch_id: Option<&str>,
+) -> bool {
+    role == MessageRole::Operator || created_branch || current_active_branch_id.is_none()
+}
+
 fn inherit_mode_for_branch_mode(mode: &str) -> &'static str {
     match mode {
         "rewrite" => "exclusive",
@@ -1724,6 +1746,158 @@ fn normalize_operator_sender(
     }
 
     trimmed.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+
+    async fn test_state() -> ConversationServiceState {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(
+                SqliteConnectOptions::new()
+                    .filename(":memory:")
+                    .create_if_missing(true),
+            )
+            .await
+            .expect("connect in-memory conversation db");
+        initialize_conversation_schema(&pool)
+            .await
+            .expect("initialize conversation schema");
+        let runtime_home =
+            std::env::temp_dir().join(format!("ennoia-conversation-test-{}", Uuid::new_v4()));
+        ConversationServiceState {
+            store: ConversationStore::new(pool),
+            runtime_paths: RuntimePaths::new(runtime_home),
+        }
+    }
+
+    fn create_payload() -> CreateConversationPayload {
+        CreateConversationPayload {
+            topology: "direct".to_string(),
+            title: Some("Test".to_string()),
+            space_id: None,
+            agent_ids: vec!["lsy".to_string()],
+            lane_name: Some("Main".to_string()),
+            lane_type: None,
+            lane_goal: None,
+        }
+    }
+
+    fn operator_message_payload(conversation_id: &str, body: &str) -> AppendMessageParams {
+        AppendMessageParams {
+            conversation_id: conversation_id.to_string(),
+            message: ConversationMessagePayload {
+                body: body.to_string(),
+                role: Some("operator".to_string()),
+                addressed_agents: vec!["lsy".to_string()],
+                ..Default::default()
+            },
+        }
+    }
+
+    fn rewrite_payload(
+        conversation_id: &str,
+        parent_branch_id: &str,
+        source_message_id: &str,
+        body: &str,
+    ) -> AppendMessageParams {
+        AppendMessageParams {
+            conversation_id: conversation_id.to_string(),
+            message: ConversationMessagePayload {
+                body: body.to_string(),
+                role: Some("operator".to_string()),
+                branch_id: Some(parent_branch_id.to_string()),
+                lane_id: Some(parent_branch_id.to_string()),
+                rewrite_from_message_id: Some(source_message_id.to_string()),
+                addressed_agents: vec!["lsy".to_string()],
+                ..Default::default()
+            },
+        }
+    }
+
+    fn agent_message_payload(
+        conversation_id: &str,
+        branch_id: &str,
+        body: &str,
+    ) -> AppendMessageParams {
+        AppendMessageParams {
+            conversation_id: conversation_id.to_string(),
+            message: ConversationMessagePayload {
+                body: body.to_string(),
+                role: Some("agent".to_string()),
+                sender: Some("lsy".to_string()),
+                branch_id: Some(branch_id.to_string()),
+                lane_id: Some(branch_id.to_string()),
+                addressed_agents: vec!["operator".to_string()],
+                ..Default::default()
+            },
+        }
+    }
+
+    #[tokio::test]
+    async fn background_agent_message_does_not_steal_active_branch_from_new_rewrite() {
+        let state = test_state().await;
+        let created = create_conversation(&state, create_payload())
+            .await
+            .expect("create conversation");
+        let conversation_id = created.conversation.id.clone();
+        let root_branch_id = created.default_lane.id.clone();
+
+        let first_operator =
+            append_routed_message(&state, operator_message_payload(&conversation_id, "first"))
+                .await
+                .expect("append first operator message");
+        let first_rewrite = append_routed_message(
+            &state,
+            rewrite_payload(
+                &conversation_id,
+                &root_branch_id,
+                &first_operator.message.id,
+                "rewrite one",
+            ),
+        )
+        .await
+        .expect("append first rewrite");
+        let first_rewrite_branch_id = first_rewrite.branch.id.clone();
+        let second_rewrite = append_routed_message(
+            &state,
+            rewrite_payload(
+                &conversation_id,
+                &first_rewrite_branch_id,
+                &first_rewrite.message.id,
+                "rewrite two",
+            ),
+        )
+        .await
+        .expect("append second rewrite");
+        let second_rewrite_branch_id = second_rewrite.branch.id.clone();
+
+        append_routed_message(
+            &state,
+            agent_message_payload(
+                &conversation_id,
+                &first_rewrite_branch_id,
+                "late reply from first rewrite",
+            ),
+        )
+        .await
+        .expect("append late agent message");
+
+        let refreshed = state
+            .store
+            .get_conversation(&conversation_id)
+            .await
+            .expect("load conversation")
+            .expect("conversation exists");
+        assert_eq!(
+            refreshed.active_branch_id.as_deref(),
+            Some(second_rewrite_branch_id.as_str())
+        );
+    }
 }
 
 fn resolve_operator_display_name(runtime_paths: &RuntimePaths) -> Option<String> {

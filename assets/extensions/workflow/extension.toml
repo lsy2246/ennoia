@@ -76,10 +76,57 @@ description = "处理会话消息创建事件。"
 name = "workflow.operation.updated"
 description = "处理系统操作状态更新事件。"
 
+[[operations]]
+name = "workflow.permission.approval.resolved"
+description = "处理权限审批结果事件。"
+
+[[operations]]
+name = "workflow.run.requested"
+description = "处理 run 请求事件。"
+
+[[operations]]
+name = "workflow.run.stage.changed"
+description = "处理 run 阶段变化事件。"
+
+[[operations]]
+name = "workflow.artifact.created"
+description = "处理 workflow artifact 创建事件。"
+
+[[operations]]
+name = "workflow.job.due"
+description = "处理调度任务到期事件。"
+
 [[events]]
 on = "conversation.message.created"
 operation = "workflow.conversation.message.created"
+priority = 100
 
 [[events]]
 on = "operation.updated"
 operation = "workflow.operation.updated"
+priority = 100
+
+[[events]]
+on = "permission.approval.resolved"
+operation = "workflow.permission.approval.resolved"
+priority = 100
+
+[[events]]
+on = "run.requested"
+operation = "workflow.run.requested"
+priority = 100
+
+[[events]]
+on = "run.stage.changed"
+operation = "workflow.run.stage.changed"
+priority = 100
+
+[[events]]
+on = "artifact.created"
+operation = "workflow.artifact.created"
+priority = 100
+
+[[events]]
+on = "job.due"
+operation = "workflow.job.due"
+priority = 100

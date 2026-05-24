@@ -3,8 +3,9 @@ use std::sync::Arc;
 
 use ennoia_contract::behavior::{BehaviorRunRequest, BehaviorRunResponse};
 use ennoia_kernel::{
-    AgentConfig, AgentDocument, ArtifactKind, ArtifactSpec, ContextLayer, HandoffSpec, OwnerRef,
-    RunSpec,
+    AgentConfig, AgentDocument, ArtifactKind, ArtifactSpec, ContextLayer,
+    ExtensionHostCapabilityRequest, HandoffSpec, HookEventPublishRequest, OwnerRef, RunSpec,
+    HOOK_EVENT_ARTIFACT_CREATED, HOOK_EVENT_RUN_STAGE_CHANGED,
 };
 use ennoia_paths::RuntimePaths;
 use sqlx::SqlitePool;
@@ -122,6 +123,7 @@ pub async fn run_behavior(
         .save_run_bundle(&plan.run, &plan.tasks, &[artifact.clone()], &handoffs)
         .await
         .map_err(|error| error.to_string())?;
+    publish_run_lifecycle_events(&plan.run, &plan.stage_events, &artifact).await;
 
     Ok(BehaviorRunResponse {
         run: plan.run,
@@ -132,6 +134,65 @@ pub async fn run_behavior(
         decision: plan.decision,
         gate_verdicts: plan.gate_verdicts,
     })
+}
+
+async fn publish_run_lifecycle_events(
+    run: &RunSpec,
+    stage_events: &[ennoia_kernel::RunStageEvent],
+    artifact: &ArtifactSpec,
+) {
+    let Ok(bridge) = crate::host_bridge::HostBridge::global() else {
+        return;
+    };
+    for stage_event in stage_events {
+        let response = bridge
+            .call(ExtensionHostCapabilityRequest::HookEventPublish {
+                payload: HookEventPublishRequest {
+                    event: HOOK_EVENT_RUN_STAGE_CHANGED.to_string(),
+                    resource_kind: "run".to_string(),
+                    resource_id: run.id.clone(),
+                    payload: serde_json::json!({
+                        "run": run,
+                        "run_id": run.id,
+                        "conversation_id": run.conversation_id,
+                        "lane_id": run.lane_id,
+                        "stage_event": stage_event,
+                        "from_stage": stage_event.from_stage,
+                        "to_stage": stage_event.to_stage,
+                    }),
+                },
+            })
+            .await;
+        if let Err(error) = response {
+            eprintln!(
+                "[workflow][run.stage.changed] publish failed run_id={} error={error}",
+                run.id
+            );
+        }
+    }
+
+    let response = bridge
+        .call(ExtensionHostCapabilityRequest::HookEventPublish {
+            payload: HookEventPublishRequest {
+                event: HOOK_EVENT_ARTIFACT_CREATED.to_string(),
+                resource_kind: "artifact".to_string(),
+                resource_id: artifact.id.clone(),
+                payload: serde_json::json!({
+                    "artifact": artifact,
+                    "artifact_id": artifact.id,
+                    "run_id": artifact.run_id,
+                    "conversation_id": artifact.conversation_id,
+                    "lane_id": artifact.lane_id,
+                }),
+            },
+        })
+        .await;
+    if let Err(error) = response {
+        eprintln!(
+            "[workflow][artifact.created] publish failed artifact_id={} error={error}",
+            artifact.id
+        );
+    }
 }
 
 pub fn persist_run_artifact(

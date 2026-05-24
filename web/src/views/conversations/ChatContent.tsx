@@ -10,10 +10,14 @@ import {
 } from "react";
 
 import type { AgentProfile, SkillConfig } from "@ennoia/api-client";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import type { ChatEntryFormat } from "./chat-types";
+import {
+  resolveMessageAttachmentLinkProps,
+  resolveMessageAttachmentUrl,
+} from "./message-attachments";
 
 const MarkdownCodeBlockContext = createContext(false);
 
@@ -245,6 +249,10 @@ function normalizeMarkdownBody(body: string) {
   };
 }
 
+function transformMarkdownUrl(url: string) {
+  return defaultUrlTransform(url);
+}
+
 function MarkdownContent({ body, agents, skills, mentionAgentIds }: {
   body: string;
   agents: AgentProfile[];
@@ -266,6 +274,7 @@ function MarkdownContent({ body, agents, skills, mentionAgentIds }: {
   return (
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
+      urlTransform={transformMarkdownUrl}
       components={{
         h1: ({ children }) => <h1 className="message-markdown__heading message-markdown__heading--1">{decorateChildren(children, agents, skills, mentionAgentIds)}</h1>,
         h2: ({ children }) => <h2 className="message-markdown__heading message-markdown__heading--2">{decorateChildren(children, agents, skills, mentionAgentIds)}</h2>,
@@ -279,10 +288,25 @@ function MarkdownContent({ body, agents, skills, mentionAgentIds }: {
         th: ({ children }) => <th>{decorateChildren(children, agents, skills, mentionAgentIds)}</th>,
         td: ({ children }) => <td>{decorateChildren(children, agents, skills, mentionAgentIds)}</td>,
         pre: ({ children }) => <MarkdownPreNode>{children}</MarkdownPreNode>,
-        a: ({ children, href }) => (
-          <a className="message-markdown__link" href={href} target="_blank" rel="noreferrer">
-            {decorateChildren(children, agents, skills, mentionAgentIds)}
-          </a>
+        a: ({ children, href }) => {
+          const linkProps = resolveMessageAttachmentLinkProps(href);
+          return (
+            <a
+              className="message-markdown__link"
+              {...linkProps}
+            >
+              {decorateChildren(children, agents, skills, mentionAgentIds)}
+            </a>
+          );
+        },
+        img: ({ alt, src, title }) => (
+          <img
+            className="message-markdown__image"
+            src={resolveMessageAttachmentUrl(src) ?? src}
+            alt={alt ?? ""}
+            title={title}
+            loading="lazy"
+          />
         ),
         code: (props) => (
           <MarkdownCodeNode
@@ -316,5 +340,12 @@ export function ChatContent({ body, format, agents, skills, mentionAgentIds = []
   if (format === "plain") {
     return <PlainTextContent body={body} agents={agents} skills={skills} mentionAgentIds={mentionAgentIds} />;
   }
-  return <MarkdownContent body={body} agents={agents} skills={skills} mentionAgentIds={mentionAgentIds} />;
+  return (
+    <MarkdownContent
+      body={body}
+      agents={agents}
+      skills={skills}
+      mentionAgentIds={mentionAgentIds}
+    />
+  );
 }

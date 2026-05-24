@@ -8,6 +8,7 @@ use tokio::time::{sleep, timeout};
 use super::*;
 use crate::app::live_server_config;
 use crate::realtime::RealtimeEvent;
+use crate::routes::actions::dispatch_hook_event;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(super) struct ScheduleRecord {
@@ -328,6 +329,17 @@ pub(crate) async fn run_due_schedules_once(state: &AppState) {
             sampled: true,
             source: "scheduler".to_string(),
         };
+        dispatch_hook_event(
+            state,
+            &request,
+            ennoia_kernel::HOOK_EVENT_JOB_DUE,
+            "schedule",
+            &schedule_id,
+            serde_json::json!({
+                "schedule_id": schedule_id,
+                "due_at": now.to_rfc3339(),
+            }),
+        );
         let _ = run_schedule_by_id(state, &schedule_id, &request).await;
     }
 }

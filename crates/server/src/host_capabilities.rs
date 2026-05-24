@@ -4,7 +4,7 @@ use ennoia_contract::{ApiError, ErrorCode};
 use ennoia_extension_host::{HostCapabilityDispatcher, ResolvedExtensionSnapshot};
 use ennoia_kernel::{
     ExtensionHostCapabilityRequest, ExtensionRpcResponse, ExtensionStateEntry,
-    RuntimeOperationRequest,
+    HookEventPublishRequest, RuntimeOperationRequest,
 };
 use ennoia_logs::{next_request_id, next_span_id, next_trace_id, RequestContext};
 
@@ -74,6 +74,9 @@ impl HostCapabilityDispatcher for ServerHostCapabilityDispatcher {
                     &operation,
                     payload,
                 )
+            }
+            ExtensionHostCapabilityRequest::HookEventPublish { payload } => {
+                publish_hook_event(&self.state, &request_context, payload)
             }
             ExtensionHostCapabilityRequest::OperationPerform { payload } => {
                 map_api_result(self.runtime.block_on(async {
@@ -159,6 +162,22 @@ fn dispatch_runtime_operation(
     }))
 }
 
+fn publish_hook_event(
+    state: &AppState,
+    request_context: &RequestContext,
+    payload: HookEventPublishRequest,
+) -> ExtensionRpcResponse {
+    actions::dispatch_hook_event(
+        state,
+        request_context,
+        &payload.event,
+        &payload.resource_kind,
+        &payload.resource_id,
+        payload.payload,
+    );
+    ExtensionRpcResponse::success(serde_json::json!({ "published": true }))
+}
+
 fn extension_state_success(entry: ExtensionStateEntry) -> ExtensionRpcResponse {
     ExtensionRpcResponse::success(serde_json::to_value(entry).unwrap())
 }
@@ -223,6 +242,31 @@ mod tests {
                 "decision": "ask",
                 "approval_id": "apr-1",
             }))
+        );
+    }
+
+    #[test]
+    fn host_capability_request_serializes_hook_event_publish() {
+        let request = ExtensionHostCapabilityRequest::HookEventPublish {
+            payload: HookEventPublishRequest {
+                event: ennoia_kernel::HOOK_EVENT_ARTIFACT_CREATED.to_string(),
+                resource_kind: "artifact".to_string(),
+                resource_id: "art-1".to_string(),
+                payload: serde_json::json!({ "artifact_id": "art-1" }),
+            },
+        };
+
+        assert_eq!(
+            serde_json::to_value(request).unwrap(),
+            serde_json::json!({
+                "kind": "hook_event_publish",
+                "payload": {
+                    "event": "artifact.created",
+                    "resource_kind": "artifact",
+                    "resource_id": "art-1",
+                    "payload": { "artifact_id": "art-1" },
+                }
+            })
         );
     }
 }

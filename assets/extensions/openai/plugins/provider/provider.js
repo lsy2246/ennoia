@@ -62,9 +62,15 @@ export async function generate(request = {}) {
   }
 
   if (tools.length === 0) {
-    const streamed = await generateByChatCompletionStream(config, model, payload);
-    if (streamed.text) {
-      return streamed;
+    try {
+      const streamed = await generateByChatCompletionStream(config, model, payload);
+      if (streamed.text) {
+        return streamed;
+      }
+    } catch (error) {
+      if (!isStreamReadResetError(error)) {
+        throw error;
+      }
     }
   }
 
@@ -73,19 +79,21 @@ export async function generate(request = {}) {
     body: JSON.stringify(payload),
   });
   const data = await response.json();
-  const text = collectChatCompletionText(data);
-  const reasoning = collectChatCompletionReasoning(data);
+  const content = normalizeGeneratedContent({
+    text: collectChatCompletionText(data),
+    reasoning: collectChatCompletionReasoning(data),
+  });
   const toolCalls = collectChatCompletionToolCalls(data);
 
-  if (!text && !reasoning && toolCalls.length === 0) {
+  if (!content.text && !content.reasoning && toolCalls.length === 0) {
     throw new Error(describeEmptyChatCompletion(data, model));
   }
 
   return {
     id: data.id,
     model: data.model ?? model,
-    text,
-    reasoning,
+    text: content.text,
+    reasoning: content.reasoning,
     tool_calls: toolCalls,
     raw: data,
   };
@@ -100,13 +108,16 @@ async function generateByChatCompletionStream(config, fallbackModel, payload) {
     }),
   });
   const data = await collectChatCompletionStream(response, fallbackModel);
-  const text = data.text.trim();
-  if (!text) {
+  const content = normalizeGeneratedContent({
+    text: data.text,
+    reasoning: data.reasoning ?? "",
+  });
+  if (!content.text) {
     return {
       id: data.id,
       model: data.model ?? fallbackModel,
       text: "",
-      reasoning: data.reasoning ?? "",
+      reasoning: content.reasoning,
       tool_calls: [],
       raw: data.raw,
     };
@@ -114,8 +125,8 @@ async function generateByChatCompletionStream(config, fallbackModel, payload) {
   return {
     id: data.id,
     model: data.model ?? fallbackModel,
-    text,
-    reasoning: data.reasoning ?? "",
+    text: content.text,
+    reasoning: content.reasoning,
     tool_calls: [],
     raw: data.raw,
   };
@@ -607,6 +618,46 @@ function collectChatCompletionReasoning(response) {
     .map((item) => item.trim())
     .filter((item) => item.length > 0)
     .join("\n");
+}
+
+function normalizeGeneratedContent({ text, reasoning }) {
+  const split = splitThinkTaggedText(text);
+  return {
+    text: split.text,
+    reasoning: [reasoning, split.reasoning]
+      .map((item) => String(item ?? "").trim())
+      .filter((item) => item.length > 0)
+      .join("\n\n"),
+  };
+}
+
+function isStreamReadResetError(error) {
+  const code = typeof error?.code === "string" ? error.code : "";
+  const syscall = typeof error?.syscall === "string" ? error.syscall : "";
+  const message = String(error?.message ?? "");
+  const cause = error?.cause;
+  return (
+    (code === "ECONNRESET" && syscall === "read")
+    || /read ECONNRESET/i.test(message)
+    || (cause && isStreamReadResetError(cause))
+  );
+}
+
+function splitThinkTaggedText(value) {
+  const source = String(value ?? "");
+  const reasoningParts = [];
+  const text = source.replace(/<think>\s*([\s\S]*?)\s*<\/think>/gi, (_match, content) => {
+    const reasoning = String(content ?? "").trim();
+    if (reasoning) {
+      reasoningParts.push(reasoning);
+    }
+    return "\n";
+  });
+
+  return {
+    text: text.trim(),
+    reasoning: reasoningParts.join("\n\n"),
+  };
 }
 
 function pushTextCandidate(target, value) {

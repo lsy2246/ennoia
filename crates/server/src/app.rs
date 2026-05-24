@@ -638,11 +638,17 @@ pub fn delete_agent_config(paths: &RuntimePaths, agent_id: &str) -> Result<bool,
     if !path.exists() {
         return Ok(false);
     }
-    fs::remove_file(&path)?;
     let agent_dir = paths.agent_dir(agent_id);
-    if agent_dir.exists() && fs::read_dir(&agent_dir)?.next().is_none() {
-        fs::remove_dir(agent_dir)?;
+    let agents_root = paths.agents_dir().canonicalize()?;
+    let resolved_agent_dir = agent_dir.canonicalize()?;
+    if !resolved_agent_dir.starts_with(&agents_root) || resolved_agent_dir == agents_root {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("refusing to delete agent directory outside agents root: {agent_id}"),
+        )
+        .into());
     }
+    fs::remove_dir_all(agent_dir)?;
     Ok(true)
 }
 
@@ -1050,6 +1056,34 @@ enabled = true
             .expect("document exists");
         assert_eq!(document.profile.display_name, "Planner Prime");
         assert_eq!(document.permission_profile.mode, "blacklist");
+    }
+
+    #[test]
+    fn delete_agent_config_removes_agent_runtime_directory() {
+        let temp = tempdir().expect("temp dir");
+        let paths = RuntimePaths::new(temp.path());
+        let agent = sample_agent("artist");
+        write_agent_document(
+            &paths,
+            &AgentDocument {
+                profile: agent,
+                permission_profile: AgentPermissionProfile::default_profile(),
+                file_access: AgentFileAccessProfile::default(),
+            },
+        )
+        .expect("seed agent document");
+        fs::create_dir_all(paths.agent_working_dir("artist")).expect("work dir");
+        fs::create_dir_all(paths.agent_artifacts_dir("artist")).expect("artifacts dir");
+        fs::create_dir_all(paths.agent_skills_dir("artist")).expect("skills dir");
+        fs::write(
+            paths.agent_artifacts_dir("artist").join("bilibili.png"),
+            b"png",
+        )
+        .expect("artifact file");
+
+        assert!(delete_agent_config(&paths, "artist").expect("delete agent"));
+
+        assert!(!paths.agent_dir("artist").exists());
     }
 }
 

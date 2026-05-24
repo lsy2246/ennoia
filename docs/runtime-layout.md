@@ -114,6 +114,7 @@
 ## 目录职责
 
 - `agents/`：Agent 的统一目录根；每个 Agent 的基础配置、权限配置、文件访问配置、工作目录、技能目录和产物目录都收敛在自己的子目录里。
+- `agents/<agent_id>/artifacts/`：Agent 产物目录；会话消息中的 `/api/agents/{agent_id}/artifacts/{relative_path}` 直接映射到这里的文件。链接不单独持久化，不设置独立 TTL；删除 Agent 会删除整个 `agents/<agent_id>/` 目录，产物链接随文件消失而失效。
 - `extensions/`：运行态扩展真实内容目录；开发态内置扩展直接从 `dev_sources` 指向的源码目录加载。
 - `skills/`：运行态技能真实内容目录；每个技能目录固定包含 `SKILL.md` 与 `config.toml`。开发态内置技能直接从 `dev_sources` 指向的源码目录加载。
 - `data/system/logs/`：文本日志与开发日志输出目录，不等同于系统日志数据库。

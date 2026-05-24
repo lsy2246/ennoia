@@ -61,3 +61,91 @@ test("OpenAI config does not read OPENAI_API_KEY unless api_key_env is explicit"
     }
   }
 });
+
+test("OpenAI provider splits think-tagged output before returning generation text", async () => {
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({
+    ok: true,
+    json: async () => ({
+      id: "chatcmpl-test",
+      model: "test-model",
+      choices: [{
+        message: {
+          content: "<think>Exploring screenshot options\n\nI need to test this out!</think>\nFinal answer.",
+        },
+      }],
+    }),
+  });
+
+  try {
+    const result = await provider.generate({
+      model_endpoint: {
+        base_url: "http://127.0.0.1:4321/v1",
+        api_key: "test-key",
+      },
+      model: "test-model",
+      tools: [{
+        name: "noop",
+        description: "No-op tool used to force non-streaming generation in this test.",
+        parameters: { type: "object", properties: {} },
+      }],
+      messages: "hello",
+    });
+
+    assert.equal(result.text, "Final answer.");
+    assert.equal(result.reasoning, "Exploring screenshot options\n\nI need to test this out!");
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test("OpenAI provider falls back to non-streaming when stream read resets", async () => {
+  const previousFetch = globalThis.fetch;
+  let callCount = 0;
+  globalThis.fetch = async () => {
+    callCount += 1;
+    if (callCount === 1) {
+      return {
+        ok: true,
+        body: {
+          getReader: () => ({
+            read: async () => {
+              const error = new Error("read ECONNRESET");
+              error.code = "ECONNRESET";
+              error.syscall = "read";
+              throw error;
+            },
+          }),
+        },
+      };
+    }
+    return {
+      ok: true,
+      json: async () => ({
+        id: "chatcmpl-fallback",
+        model: "test-model",
+        choices: [{
+          message: {
+            content: "Recovered without streaming.",
+          },
+        }],
+      }),
+    };
+  };
+
+  try {
+    const result = await provider.generate({
+      model_endpoint: {
+        base_url: "http://127.0.0.1:4321/v1",
+        api_key: "test-key",
+      },
+      model: "test-model",
+      messages: "hello",
+    });
+
+    assert.equal(callCount, 2);
+    assert.equal(result.text, "Recovered without streaming.");
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});

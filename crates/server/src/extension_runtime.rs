@@ -374,6 +374,25 @@ impl ExtensionRuntimeStore {
             .map_err(std::io::Error::other)
     }
 
+    pub fn latest_conversation_record_updated_at(
+        &self,
+        conversation_id: &str,
+    ) -> std::io::Result<Option<String>> {
+        let connection = self.open()?;
+        connection
+            .query_row(
+                "SELECT updated_at
+                 FROM extension_record_entries
+                 WHERE scope_type = 'conversation' AND scope_id = ?1
+                 ORDER BY updated_at DESC
+                 LIMIT 1",
+                params![conversation_id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()
+            .map_err(sql_err)
+    }
+
     fn open(&self) -> std::io::Result<Connection> {
         let connection = Connection::open(&self.db_path).map_err(sql_err)?;
         for statement in SQLITE_PRAGMAS {
@@ -447,4 +466,53 @@ fn map_record_entry(row: &rusqlite::Row<'_>) -> rusqlite::Result<ExtensionRecord
         updated_at: row.get("updated_at")?,
         closed_at: row.get("closed_at")?,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use tempfile::tempdir;
+
+    #[test]
+    fn latest_conversation_record_updated_at_tracks_new_records() {
+        let temp = tempdir().expect("temp dir");
+        let paths = RuntimePaths::new(temp.path());
+        let store = ExtensionRuntimeStore::new(&paths).expect("extension runtime store");
+        assert_eq!(
+            store
+                .latest_conversation_record_updated_at("conv-1")
+                .expect("latest record timestamp"),
+            None
+        );
+
+        let record = store
+            .append_record(&ExtensionRecordAppend {
+                extension_id: "artifact-runner".to_string(),
+                namespace: "artifact-runner/conversation/conv-1".to_string(),
+                scope_type: "conversation".to_string(),
+                scope_id: "conv-1".to_string(),
+                kind: "artifact-runner.artifact".to_string(),
+                status: Some("ready".to_string()),
+                title: Some("Canvas".to_string()),
+                summary: Some("Canvas".to_string()),
+                payload: serde_json::json!({ "type": "html-preview" }),
+                related_message_id: Some("msg-1".to_string()),
+                parent_id: None,
+            })
+            .expect("append record");
+
+        assert_eq!(
+            store
+                .latest_conversation_record_updated_at("conv-1")
+                .expect("latest record timestamp"),
+            Some(record.updated_at)
+        );
+        assert_eq!(
+            store
+                .latest_conversation_record_updated_at("conv-2")
+                .expect("latest other timestamp"),
+            None
+        );
+    }
 }

@@ -1,7 +1,7 @@
 use ennoia_contract::ApiError;
 use ennoia_kernel::{
     ActionPhase, ActionResultMode, HOOK_EVENT_CONVERSATION_CREATED,
-    HOOK_EVENT_CONVERSATION_MESSAGE_CREATED,
+    HOOK_EVENT_CONVERSATION_MESSAGE_CREATED, HOOK_EVENT_RUN_REQUESTED,
 };
 use ennoia_logs::RequestContext;
 use serde_json::Value as JsonValue;
@@ -29,6 +29,7 @@ enum PipelineHandlerAction {
     EmitConversationCreated,
     EmitConversationDeleted,
     EmitConversationMessageCreated,
+    EmitRunRequested,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -65,6 +66,14 @@ const PIPELINE_HANDLERS: &[PipelineHandler] = &[
         priority: 300,
         enabled: true,
         action: PipelineHandlerAction::EmitConversationMessageCreated,
+    },
+    PipelineHandler {
+        id: "run.requested.emit",
+        target: "run.create",
+        stage: PipelineStage::AfterSuccess,
+        priority: 300,
+        enabled: true,
+        action: PipelineHandlerAction::EmitRunRequested,
     },
 ];
 
@@ -157,6 +166,11 @@ async fn run_pipeline_stage(
             PipelineHandlerAction::EmitConversationMessageCreated => {
                 if let Some(payload) = result {
                     emit_conversation_message_created(state, request, payload);
+                }
+            }
+            PipelineHandlerAction::EmitRunRequested => {
+                if let Some(payload) = result {
+                    emit_run_requested(state, request, payload);
                 }
             }
         }
@@ -364,4 +378,39 @@ fn emit_conversation_message_created(
     state.realtime.publish(RealtimeEvent::ConversationChanged {
         conversation_id: conversation_id.to_string(),
     });
+}
+
+fn emit_run_requested(state: &AppState, request: &RequestContext, payload: &JsonValue) {
+    let run_id = payload
+        .get("run")
+        .and_then(|item| item.get("id"))
+        .or_else(|| payload.get("run_id"))
+        .or_else(|| payload.get("id"))
+        .and_then(JsonValue::as_str)
+        .unwrap_or("unknown");
+    dispatch_hook_event(
+        state,
+        request,
+        HOOK_EVENT_RUN_REQUESTED,
+        "run",
+        run_id,
+        payload.clone(),
+    );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pipeline_handlers_include_run_requested_after_run_create_success() {
+        assert!(PIPELINE_HANDLERS.iter().any(|handler| {
+            handler.id == "run.requested.emit"
+                && handler.target == "run.create"
+                && handler.stage == PipelineStage::AfterSuccess
+                && handler.priority == 300
+                && handler.enabled
+                && matches!(handler.action, PipelineHandlerAction::EmitRunRequested)
+        }));
+    }
 }

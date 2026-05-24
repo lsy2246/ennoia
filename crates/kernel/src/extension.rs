@@ -119,6 +119,8 @@ pub struct ExtensionOperationSpec {
 pub struct ExtensionEventSpec {
     pub on: String,
     pub operation: String,
+    #[serde(default)]
+    pub priority: i32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -205,6 +207,8 @@ fn default_manual_model() -> bool {
 pub struct HookContribution {
     pub event: String,
     pub handler: Option<String>,
+    #[serde(default)]
+    pub priority: i32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -389,6 +393,15 @@ pub struct HookDispatchResponse {
     pub result: Option<JsonValue>,
     #[serde(default)]
     pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct HookEventPublishRequest {
+    pub event: String,
+    pub resource_kind: String,
+    pub resource_id: String,
+    #[serde(default)]
+    pub payload: JsonValue,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -836,6 +849,9 @@ pub enum ExtensionHostCapabilityRequest {
     RuntimeOperation {
         operation: String,
         payload: RuntimeOperationRequest,
+    },
+    HookEventPublish {
+        payload: HookEventPublishRequest,
     },
     OperationPerform {
         payload: OperationPerformRequest,

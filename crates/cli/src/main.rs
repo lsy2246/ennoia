@@ -31,6 +31,7 @@ use windows_sys::Win32::System::Threading::{
 
 const WEB_DIR: &str = "web";
 const ENNOIA_ALLOW_DEV_SOURCES_ENV: &str = "ENNOIA_ALLOW_DEV_SOURCES";
+const REMOVED_BUILTIN_EXTENSION_IDS: &[&str] = &[concat!("rich", "-", "output")];
 static DEV_CONSOLE_OUTPUT_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -2549,6 +2550,7 @@ fn init_home_template(paths: &RuntimePaths) -> io::Result<()> {
     write_if_missing(&paths.server_config_file(), templates::server_config())?;
     write_if_missing(&paths.ui_config_file(), templates::ui_config())?;
     migrate_ui_config(&paths.ui_config_file())?;
+    remove_removed_builtin_packages(paths)?;
     sync_builtin_registries(paths)?;
     materialize_builtin_packages(paths)?;
     sync_builtin_provider_presets(paths, false)?;
@@ -2561,6 +2563,7 @@ fn init_dev_home_template(paths: &RuntimePaths) -> io::Result<()> {
     write_if_missing(&paths.server_config_file(), templates::server_config())?;
     write_if_missing(&paths.ui_config_file(), templates::ui_config())?;
     migrate_ui_config(&paths.ui_config_file())?;
+    remove_removed_builtin_packages(paths)?;
     sync_builtin_registries(paths)?;
     remove_dev_builtin_package_copies(paths)
 }
@@ -2571,6 +2574,13 @@ fn remove_dev_builtin_package_copies(paths: &RuntimePaths) -> io::Result<()> {
     }
     for id in builtin_skill_ids() {
         remove_package_dir_if_inside_root(&paths.skills_dir(), &paths.skill_dir(&id))?;
+    }
+    Ok(())
+}
+
+fn remove_removed_builtin_packages(paths: &RuntimePaths) -> io::Result<()> {
+    for id in REMOVED_BUILTIN_EXTENSION_IDS {
+        remove_package_dir_if_inside_root(&paths.extensions_dir(), &paths.extension_dir(id))?;
     }
     Ok(())
 }
@@ -2823,7 +2833,7 @@ mod tests {
         is_host_reload_path, next_dev_reload_action, parse_optional_home_arg,
         parse_optional_usize_arg, parse_required_arg, print_config_usage,
         should_mark_binary_asset_executable, summary_text, tail_log_file, unique_suffix,
-        DevReloadAction, RuntimePaths, SKILL_MARKDOWN_FILE,
+        DevReloadAction, RuntimePaths, REMOVED_BUILTIN_EXTENSION_IDS, SKILL_MARKDOWN_FILE,
     };
 
     fn as_args(values: &[&str]) -> Vec<String> {
@@ -2928,6 +2938,28 @@ mod tests {
         assert!(!stale_builtin_skill.exists());
         assert!(custom_extension.exists());
         assert!(custom_skill.exists());
+
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn dev_home_template_removes_removed_builtin_extension_copies() {
+        let home =
+            std::env::temp_dir().join(format!("ennoia-dev-removed-extension-{}", unique_suffix()));
+        let paths = RuntimePaths::new(&home);
+        let removed_extension_id = REMOVED_BUILTIN_EXTENSION_IDS[0];
+        let removed_extension = paths.extension_dir(removed_extension_id);
+
+        fs::create_dir_all(&removed_extension).expect("removed extension dir");
+        fs::write(
+            removed_extension.join("extension.toml"),
+            format!("id = \"{removed_extension_id}\"\n"),
+        )
+        .expect("write removed extension manifest");
+
+        init_dev_home_template(&paths).expect("init dev home");
+
+        assert!(!removed_extension.exists());
 
         let _ = fs::remove_dir_all(home);
     }

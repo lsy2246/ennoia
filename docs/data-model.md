@@ -129,6 +129,7 @@
 - `agent_ids.len() == 1` 创建 `direct`。
 - `agent_ids.len() >= 2` 创建 `group`。
 - 产品文案可以称为“会话”，系统 API 使用 `conversation`。
+- `active_branch_id` 表示操作者当前查看或继续输入的分支；operator 消息、新建分支和显式切换可以更新它，agent、tool、system 等后台消息只更新自身分支活动时间，不抢占当前分支。
 - 具体持久化格式由绑定到 `conversation.*`、`branch.*`、`lane.*`、`message.*` 的扩展决定。
 
 `ConversationBranchSpec` 字段：
@@ -196,6 +197,8 @@
 - `file_access`
 
 `AgentConfig`、`AgentPermissionProfile` 与 `AgentFileAccessProfile` 统一持久化在 `agents/<agent_id>/agent.toml`。`kind`、`default_model`、`skills_dir`、`working_dir`、`artifacts_dir` 作为运行时派生/内部字段存在，前端产品模型以显式字段为主。`working_dir` / `artifacts_dir` 是模型侧可见的虚拟路径，默认展示为 `/workspace` 与 `/artifacts`，不等同于宿主机绝对路径。
+
+Agent 的 `work/`、`artifacts/` 与私有 `skills/` 都归属该 Agent 生命周期。删除 Agent 时删除整个 `agents/<agent_id>/` 目录；因此会话消息里的 `/api/agents/{agent_id}/artifacts/{relative_path}` 链接只在 Agent 与对应文件仍存在时有效。
 
 ## Agent 权限域
 

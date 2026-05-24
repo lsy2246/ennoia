@@ -3,6 +3,7 @@ use crate::app::{
     delete_agent_config, load_agent_document, load_agent_documents, normalize_agent_document,
     write_agent_document,
 };
+use crate::execution::{resolve_agent_file_path, AgentFileAccessPaths};
 use crate::realtime::RealtimeEvent;
 use crate::skills::{
     load_skill_manifest, load_skill_settings, load_skill_status, run_skill_check,
@@ -50,6 +51,109 @@ pub(super) async fn agent_detail(
         .map(AgentRecord::from)
         .map(Json)
         .ok_or_else(|| ApiError::not_found(format!("agent '{agent_id}' not found")))
+}
+
+pub(super) async fn agent_artifact_download(
+    State(state): State<AppState>,
+    Extension(request): Extension<RequestContext>,
+    Query(query): Query<AgentArtifactQuery>,
+    Path((agent_id, artifact_path)): Path<(String, String)>,
+) -> Result<impl IntoResponse, ApiError> {
+    let document = load_agent_document(&state.runtime_paths, &agent_id)
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?
+        .ok_or_else(|| {
+            scoped(
+                ApiError::not_found(format!("agent '{agent_id}' not found")),
+                &request,
+            )
+        })?;
+    let paths = AgentFileAccessPaths::for_agent(&state, &document.profile, "artifact-download");
+    let resolved = resolve_agent_file_path(
+        &document.file_access,
+        &paths,
+        &format!("/artifacts/{artifact_path}"),
+    )
+    .map_err(|error| scoped(error, &request))?;
+    if !resolved.host_path.is_file() {
+        return Err(scoped(
+            ApiError::not_found(format!("artifact '{}' not found", resolved.display_path)),
+            &request,
+        ));
+    }
+    let body = fs::read(&resolved.host_path)
+        .map_err(|error| scoped(ApiError::internal(error.to_string()), &request))?;
+    let content_type = mime_guess::from_path(&resolved.host_path)
+        .first_or_octet_stream()
+        .to_string();
+    let disposition = if query.download.as_deref() == Some("1") {
+        "attachment"
+    } else {
+        "inline"
+    };
+    let filename = artifact_download_filename(&resolved.host_path);
+
+    Ok((
+        [
+            (header::CONTENT_TYPE, content_type),
+            (header::CACHE_CONTROL, "no-cache".to_string()),
+            (
+                header::CONTENT_DISPOSITION,
+                format!(
+                    "{disposition}; filename=\"{}\"; filename*=UTF-8''{}",
+                    filename.ascii_fallback, filename.encoded
+                ),
+            ),
+        ],
+        body,
+    ))
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub(super) struct AgentArtifactQuery {
+    download: Option<String>,
+}
+
+struct ArtifactDownloadFilename {
+    ascii_fallback: String,
+    encoded: String,
+}
+
+fn artifact_download_filename(path: &StdPath) -> ArtifactDownloadFilename {
+    let filename = path
+        .file_name()
+        .and_then(|item| item.to_str())
+        .filter(|item| !item.is_empty())
+        .unwrap_or("artifact");
+    let ascii_fallback = filename
+        .chars()
+        .map(|item| match item {
+            '"' | '\\' | '\r' | '\n' => '_',
+            '\u{20}'..='\u{7e}' => item,
+            _ => '_',
+        })
+        .collect::<String>();
+    let ascii_fallback = if ascii_fallback.trim().is_empty() {
+        "artifact".to_string()
+    } else {
+        ascii_fallback
+    };
+    ArtifactDownloadFilename {
+        ascii_fallback,
+        encoded: encode_header_filename(filename),
+    }
+}
+
+fn encode_header_filename(value: &str) -> String {
+    let mut encoded = String::new();
+    for byte in value.as_bytes() {
+        let item = *byte;
+        if item.is_ascii_alphanumeric() || matches!(item, b'.' | b'-' | b'_') {
+            encoded.push(item as char);
+        } else {
+            encoded.push_str(&format!("%{item:02X}"));
+        }
+    }
+    encoded
 }
 
 pub(super) async fn agent_create(
@@ -411,10 +515,15 @@ pub(super) fn validate_model_endpoint_request_timeout_ms(
 
 #[cfg(test)]
 mod tests {
-    use super::{skill_prepare, validate_model_endpoint_request_timeout_ms};
-    use crate::app::default_app_state;
-    use axum::extract::{Path, State};
+    use super::{
+        agent_artifact_download, skill_prepare, validate_model_endpoint_request_timeout_ms,
+        AgentArtifactQuery,
+    };
+    use crate::app::{default_app_state, write_agent_document};
+    use axum::extract::{Path, Query, State};
+    use axum::response::IntoResponse;
     use axum::Extension;
+    use ennoia_kernel::{AgentConfig, AgentDocument, AgentPermissionProfile};
     use ennoia_logs::RequestContext;
     use ennoia_paths::RuntimePaths;
     use std::fs;
@@ -496,6 +605,29 @@ timeout_ms = 10000
         state
     }
 
+    fn sample_agent_document(agent_id: &str) -> AgentDocument {
+        AgentDocument {
+            profile: AgentConfig {
+                id: agent_id.to_string(),
+                display_name: agent_id.to_string(),
+                description: String::new(),
+                system_prompt: String::new(),
+                model_endpoint_id: String::new(),
+                model_id: String::new(),
+                generation_options: Default::default(),
+                skills: Vec::new(),
+                enabled: true,
+                kind: "agent".to_string(),
+                default_model: String::new(),
+                skills_dir: String::new(),
+                working_dir: String::new(),
+                artifacts_dir: String::new(),
+            },
+            permission_profile: AgentPermissionProfile::default_profile(),
+            file_access: Default::default(),
+        }
+    }
+
     #[test]
     fn allows_unlimited_model_endpoint_timeout() {
         assert!(validate_model_endpoint_request_timeout_ms(Some(0)).is_ok());
@@ -556,6 +688,107 @@ timeout_ms = 10000
         assert!(error
             .message()
             .contains("does not define a prepare workflow"));
+    }
+
+    #[tokio::test]
+    async fn agent_artifact_download_serves_file_from_agent_artifacts_root() {
+        let temp = tempdir().expect("temp dir");
+        let paths = RuntimePaths::new(temp.path().join("home"));
+        paths.ensure_layout().expect("layout");
+        write_agent_document(&paths, &sample_agent_document("lsy")).expect("write agent");
+        fs::create_dir_all(paths.agent_artifacts_dir("lsy")).expect("create artifacts");
+        fs::write(
+            paths.agent_artifacts_dir("lsy").join("bilibili.png"),
+            b"png",
+        )
+        .expect("write artifact");
+        let state = state_for_paths(paths);
+
+        let response = agent_artifact_download(
+            State(state),
+            Extension(test_request_context()),
+            Query(AgentArtifactQuery::default()),
+            Path(("lsy".to_string(), "bilibili.png".to_string())),
+        )
+        .await
+        .expect("artifact response")
+        .into_response();
+
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        assert_eq!(
+            response
+                .headers()
+                .get(axum::http::header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok()),
+            Some("image/png")
+        );
+        assert_eq!(
+            response
+                .headers()
+                .get(axum::http::header::CONTENT_DISPOSITION)
+                .and_then(|value| value.to_str().ok()),
+            Some("inline; filename=\"bilibili.png\"; filename*=UTF-8''bilibili.png")
+        );
+    }
+
+    #[tokio::test]
+    async fn agent_artifact_download_can_force_attachment_disposition() {
+        let temp = tempdir().expect("temp dir");
+        let paths = RuntimePaths::new(temp.path().join("home"));
+        paths.ensure_layout().expect("layout");
+        write_agent_document(&paths, &sample_agent_document("lsy")).expect("write agent");
+        fs::create_dir_all(paths.agent_artifacts_dir("lsy")).expect("create artifacts");
+        fs::write(
+            paths.agent_artifacts_dir("lsy").join("Bilibili 官网.png"),
+            b"png",
+        )
+        .expect("write artifact");
+        let state = state_for_paths(paths);
+
+        let response = agent_artifact_download(
+            State(state),
+            Extension(test_request_context()),
+            Query(AgentArtifactQuery {
+                download: Some("1".to_string()),
+            }),
+            Path(("lsy".to_string(), "Bilibili 官网.png".to_string())),
+        )
+        .await
+        .expect("artifact response")
+        .into_response();
+
+        assert_eq!(
+            response
+                .headers()
+                .get(axum::http::header::CONTENT_DISPOSITION)
+                .and_then(|value| value.to_str().ok()),
+            Some(
+                "attachment; filename=\"Bilibili __.png\"; filename*=UTF-8''Bilibili%20%E5%AE%98%E7%BD%91.png"
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn agent_artifact_download_rejects_paths_outside_artifacts_root() {
+        let temp = tempdir().expect("temp dir");
+        let paths = RuntimePaths::new(temp.path().join("home"));
+        paths.ensure_layout().expect("layout");
+        write_agent_document(&paths, &sample_agent_document("lsy")).expect("write agent");
+        let state = state_for_paths(paths);
+
+        let error = match agent_artifact_download(
+            State(state),
+            Extension(test_request_context()),
+            Query(AgentArtifactQuery::default()),
+            Path(("lsy".to_string(), "../agent.toml".to_string())),
+        )
+        .await
+        {
+            Ok(_) => panic!("path escape should fail"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error.code(), ennoia_contract::ErrorCode::BadRequest);
     }
 }
 

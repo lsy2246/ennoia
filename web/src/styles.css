@@ -1925,6 +1925,7 @@ label {
   flex-direction: column;
   align-items: flex-start;
   gap: 10px;
+  width: 100%;
 }
 
 .chat-turn {
@@ -2390,11 +2391,15 @@ label {
   flex-direction: column;
   align-items: flex-start;
   gap: 10px;
+  width: 100%;
 }
 
 .message-accessory {
   width: min(100%, var(--chat-bubble-max-width));
   max-width: min(100%, var(--chat-bubble-max-width));
+  min-width: 0;
+  flex: 0 1 min(100%, var(--chat-bubble-max-width));
+  box-sizing: border-box;
   border: 1px solid color-mix(in srgb, var(--line) 76%, transparent);
   border-radius: 16px;
   background: color-mix(in srgb, var(--bg-soft) 94%, transparent);
@@ -2414,6 +2419,8 @@ label {
   cursor: pointer;
   padding: 10px 12px;
   width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .message-accessory summary::-webkit-details-marker {
@@ -2426,6 +2433,8 @@ label {
   align-items: center;
   gap: 8px;
   color: var(--text);
+  flex: 1 1 auto;
+  max-width: 100%;
 }
 
 .message-accessory__summary-main strong {
@@ -2453,6 +2462,8 @@ label {
   flex-direction: column;
   gap: 10px;
   width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 .message-accessory[open] .message-accessory__summary-main span {
@@ -2710,6 +2721,15 @@ label {
   text-decoration: underline;
   text-decoration-color: color-mix(in srgb, var(--accent) 42%, transparent);
   text-underline-offset: 2px;
+}
+
+.message-markdown__image {
+  display: block;
+  max-width: min(100%, 720px);
+  height: auto;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
+  background: var(--bg-panel);
 }
 
 .message-diagram {

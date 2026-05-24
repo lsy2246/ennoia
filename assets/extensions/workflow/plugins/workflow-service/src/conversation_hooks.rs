@@ -19,6 +19,7 @@ use serde_json::Value as JsonValue;
 use sqlx::Row;
 use uuid::Uuid;
 
+use crate::extension_outputs::{parse_extension_output_reply, ExtensionOutputEnvelope};
 use crate::host_bridge::HostBridge;
 use crate::pipeline::{run_behavior, WorkflowRuntime};
 use crate::planning::{
@@ -50,6 +51,12 @@ fn workflow_trace(
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum AgentReplyProgress {
     Completed(String),
+    Pending,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ConversationTurnProgress {
+    Completed,
     Pending,
 }
 
@@ -584,6 +591,14 @@ pub async fn handle_operation_updated(
                 &reply_body,
             )
             .await?;
+            mark_conversation_message_receipt_status(
+                store,
+                &operation.conversation_id,
+                direct_state.message_id.as_deref(),
+                &operation.agent_id,
+                "completed",
+            )
+            .await?;
         }
         Ok(AgentReplyProgress::Pending) => {}
         Err(error) if error.is_permission_approval() => {}
@@ -602,6 +617,14 @@ pub async fn handle_operation_updated(
                 &format_host_api_error_for_conversation(&error),
             )
             .await?;
+            mark_conversation_message_receipt_status(
+                store,
+                &operation.conversation_id,
+                direct_state.message_id.as_deref(),
+                &operation.agent_id,
+                "failed",
+            )
+            .await?;
         }
     }
     Ok(HookDispatchResponse {
@@ -609,6 +632,96 @@ pub async fn handle_operation_updated(
         result: None,
         message: None,
     })
+}
+
+pub async fn handle_permission_approval_resolved(
+    envelope: HookEventEnvelope,
+) -> Result<HookDispatchResponse, String> {
+    let approval = envelope.payload.get("approval").unwrap_or(&JsonValue::Null);
+    let approval_id = payload_string_field(approval, &["approval_id"])
+        .or_else(|| Some(envelope.resource.id.clone()))
+        .unwrap_or_else(|| "unknown".to_string());
+    let agent_id =
+        payload_string_field(approval, &["agent_id"]).unwrap_or_else(|| "unknown".to_string());
+    let status =
+        payload_string_field(approval, &["status"]).unwrap_or_else(|| "unknown".to_string());
+    let conversation_id = payload_string_field(approval, &["scope", "conversation_id"])
+        .or(envelope.resource.conversation_id.clone())
+        .unwrap_or_else(|| "unknown".to_string());
+    workflow_trace(
+        "permission.approval.resolved",
+        &conversation_id,
+        None,
+        &agent_id,
+        format!("approval_id={approval_id} status={status}"),
+    );
+    Ok(handled_hook_response())
+}
+
+pub async fn handle_run_requested(
+    envelope: HookEventEnvelope,
+) -> Result<HookDispatchResponse, String> {
+    trace_lifecycle_event("run.requested", &envelope, "run");
+    Ok(handled_hook_response())
+}
+
+pub async fn handle_run_stage_changed(
+    envelope: HookEventEnvelope,
+) -> Result<HookDispatchResponse, String> {
+    let run_id = payload_string_field(&envelope.payload, &["run", "id"])
+        .or_else(|| payload_string_field(&envelope.payload, &["run_id"]))
+        .or(envelope.resource.run_id.clone())
+        .unwrap_or_else(|| envelope.resource.id.clone());
+    let from_stage = payload_string_field(&envelope.payload, &["from_stage"])
+        .or_else(|| payload_string_field(&envelope.payload, &["stage_event", "from_stage"]))
+        .unwrap_or_else(|| "-".to_string());
+    let to_stage = payload_string_field(&envelope.payload, &["to_stage"])
+        .or_else(|| payload_string_field(&envelope.payload, &["stage_event", "to_stage"]))
+        .or_else(|| payload_string_field(&envelope.payload, &["run", "stage"]))
+        .unwrap_or_else(|| "unknown".to_string());
+    let conversation_id = lifecycle_conversation_id(&envelope);
+    workflow_trace(
+        "run.stage.changed",
+        &conversation_id,
+        None,
+        "workflow",
+        format!("run_id={run_id} from={from_stage} to={to_stage}"),
+    );
+    Ok(handled_hook_response())
+}
+
+pub async fn handle_artifact_created(
+    envelope: HookEventEnvelope,
+) -> Result<HookDispatchResponse, String> {
+    let artifact_id = payload_string_field(&envelope.payload, &["artifact", "id"])
+        .or_else(|| payload_string_field(&envelope.payload, &["artifact_id"]))
+        .unwrap_or_else(|| envelope.resource.id.clone());
+    let run_id = payload_string_field(&envelope.payload, &["artifact", "run_id"])
+        .or_else(|| payload_string_field(&envelope.payload, &["run_id"]))
+        .or(envelope.resource.run_id.clone())
+        .unwrap_or_else(|| "unknown".to_string());
+    let conversation_id = lifecycle_conversation_id(&envelope);
+    workflow_trace(
+        "artifact.created",
+        &conversation_id,
+        None,
+        "workflow",
+        format!("artifact_id={artifact_id} run_id={run_id}"),
+    );
+    Ok(handled_hook_response())
+}
+
+pub async fn handle_job_due(envelope: HookEventEnvelope) -> Result<HookDispatchResponse, String> {
+    trace_lifecycle_event("job.due", &envelope, "scheduler");
+    Ok(handled_hook_response())
+}
+
+fn handled_hook_response() -> HookDispatchResponse {
+    HookDispatchResponse {
+        handled: true,
+        result: None,
+        message: None,
+    }
 }
 
 pub async fn recover_stale_conversation_receipts(
@@ -813,7 +926,7 @@ async fn generate_conversation_agent_reply(
             );
             continue;
         }
-        let agent_result: Result<(), String> = async {
+        let agent_result: Result<ConversationTurnProgress, String> = async {
             let started = Instant::now();
             workflow_trace(
                 "message.list.start",
@@ -968,10 +1081,10 @@ async fn generate_conversation_agent_reply(
                     )
                     .await?;
                 }
-                return Ok(());
+                return Ok(ConversationTurnProgress::Completed);
             }
 
-            match decide_conversation_route(&body, active_session.as_ref()) {
+            let progress = match decide_conversation_route(&body, active_session.as_ref()) {
                 ConversationRoute::ManagedDiscussion => {
                     workflow_trace(
                         "route",
@@ -1007,6 +1120,7 @@ async fn generate_conversation_agent_reply(
                         &discussion_reply,
                     )
                     .await?;
+                    ConversationTurnProgress::Completed
                 }
                 ConversationRoute::DirectReply => {
                     let direct_run_id = synthetic_direct_run_id(agent_id, message_id.as_deref());
@@ -1038,10 +1152,11 @@ async fn generate_conversation_agent_reply(
                         agent_id,
                         "execute_direct_reply returned",
                     );
+                    ConversationTurnProgress::Pending
                 }
-            }
+            };
 
-            Ok(())
+            Ok(progress)
         }
         .await;
         workflow_trace(
@@ -1051,22 +1166,30 @@ async fn generate_conversation_agent_reply(
             agent_id,
             if agent_result.is_ok() { "ok" } else { "error" },
         );
-        mark_conversation_message_receipt_status(
-            store,
-            &conversation_id,
-            message_id.as_deref(),
-            agent_id,
-            if agent_result.is_ok() {
-                "completed"
-            } else {
-                "failed"
-            },
-        )
-        .await?;
+        if let Some(status) = conversation_receipt_terminal_status(&agent_result) {
+            mark_conversation_message_receipt_status(
+                store,
+                &conversation_id,
+                message_id.as_deref(),
+                agent_id,
+                status,
+            )
+            .await?;
+        }
         agent_result?;
     }
 
     Ok(())
+}
+
+fn conversation_receipt_terminal_status(
+    result: &Result<ConversationTurnProgress, String>,
+) -> Option<&'static str> {
+    match result {
+        Ok(ConversationTurnProgress::Completed) => Some("completed"),
+        Ok(ConversationTurnProgress::Pending) => None,
+        Err(_) => Some("failed"),
+    }
 }
 
 fn workflow_session_namespace() -> &'static str {
@@ -1817,9 +1940,14 @@ async fn generate_draft_plan(
                     "model_endpoint": model_endpoint_runtime_request_config(model_endpoint),
                     "model": model_id,
                     "instructions": ProviderInstructions {
-                        base: build_agent_runtime_prompt(agent, &draft_run_id, &operator_profile),
+                        base: build_agent_runtime_prompt(
+                            agent,
+                            &draft_run_id,
+                            &operator_profile,
+                            &JsonValue::Null,
+                        ),
                     },
-                    "system_prompt": build_agent_runtime_prompt(agent, &draft_run_id, &operator_profile),
+                    "system_prompt": build_agent_runtime_prompt(agent, &draft_run_id, &operator_profile, &JsonValue::Null),
                     "context": context,
                     "messages": messages,
                     "generation_options": agent.generation_options,
@@ -2450,7 +2578,7 @@ async fn continue_agent_reply_from_state(
     .await;
     let operator_profile = resolve_operator_profile(runtime_paths);
     let instructions = ProviderInstructions {
-        base: build_agent_runtime_prompt(agent, run_id, &operator_profile),
+        base: build_agent_runtime_prompt(agent, run_id, &operator_profile, &context),
     };
     let metadata = serde_json::json!({
         "conversation_id": conversation_id,
@@ -2659,15 +2787,6 @@ async fn continue_agent_reply_from_state(
             }
         }
 
-        if state.next_iteration >= 6 {
-            if let Some(store) = direct_state_store {
-                let _ = delete_direct_reply_state(store, run_id).await;
-            }
-            return Err(internal_error(
-                "agent tool loop exceeded maximum iterations",
-            ));
-        }
-
         workflow_trace(
             "provider.start",
             conversation_id,
@@ -2682,7 +2801,7 @@ async fn continue_agent_reply_from_state(
                     "model_endpoint": model_endpoint_runtime_request_config(model_endpoint),
                     "model": model_id,
                     "instructions": instructions,
-                    "system_prompt": build_agent_runtime_prompt(agent, run_id, &operator_profile),
+                    "system_prompt": build_agent_runtime_prompt(agent, run_id, &operator_profile, &JsonValue::Null),
                     "context": context,
                     "messages": state.messages,
                     "generation_options": agent.generation_options,
@@ -2917,13 +3036,18 @@ async fn append_agent_conversation_reply(
     run_id: Option<&str>,
     body: &str,
 ) -> Result<(), String> {
-    client
+    let extension_output = parse_extension_output_reply(body);
+    let message_body = extension_output
+        .as_ref()
+        .map(|output| output.fallback.as_str())
+        .unwrap_or(body);
+    let append_response = client
         .dispatch_action(
             "message.append",
             serde_json::json!({
                 "conversation_id": conversation_id,
                 "message": {
-                    "body": body,
+                    "body": message_body,
                     "lane_id": lane_id,
                     "sender": agent_id,
                     "role": "agent",
@@ -2939,8 +3063,82 @@ async fn append_agent_conversation_reply(
             ),
         )
         .await
-        .map(|_| ())
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    if let Some(output) = extension_output {
+        let reply_message_id = append_response
+            .get("message")
+            .and_then(|message| message.get("id"))
+            .and_then(JsonValue::as_str);
+        append_extension_output_records(
+            client,
+            conversation_id,
+            reply_message_id.or(message_id),
+            agent_id,
+            &output,
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+async fn append_extension_output_records(
+    client: &HostApiClient,
+    conversation_id: &str,
+    related_message_id: Option<&str>,
+    agent_id: &str,
+    output: &ExtensionOutputEnvelope,
+) -> Result<(), HostApiError> {
+    if let Some(html) = output.html_reply.as_deref() {
+        let _ = client
+            .append_extension_record(serde_json::json!({
+                "extension_id": "html-reply",
+                "namespace": format!("html-reply/conversation/{conversation_id}"),
+                "scope_type": "conversation",
+                "scope_id": conversation_id,
+                "kind": "html-reply.message",
+                "status": "ready",
+                "title": "HTML 排版回复",
+                "summary": output.fallback,
+                "payload": {
+                    "type": "html-rich",
+                    "html": html,
+                    "fallback": output.fallback,
+                    "agent_id": agent_id,
+                },
+                "related_message_id": related_message_id,
+            }))
+            .await?;
+    }
+
+    if let Some(block) = &output.artifact {
+        let title = block.title.as_deref().unwrap_or(match block.kind.as_str() {
+            "html-preview" => "HTML 预览",
+            "python-run" => "Python 代码",
+            _ => "产物",
+        });
+        let _ = client
+            .append_extension_record(serde_json::json!({
+                "extension_id": "artifact-runner",
+                "namespace": format!("artifact-runner/conversation/{conversation_id}"),
+                "scope_type": "conversation",
+                "scope_id": conversation_id,
+                "kind": "artifact-runner.artifact",
+                "status": "ready",
+                "title": title,
+                "summary": title,
+                "payload": {
+                    "type": block.kind,
+                    "title": block.title,
+                    "mime_type": block.mime_type,
+                    "content": block.content,
+                    "agent_id": agent_id,
+                },
+                "related_message_id": related_message_id,
+            }))
+            .await?;
+    }
+    Ok(())
 }
 
 async fn append_tool_result_message(
@@ -3512,6 +3710,9 @@ async fn build_agent_provider_context(
             })
         })
         .unwrap_or(JsonValue::Null);
+    let extension_outputs = build_extension_output_context(client, &extensions_runtime)
+        .await
+        .unwrap_or(JsonValue::Null);
     serde_json::json!({
         "kind": "ennoia.agent_context",
         "runtime": {
@@ -3520,6 +3721,7 @@ async fn build_agent_provider_context(
             "run_id": normalize_unknown(run_id),
             "workspace_root": "/workspace",
             "artifacts_root": "/artifacts",
+            "artifact_url_root": format!("/api/agents/{}/artifacts", encode_url_path_segment(&agent.id)),
             "temp_root": "/tmp",
             "file_access": agent_file_access_context(),
         },
@@ -3538,9 +3740,173 @@ async fn build_agent_provider_context(
             "plan": plan_context,
         },
         "extensions": extract_conversation_extensions(&extensions_runtime),
+        "extension_outputs": extension_outputs,
         "skills": agent.skills,
         "tools": build_agent_tool_contexts(&extensions_runtime, agent),
     })
+}
+
+async fn build_extension_output_context(
+    client: &HostApiClient,
+    snapshot: &JsonValue,
+) -> Result<JsonValue, HostApiError> {
+    Ok(serde_json::json!({
+        "html_reply": build_html_reply_context(client, snapshot).await?,
+        "artifact_runner": build_artifact_runner_context(client, snapshot).await?,
+    }))
+}
+
+async fn build_html_reply_context(
+    client: &HostApiClient,
+    snapshot: &JsonValue,
+) -> Result<JsonValue, HostApiError> {
+    if !extension_available(snapshot, "html-reply") {
+        return Ok(serde_json::json!({
+            "available": false,
+            "enabled": false,
+        }));
+    }
+    let resolved =
+        resolve_extension_output_config(client, "html-reply", "html-reply/config").await?;
+    let Some(config) = resolved else {
+        return Ok(serde_json::json!({
+            "available": true,
+            "enabled": false,
+            "source": "none",
+        }));
+    };
+    let enabled = config
+        .get("enabled")
+        .and_then(JsonValue::as_bool)
+        .unwrap_or_else(|| config_has_reply_mode(&config));
+    Ok(serde_json::json!({
+        "available": true,
+        "enabled": enabled,
+        "source": "extension",
+        "reply_mode": config.get("reply_mode").cloned().unwrap_or(JsonValue::Null),
+    }))
+}
+
+async fn build_artifact_runner_context(
+    client: &HostApiClient,
+    snapshot: &JsonValue,
+) -> Result<JsonValue, HostApiError> {
+    if !extension_available(snapshot, "artifact-runner") {
+        return Ok(serde_json::json!({
+            "available": false,
+            "enabled": false,
+        }));
+    }
+    let resolved =
+        resolve_extension_output_config(client, "artifact-runner", "artifact-runner/config")
+            .await?;
+    let Some(config) = resolved else {
+        return Ok(serde_json::json!({
+            "available": true,
+            "enabled": false,
+            "source": "none",
+        }));
+    };
+    let enabled = config
+        .get("enabled")
+        .and_then(JsonValue::as_bool)
+        .unwrap_or_else(|| config_has_artifacts(&config));
+    let artifacts = resolve_artifact_profiles(&config);
+    Ok(serde_json::json!({
+        "available": true,
+        "enabled": enabled,
+        "source": "extension",
+        "artifacts": artifacts,
+    }))
+}
+
+async fn resolve_extension_output_config(
+    client: &HostApiClient,
+    extension_id: &str,
+    namespace: &str,
+) -> Result<Option<JsonValue>, HostApiError> {
+    client
+        .get_extension_state(
+            extension_id,
+            namespace,
+            extension_output_config_scope_type(),
+            extension_output_config_scope_id(),
+            extension_output_config_key(),
+        )
+        .await
+}
+
+fn extension_output_config_scope_type() -> &'static str {
+    "extension"
+}
+
+fn extension_output_config_scope_id() -> &'static str {
+    "default"
+}
+
+fn extension_output_config_key() -> &'static str {
+    "output"
+}
+
+fn config_has_reply_mode(config: &JsonValue) -> bool {
+    config
+        .get("reply_mode")
+        .and_then(JsonValue::as_str)
+        .is_some_and(|value| !value.trim().is_empty())
+}
+
+fn config_has_artifacts(config: &JsonValue) -> bool {
+    if config
+        .get("html_artifact_enabled")
+        .and_then(JsonValue::as_bool)
+        .unwrap_or(false)
+        || config
+            .get("python_artifact_enabled")
+            .and_then(JsonValue::as_bool)
+            .unwrap_or(false)
+    {
+        return true;
+    }
+    config
+        .get("artifacts")
+        .and_then(JsonValue::as_array)
+        .is_some_and(|items| !items.is_empty())
+}
+
+fn resolve_artifact_profiles(config: &JsonValue) -> Vec<&'static str> {
+    if let Some(items) = config.get("artifacts").and_then(JsonValue::as_array) {
+        let mut profiles = Vec::new();
+        if items
+            .iter()
+            .any(|item| item.as_str() == Some("html-artifact"))
+        {
+            profiles.push("html-artifact");
+        }
+        if items
+            .iter()
+            .any(|item| item.as_str() == Some("python-artifact"))
+        {
+            profiles.push("python-artifact");
+        }
+        return profiles;
+    }
+
+    let mut profiles = Vec::new();
+    if config
+        .get("html_artifact_enabled")
+        .and_then(JsonValue::as_bool)
+        .unwrap_or(false)
+    {
+        profiles.push("html-artifact");
+    }
+    if config
+        .get("python_artifact_enabled")
+        .and_then(JsonValue::as_bool)
+        .unwrap_or(false)
+    {
+        profiles.push("python-artifact");
+    }
+    profiles
 }
 
 fn agent_file_access_context() -> JsonValue {
@@ -3596,7 +3962,7 @@ fn build_agent_tool_contexts(snapshot: &JsonValue, agent: &AgentConfig) -> Vec<J
             "extension_name": "Runtime",
             "capability_id": "command.exec",
             "label": "命令执行",
-            "summary": "执行系统命令，并返回 stdout、stderr 和退出码；需要读写文件或访问网络时，也通过命令完成。工作目录优先使用 /workspace、/artifacts、/tmp 这些文件访问根。",
+            "summary": "执行系统命令，并返回 stdout、stderr 和退出码；需要读写文件或访问网络时，也通过命令完成。工作目录优先使用 /workspace、/artifacts、/tmp 这些文件访问根。写入 /artifacts 的文件在最终回复里使用 /api/agents/{agent_id}/artifacts/{relative_path} 引用。",
             "kind": "builtin",
             "contract": "command.exec",
         }),
@@ -3612,14 +3978,28 @@ fn extract_conversation_extensions(snapshot: &JsonValue) -> Vec<JsonValue> {
         .cloned()
         .unwrap_or_default()
         .into_iter()
-        .filter(|extension| {
-            extension
-                .get("conversation")
-                .and_then(|value| value.get("inject"))
-                .and_then(JsonValue::as_bool)
-                .unwrap_or(false)
-        })
+        .filter(conversation_extension_is_visible)
         .collect()
+}
+
+fn conversation_extension_is_visible(extension: &JsonValue) -> bool {
+    extension
+        .get("conversation")
+        .and_then(|value| value.get("visible").or_else(|| value.get("inject")))
+        .and_then(JsonValue::as_bool)
+        .unwrap_or(false)
+}
+
+fn extension_available(snapshot: &JsonValue, extension_id: &str) -> bool {
+    snapshot
+        .get("extensions")
+        .and_then(JsonValue::as_array)
+        .is_some_and(|extensions| {
+            extensions.iter().any(|extension| {
+                extension.get("id").and_then(JsonValue::as_str) == Some(extension_id)
+                    && conversation_extension_is_visible(extension)
+            })
+        })
 }
 
 fn serialize_tool_message_envelope(
@@ -3809,13 +4189,14 @@ fn build_agent_runtime_prompt(
     agent: &AgentConfig,
     run_id: &str,
     operator_profile: &OperatorProfileSnapshot,
+    context: &JsonValue,
 ) -> String {
     let mut sections = Vec::new();
     if !agent.system_prompt.trim().is_empty() {
         sections.push(agent.system_prompt.trim().to_string());
     }
     sections.push(format!(
-        "你当前运行在 Ennoia 会话系统中。\nagent_id：{}\nagent_name：{}\noperator_name：{}\noperator_time_zone：{}\noperator_operating_system：{}\nrun_id：{}\nworkspace_root：/workspace\nartifacts_root：/artifacts\ntemp_root：/tmp\nfile_access_roots：/workspace, /artifacts, /tmp\n文件访问只接受这些虚拟根及其子路径；除非用户明确需要，否则不要主动复述内部路径或实现细节。直接回答用户，不要伪装成“系统已接收”或“正在处理中”。",
+        "你当前运行在 Ennoia 会话系统中。\nagent_id：{}\nagent_name：{}\noperator_name：{}\noperator_time_zone：{}\noperator_operating_system：{}\nrun_id：{}\nworkspace_root：/workspace\nartifacts_root：/artifacts\nartifact_url_root：/api/agents/{}/artifacts\ntemp_root：/tmp\nfile_access_roots：/workspace, /artifacts, /tmp\n文件访问只接受这些虚拟根及其子路径；需要给用户展示或下载 /artifacts 下的文件时，在 Markdown 图片或链接地址中使用 /api/agents/{}/artifacts/<relative_path>；除非用户明确需要，否则不要主动复述内部路径或实现细节。直接回答用户，不要伪装成“系统已接收”或“正在处理中”。",
         agent.id,
         agent.display_name,
         operator_profile.display_name,
@@ -3830,6 +4211,8 @@ fn build_agent_runtime_prompt(
             .filter(|value| !value.trim().is_empty())
             .unwrap_or("unknown"),
         if run_id.trim().is_empty() { "unknown" } else { run_id },
+        encode_url_path_segment(&agent.id),
+        encode_url_path_segment(&agent.id),
     ));
     sections.push(
         "系统会额外提供结构化上下文。按字段理解并使用，不要向用户原样复述 JSON。".to_string(),
@@ -3839,7 +4222,47 @@ fn build_agent_runtime_prompt(
     if agent_has_skill(agent, "web-search") {
         sections.push("当用户要求搜索网页资料、访问网站、查看官网、文档、公告、新闻或网页正文时，可以使用 web_search_search。web_search_search 和 command_exec 都是 runtime 工具；工具执行失败时，系统会把结构化错误作为 tool 结果返回给你继续处理。".to_string());
     }
+    if html_reply_enabled(context) {
+        sections.push(
+            "当前会话启用了 html-reply 扩展。需要把普通回复做成静态 HTML 排版时，最终回复可以输出 JSON 对象，不要包在 Markdown 代码块中：{\"kind\":\"ennoia.html_reply\",\"version\":1,\"profile\":\"html-message\",\"placement\":\"message\",\"content_type\":\"text/html\",\"fallback\":\"普通文本摘要\",\"body\":\"<section>安全静态 HTML 片段</section>\"}。只用于普通回复排版；不要写 <script>、事件属性或外链脚本；始终提供 fallback。".to_string(),
+        );
+    }
+    if artifact_runner_enabled(context) {
+        sections.push(
+            "当前会话启用了 artifact-runner 扩展。需要生成可预览产物时，最终回复可以输出 JSON 对象，不要包在 Markdown 代码块中。HTML 产物：{\"kind\":\"ennoia.artifact_runner\",\"version\":1,\"profile\":\"html-artifact\",\"placement\":\"artifact\",\"content_type\":\"text/html\",\"title\":\"页面预览\",\"fallback\":\"我生成了一个 HTML 页面，可以在下方预览。\",\"body\":\"<!doctype html><html>...</html>\"}。Python 产物：{\"kind\":\"ennoia.artifact_runner\",\"version\":1,\"profile\":\"python-artifact\",\"placement\":\"artifact\",\"content_type\":\"text/x-python\",\"title\":\"Python 示例\",\"fallback\":\"我生成了一个 Python 示例。\",\"body\":\"print('hello')\"}。Python 当前只展示，不自动执行；始终提供 fallback。".to_string(),
+        );
+    }
     sections.join("\n\n")
+}
+
+fn html_reply_enabled(context: &JsonValue) -> bool {
+    context
+        .get("extension_outputs")
+        .and_then(|value| value.get("html_reply"))
+        .and_then(|value| value.get("enabled"))
+        .and_then(JsonValue::as_bool)
+        .unwrap_or(false)
+}
+
+fn artifact_runner_enabled(context: &JsonValue) -> bool {
+    context
+        .get("extension_outputs")
+        .and_then(|value| value.get("artifact_runner"))
+        .and_then(|value| value.get("enabled"))
+        .and_then(JsonValue::as_bool)
+        .unwrap_or(false)
+}
+
+fn encode_url_path_segment(value: &str) -> String {
+    value
+        .bytes()
+        .flat_map(|byte| match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                vec![byte as char]
+            }
+            _ => format!("%{byte:02X}").chars().collect::<Vec<_>>(),
+        })
+        .collect()
 }
 
 fn build_agent_builtin_tool_specs(agent: &AgentConfig) -> Vec<ToolSpec> {
@@ -4189,6 +4612,39 @@ fn payload_string_array_field(payload: &JsonValue, path: &[&str]) -> Vec<String>
 
 fn payload_owner(payload: &JsonValue) -> Option<OwnerRef> {
     serde_json::from_value(payload.get("owner")?.clone()).ok()
+}
+
+fn lifecycle_conversation_id(envelope: &HookEventEnvelope) -> String {
+    envelope
+        .resource
+        .conversation_id
+        .clone()
+        .or_else(|| payload_string_field(&envelope.payload, &["conversation_id"]))
+        .or_else(|| payload_string_field(&envelope.payload, &["conversation", "id"]))
+        .or_else(|| payload_string_field(&envelope.payload, &["run", "conversation_id"]))
+        .or_else(|| payload_string_field(&envelope.payload, &["artifact", "conversation_id"]))
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
+fn trace_lifecycle_event(phase: &str, envelope: &HookEventEnvelope, agent_id: &str) {
+    let conversation_id = lifecycle_conversation_id(envelope);
+    let run_id = envelope
+        .resource
+        .run_id
+        .clone()
+        .or_else(|| payload_string_field(&envelope.payload, &["run_id"]))
+        .or_else(|| payload_string_field(&envelope.payload, &["run", "id"]))
+        .unwrap_or_else(|| "-".to_string());
+    workflow_trace(
+        phase,
+        &conversation_id,
+        None,
+        agent_id,
+        format!(
+            "resource={}:{} run_id={run_id}",
+            envelope.resource.kind, envelope.resource.id
+        ),
+    );
 }
 
 fn humanize_agent_tool_label(id: &str, contract: &str) -> String {
@@ -4563,6 +5019,24 @@ mod tests {
     }
 
     #[test]
+    fn direct_reply_loop_has_no_count_based_stop_guard() {
+        let source = include_str!("conversation_hooks.rs");
+        let forbidden = [
+            ["provider_generation", "_iteration", "_limit"].concat(),
+            ["configured", " iteration ", "limit"].concat(),
+            ["maximum", " iterations"].concat(),
+            ["max", "_iterations"].concat(),
+        ];
+
+        for needle in forbidden {
+            assert!(
+                !source.contains(&needle),
+                "direct reply loop should not contain count-based stop guard: {needle}"
+            );
+        }
+    }
+
+    #[test]
     fn failed_runtime_tool_operation_serializes_as_tool_error_message() {
         let tool_call = AgentToolCall {
             id: "call-1".to_string(),
@@ -4700,6 +5174,126 @@ mod tests {
         );
     }
 
+    #[test]
+    fn extension_output_prompts_are_added_per_enabled_extension_context() {
+        let removed_combined_extension_id = format!("{}-{}", "rich", "output");
+        let removed_combined_output_kind = format!("ennoia.{}_{}", "rich", "output");
+        let agent = AgentConfig {
+            id: "designer".to_string(),
+            display_name: "Designer".to_string(),
+            description: String::new(),
+            system_prompt: String::new(),
+            model_endpoint_id: "openai".to_string(),
+            model_id: "gpt-test".to_string(),
+            generation_options: Default::default(),
+            skills: Vec::new(),
+            enabled: true,
+            kind: "assistant".to_string(),
+            default_model: String::new(),
+            skills_dir: String::new(),
+            working_dir: String::new(),
+            artifacts_dir: String::new(),
+        };
+        let operator_profile = OperatorProfileSnapshot {
+            display_name: "Operator".to_string(),
+            time_zone: Some("Asia/Shanghai".to_string()),
+            operating_system: Some("Windows".to_string()),
+        };
+        let without_extension =
+            build_agent_runtime_prompt(&agent, "run-1", &operator_profile, &JsonValue::Null);
+        let available_but_disabled = build_agent_runtime_prompt(
+            &agent,
+            "run-1",
+            &operator_profile,
+            &serde_json::json!({
+                "extension_outputs": {
+                    "html_reply": {
+                        "available": true,
+                        "enabled": false
+                    },
+                    "artifact_runner": {
+                        "available": true,
+                        "enabled": false
+                    }
+                }
+            }),
+        );
+        let enabled = build_agent_runtime_prompt(
+            &agent,
+            "run-1",
+            &operator_profile,
+            &serde_json::json!({
+                "extension_outputs": {
+                    "html_reply": {
+                        "available": true,
+                        "enabled": true,
+                        "source": "agent",
+                        "reply_mode": "html-message"
+                    },
+                    "artifact_runner": {
+                        "available": true,
+                        "enabled": true,
+                        "source": "agent",
+                        "artifacts": ["html-artifact", "python-artifact"]
+                    }
+                }
+            }),
+        );
+
+        assert!(!without_extension.contains("ennoia.html_reply"));
+        assert!(!without_extension.contains("ennoia.artifact_runner"));
+        assert!(!without_extension.contains(&removed_combined_output_kind));
+        assert!(!available_but_disabled.contains("ennoia.html_reply"));
+        assert!(!available_but_disabled.contains("ennoia.artifact_runner"));
+        assert!(!available_but_disabled.contains(&removed_combined_output_kind));
+        assert!(enabled.contains("ennoia.html_reply"));
+        assert!(enabled.contains("ennoia.artifact_runner"));
+        assert!(!enabled.contains(&removed_combined_extension_id));
+        assert!(!enabled.contains(&removed_combined_output_kind));
+        assert!(enabled.contains("\"profile\":\"html-message\""));
+        assert!(enabled.contains("\"profile\":\"html-artifact\""));
+        assert!(enabled.contains("\"profile\":\"python-artifact\""));
+        assert!(enabled.contains("Python 当前只展示，不自动执行"));
+    }
+
+    #[test]
+    fn extension_output_config_uses_single_extension_scope() {
+        assert_eq!(extension_output_config_scope_type(), "extension");
+        assert_eq!(extension_output_config_scope_id(), "default");
+        assert_eq!(extension_output_config_key(), "output");
+    }
+
+    #[test]
+    fn runtime_prompt_exposes_canonical_artifact_url_root() {
+        let agent = AgentConfig {
+            id: "agent 1".to_string(),
+            display_name: "Agent One".to_string(),
+            description: String::new(),
+            system_prompt: String::new(),
+            model_endpoint_id: "openai".to_string(),
+            model_id: "gpt-test".to_string(),
+            generation_options: Default::default(),
+            skills: Vec::new(),
+            enabled: true,
+            kind: "assistant".to_string(),
+            default_model: String::new(),
+            skills_dir: String::new(),
+            working_dir: String::new(),
+            artifacts_dir: String::new(),
+        };
+        let operator_profile = OperatorProfileSnapshot {
+            display_name: "Operator".to_string(),
+            time_zone: Some("Asia/Shanghai".to_string()),
+            operating_system: Some("Windows".to_string()),
+        };
+
+        let prompt =
+            build_agent_runtime_prompt(&agent, "run-1", &operator_profile, &JsonValue::Null);
+
+        assert!(prompt.contains("artifact_url_root：/api/agents/agent%201/artifacts"));
+        assert!(prompt.contains("/api/agents/agent%201/artifacts/<relative_path>"));
+    }
+
     #[tokio::test]
     async fn missing_direct_run_resume_does_not_error() {
         let pool = SqlitePool::connect("sqlite::memory:")
@@ -4783,6 +5377,23 @@ mod tests {
     }
 
     #[test]
+    fn pending_conversation_turn_keeps_receipt_running() {
+        let pending = Ok(ConversationTurnProgress::Pending);
+        let completed = Ok(ConversationTurnProgress::Completed);
+        let failed = Err("provider failed".to_string());
+
+        assert_eq!(conversation_receipt_terminal_status(&pending), None);
+        assert_eq!(
+            conversation_receipt_terminal_status(&completed),
+            Some("completed")
+        );
+        assert_eq!(
+            conversation_receipt_terminal_status(&failed),
+            Some("failed")
+        );
+    }
+
+    #[test]
     fn configured_web_search_skill_is_exposed_as_agent_tool() {
         let agent = AgentConfig {
             id: "researcher".to_string(),
@@ -4834,7 +5445,8 @@ mod tests {
             operating_system: Some("Windows".to_string()),
         };
 
-        let prompt = build_agent_runtime_prompt(&agent, "run-1", &operator_profile);
+        let prompt =
+            build_agent_runtime_prompt(&agent, "run-1", &operator_profile, &JsonValue::Null);
         assert!(
             prompt.contains("web_search_search"),
             "expected runtime prompt to name web_search_search when web-search is enabled, got: {prompt}"

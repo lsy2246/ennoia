@@ -114,6 +114,7 @@ description = "处理会话消息创建事件。"
 [[events]]
 on = "conversation.message.created"
 operation = "workflow.conversation.message.created"
+priority = 100
 ```
 
 ## Views
@@ -162,8 +163,50 @@ Web 主壳按 runtime snapshot 挂载 view，不需要在 manifest 里重复描�
 
 - `on`：系统事件名。
 - `operation`：事件发生后调用的 operation 名称。
+- `priority`：同一事件下的投递优先级，默认 `0`。宿主按 `priority` 降序投递，同优先级按扩展 ID 和 handler 名稳定排序。
 
 系统先把事件写入宿主持久化事件总线，再异步投递到目标 operation。扩展临时离线不会阻塞主业务写入。
+
+内置 `workflow` 通过事件钩子进入多个编排时机，而不是接管唯一会话入口：
+
+```toml
+[[events]]
+on = "conversation.message.created"
+operation = "workflow.conversation.message.created"
+priority = 100
+
+[[events]]
+on = "operation.updated"
+operation = "workflow.operation.updated"
+priority = 100
+
+[[events]]
+on = "permission.approval.resolved"
+operation = "workflow.permission.approval.resolved"
+priority = 100
+
+[[events]]
+on = "run.requested"
+operation = "workflow.run.requested"
+priority = 100
+
+[[events]]
+on = "run.stage.changed"
+operation = "workflow.run.stage.changed"
+priority = 100
+
+[[events]]
+on = "artifact.created"
+operation = "workflow.artifact.created"
+priority = 100
+
+[[events]]
+on = "job.due"
+operation = "workflow.job.due"
+priority = 100
+```
+
+其中 `conversation.message.created`、`operation.updated`、`permission.approval.resolved`、`run.requested` 和 `job.due` 由宿主动作管道、权限路由或 scheduler 发布；`run.stage.changed` 和 `artifact.created` 由 workflow worker 在内部持久化对应事实后，通过宿主 `HookEventPublish` capability 写回事件总线。
 
 ## Settings
 
@@ -220,6 +263,8 @@ export default ui;
 ```
 
 页面和面板导出 `mount(container, context)` / `unmount()`；扩展 UI 可以自带自己的 React runtime，不和主壳 hooks 冲突。需要渲染会话时间线记录时导出 `conversationRecords`，它使用扩展记录的 `kind` 作为 mount key。`context.helpers` 提供 `apiBaseUrl`、`locale`、`themeId`、`t()`、`formatDateTime()` 等宿主运行时能力。
+
+内置 `html-reply` 与 `artifact-runner` 扩展使用这一机制承载两类输出体验：`workflow` 识别 `ennoia.html_reply` envelope 后只把普通 fallback 写入会话消息，把 HTML 排版内容写入 `html-reply.message`；识别 `ennoia.artifact_runner` envelope 后把 HTML/Python 产物写入 `artifact-runner.artifact`。这些协议属于扩展内部约定，不新增系统级 manifest 字段，也不改变核心消息模型。
 
 ## Worker ABI
 

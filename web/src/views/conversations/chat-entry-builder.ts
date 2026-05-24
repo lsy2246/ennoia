@@ -4,6 +4,7 @@ import type {
   ChatEntryRecipient,
   ChatEntryViewModel,
   LocalMessageDraft,
+  PendingReplyMarker,
 } from "./chat-types";
 import { classifyConversationFailure, isLikelyFailureMessage } from "./error-classification";
 
@@ -407,6 +408,50 @@ export function buildStatusEntries(params: {
       sourceMessageId: operation.message_id ?? undefined,
       live: true,
       operationId: operation.id,
+    });
+  }
+
+  return entries;
+}
+
+export function buildPendingReplyStatusEntries(params: {
+  pendingReplies: PendingReplyMarker[];
+  activeBranchId?: string;
+  operations: OperationRecord[];
+  resolveAgent: (agentId: string) => AgentProfile | undefined;
+  texts: StatusTexts;
+}): ChatEntryViewModel[] {
+  const activeOperationKeys = new Set(
+    params.operations
+      .filter((operation) => ["queued", "running"].includes(operation.status))
+      .map((operation) => `${operation.message_id ?? ""}:${operation.agent_id}`),
+  );
+  const entries: ChatEntryViewModel[] = [];
+
+  for (const marker of params.pendingReplies) {
+    if (params.activeBranchId && marker.branchId !== params.activeBranchId) {
+      continue;
+    }
+    if (activeOperationKeys.has(`${marker.sourceMessageId}:${marker.agentId}`)) {
+      continue;
+    }
+    const agent = params.resolveAgent(marker.agentId);
+    entries.push({
+      id: `status:pending:${marker.id}`,
+      role: "agent",
+      kind: "status",
+      format: "plain",
+      state: "streaming",
+      sender: agent?.display_name ?? marker.agentId,
+      title: params.texts.typingLabel,
+      label: params.texts.typingLabel,
+      branchId: marker.branchId,
+      detail: params.texts.typingDetail,
+      animation: "typing",
+      body: params.texts.typingDetail,
+      createdAt: marker.createdAt,
+      sourceMessageId: marker.sourceMessageId,
+      live: true,
     });
   }
 

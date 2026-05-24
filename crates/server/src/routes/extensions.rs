@@ -11,7 +11,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::Instant;
 
-use crate::app::{dispatch_extension_rpc, record_trace_span};
+use crate::app::{dispatch_extension_rpc, live_server_config, record_trace_span};
 use crate::extension_runtime::{
     ExtensionRecordAppend, ExtensionRecordListQuery, ExtensionRecordUpdate, ExtensionStateGetQuery,
     ExtensionStateListQuery, ExtensionStatePut,
@@ -511,8 +511,13 @@ pub(super) async fn extension_ui_module(
     })?;
 
     let source_root = PathBuf::from(&extension.source_root);
-    let import_url = extension_ui_import_url(&extension_id, &source_root, &ui)
-        .map_err(|error| scoped(error, &request))?;
+    let import_url = extension_ui_import_url(
+        &extension_id,
+        &source_root,
+        &ui,
+        &live_server_config(&state).web_dev,
+    )
+    .map_err(|error| scoped(error, &request))?;
     let body = extension_ui_module_export_body(&import_url);
 
     Ok((
@@ -535,6 +540,7 @@ fn extension_ui_import_url(
     extension_id: &str,
     source_root: &StdPath,
     ui: &ennoia_kernel::ResolvedUiEntry,
+    web_dev: &ennoia_kernel::WebDevConfig,
 ) -> Result<String, ApiError> {
     match ui.kind.as_str() {
         "url" => Ok(ui.entry.clone()),
@@ -544,7 +550,8 @@ fn extension_ui_import_url(
             extension_asset_relative_path(source_root, &entry_path)
                 .map_err(|error| ApiError::bad_request(error.to_string()))?;
             Ok(format!(
-                "/@fs/{}?v={}",
+                "{}/@fs/{}?v={}",
+                web_dev_origin(web_dev),
                 vite_fs_import_path(&entry_path),
                 encode_url_query_component(&ui.version),
             ))
@@ -1122,6 +1129,18 @@ fn vite_fs_import_path(path: &StdPath) -> String {
     display
 }
 
+fn web_dev_origin(web_dev: &ennoia_kernel::WebDevConfig) -> String {
+    let normalized_host = web_dev.host.trim();
+    let host = match normalized_host {
+        "" | "0.0.0.0" | "::" | "[::]" => "127.0.0.1".to_string(),
+        value if value.contains(':') && !value.starts_with('[') && !value.ends_with(']') => {
+            format!("[{value}]")
+        }
+        value => value.to_string(),
+    };
+    format!("http://{}:{}", host, web_dev.port)
+}
+
 fn encode_url_query_component(value: &str) -> String {
     value
         .bytes()
@@ -1170,7 +1189,7 @@ fn resolve_provider_contribution(
 mod tests {
     use super::*;
 
-    use ennoia_kernel::ResolvedUiEntry;
+    use ennoia_kernel::{ResolvedUiEntry, WebDevConfig};
     use tempfile::tempdir;
 
     #[test]
@@ -1191,12 +1210,16 @@ mod tests {
                 hmr: true,
                 version: "123 456".to_string(),
             },
+            &WebDevConfig {
+                host: "127.0.0.1".to_string(),
+                port: 5173,
+            },
         )
         .expect("dev ui import url");
 
         assert!(
-            url.starts_with("/@fs/"),
-            "dev HMR ui entries must import through Vite /@fs, got: {url}"
+            url.starts_with("http://127.0.0.1:5173/@fs/"),
+            "dev HMR ui entries must import through the Web dev server Vite /@fs, got: {url}"
         );
         assert!(
             url.contains("ui/entry.tsx"),

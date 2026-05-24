@@ -279,11 +279,21 @@ impl ExtensionRuntime {
     }
 
     pub fn hooks_for_event(&self, event: &str) -> Vec<RegisteredHookContribution> {
-        self.snapshot()
+        let mut hooks = self
+            .snapshot()
             .hooks
             .into_iter()
             .filter(|item| item.hook.event == event)
-            .collect()
+            .collect::<Vec<_>>();
+        hooks.sort_by(|left, right| {
+            right
+                .hook
+                .priority
+                .cmp(&left.hook.priority)
+                .then_with(|| left.extension_id.cmp(&right.extension_id))
+                .then_with(|| left.hook.handler.cmp(&right.hook.handler))
+        });
+        hooks
     }
 
     pub fn refresh_from_disk(&self, summary: &str) -> io::Result<Option<ExtensionRuntimeSnapshot>> {
@@ -997,6 +1007,7 @@ fn derive_hooks(events: &[ExtensionEventSpec]) -> Vec<HookContribution> {
         .map(|event| HookContribution {
             event: event.on.clone(),
             handler: Some(event.operation.clone()),
+            priority: event.priority,
         })
         .collect()
 }
@@ -1398,6 +1409,118 @@ mod tests {
     }
 
     #[test]
+    fn hooks_for_event_returns_matching_hooks_by_priority_then_stable_tiebreakers() {
+        let root = unique_test_dir("runtime-hook-priority");
+        let alpha_dir = root.join("alpha");
+        let beta_dir = root.join("beta");
+        let gamma_dir = root.join("gamma");
+        for ext_dir in [&alpha_dir, &beta_dir, &gamma_dir] {
+            fs::create_dir_all(ext_dir.join("runtime")).expect("create runtime dir");
+            fs::write(service_entry_path(ext_dir), b"test").expect("write service entry");
+        }
+        fs::write(
+            alpha_dir.join("extension.toml"),
+            hook_descriptor_for("alpha", "conversation.message.created", "alpha.high", 100),
+        )
+        .expect("write alpha descriptor");
+        fs::write(
+            beta_dir.join("extension.toml"),
+            hook_descriptor_for("beta", "conversation.message.created", "beta.low", 10),
+        )
+        .expect("write beta descriptor");
+        fs::write(
+            gamma_dir.join("extension.toml"),
+            hook_descriptor_for("gamma", "conversation.message.created", "gamma.high", 100),
+        )
+        .expect("write gamma descriptor");
+
+        let config = ExtensionRuntimeConfig {
+            registry_file: root.join("config/extensions.toml"),
+            logs_dir: root.join("logs"),
+            home_dir: root.clone(),
+            allow_dev_sources: true,
+            runtime_defaults: ExtensionRuntimeSpec::default(),
+        };
+        write_registry_file(
+            &config.registry_file,
+            &ExtensionRegistryFile {
+                dev_sources: vec![
+                    ExtensionDevSourceEntry {
+                        id: "beta".to_string(),
+                        path: normalize_display_path(&beta_dir),
+                        enabled: true,
+                    },
+                    ExtensionDevSourceEntry {
+                        id: "gamma".to_string(),
+                        path: normalize_display_path(&gamma_dir),
+                        enabled: true,
+                    },
+                    ExtensionDevSourceEntry {
+                        id: "alpha".to_string(),
+                        path: normalize_display_path(&alpha_dir),
+                        enabled: true,
+                    },
+                ],
+                ..ExtensionRegistryFile::default()
+            },
+        )
+        .expect("write registry");
+
+        let runtime = ExtensionRuntime::bootstrap(config).expect("bootstrap runtime");
+        let hooks = runtime.hooks_for_event("conversation.message.created");
+
+        assert_eq!(
+            hooks
+                .iter()
+                .map(|item| (
+                    item.extension_id.as_str(),
+                    item.hook.handler.as_deref(),
+                    item.hook.priority
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                ("alpha", Some("alpha.high"), 100),
+                ("gamma", Some("gamma.high"), 100),
+                ("beta", Some("beta.low"), 10),
+            ]
+        );
+
+        fs::remove_dir_all(&root).expect("cleanup");
+    }
+
+    #[test]
+    fn builtin_workflow_manifest_registers_task_orchestration_lifecycle_events() {
+        let manifest_path = workspace_root()
+            .join("assets")
+            .join("extensions")
+            .join("workflow")
+            .join("extension.toml");
+        let contents = fs::read_to_string(&manifest_path).expect("read workflow manifest");
+        let manifest: ExtensionManifest =
+            toml::from_str(&contents).expect("parse workflow manifest");
+        let registered_events = manifest
+            .events
+            .iter()
+            .map(|event| event.on.as_str())
+            .collect::<Vec<_>>();
+
+        for expected in [
+            "conversation.message.created",
+            "operation.updated",
+            "permission.approval.resolved",
+            "run.requested",
+            "run.stage.changed",
+            "artifact.created",
+            "job.due",
+        ] {
+            assert!(
+                registered_events.contains(&expected),
+                "workflow manifest should register {expected}"
+            );
+        }
+    }
+
+    #[test]
     fn attached_dev_source_prefers_discovered_ui_entry_over_bundle() {
         let root = unique_test_dir("runtime-dev-ui-entry");
         let ext_dir = root.join("sample");
@@ -1547,8 +1670,33 @@ operation = "{id}.run.completed"
         )
     }
 
+    fn hook_descriptor_for(id: &str, event: &str, operation: &str, priority: i32) -> String {
+        format!(
+            r##"
+id = "{id}"
+name = "{id}"
+
+[[operations]]
+name = "{operation}"
+
+[[events]]
+on = "{event}"
+operation = "{operation}"
+priority = {priority}
+"##
+        )
+    }
+
     fn unique_test_dir(prefix: &str) -> PathBuf {
         std::env::temp_dir().join(format!("ennoia-{prefix}-{}", unique_suffix()))
+    }
+
+    fn workspace_root() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .and_then(Path::parent)
+            .expect("workspace root")
+            .to_path_buf()
     }
 
     fn service_entry_path(root: &Path) -> PathBuf {

@@ -72,6 +72,7 @@ Web
 - 会话、记忆、运行等产品视图都通过通用 action runtime 和扩展 RPC 组合，不再保留核心包装 REST。
 - 内置 `conversation` 扩展当前声明会话、分支、检查点、线路和消息接口；内置 `memory` 扩展只负责记忆、上下文、审查和图谱侧车。
 - 动作管道是系统级中立执行层，只负责执行规则、收敛结果和发出事实事件；它不再承接 workflow、memory、provider 或 Agent tool 的产品编排。
+- 任务编排通过事件钩子进入生命周期时机。当前内置实现是 `workflow`，未来其他编排机制也可以注册同一事件，并通过 hook `priority` 与稳定排序并存。
 - 会话展示层首屏和后续刷新统一由前端通过 action runtime 组装 detail、run 和 approval 快照；核心不再维护会话专属 SSE 聚合面。
 - `memory` 只暴露 `memory.*` 动作键，不再保留 `/api/memory/*` 核心包装入口。
 - `conversation` 不直接调用 `memory` 或 `workflow`；它只维护会话事实并发出事实事件。
@@ -128,16 +129,18 @@ Web
 ## Hook 边界
 
 - Hook 保留为扩展订阅系统事件的方式，但事件先进入宿主持久化事件总线，不做同步强耦合调用。
-- 动作管道在完成会话创建、消息追加、operation 生命周期推进等动作后，把 `conversation.created`、`conversation.message.created`、`operation.updated` 等事件写入 `events.db`。
+- 动作管道在完成会话创建、消息追加、run 请求等动作后，把 `conversation.created`、`conversation.message.created`、`run.requested` 等事件写入 `events.db`；operation 生命周期、权限审批和 scheduler 分别发布 `operation.updated`、`permission.approval.resolved`、`job.due`。
+- workflow 这类进程型 Worker 如果在扩展内部产生新的生命周期事实，可以通过宿主 `HookEventPublish` capability 写回事件总线；当前 workflow 会发布 `run.stage.changed` 和 `artifact.created`。
 - 事件总线异步把事件投递给已注册 Hook；扩展临时离线不会阻塞会话写入。
-- 系统不要求 memory / workflow 必须通过 Hook 互相耦合；跨域组合统一走事件链和宿主中立 runtime bridge（action、provider、runtime operation、permission）。
+- 同一事件下的 hook 按 manifest `events[].priority` 降序投递，同优先级按扩展 ID 和 handler 名稳定排序。
+- 系统不要求 memory / workflow 必须通过 Hook 互相耦合；跨域组合统一走事件链和宿主中立 runtime bridge（action、provider、runtime operation、permission、hook event publish）。
 
 ## 扩展契约模型
 
 - 扩展 manifest 只声明系统可见契约：`id`、`version`、`name`、`description`、`docs`、`compat`、`views`、`operations`、`events`、`settings`、`conversation`。
 - `views` 表达主壳可以打开或挂载的界面契约，当前稳定类型是 `page` 与 `panel`，不再单独设计 entry、surface 或入口列表。
 - `operations` 表达系统可调用动作；`operation.name` 是唯一调用名，同时作为 action key、Worker method 和事件投递目标。
-- `events` 只表达 `on -> operation` 的投递关系；事件先进入宿主持久化事件总线，再异步投递到目标 operation。
+- `events` 表达 `on -> operation` 的投递关系，并可声明 `priority`；事件先进入宿主持久化事件总线，再异步投递到目标 operation。
 - `settings` 表达扩展级配置字段；主壳按声明渲染表单，实际值保存在扩展级宿主配置文件，不上浮为系统级配置模型。
 - `workflow` 和 `memory` 都只是内置扩展实现；系统依赖接口键和动作 ID，不反向依赖具体扩展。
 - 扩展不自行开放端口；operation 执行统一走宿主 Worker RPC，Worker 通过 Wasm ABI 或进程 stdio 协议接入。
@@ -147,11 +150,13 @@ Web
 - UI 与 service 入口由目录约定发现，属于宿主内部解析结果，不属于 manifest 契约，也不在扩展设计页面展示。
 - 扩展 UI 通过独立 ESM bundle 动态加载；主壳只导入 `/api/extensions/{extension_id}/ui/module` 暴露的模块包装器，再按 view name 调用扩展自己的 `mount/unmount`。
 - 会话时间线只提供通用 record mount 槽位；主壳不硬编码 workflow 专属卡片，扩展可以把自己的 record 以会话附件或独立块渲染出来。
+- `html-reply` 与 `artifact-runner` 是两个独立内置扩展。`workflow` 只识别各自的输出 envelope，把 fallback 写入普通会话消息，再把 HTML 回复写入 `html-reply.message`、把 HTML/Python 产物写入 `artifact-runner.artifact`；Web 主壳继续通过通用 `conversationRecords` 挂载记录，核心不理解这些扩展输出语义，也不把它们提升为系统级消息结构。
 - 扩展主题通过 `ennoia.theme` 与主壳对接；主壳只消费稳定语义 token 和 dockview token，不把内部 class 结构暴露给扩展。
 - 扩展默认不进入会话目录；只有显式声明 `conversation.visible = true` 时，宿主才会把该扩展作为会话可见目录项暴露给模型。进入会话时只注入扩展自身的 `description`、受限资源/operation 目录与 `docs` 入口，不自动注入 `docs` 正文。
 - Agent 权限系统由宿主按 operation 和调用上下文统一裁决；扩展 manifest 不声明底层权限边界、SQLite、文件、网络或环境变量。
 - Agent 调用上游模型时，宿主统一构造结构化 `context`，至少包含 `runtime`、`conversation`、`extensions`、`skills` 与 `tools`，再由 provider 适配层渲染成模型可见消息；`metadata` 只保留给链路追踪和调试，不承担模型上下文职责。
-- 当前模型侧应优先使用 `runtime.workspace_root`、`runtime.artifacts_root` 与 `runtime.temp_root` 这些虚拟根；它们表示 Agent 自己的内部执行视图，不等同于用户项目工作区，也不应默认向用户主动播报宿主机绝对路径。
+- 当前模型侧应优先使用 `runtime.workspace_root`、`runtime.artifacts_root` 与 `runtime.temp_root` 这些虚拟根；它们表示 Agent 自己的内部执行视图，不等同于用户项目工作区，也不应默认向用户主动播报宿主机绝对路径。需要在会话消息里展示或下载 `runtime.artifacts_root` 下的产物时，使用 `runtime.artifact_url_root` 拼出 `/api/agents/{agent_id}/artifacts/{relative_path}`，不要把虚拟根直接作为用户可点击链接。
+- Artifact URL 是 Agent 产物目录的 HTTP 投影，不是独立生命周期对象。文件存在且 Agent 存在时链接有效；删除 Agent 时，`agents/{agent_id}/` 下的 `agent.toml`、`work/`、`artifacts/` 与 `skills/` 一起删除，历史消息中的 artifact 链接随之返回不存在。
 
 ## Skill 模型
 
