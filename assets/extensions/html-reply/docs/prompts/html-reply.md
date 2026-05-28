@@ -18,4 +18,4 @@
 
 - 只写静态 HTML 片段，不写 `<script>`、事件属性或外链脚本。
 - 始终提供有意义的 `fallback`。
-- 完整 HTML 页面、Python 脚本或其他可预览产物不要放在这里，交给 `artifact-runner`。
+- HTML 源码、完整 HTML 页面、Python 脚本或其他可预览产物不要放在这里，交给 `artifact-runner`。

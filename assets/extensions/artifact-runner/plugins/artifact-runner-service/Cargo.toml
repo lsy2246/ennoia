@@ -1,0 +1,15 @@
+[package]
+name = "ennoia-artifact-runner"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+ennoia-kernel = { path = "../../../../../crates/kernel" }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+tempfile = "3.23.0"
+tokio = { version = "1.51.1", features = ["macros", "process", "rt-multi-thread", "time"] }
+
+[lib]
+path = "src/lib.rs"

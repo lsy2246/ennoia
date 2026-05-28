@@ -1,7 +1,7 @@
 id = "artifact-runner"
 version = "0.1.0"
 name = "Artifact Runner"
-description = "提供 HTML 产物预览和 Python 代码产物展示，后续承载受权限约束的运行能力。"
+description = "提供 HTML 产物预览源码和 Python 代码产物手动运行。"
 docs = "docs/overview.md"
 
 [compat]
@@ -10,7 +10,14 @@ ennoia = ">=0.1.0"
 [conversation]
 visible = true
 resources = ["artifact-runner.artifact"]
-operations = []
+operations = ["artifact.run_python"]
+
+[[operations]]
+name = "artifact.run_python"
+title = { key = "ext.artifact_runner.run_python", fallback = "运行 Python 产物" }
+description = "在 artifact-runner 扩展内运行 Python 代码产物并返回 stdout/stderr/退出码。"
+input = "artifact-runner.python-run.input"
+output = "artifact-runner.python-run.output"
 
 [[views]]
 name = "artifact-runner.panel"

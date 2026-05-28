@@ -2306,6 +2306,8 @@ fn build_builtin_process_workers(repo_root: &Path) -> io::Result<()> {
         .arg("ennoia-memory")
         .arg("-p")
         .arg("ennoia-workflow")
+        .arg("-p")
+        .arg("ennoia-artifact-runner")
         .current_dir(repo_root)
         .status()?;
     if !status.success() {
@@ -2393,6 +2395,35 @@ fn install_builtin_process_workers(repo_root: &Path) -> io::Result<()> {
         copy_builtin_process_worker(&built_binary, &destination)?;
     }
 
+    let artifact_runner_root = repo_root
+        .join("assets")
+        .join("extensions")
+        .join("artifact-runner");
+    if artifact_runner_root.join("extension.toml").exists() {
+        let built_binary = repo_root
+            .join("target")
+            .join("debug")
+            .join(if cfg!(windows) {
+                "ennoia-artifact-runner-extension.exe"
+            } else {
+                "ennoia-artifact-runner-extension"
+            });
+        if !built_binary.exists() {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!(
+                    "artifact-runner process worker not found at {}",
+                    built_binary.display()
+                ),
+            ));
+        }
+
+        let destination = artifact_runner_root
+            .join("bin")
+            .join(artifact_runner_service_name());
+        copy_builtin_process_worker(&built_binary, &destination)?;
+    }
+
     Ok(())
 }
 
@@ -2433,6 +2464,14 @@ fn workflow_service_name() -> &'static str {
         "workflow-service.exe"
     } else {
         "workflow-service"
+    }
+}
+
+fn artifact_runner_service_name() -> &'static str {
+    if cfg!(windows) {
+        "artifact-runner-service.exe"
+    } else {
+        "artifact-runner-service"
     }
 }
 
@@ -3044,6 +3083,12 @@ mod tests {
         assert!(is_builtin_worker_reload_path(
             repo_root,
             &repo_root.join("assets/extensions/workflow/worker/src/lib.rs")
+        ));
+        assert!(is_builtin_worker_reload_path(
+            repo_root,
+            &repo_root.join(
+                "assets/extensions/artifact-runner/plugins/artifact-runner-service/src/lib.rs"
+            )
         ));
     }
 

@@ -88,6 +88,7 @@ fn artifact_block_from_profile(
     }
     let content = body?;
     let (kind, mime_type) = match (profile, content_type) {
+        (Some("html-source"), _) => ("html-source", "text/html"),
         (Some("html-artifact"), _) | (_, Some("text/html")) => ("html-preview", "text/html"),
         (Some("python-artifact"), _) | (_, Some("text/x-python")) | (_, Some("text/python")) => {
             ("python-run", "text/x-python")
@@ -211,6 +212,54 @@ mod tests {
         let artifact = parsed.artifact.expect("artifact");
         assert_eq!(artifact.kind, "html-preview");
         assert_eq!(artifact.title.as_deref(), Some("登录页原型"));
+        assert_eq!(artifact.mime_type.as_deref(), Some("text/html"));
+    }
+
+    #[test]
+    fn routes_python_artifact_to_artifact_runner_extension_only() {
+        let body = serde_json::json!({
+            "kind": "ennoia.artifact_runner",
+            "version": 1,
+            "profile": "python-artifact",
+            "placement": "artifact",
+            "content_type": "text/x-python",
+            "title": "Python 示例",
+            "fallback": "我生成了一个 Python 示例。",
+            "body": "print('hello')"
+        })
+        .to_string();
+
+        let parsed = parse_extension_output_reply(&body).expect("parse python artifact");
+
+        assert_eq!(parsed.fallback, "我生成了一个 Python 示例。");
+        assert_eq!(parsed.html_reply, None);
+        let artifact = parsed.artifact.expect("artifact");
+        assert_eq!(artifact.kind, "python-run");
+        assert_eq!(artifact.title.as_deref(), Some("Python 示例"));
+        assert_eq!(artifact.mime_type.as_deref(), Some("text/x-python"));
+        assert_eq!(artifact.content, "print('hello')");
+    }
+
+    #[test]
+    fn routes_explicit_html_source_to_source_artifact() {
+        let body = serde_json::json!({
+            "kind": "ennoia.artifact_runner",
+            "version": 1,
+            "profile": "html-source",
+            "placement": "artifact",
+            "content_type": "text/html",
+            "title": "snake.html",
+            "fallback": "这是 HTML 源代码。",
+            "body": "<!doctype html><html><body>source</body></html>"
+        })
+        .to_string();
+
+        let parsed = parse_extension_output_reply(&body).expect("parse html source");
+
+        assert_eq!(parsed.html_reply, None);
+        let artifact = parsed.artifact.expect("artifact");
+        assert_eq!(artifact.kind, "html-source");
+        assert_eq!(artifact.title.as_deref(), Some("snake.html"));
         assert_eq!(artifact.mime_type.as_deref(), Some("text/html"));
     }
 

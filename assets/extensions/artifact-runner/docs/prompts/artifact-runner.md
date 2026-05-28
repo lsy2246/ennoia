@@ -17,6 +17,21 @@ HTML 产物：
 }
 ```
 
+HTML 源码产物：
+
+```json
+{
+  "kind": "ennoia.artifact_runner",
+  "version": 1,
+  "profile": "html-source",
+  "placement": "artifact",
+  "content_type": "text/html",
+  "title": "index.html",
+  "fallback": "这是 HTML 源代码。",
+  "body": "<!doctype html><html>...</html>"
+}
+```
+
 Python 产物：
 
 ```json
@@ -34,7 +49,11 @@ Python 产物：
 
 要求：
 
-- HTML 预览默认不写 `<script>`、事件属性或外链脚本。
-- Python 代码当前只展示，不自动执行。
+- 用户说“预览 / 运行 / 画出来 / 展示页面”时使用 `html-artifact`。
+- 用户明确说“HTML 源码 / 源代码 / 代码 / 保存成 html 文件源码”时使用 `html-source`，默认展示源码，并允许用户手动切换到预览。
+- HTML 预览可以写内联 `<script>` 或事件监听来实现 canvas、小游戏、表单交互等产物行为；不要使用外链脚本。
+- HTML 预览在 sandbox iframe 中运行，不依赖宿主页面上下文；需要持久化状态时优先使用页面内变量，`localStorage`/`sessionStorage` 只作为临时预览状态使用。
+- Python 代码默认展示源码，用户可以在产物卡片中手动运行；运行结果由 `artifact-runner` 扩展返回 stdout、stderr 和退出码。
+- 不要在普通回复正文里伪造 Python 运行结果；只有真正运行后才描述输出。
 - 始终提供有意义的 `fallback`。
 - 普通回复的 HTML 排版不要放在这里，交给 `html-reply`。

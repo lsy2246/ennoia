@@ -685,6 +685,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "ennoia-artifact-runner"
+version = "0.1.0"
+dependencies = [
+ "ennoia-kernel",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "ennoia-assets"
 version = "0.1.0"
 

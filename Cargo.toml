@@ -13,6 +13,7 @@ members = [
   "assets/extensions/memory/plugins/memory-service",
   "assets/extensions/conversation/plugins/conversation-service",
   "assets/extensions/workflow/plugins/workflow-service",
+  "assets/extensions/artifact-runner/plugins/artifact-runner-service",
   "assets/extensions/workflow/worker",
 ]
 resolver = "2"

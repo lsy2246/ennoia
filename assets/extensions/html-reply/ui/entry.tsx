@@ -81,10 +81,6 @@ function HtmlReplyCard({ record }: { record: ExtensionConversationRecord }) {
         title={record.title || "HTML 排版回复"}
         srcDoc={buildSandboxHtml(html)}
       />
-      <details className="html-reply-source">
-        <summary>源码</summary>
-        <pre>{html}</pre>
-      </details>
     </section>
   );
 }

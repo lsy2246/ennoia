@@ -264,7 +264,7 @@ export default ui;
 
 页面和面板导出 `mount(container, context)` / `unmount()`；扩展 UI 可以自带自己的 React runtime，不和主壳 hooks 冲突。需要渲染会话时间线记录时导出 `conversationRecords`，它使用扩展记录的 `kind` 作为 mount key。`context.helpers` 提供 `apiBaseUrl`、`locale`、`themeId`、`t()`、`formatDateTime()` 等宿主运行时能力。
 
-内置 `html-reply` 与 `artifact-runner` 扩展使用这一机制承载两类输出体验：`workflow` 识别 `ennoia.html_reply` envelope 后只把普通 fallback 写入会话消息，把 HTML 排版内容写入 `html-reply.message`；识别 `ennoia.artifact_runner` envelope 后把 HTML/Python 产物写入 `artifact-runner.artifact`。这些协议属于扩展内部约定，不新增系统级 manifest 字段，也不改变核心消息模型。
+内置 `html-reply` 与 `artifact-runner` 扩展使用这一机制承载两类输出体验：`workflow` 识别 `ennoia.html_reply` envelope 后只把普通 fallback 写入会话消息，把 HTML 排版内容写入 `html-reply.message`，由 `html-reply` 作为静态消息排版展示，不显示源码、不运行脚本；识别 `ennoia.artifact_runner` envelope 后把 HTML/Python 产物写入 `artifact-runner.artifact`，由 `artifact-runner` 提供 HTML 预览、HTML 源码展示与 Python 手动运行输出。Python 运行通过 `artifact-runner` 自己声明的 `artifact.run_python` operation 和 process service 完成。这些协议属于扩展内部约定，不新增系统级 manifest 字段，也不改变核心消息模型。
 
 ## Worker ABI
 

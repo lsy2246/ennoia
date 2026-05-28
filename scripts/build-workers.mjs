@@ -11,6 +11,8 @@ const memoryBinaryName =
   process.platform === "win32" ? "memory-service.exe" : "memory-service";
 const workflowBinaryName =
   process.platform === "win32" ? "workflow-service.exe" : "workflow-service";
+const artifactRunnerBinaryName =
+  process.platform === "win32" ? "artifact-runner-service.exe" : "artifact-runner-service";
 
 function run(command, args) {
   const result = spawnSync(command, args, {
@@ -62,6 +64,8 @@ run(cargo, [
   "ennoia-memory",
   "-p",
   "ennoia-workflow",
+  "-p",
+  "ennoia-artifact-runner",
   "--release",
 ]);
 run(cargo, [
@@ -98,4 +102,11 @@ copyNativeWorker(
     ? "ennoia-workflow-extension.exe"
     : "ennoia-workflow-extension",
   `assets/extensions/workflow/bin/${workflowBinaryName}`,
+);
+copyNativeWorker(
+  "ennoia-artifact-runner",
+  process.platform === "win32"
+    ? "ennoia-artifact-runner-extension.exe"
+    : "ennoia-artifact-runner-extension",
+  `assets/extensions/artifact-runner/bin/${artifactRunnerBinaryName}`,
 );

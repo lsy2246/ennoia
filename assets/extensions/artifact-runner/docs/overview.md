@@ -6,8 +6,9 @@
 
 第一版支持：
 
-- `html-artifact`：使用 sandbox iframe 预览 HTML，并提供源码。
-- `python-artifact`：展示 Python 源码和运行占位；真运行需要后续接入受权限系统约束的 operation。
+- `html-artifact`：使用 sandbox iframe 预览 HTML，并提供源码。预览允许内联脚本实现 canvas、小游戏和页面交互，但不放开同源权限。聊天卡片提供紧凑预览，也可以打开扩展内大预览查看完整页面。
+- `html-source`：默认展示 HTML 源码，并允许用户手动切换到预览，适合用户明确要求源代码的场景。
+- `python-artifact`：展示 Python 源码，并通过本扩展的 `artifact.run_python` operation 手动运行，返回 stdout、stderr、退出码和耗时。
 
 ## HTML Envelope
 
@@ -20,6 +21,21 @@
   "content_type": "text/html",
   "title": "页面预览",
   "fallback": "我生成了一个 HTML 页面，可以在下方预览。",
+  "body": "<!doctype html><html>...</html>"
+}
+```
+
+## HTML Source Envelope
+
+```json
+{
+  "kind": "ennoia.artifact_runner",
+  "version": 1,
+  "profile": "html-source",
+  "placement": "artifact",
+  "content_type": "text/html",
+  "title": "index.html",
+  "fallback": "这是 HTML 源代码。",
   "body": "<!doctype html><html>...</html>"
 }
 ```

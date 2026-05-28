@@ -3114,6 +3114,7 @@ async fn append_extension_output_records(
     if let Some(block) = &output.artifact {
         let title = block.title.as_deref().unwrap_or(match block.kind.as_str() {
             "html-preview" => "HTML 预览",
+            "html-source" => "HTML 源码",
             "python-run" => "Python 代码",
             _ => "产物",
         });
@@ -3881,6 +3882,7 @@ fn resolve_artifact_profiles(config: &JsonValue) -> Vec<&'static str> {
             .any(|item| item.as_str() == Some("html-artifact"))
         {
             profiles.push("html-artifact");
+            profiles.push("html-source");
         }
         if items
             .iter()
@@ -3898,6 +3900,7 @@ fn resolve_artifact_profiles(config: &JsonValue) -> Vec<&'static str> {
         .unwrap_or(false)
     {
         profiles.push("html-artifact");
+        profiles.push("html-source");
     }
     if config
         .get("python_artifact_enabled")
@@ -4224,12 +4227,12 @@ fn build_agent_runtime_prompt(
     }
     if html_reply_enabled(context) {
         sections.push(
-            "当前会话启用了 html-reply 扩展。需要把普通回复做成静态 HTML 排版时，最终回复可以输出 JSON 对象，不要包在 Markdown 代码块中：{\"kind\":\"ennoia.html_reply\",\"version\":1,\"profile\":\"html-message\",\"placement\":\"message\",\"content_type\":\"text/html\",\"fallback\":\"普通文本摘要\",\"body\":\"<section>安全静态 HTML 片段</section>\"}。只用于普通回复排版；不要写 <script>、事件属性或外链脚本；始终提供 fallback。".to_string(),
+            "当前会话启用了 html-reply 扩展。需要把普通回复做成静态 HTML 排版时，最终回复可以输出 JSON 对象，不要包在 Markdown 代码块中：{\"kind\":\"ennoia.html_reply\",\"version\":1,\"profile\":\"html-message\",\"placement\":\"message\",\"content_type\":\"text/html\",\"fallback\":\"普通文本摘要\",\"body\":\"<section>安全静态 HTML 片段</section>\"}。只用于普通回复排版；用户要求 HTML 源码、源代码或代码时不要使用 html-reply；不要写 <script>、事件属性或外链脚本；始终提供 fallback。".to_string(),
         );
     }
     if artifact_runner_enabled(context) {
         sections.push(
-            "当前会话启用了 artifact-runner 扩展。需要生成可预览产物时，最终回复可以输出 JSON 对象，不要包在 Markdown 代码块中。HTML 产物：{\"kind\":\"ennoia.artifact_runner\",\"version\":1,\"profile\":\"html-artifact\",\"placement\":\"artifact\",\"content_type\":\"text/html\",\"title\":\"页面预览\",\"fallback\":\"我生成了一个 HTML 页面，可以在下方预览。\",\"body\":\"<!doctype html><html>...</html>\"}。Python 产物：{\"kind\":\"ennoia.artifact_runner\",\"version\":1,\"profile\":\"python-artifact\",\"placement\":\"artifact\",\"content_type\":\"text/x-python\",\"title\":\"Python 示例\",\"fallback\":\"我生成了一个 Python 示例。\",\"body\":\"print('hello')\"}。Python 当前只展示，不自动执行；始终提供 fallback。".to_string(),
+            "当前会话启用了 artifact-runner 扩展。需要生成可预览或可运行产物时，最终回复可以输出 JSON 对象，不要包在 Markdown 代码块中。用户要求预览、运行、画出来或展示页面时使用 HTML 预览产物：{\"kind\":\"ennoia.artifact_runner\",\"version\":1,\"profile\":\"html-artifact\",\"placement\":\"artifact\",\"content_type\":\"text/html\",\"title\":\"页面预览\",\"fallback\":\"我生成了一个 HTML 页面，可以在下方预览。\",\"body\":\"<!doctype html><html>...</html>\"}。HTML 预览可以写内联 <script> 或事件监听实现 canvas、小游戏、表单交互等产物行为；不要使用外链脚本，也不要依赖宿主页面上下文。用户明确要求 HTML 源码、源代码或代码时使用 HTML 源码产物，它默认展示源码，并允许用户手动切换到预览：{\"kind\":\"ennoia.artifact_runner\",\"version\":1,\"profile\":\"html-source\",\"placement\":\"artifact\",\"content_type\":\"text/html\",\"title\":\"index.html\",\"fallback\":\"这是 HTML 源代码。\",\"body\":\"<!doctype html><html>...</html>\"}。Python 产物：{\"kind\":\"ennoia.artifact_runner\",\"version\":1,\"profile\":\"python-artifact\",\"placement\":\"artifact\",\"content_type\":\"text/x-python\",\"title\":\"Python 示例\",\"fallback\":\"我生成了一个 Python 示例。\",\"body\":\"print('hello')\"}。Python 默认展示源码，用户可在产物卡片手动运行并查看 stdout、stderr、退出码；不要在正文里伪造运行结果；始终提供 fallback。".to_string(),
         );
     }
     sections.join("\n\n")
@@ -5252,8 +5255,11 @@ mod tests {
         assert!(!enabled.contains(&removed_combined_output_kind));
         assert!(enabled.contains("\"profile\":\"html-message\""));
         assert!(enabled.contains("\"profile\":\"html-artifact\""));
+        assert!(enabled.contains("\"profile\":\"html-source\""));
+        assert!(enabled.contains("用户明确要求 HTML 源码"));
         assert!(enabled.contains("\"profile\":\"python-artifact\""));
-        assert!(enabled.contains("Python 当前只展示，不自动执行"));
+        assert!(enabled.contains("Python 默认展示源码"));
+        assert!(enabled.contains("stdout、stderr、退出码"));
     }
 
     #[test]

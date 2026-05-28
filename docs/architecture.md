@@ -150,7 +150,7 @@ Web
 - UI 与 service 入口由目录约定发现，属于宿主内部解析结果，不属于 manifest 契约，也不在扩展设计页面展示。
 - 扩展 UI 通过独立 ESM bundle 动态加载；主壳只导入 `/api/extensions/{extension_id}/ui/module` 暴露的模块包装器，再按 view name 调用扩展自己的 `mount/unmount`。
 - 会话时间线只提供通用 record mount 槽位；主壳不硬编码 workflow 专属卡片，扩展可以把自己的 record 以会话附件或独立块渲染出来。
-- `html-reply` 与 `artifact-runner` 是两个独立内置扩展。`workflow` 只识别各自的输出 envelope，把 fallback 写入普通会话消息，再把 HTML 回复写入 `html-reply.message`、把 HTML/Python 产物写入 `artifact-runner.artifact`；Web 主壳继续通过通用 `conversationRecords` 挂载记录，核心不理解这些扩展输出语义，也不把它们提升为系统级消息结构。
+- `html-reply` 与 `artifact-runner` 是两个独立内置扩展。`workflow` 只识别各自的输出 envelope，把 fallback 写入普通会话消息，再把 HTML 回复写入 `html-reply.message`、把 HTML/Python 产物写入 `artifact-runner.artifact`；`html-reply` 只做静态消息排版，`artifact-runner` 负责 HTML 预览、HTML 源码展示和 Python 手动运行输出。Web 主壳继续通过通用 `conversationRecords` 与扩展 RPC 挂载记录和调用扩展 operation，核心不理解这些扩展输出语义，也不把它们提升为系统级消息结构。
 - 扩展主题通过 `ennoia.theme` 与主壳对接；主壳只消费稳定语义 token 和 dockview token，不把内部 class 结构暴露给扩展。
 - 扩展默认不进入会话目录；只有显式声明 `conversation.visible = true` 时，宿主才会把该扩展作为会话可见目录项暴露给模型。进入会话时只注入扩展自身的 `description`、受限资源/operation 目录与 `docs` 入口，不自动注入 `docs` 正文。
 - Agent 权限系统由宿主按 operation 和调用上下文统一裁决；扩展 manifest 不声明底层权限边界、SQLite、文件、网络或环境变量。
