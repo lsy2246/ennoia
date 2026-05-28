@@ -134,6 +134,7 @@ export function Extensions() {
   const selectedHealth = detail?.health ?? selected?.status ?? t("web.common.unknown", "未知");
   const selectedOperations = detail?.operations ?? [];
   const selectedEvents = detail?.events ?? [];
+  const selectedMessageRenderers = detail?.message_renderers ?? [];
   const selectedViews = detail?.views ?? [];
   const selectedConversation = detail?.conversation;
   const selectedCompat = detail?.compat;
@@ -402,7 +403,11 @@ export function Extensions() {
     : t("web.extensions.view_logs", "查看诊断文本");
   const selectedConversationResourceCount = selectedConversation?.resources.length ?? 0;
   const selectedConversationOperationCount = selectedConversation?.operations.length ?? 0;
-  const selectedCapabilityCount = selectedViews.length + selectedOperations.length + selectedEvents.length;
+  const selectedCapabilityCount =
+    selectedViews.length
+    + selectedOperations.length
+    + selectedEvents.length
+    + selectedMessageRenderers.length;
   const selectedVersion = detail?.version ?? t("web.common.none", "无");
   const selectedGeneration = detail?.generation ?? t("web.common.none", "无");
   const hasDiagnostics = selectedDiagnostics.length > 0;
@@ -682,6 +687,22 @@ export function Extensions() {
                             )}
                           </div>
                         </div>
+                      </div>
+                    </details>
+                  ) : null}
+
+                  {selectedMessageRenderers.length > 0 ? (
+                    <details className="extensions-detail-drawer">
+                      <summary>
+                        <span>{t("web.extensions.message_renderers", "消息渲染器")}</span>
+                        <strong>{selectedMessageRenderers.length}</strong>
+                      </summary>
+                      <div className="extensions-chip-row">
+                        {selectedMessageRenderers.map((renderer) => (
+                          <span key={renderer.id} className="chip chip--active">
+                            {`${renderer.format}:${renderer.mount}`}
+                          </span>
+                        ))}
                       </div>
                     </details>
                   ) : null}

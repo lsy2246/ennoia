@@ -137,7 +137,7 @@ Web
 
 ## 扩展契约模型
 
-- 扩展 manifest 只声明系统可见契约：`id`、`version`、`name`、`description`、`docs`、`compat`、`views`、`operations`、`events`、`settings`、`conversation`。
+- 扩展 manifest 只声明系统可见契约：`id`、`version`、`name`、`description`、`docs`、`compat`、`views`、`operations`、`events`、`settings`、`message_renderers`、`conversation`。
 - `views` 表达主壳可以打开或挂载的界面契约，当前稳定类型是 `page` 与 `panel`，不再单独设计 entry、surface 或入口列表。
 - `operations` 表达系统可调用动作；`operation.name` 是唯一调用名，同时作为 action key、Worker method 和事件投递目标。
 - `events` 表达 `on -> operation` 的投递关系，并可声明 `priority`；事件先进入宿主持久化事件总线，再异步投递到目标 operation。
@@ -150,6 +150,7 @@ Web
 - UI 与 service 入口由目录约定发现，属于宿主内部解析结果，不属于 manifest 契约，也不在扩展设计页面展示。
 - 扩展 UI 通过独立 ESM bundle 动态加载；主壳只导入 `/api/extensions/{extension_id}/ui/module` 暴露的模块包装器，再按 view name 调用扩展自己的 `mount/unmount`。
 - 会话时间线只提供通用 record mount 槽位；主壳不硬编码 workflow 专属卡片，扩展可以把自己的 record 以会话附件或独立块渲染出来。
+- 会话消息正文提供通用 `message_renderers` 槽位；主壳按消息 `format` 选择最高优先级渲染器并传入正文、角色、agents、skills 和 mentions。内置 `markdown-renderer` 扩展接管 Markdown/GFM 渲染；主壳只保留纯文本兜底，不内置 Markdown 解析语义。
 - `html-reply` 与 `artifact-runner` 是两个独立内置扩展。`workflow` 只识别各自的输出 envelope，把 fallback 写入普通会话消息，再把 HTML 回复写入 `html-reply.message`、把 HTML/Python 产物写入 `artifact-runner.artifact`；`html-reply` 只做静态消息排版，`artifact-runner` 负责 HTML 预览、HTML 源码展示和 Python 手动运行输出。Web 主壳继续通过通用 `conversationRecords` 与扩展 RPC 挂载记录和调用扩展 operation，核心不理解这些扩展输出语义，也不把它们提升为系统级消息结构。
 - 扩展主题通过 `ennoia.theme` 与主壳对接；主壳只消费稳定语义 token 和 dockview token，不把内部 class 结构暴露给扩展。
 - 扩展默认不进入会话目录；只有显式声明 `conversation.visible = true` 时，宿主才会把该扩展作为会话可见目录项暴露给模型。进入会话时只注入扩展自身的 `description`、受限资源/operation 目录与 `docs` 入口，不自动注入 `docs` 正文。

@@ -1,0 +1,14 @@
+id = "markdown-renderer"
+version = "0.1.0"
+name = "Markdown Renderer"
+description = "提供会话普通消息 Markdown 渲染。"
+docs = "docs/overview.md"
+
+[compat]
+ennoia = ">=0.1.0"
+
+[[message_renderers]]
+id = "markdown-renderer.markdown"
+format = "markdown"
+mount = "markdown-renderer.markdown"
+priority = 100

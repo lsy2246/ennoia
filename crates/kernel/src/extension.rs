@@ -53,6 +53,16 @@ pub struct LocaleContribution {
     pub entry: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct MessageRendererContribution {
+    pub id: String,
+    pub format: String,
+    pub mount: String,
+    #[serde(default)]
+    pub priority: i32,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ExtensionCompatSpec {
     #[serde(default)]
@@ -531,6 +541,8 @@ pub struct ExtensionManifest {
     pub events: Vec<ExtensionEventSpec>,
     #[serde(default)]
     pub settings: Vec<ExtensionSettingFieldSpec>,
+    #[serde(default)]
+    pub message_renderers: Vec<MessageRendererContribution>,
     #[serde(default)]
     pub conversation: ExtensionConversationSpec,
 }

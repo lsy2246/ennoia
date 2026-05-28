@@ -1097,6 +1097,7 @@ mod tests {
             panels: Vec::new(),
             themes: Vec::new(),
             locales: Vec::new(),
+            message_renderers: Vec::new(),
             settings: Vec::new(),
             providers: Vec::new(),
             behaviors: Vec::new(),

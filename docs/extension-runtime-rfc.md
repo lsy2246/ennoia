@@ -29,6 +29,7 @@ Extension descriptor 包含：
 - `operations`
 - `events`
 - `settings`
+- `message_renderers`
 - `conversation`
 
 Skill 磁盘包包含：
@@ -36,9 +37,9 @@ Skill 磁盘包包含：
 - `SKILL.md`：传统技能入口，YAML frontmatter 必须包含 `name` 与 `description`
 - `config.toml`：Ennoia 增强配置，包含 `version`、`mount.mode`、`actions[]`、`settings[]`、`diagnostics` 与可选 `prepare`
 
-主声明模型统一只有一层：`views`、`operations`、`events`、`settings`、`conversation`。
+主声明模型统一只有一层：`views`、`operations`、`events`、`settings`、`message_renderers`、`conversation`。
 
-`views` 表达主壳可以打开或挂载的界面契约，当前稳定类型是 `page` 与 `panel`。`operations` 表达系统可调用动作；`operation.name` 是唯一调用名，同时作为 action key、Worker method 和事件投递目标。`events` 只表达 `on -> operation` 的投递关系。
+`views` 表达主壳可以打开或挂载的界面契约，当前稳定类型是 `page` 与 `panel`。`operations` 表达系统可调用动作；`operation.name` 是唯一调用名，同时作为 action key、Worker method 和事件投递目标。`events` 只表达 `on -> operation` 的投递关系。`message_renderers` 表达消息正文格式到扩展 UI mount 的映射，主壳只做选择、挂载和纯文本兜底。
 
 UI 与 service 入口由目录约定发现，属于宿主内部解析结果，不属于 manifest 契约，也不在扩展设计界面展示。
 
@@ -55,6 +56,7 @@ Extension 默认不进入会话目录。只有显式声明了 `conversation.visi
 5. Extension Host 解析 manifest 契约，并按目录约定发现 UI / service 入口，生成 runtime snapshot。
 6. Server 暴露 runtime snapshot、事件、诊断、日志、资源贡献接口、动作规则视图、技能资源接口、scheduler API 和 Worker RPC。
 7. Web 工作台通过 runtime snapshot 动态挂载扩展贡献。
+8. 会话消息正文按 runtime snapshot 中的 `message_renderers` 选择扩展 UI 渲染；没有可用渲染器时展示纯文本兜底。
 
 ## Operation 与事件
 

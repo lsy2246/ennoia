@@ -7,6 +7,7 @@ import type {
   ExtensionHookContribution,
   ExtensionLocaleContribution,
   ExtensionMemoryContribution,
+  ExtensionMessageRendererContribution,
   ExtensionOperation,
   ExtensionOperationContribution,
   ExtensionPageContribution,
@@ -70,6 +71,7 @@ export type UiRuntime = {
     panels: ExtensionPanelContribution[];
     themes: ExtensionThemeContribution[];
     locales: ExtensionLocaleContribution[];
+    message_renderers: ExtensionMessageRendererContribution[];
     providers: ExtensionProviderContribution[];
     behaviors: ExtensionBehaviorContribution[];
     memories: ExtensionMemoryContribution[];
@@ -655,6 +657,7 @@ export type ExtensionDetail = {
   views: ExtensionView[];
   operations: ExtensionOperation[];
   events: ExtensionEvent[];
+  message_renderers: ExtensionMessageRendererContribution["renderer"][];
   settings: ExtensionSettingField[];
   diagnostics: ExtensionDiagnostic[];
 };

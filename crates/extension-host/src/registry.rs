@@ -11,9 +11,9 @@ use ennoia_kernel::{
     ExtensionManifest, ExtensionOperationSpec, ExtensionRegistryEntry, ExtensionRegistryFile,
     ExtensionRpcRequest, ExtensionRpcResponse, ExtensionRuntimeEvent, ExtensionRuntimeSpec,
     ExtensionSettingFieldSpec, ExtensionSourceMode, ExtensionViewSpec, HookContribution,
-    LocaleContribution, MemoryContribution, PageContribution, PageNavContribution,
-    PanelContribution, ProviderContribution, ResolvedUiEntry, ResolvedWorkerEntry,
-    ScheduleActionContribution, ThemeContribution,
+    LocaleContribution, MemoryContribution, MessageRendererContribution, PageContribution,
+    PageNavContribution, PanelContribution, ProviderContribution, ResolvedUiEntry,
+    ResolvedWorkerEntry, ScheduleActionContribution, ThemeContribution,
 };
 use serde::Serialize;
 use serde_json::Value as JsonValue;
@@ -45,6 +45,7 @@ pub struct ResolvedExtensionSnapshot {
     pub panels: Vec<PanelContribution>,
     pub themes: Vec<ThemeContribution>,
     pub locales: Vec<LocaleContribution>,
+    pub message_renderers: Vec<MessageRendererContribution>,
     pub settings: Vec<ExtensionSettingFieldSpec>,
     pub providers: Vec<ProviderContribution>,
     pub behaviors: Vec<BehaviorContribution>,
@@ -112,6 +113,14 @@ pub struct RegisteredLocaleContribution {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RegisteredMessageRendererContribution {
+    pub extension_id: String,
+    pub source_mode: ExtensionSourceMode,
+    pub install_dir: String,
+    pub renderer: MessageRendererContribution,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RegisteredProviderContribution {
     pub extension_id: String,
     pub source_mode: ExtensionSourceMode,
@@ -171,6 +180,7 @@ pub struct ExtensionRuntimeSnapshot {
     pub panels: Vec<RegisteredPanelContribution>,
     pub themes: Vec<RegisteredThemeContribution>,
     pub locales: Vec<RegisteredLocaleContribution>,
+    pub message_renderers: Vec<RegisteredMessageRendererContribution>,
     pub providers: Vec<RegisteredProviderContribution>,
     pub behaviors: Vec<RegisteredBehaviorContribution>,
     pub memories: Vec<RegisteredMemoryContribution>,
@@ -536,6 +546,19 @@ impl ResolvedExtensionSnapshot {
             .collect()
     }
 
+    fn message_renderer_rows(&self) -> Vec<RegisteredMessageRendererContribution> {
+        self.message_renderers
+            .iter()
+            .cloned()
+            .map(|renderer| RegisteredMessageRendererContribution {
+                extension_id: self.id.clone(),
+                source_mode: self.source_mode.clone(),
+                install_dir: self.install_dir.clone(),
+                renderer,
+            })
+            .collect()
+    }
+
     fn provider_rows(&self) -> Vec<RegisteredProviderContribution> {
         self.providers
             .iter()
@@ -639,6 +662,7 @@ fn build_snapshot(
     let mut panels = Vec::new();
     let mut themes = Vec::new();
     let mut locales = Vec::new();
+    let mut message_renderers = Vec::new();
     let mut providers = Vec::new();
     let mut behaviors = Vec::new();
     let mut memories = Vec::new();
@@ -654,6 +678,7 @@ fn build_snapshot(
         panels.extend(extension.panel_rows());
         themes.extend(extension.theme_rows());
         locales.extend(extension.locale_rows());
+        message_renderers.extend(extension.message_renderer_rows());
         providers.extend(extension.provider_rows());
         behaviors.extend(extension.behavior_rows());
         memories.extend(extension.memory_rows());
@@ -673,6 +698,7 @@ fn build_snapshot(
         panels,
         themes,
         locales,
+        message_renderers,
         providers,
         behaviors,
         memories,
@@ -773,6 +799,7 @@ fn resolve_manifest(
     let pages = derive_pages(&views);
     let panels = derive_panels(&views);
     let settings = manifest.settings.clone();
+    let message_renderers = manifest.message_renderers.clone();
     let providers = derive_providers(&operations, &manifest.id, &source.root);
     let behaviors = derive_behaviors(&operations, &manifest.id);
     let memories = derive_memories(&operations, &manifest.id);
@@ -842,6 +869,7 @@ fn resolve_manifest(
         panels,
         themes: discover_themes(&source.root),
         locales: discover_locales(&source.root, &manifest.id),
+        message_renderers,
         settings,
         providers,
         behaviors,
@@ -1173,6 +1201,7 @@ fn failed_extension_snapshot(
         panels: Vec::new(),
         themes: Vec::new(),
         locales: Vec::new(),
+        message_renderers: Vec::new(),
         settings: Vec::new(),
         providers: Vec::new(),
         behaviors: Vec::new(),
@@ -1244,6 +1273,7 @@ fn equivalent_snapshots(
         && current.panels == next.panels
         && current.themes == next.themes
         && current.locales == next.locales
+        && current.message_renderers == next.message_renderers
         && current.providers == next.providers
         && current.behaviors == next.behaviors
         && current.memories == next.memories
@@ -1277,6 +1307,7 @@ fn empty_snapshot() -> ExtensionRuntimeSnapshot {
         panels: Vec::new(),
         themes: Vec::new(),
         locales: Vec::new(),
+        message_renderers: Vec::new(),
         providers: Vec::new(),
         behaviors: Vec::new(),
         memories: Vec::new(),
@@ -1371,6 +1402,16 @@ mod tests {
         assert_eq!(snapshot.events.len(), 1);
         assert_eq!(snapshot.pages.len(), 1);
         assert_eq!(snapshot.panels.len(), 1);
+        assert_eq!(snapshot.message_renderers.len(), 1);
+        assert_eq!(
+            snapshot.message_renderers[0].renderer.format.as_str(),
+            "markdown"
+        );
+        assert_eq!(
+            snapshot.message_renderers[0].renderer.mount.as_str(),
+            "sample.markdown"
+        );
+        assert_eq!(snapshot.message_renderers[0].renderer.priority, 100);
         assert_eq!(snapshot.locales.len(), 0);
         assert_eq!(snapshot.providers.len(), 1);
         assert_eq!(snapshot.hooks.len(), 1);
@@ -1666,6 +1707,12 @@ name = "{id}.run.completed"
 [[events]]
 on = "run.completed"
 operation = "{id}.run.completed"
+
+[[message_renderers]]
+id = "{id}.markdown"
+format = "markdown"
+mount = "{id}.markdown"
+priority = 100
 "##
         )
     }

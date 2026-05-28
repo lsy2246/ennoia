@@ -4,7 +4,7 @@ use ennoia_kernel::{
     ExtensionHealth, ExtensionOperationSpec, ExtensionRecordEntry, ExtensionRpcRequest,
     ExtensionRpcResponse, ExtensionSettingFieldSpec, ExtensionSettingFieldType,
     ExtensionSettingValue, ExtensionSourceMode, ExtensionStateEntry, ExtensionViewSpec,
-    HookDispatchResponse, ModelEndpointConfig,
+    HookDispatchResponse, MessageRendererContribution, ModelEndpointConfig,
 };
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -83,6 +83,7 @@ pub(crate) struct ExtensionDetailRecord {
     views: Vec<ExtensionViewSpec>,
     operations: Vec<ExtensionOperationSpec>,
     events: Vec<ExtensionEventSpec>,
+    message_renderers: Vec<MessageRendererContribution>,
     settings: Vec<ExtensionSettingFieldSpec>,
     diagnostics: Vec<ExtensionDiagnostic>,
 }
@@ -199,6 +200,7 @@ fn map_extension_detail_record(extension: &ResolvedExtensionSnapshot) -> Extensi
         views: extension.views.clone(),
         operations: extension.operations.clone(),
         events: extension.events.clone(),
+        message_renderers: extension.message_renderers.clone(),
         settings: extension.settings.clone(),
         diagnostics: extension.diagnostics.clone(),
     }

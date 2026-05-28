@@ -821,7 +821,7 @@ function renderToolResultBody(
 ) {
   const envelope = readStructuredToolEnvelope(entry.body);
   if (!envelope) {
-    return <ChatContent body={entry.body} format={entry.format} agents={agents} skills={skills} />;
+    return <ChatContent body={entry.body} format={entry.format} role={entry.role} agents={agents} skills={skills} />;
   }
 
   if (envelope.status === "succeeded") {
@@ -830,6 +830,7 @@ function renderToolResultBody(
       <ChatContent
         body={body}
         format={detectContentFormat(body)}
+        role={entry.role}
         agents={agents}
         skills={skills}
       />
@@ -942,7 +943,7 @@ function DefaultRecordBody({
 
   return (
     <div className="message-record-fallback">
-      <ChatContent body={body} format="markdown" agents={agents} skills={skills} />
+      <ChatContent body={body} format="markdown" role="tool" agents={agents} skills={skills} />
       {payload && payload !== "null" ? (
         <details className="message-accessory__detail">
           <summary>Payload</summary>
@@ -1173,6 +1174,7 @@ function AccessoryBlock({
           <ChatContent
             body={entry.body}
             format={entry.format}
+            role={entry.role}
             agents={agents}
             skills={skills}
           />
@@ -1218,6 +1220,7 @@ function AccessoryBlock({
           <ChatContent
             body={entry.body}
             format={entry.format}
+            role={entry.role}
             agents={agents}
             skills={skills}
           />
@@ -1399,6 +1402,7 @@ function MessageGroup({
               <ChatContent
                 body={anchor.body}
                 format={anchor.format}
+                role={anchor.role}
                 agents={agents}
                 skills={skills}
                 mentionAgentIds={anchor.mentions}

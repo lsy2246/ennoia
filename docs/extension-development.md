@@ -67,6 +67,7 @@ Skill 的产品化配置只放在 `config.toml`。`SKILL.md` 保持传统技能�
 - `operations`
 - `events`
 - `settings`
+- `message_renderers`
 - `conversation`
 
 示例：
@@ -114,6 +115,16 @@ description = "处理会话消息创建事件。"
 [[events]]
 on = "conversation.message.created"
 operation = "workflow.conversation.message.created"
+priority = 100
+```
+
+消息正文渲染器可以通过 `message_renderers` 注册。内置 `markdown-renderer` 使用这个入口接管普通 Markdown 消息渲染：
+
+```toml
+[[message_renderers]]
+id = "markdown-renderer.markdown"
+format = "markdown"
+mount = "markdown-renderer.markdown"
 priority = 100
 ```
 
@@ -222,6 +233,19 @@ priority = 100
 
 扩展私有数据库、缓存和业务运行数据保留在 `~/.ennoia/data/extensions/{extension_id}/`，由扩展自行解释。
 
+## Message Renderers
+
+`message_renderers[]` 声明会话消息正文渲染器。它只处理消息 `body` 的展示，不创建会话附件、产物或扩展记录。
+
+字段：
+
+- `id`：渲染器唯一 ID。
+- `format`：匹配的消息格式，例如 `markdown`。
+- `mount`：UI module 中的 `messageRenderers` mount key。
+- `priority`：同一格式下的优先级，默认 `0`。主壳按优先级降序选择渲染器，同优先级按扩展 ID 和渲染器 ID 稳定排序。
+
+Web 主壳把 `body`、`format`、`role`、`agents`、`skills`、`mentionAgentIds` 和 `helpers` 传给扩展。扩展缺失、加载失败或没有匹配渲染器时，主壳回退为纯文本展示，确保聊天仍可读。
+
 ## Conversation
 
 扩展默认不进入会话上下文。需要进入时声明：
@@ -257,14 +281,23 @@ const ui: ExtensionUiModule = {
       };
     },
   },
+  messageRenderers: {
+    "markdown-renderer.markdown": (container, context) => {
+      return {
+        unmount() {},
+      };
+    },
+  },
 };
 
 export default ui;
 ```
 
-页面和面板导出 `mount(container, context)` / `unmount()`；扩展 UI 可以自带自己的 React runtime，不和主壳 hooks 冲突。需要渲染会话时间线记录时导出 `conversationRecords`，它使用扩展记录的 `kind` 作为 mount key。`context.helpers` 提供 `apiBaseUrl`、`locale`、`themeId`、`t()`、`formatDateTime()` 等宿主运行时能力。
+页面、面板和消息渲染器导出 `mount(container, context)` / `unmount()`；扩展 UI 可以自带自己的 React runtime，不和主壳 hooks 冲突。需要渲染会话时间线记录时导出 `conversationRecords`，它使用扩展记录的 `kind` 作为 mount key。需要渲染消息正文时导出 `messageRenderers`，它使用 `message_renderers[].mount` 作为 mount key。`context.helpers` 提供 `apiBaseUrl`、`locale`、`themeId`、`t()`、`formatDateTime()` 等宿主运行时能力。
 
 内置 `html-reply` 与 `artifact-runner` 扩展使用这一机制承载两类输出体验：`workflow` 识别 `ennoia.html_reply` envelope 后只把普通 fallback 写入会话消息，把 HTML 排版内容写入 `html-reply.message`，由 `html-reply` 作为静态消息排版展示，不显示源码、不运行脚本；识别 `ennoia.artifact_runner` envelope 后把 HTML/Python 产物写入 `artifact-runner.artifact`，由 `artifact-runner` 提供 HTML 预览、HTML 源码展示与 Python 手动运行输出。Python 运行通过 `artifact-runner` 自己声明的 `artifact.run_python` operation 和 process service 完成。这些协议属于扩展内部约定，不新增系统级 manifest 字段，也不改变核心消息模型。
+
+内置 `markdown-renderer` 扩展使用 `message_renderers` 承载普通 Markdown/GFM 正文渲染。它不同于 `conversationRecords`：前者是消息正文展示，后者是消息附件或产物记录展示。
 
 ## Worker ABI
 

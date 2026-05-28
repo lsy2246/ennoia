@@ -1,6 +1,8 @@
 import { getExtensionUiModuleUrl } from "@ennoia/api-client";
 import type {
   ExtensionConversationRecordMount,
+  ExtensionMessageRendererContribution,
+  ExtensionMessageRendererMount,
   ExtensionPageContribution,
   ExtensionPanelContribution,
   ExtensionPageMount,
@@ -53,5 +55,17 @@ export async function loadExtensionConversationRecordMount(
   const resolved = module.default ?? module;
   return resolved.conversationRecords?.[kind]
     ?? resolved.conversationRecords?.default
+    ?? null;
+}
+
+export async function loadExtensionMessageRendererMount(
+  renderer: ExtensionMessageRendererContribution,
+  generation: number,
+): Promise<ExtensionMessageRendererMount | null> {
+  const module = await loadExtensionUiModule(renderer.extension_id, generation);
+  const resolved = module.default ?? module;
+  return resolved.messageRenderers?.[renderer.renderer.mount]
+    ?? resolved.messageRenderers?.[renderer.renderer.id]
+    ?? resolved.messageRenderers?.default
     ?? null;
 }

@@ -127,6 +127,15 @@ export type ExtensionLocaleContribution = RegisteredContributionBase & {
   };
 };
 
+export type ExtensionMessageRendererContribution = RegisteredContributionBase & {
+  renderer: {
+    id: string;
+    format: string;
+    mount: string;
+    priority: number;
+  };
+};
+
 export type PanelSlot = "left" | "right" | "bottom" | "main";
 
 export type ExtensionUiRenderHelpers = {
@@ -179,6 +188,21 @@ export type ExtensionConversationRecordMountContext = ExtensionViewMountContext 
   record: ExtensionConversationRecord;
 };
 
+export type ExtensionMessageRenderRequest = {
+  body: string;
+  format: string;
+  role: "operator" | "agent" | "system" | "tool";
+  agents: Array<{ id: string; display_name: string }>;
+  skills: Array<{ id: string }>;
+  mentionAgentIds: string[];
+};
+
+export type ExtensionMessageRendererMountContext = ExtensionViewMountContext & {
+  kind: "message_renderer";
+  renderer: ExtensionMessageRendererContribution;
+  request: ExtensionMessageRenderRequest;
+};
+
 export type ExtensionViewHandle = {
   unmount?: () => void | Promise<void>;
 };
@@ -198,10 +222,16 @@ export type ExtensionConversationRecordMount = (
   context: ExtensionConversationRecordMountContext,
 ) => void | ExtensionViewHandle | Promise<void | ExtensionViewHandle>;
 
+export type ExtensionMessageRendererMount = (
+  container: HTMLElement,
+  context: ExtensionMessageRendererMountContext,
+) => void | ExtensionViewHandle | Promise<void | ExtensionViewHandle>;
+
 export type ExtensionUiModule = {
   pages?: Record<string, ExtensionPageMount>;
   panels?: Record<string, ExtensionPanelMount>;
   conversationRecords?: Record<string, ExtensionConversationRecordMount>;
+  messageRenderers?: Record<string, ExtensionMessageRendererMount>;
 };
 
 export type ExtensionProviderContribution = RegisteredContributionBase & {
@@ -293,6 +323,7 @@ export type ExtensionRuntimeExtension = {
   panels: ExtensionPanelContribution["panel"][];
   themes: ExtensionThemeContribution["theme"][];
   locales: ExtensionLocaleContribution["locale"][];
+  message_renderers: ExtensionMessageRendererContribution["renderer"][];
   settings: ExtensionSettingField[];
   providers: ExtensionProviderContribution["provider"][];
   behaviors: ExtensionBehaviorContribution["behavior"][];
@@ -314,6 +345,7 @@ export type ExtensionRuntimeSnapshot = {
   panels: ExtensionPanelContribution[];
   themes: ExtensionThemeContribution[];
   locales: ExtensionLocaleContribution[];
+  message_renderers: ExtensionMessageRendererContribution[];
   providers: ExtensionProviderContribution[];
   behaviors: ExtensionBehaviorContribution[];
   memories: ExtensionMemoryContribution[];

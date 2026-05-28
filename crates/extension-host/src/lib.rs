@@ -8,9 +8,9 @@ pub use registry::{
     ExtensionRuntimeSnapshot, RegisteredActionRuleContribution, RegisteredBehaviorContribution,
     RegisteredExtensionEventContribution, RegisteredExtensionOperationContribution,
     RegisteredExtensionViewContribution, RegisteredHookContribution, RegisteredLocaleContribution,
-    RegisteredMemoryContribution, RegisteredPageContribution, RegisteredPanelContribution,
-    RegisteredProviderContribution, RegisteredScheduleActionContribution,
-    RegisteredThemeContribution, ResolvedExtensionSnapshot,
+    RegisteredMemoryContribution, RegisteredMessageRendererContribution,
+    RegisteredPageContribution, RegisteredPanelContribution, RegisteredProviderContribution,
+    RegisteredScheduleActionContribution, RegisteredThemeContribution, ResolvedExtensionSnapshot,
 };
 pub use worker::HostCapabilityDispatcher;
 
@@ -38,6 +38,7 @@ mod tests {
             panels: Vec::new(),
             themes: Vec::new(),
             locales: Vec::new(),
+            message_renderers: Vec::new(),
             providers: Vec::new(),
             behaviors: Vec::new(),
             memories: Vec::new(),

@@ -1,40 +1,25 @@
 import {
-  Children,
-  cloneElement,
-  createContext,
+  apiUrl,
+  type AgentProfile,
+  type SkillConfig,
+} from "@ennoia/api-client";
+import {
   Fragment,
-  isValidElement,
-  useContext,
-  type ReactElement,
-  type ReactNode,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
 } from "react";
 
-import type { AgentProfile, SkillConfig } from "@ennoia/api-client";
-import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
-import remarkGfm from "remark-gfm";
+import type {
+  ExtensionMessageRendererContribution,
+  ExtensionMessageRendererMount,
+  ExtensionViewHandle,
+} from "@ennoia/ui-sdk";
+import { useUiHelpers, useUiStore } from "@/stores/ui";
+import { loadExtensionMessageRendererMount } from "@/views/extensions/registry";
 
 import type { ChatEntryFormat } from "./chat-types";
-import {
-  resolveMessageAttachmentLinkProps,
-  resolveMessageAttachmentUrl,
-} from "./message-attachments";
-
-const MarkdownCodeBlockContext = createContext(false);
-
-function extractNodeText(node: ReactNode): string {
-  if (typeof node === "string" || typeof node === "number") {
-    return String(node);
-  }
-  if (Array.isArray(node)) {
-    return node.map((item) => extractNodeText(item)).join("");
-  }
-  if (!isValidElement(node)) {
-    return "";
-  }
-
-  const element = node as ReactElement<{ children?: ReactNode }>;
-  return extractNodeText(element.props.children);
-}
 
 function buildSkillMap(skills: SkillConfig[]) {
   const skillMap = new Map<string, string>();
@@ -100,31 +85,6 @@ function renderInlineTokens(
   });
 }
 
-function decorateChildren(
-  children: ReactNode,
-  agents: AgentProfile[],
-  skills: SkillConfig[],
-  mentionAgentIds: string[],
-): ReactNode {
-  return Children.map(children, (child) => {
-    if (typeof child === "string") {
-      return renderInlineTokens(child, agents, skills, mentionAgentIds);
-    }
-    if (!isValidElement(child)) {
-      return child;
-    }
-
-    const element = child as ReactElement<{ children?: ReactNode }>;
-    if (element.type === "code" || element.type === "pre") {
-      return element;
-    }
-
-    return cloneElement(element, {
-      children: decorateChildren(element.props.children, agents, skills, mentionAgentIds),
-    });
-  });
-}
-
 function PlainTextContent({ body, agents, skills, mentionAgentIds }: {
   body: string;
   agents: AgentProfile[];
@@ -180,150 +140,177 @@ function DiagramContent({ body }: { body: string }) {
   );
 }
 
-function MarkdownPreNode({ children }: { children?: ReactNode }) {
-  return (
-    <MarkdownCodeBlockContext.Provider value={true}>
-      {children}
-    </MarkdownCodeBlockContext.Provider>
+function isPromiseLike<T>(value: unknown): value is PromiseLike<T> {
+  return Boolean(value && typeof (value as { then?: unknown }).then === "function");
+}
+
+function cleanupHandle(handle: void | ExtensionViewHandle | null | undefined) {
+  if (handle?.unmount) {
+    void handle.unmount();
+  }
+}
+
+function callMessageRendererMount(
+  mount: ExtensionMessageRendererMount,
+  container: HTMLElement,
+  context: Parameters<ExtensionMessageRendererMount>[1],
+  onMounted: () => void,
+) {
+  const result = mount(container, context);
+  if (isPromiseLike<void | ExtensionViewHandle>(result)) {
+    return result.then((handle) => {
+      onMounted();
+      return handle;
+    });
+  }
+  onMounted();
+  return result;
+}
+
+function selectMessageRenderer(
+  renderers: ExtensionMessageRendererContribution[],
+  format: ChatEntryFormat,
+) {
+  const candidates = renderers.filter((item) => item.renderer.format === format);
+  candidates.sort((left, right) =>
+    right.renderer.priority - left.renderer.priority
+    || left.extension_id.localeCompare(right.extension_id)
+    || left.renderer.id.localeCompare(right.renderer.id)
   );
+  return candidates[0] ?? null;
 }
 
-function MarkdownCodeNode({
-  className,
-  children,
-}: {
-  className?: string;
-  children?: ReactNode;
-}) {
-  const isBlock = useContext(MarkdownCodeBlockContext);
-  const raw = extractNodeText(children).replace(/\n$/, "");
-  if (!isBlock) {
-    return <code className="message-code-inline">{raw}</code>;
-  }
-
-  const language = className?.replace("language-", "").toLowerCase() ?? "";
-  if (["mermaid", "diagram", "flowchart"].includes(language)) {
-    return <DiagramContent body={`\`\`\`${language}\n${raw}\n\`\`\``} />;
-  }
-
-  return (
-    <pre className="message-pre">
-      <code>{raw}</code>
-    </pre>
-  );
-}
-
-function normalizeMarkdownBody(body: string) {
-  const normalized = body
-    .replace(/\$\s*\\rightarrow\s*\$/g, "→")
-    .replace(/\\rightarrow/g, "→")
-    .replace(/\$\s*\\to\s*\$/g, "→")
-    .replace(/\\to/g, "→")
-    .replace(/\$\s*\\leftarrow\s*\$/g, "←")
-    .replace(/\\leftarrow/g, "←")
-    .replace(/\$\s*\\uparrow\s*\$/g, "↑")
-    .replace(/\\uparrow/g, "↑")
-    .replace(/\$\s*\\downarrow\s*\$/g, "↓")
-    .replace(/\\downarrow/g, "↓")
-    .replace(/\$([←→↑↓,\s()]+)\$/g, "$1");
-
-  const fencedCount = (normalized.match(/```/g) ?? []).length;
-  if (fencedCount % 2 === 1) {
-    return {
-      body: normalized,
-      fallbackToPlain: true,
-    };
-  }
-
-  const inlineTickCount = (normalized.match(/`/g) ?? []).length - fencedCount * 3;
-  if (inlineTickCount % 2 === 1) {
-    return {
-      body: normalized,
-      fallbackToPlain: true,
-    };
-  }
-
-  return {
-    body: normalized,
-    fallbackToPlain: false,
-  };
-}
-
-function transformMarkdownUrl(url: string) {
-  return defaultUrlTransform(url);
-}
-
-function MarkdownContent({ body, agents, skills, mentionAgentIds }: {
+function ExtensionMessageContent({ body, format, role, agents, skills, mentionAgentIds }: {
   body: string;
+  format: ChatEntryFormat;
+  role: "operator" | "agent" | "system" | "tool";
   agents: AgentProfile[];
   skills: SkillConfig[];
   mentionAgentIds: string[];
 }) {
-  const normalized = normalizeMarkdownBody(body);
-  if (normalized.fallbackToPlain) {
-    return (
-      <PlainTextContent
-        body={normalized.body}
-        agents={agents}
-        skills={skills}
-        mentionAgentIds={mentionAgentIds}
-      />
-    );
-  }
+  const runtime = useUiStore((state) => state.runtime);
+  const themeId = useUiStore((state) => state.themeId);
+  const { formatDate, formatDateTime, formatTime, locale, t } = useUiHelpers();
+  const [renderState, setRenderState] = useState<"loading" | "mounted" | "fallback">("loading");
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const generation = runtime?.versions.registry ?? 0;
+  const renderer = useMemo(
+    () => selectMessageRenderer(runtime?.registry.message_renderers ?? [], format),
+    [format, runtime?.registry.message_renderers],
+  );
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || !renderer) {
+      setRenderState("fallback");
+      return undefined;
+    }
+
+    let disposed = false;
+    let mountedHandle: ExtensionViewHandle | null | undefined;
+    setRenderState("loading");
+    container.replaceChildren();
+
+    void loadExtensionMessageRendererMount(renderer, generation)
+      .then((mount) => {
+        if (disposed) {
+          return null;
+        }
+        if (!mount) {
+          setRenderState("fallback");
+          return null;
+        }
+        return callMessageRendererMount(
+          mount,
+          container,
+          {
+            kind: "message_renderer",
+            extensionId: renderer.extension_id,
+            mount: renderer.renderer.mount,
+            renderer,
+            helpers: {
+              locale,
+              themeId,
+              apiBaseUrl: apiUrl(""),
+              t,
+              formatDateTime,
+              formatDate,
+              formatTime,
+            },
+            request: {
+              body,
+              format,
+              role,
+              agents,
+              skills,
+              mentionAgentIds,
+            },
+          },
+          () => {
+            if (!disposed) {
+              setRenderState("mounted");
+            }
+          },
+        );
+      })
+      .then((handle) => {
+        if (disposed) {
+          cleanupHandle(handle);
+          return;
+        }
+        mountedHandle = handle ?? null;
+      })
+      .catch(() => {
+        if (!disposed) {
+          setRenderState("fallback");
+        }
+      });
+
+    return () => {
+      disposed = true;
+      cleanupHandle(mountedHandle);
+      container.replaceChildren();
+    };
+  }, [
+    agents,
+    body,
+    formatDate,
+    formatDateTime,
+    formatTime,
+    format,
+    generation,
+    locale,
+    mentionAgentIds,
+    renderer,
+    role,
+    skills,
+    t,
+    themeId,
+  ]);
 
   return (
-    <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
-      urlTransform={transformMarkdownUrl}
-      components={{
-        h1: ({ children }) => <h1 className="message-markdown__heading message-markdown__heading--1">{decorateChildren(children, agents, skills, mentionAgentIds)}</h1>,
-        h2: ({ children }) => <h2 className="message-markdown__heading message-markdown__heading--2">{decorateChildren(children, agents, skills, mentionAgentIds)}</h2>,
-        h3: ({ children }) => <h3 className="message-markdown__heading message-markdown__heading--3">{decorateChildren(children, agents, skills, mentionAgentIds)}</h3>,
-        p: ({ children }) => <p className="message-markdown__paragraph">{decorateChildren(children, agents, skills, mentionAgentIds)}</p>,
-        ul: ({ children }) => <ul className="message-markdown__list">{decorateChildren(children, agents, skills, mentionAgentIds)}</ul>,
-        ol: ({ children }) => <ol className="message-markdown__list message-markdown__list--ordered">{decorateChildren(children, agents, skills, mentionAgentIds)}</ol>,
-        li: ({ children }) => <li className="message-markdown__item">{decorateChildren(children, agents, skills, mentionAgentIds)}</li>,
-        blockquote: ({ children }) => <blockquote className="message-markdown__quote">{decorateChildren(children, agents, skills, mentionAgentIds)}</blockquote>,
-        table: ({ children }) => <div className="message-markdown__table-wrap"><table className="message-markdown__table">{decorateChildren(children, agents, skills, mentionAgentIds)}</table></div>,
-        th: ({ children }) => <th>{decorateChildren(children, agents, skills, mentionAgentIds)}</th>,
-        td: ({ children }) => <td>{decorateChildren(children, agents, skills, mentionAgentIds)}</td>,
-        pre: ({ children }) => <MarkdownPreNode>{children}</MarkdownPreNode>,
-        a: ({ children, href }) => {
-          const linkProps = resolveMessageAttachmentLinkProps(href);
-          return (
-            <a
-              className="message-markdown__link"
-              {...linkProps}
-            >
-              {decorateChildren(children, agents, skills, mentionAgentIds)}
-            </a>
-          );
-        },
-        img: ({ alt, src, title }) => (
-          <img
-            className="message-markdown__image"
-            src={resolveMessageAttachmentUrl(src) ?? src}
-            alt={alt ?? ""}
-            title={title}
-            loading="lazy"
-          />
-        ),
-        code: (props) => (
-          <MarkdownCodeNode
-            className={"className" in props ? props.className : undefined}
-            children={"children" in props ? props.children : undefined}
-          />
-        ),
-      }}
-    >
-      {normalized.body}
-    </ReactMarkdown>
+    <>
+      <div
+        ref={containerRef}
+        className="message-extension-renderer"
+        hidden={renderState !== "mounted"}
+      />
+      {renderState === "fallback" ? (
+        <PlainTextContent
+          body={body}
+          agents={agents}
+          skills={skills}
+          mentionAgentIds={mentionAgentIds}
+        />
+      ) : null}
+    </>
   );
 }
 
-export function ChatContent({ body, format, agents, skills, mentionAgentIds = [] }: {
+export function ChatContent({ body, format, role = "agent", agents, skills, mentionAgentIds = [] }: {
   body: string;
   format: ChatEntryFormat;
+  role?: "operator" | "agent" | "system" | "tool";
   agents: AgentProfile[];
   skills: SkillConfig[];
   mentionAgentIds?: string[];
@@ -341,8 +328,10 @@ export function ChatContent({ body, format, agents, skills, mentionAgentIds = []
     return <PlainTextContent body={body} agents={agents} skills={skills} mentionAgentIds={mentionAgentIds} />;
   }
   return (
-    <MarkdownContent
+    <ExtensionMessageContent
       body={body}
+      format={format}
+      role={role}
       agents={agents}
       skills={skills}
       mentionAgentIds={mentionAgentIds}

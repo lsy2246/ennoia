@@ -20,8 +20,9 @@ use ennoia_extension_host::{
     RegisteredBehaviorContribution, RegisteredExtensionEventContribution,
     RegisteredExtensionOperationContribution, RegisteredExtensionViewContribution,
     RegisteredHookContribution, RegisteredLocaleContribution, RegisteredMemoryContribution,
-    RegisteredPageContribution, RegisteredPanelContribution, RegisteredProviderContribution,
-    RegisteredScheduleActionContribution, RegisteredThemeContribution, ResolvedExtensionSnapshot,
+    RegisteredMessageRendererContribution, RegisteredPageContribution, RegisteredPanelContribution,
+    RegisteredProviderContribution, RegisteredScheduleActionContribution,
+    RegisteredThemeContribution, ResolvedExtensionSnapshot,
 };
 use ennoia_kernel::{
     AgentConfig, BootstrapState, ExtensionDiagnostic, ExtensionRuntimeEvent, HookEventEnvelope,
@@ -334,6 +335,7 @@ struct UiRuntimeRegistryResponse {
     panels: Vec<RegisteredPanelContribution>,
     themes: Vec<RegisteredThemeContribution>,
     locales: Vec<RegisteredLocaleContribution>,
+    message_renderers: Vec<RegisteredMessageRendererContribution>,
     providers: Vec<RegisteredProviderContribution>,
     behaviors: Vec<RegisteredBehaviorContribution>,
     memories: Vec<RegisteredMemoryContribution>,
@@ -533,6 +535,7 @@ async fn ui_runtime(State(state): State<AppState>) -> Json<UiRuntimeResponse> {
         + snapshot.panels.len()
         + snapshot.themes.len()
         + snapshot.locales.len()
+        + snapshot.message_renderers.len()
         + snapshot.providers.len()
         + snapshot.behaviors.len()
         + snapshot.memories.len()
@@ -551,6 +554,7 @@ async fn ui_runtime(State(state): State<AppState>) -> Json<UiRuntimeResponse> {
             panels: snapshot.panels,
             themes: snapshot.themes,
             locales: snapshot.locales,
+            message_renderers: snapshot.message_renderers,
             providers: snapshot.providers,
             behaviors: snapshot.behaviors,
             memories: snapshot.memories,
