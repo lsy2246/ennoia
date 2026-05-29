@@ -4,12 +4,14 @@
 
 Extension 负责系统能力，Skill 负责 Agent 工具与用法。Extension manifest 只描述系统可见契约，不描述扩展内部实现细节。
 
-系统关心的扩展契约只有五类：
+系统关心的扩展契约包括以下几类：
 
 - `views`：主壳可以打开或挂载的界面。
 - `operations`：系统可以调用的操作。
 - `events`：系统事件投递到 operation 的关系。
+- `pipeline_handlers`：同步生命周期入口上的 handler、slot、优先级和 activation。
 - `settings`：宿主需要渲染和保存的扩展级配置字段。
+- `message_renderers`：会话消息正文格式到扩展 UI mount 的映射。
 - `conversation`：扩展是否进入会话上下文，以及暴露哪些资源和 operation 名称。
 
 UI 入口、service 入口、SQLite、缓存、内部权限边界、构建产物和运行脚本都属于扩展内部实现。宿主可以按目录约定发现入口，但这些内容不进入 manifest 契约，也不在扩展设计界面展示。
@@ -66,6 +68,7 @@ Skill 的产品化配置只放在 `config.toml`。`SKILL.md` 保持传统技能�
 - `views`
 - `operations`
 - `events`
+- `pipeline_handlers`
 - `settings`
 - `message_renderers`
 - `conversation`
@@ -109,13 +112,35 @@ agent = true
 schedule = true
 
 [[operations]]
-name = "workflow.conversation.message.created"
-description = "处理会话消息创建事件。"
+name = "workflow.handle_operator_message"
+description = "作为 conversation.response pipeline handler 处理操作者消息。"
 
-[[events]]
-on = "conversation.message.created"
-operation = "workflow.conversation.message.created"
+[[operations]]
+name = "workflow.handle_operator_message_default"
+description = "作为 conversation.response pipeline fallback 执行普通 Agent 回复。"
+
+[[pipeline_handlers]]
+id = "workflow.task_response"
+on = "conversation.operator_message.received"
+stage = "drive"
+slot = "conversation.response"
 priority = 100
+operation = "workflow.handle_operator_message"
+
+[pipeline_handlers.activation]
+scope = "conversation"
+key = "workflow.task_mode"
+default = false
+label = { key = "ext.workflow.task_mode", fallback = "任务模式" }
+
+[[pipeline_handlers]]
+id = "workflow.default_response"
+on = "conversation.operator_message.received"
+stage = "drive"
+slot = "conversation.response"
+priority = 0
+operation = "workflow.handle_operator_message_default"
+fallback = true
 ```
 
 消息正文渲染器可以通过 `message_renderers` 注册。内置 `markdown-renderer` 使用这个入口接管普通 Markdown 消息渲染：
@@ -178,13 +203,31 @@ Web 主壳按 runtime snapshot 挂载 view，不需要在 manifest 里重复描�
 
 系统先把事件写入宿主持久化事件总线，再异步投递到目标 operation。扩展临时离线不会阻塞主业务写入。
 
-内置 `workflow` 通过事件钩子进入多个编排时机，而不是接管唯一会话入口：
+内置 `workflow` 通过 pipeline handler 接入会话主回复，通过事件钩子进入后续运行时机：
 
 ```toml
-[[events]]
-on = "conversation.message.created"
-operation = "workflow.conversation.message.created"
+[[pipeline_handlers]]
+id = "workflow.task_response"
+on = "conversation.operator_message.received"
+stage = "drive"
+slot = "conversation.response"
 priority = 100
+operation = "workflow.handle_operator_message"
+
+[pipeline_handlers.activation]
+scope = "conversation"
+key = "workflow.task_mode"
+default = false
+label = { key = "ext.workflow.task_mode", fallback = "任务模式" }
+
+[[pipeline_handlers]]
+id = "workflow.default_response"
+on = "conversation.operator_message.received"
+stage = "drive"
+slot = "conversation.response"
+priority = 0
+operation = "workflow.handle_operator_message_default"
+fallback = true
 
 [[events]]
 on = "operation.updated"
@@ -217,7 +260,52 @@ operation = "workflow.job.due"
 priority = 100
 ```
 
-其中 `conversation.message.created`、`operation.updated`、`permission.approval.resolved`、`run.requested` 和 `job.due` 由宿主动作管道、权限路由或 scheduler 发布；`run.stage.changed` 和 `artifact.created` 由 workflow worker 在内部持久化对应事实后，通过宿主 `HookEventPublish` capability 写回事件总线。
+其中 `conversation.operator_message.received` 是宿主在 `message.append` 成功后同步驱动的 pipeline 生命周期事件；`operation.updated`、`permission.approval.resolved`、`run.requested` 和 `job.due` 由宿主动作管道、权限路由或 scheduler 发布；`run.stage.changed` 和 `artifact.created` 由 workflow worker 在内部持久化对应事实后，通过宿主 `HookEventPublish` capability 写回事件总线。
+
+## Pipeline Handlers
+
+`pipeline_handlers[]` 声明扩展要接入的同步生命周期入口。它适合处理“这个 slot 本次由谁负责”的问题，例如会话主回复；不适合表达一个 run 内部的 planning、review、blocked、retry 等循环，这些应该放在扩展自己的状态机里。
+
+字段：
+
+- `id`：handler 唯一 ID，扩展内唯一。
+- `on`：生命周期事件名。当前会话主回复入口是 `conversation.operator_message.received`。
+- `stage`：生命周期阶段，取值为 `tap`、`prepare`、`drive`、`after`。当前已落地同步执行的是 `drive`。
+- `slot`：宿主定义的主职责槽位。当前会话主回复 slot 是 `conversation.response`。
+- `priority`：同一事件、阶段和 slot 下的优先级，默认 `0`。宿主按降序调用，同优先级按扩展 ID 和 handler ID 稳定排序。
+- `operation`：handler 被调用时执行的 operation 名称。
+- `fallback`：标记兜底 handler。兜底仍然按 priority 和 outcome 参与排序，主壳可用它区分可切换的主 handler 与普通兜底。
+- `activation`：可选开关声明。主壳根据 activation 渲染作用域内的切换控件，宿主在 Worker RPC 的 `context.pipeline.activation` 中传入当前状态。
+
+activation 字段：
+
+- `scope`：状态作用域，取值为 `conversation`、`agent`、`space`、`global`。
+- `key`：状态键。宿主把值保存在 `extension.state` 的 `pipeline.activation` namespace 下。
+- `default`：没有保存状态时的默认启用值。
+- `label`：主壳展示的本地化标签。
+
+handler 返回值使用 `PipelineHandlerResponse`：
+
+```json
+{
+  "outcome": "claim",
+  "slot": "conversation.response",
+  "run_id": "run_xxx",
+  "operation_id": "op_xxx",
+  "result": {},
+  "message": "accepted"
+}
+```
+
+`outcome` 语义：
+
+- `skip`：当前 handler 不处理，本 slot 继续找后续 handler。
+- `continue`：当前 handler 已完成旁路工作，本 slot 继续找后续 handler。
+- `claim`：当前 handler 接管本 slot，宿主停止调用同 slot 后续 handler。
+- `complete`：当前 handler 已完成本 slot，宿主停止调用同 slot 后续 handler。
+- `fail`：当前 handler 处理失败，宿主记录日志并继续尝试 fallback 或后续 handler。
+
+扩展不声明“我要和哪个扩展互斥”。互斥由宿主生命周期接口的 `slot` 决定：同一事件、阶段和 slot 一次只有一个 owner，但可以有多个候选 handler。是否要继续、跳过或接管，由 handler 的返回 outcome 决定。
 
 ## Settings
 

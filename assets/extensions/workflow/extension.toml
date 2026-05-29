@@ -69,8 +69,12 @@ agent = true
 schedule = true
 
 [[operations]]
-name = "workflow.conversation.message.created"
-description = "处理会话消息创建事件。"
+name = "workflow.handle_operator_message"
+description = "作为 conversation.response pipeline handler 处理操作者消息。"
+
+[[operations]]
+name = "workflow.handle_operator_message_default"
+description = "作为 conversation.response pipeline fallback 执行普通 Agent 回复。"
 
 [[operations]]
 name = "workflow.operation.updated"
@@ -96,10 +100,28 @@ description = "处理 workflow artifact 创建事件。"
 name = "workflow.job.due"
 description = "处理调度任务到期事件。"
 
-[[events]]
-on = "conversation.message.created"
-operation = "workflow.conversation.message.created"
+[[pipeline_handlers]]
+id = "workflow.task_response"
+on = "conversation.operator_message.received"
+stage = "drive"
+slot = "conversation.response"
 priority = 100
+operation = "workflow.handle_operator_message"
+
+[pipeline_handlers.activation]
+scope = "conversation"
+key = "workflow.task_mode"
+default = false
+label = { key = "ext.workflow.task_mode", fallback = "任务模式" }
+
+[[pipeline_handlers]]
+id = "workflow.default_response"
+on = "conversation.operator_message.received"
+stage = "drive"
+slot = "conversation.response"
+priority = 0
+operation = "workflow.handle_operator_message_default"
+fallback = true
 
 [[events]]
 on = "operation.updated"

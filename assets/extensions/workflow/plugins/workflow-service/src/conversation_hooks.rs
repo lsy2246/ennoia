@@ -10,8 +10,8 @@ use ennoia_kernel::{
     ExtensionRecordAppend, ExtensionRecordEntry, ExtensionRecordUpdate, ExtensionStateEntry,
     ExtensionStateGetQuery, ExtensionStatePut, HookDispatchResponse, HookEventEnvelope,
     ModelEndpointConfig, NextAction, OperationPerformRequest, OperationPerformResponse,
-    OperationRecord, OwnerKind, OwnerRef, RunContext, RunStage, RunStageEvent, RuntimeProfile,
-    ServerConfig,
+    OperationRecord, OwnerKind, OwnerRef, PipelineHandlerResponse, RunContext, RunStage,
+    RunStageEvent, RuntimeProfile, ServerConfig,
 };
 use ennoia_paths::RuntimePaths;
 use serde::{Deserialize, Serialize};
@@ -476,17 +476,40 @@ impl HostApiClient {
     }
 }
 
-pub async fn handle_conversation_message_created(
+pub async fn handle_operator_message_pipeline(
     runtime: &WorkflowRuntime,
     store: &SqliteRuntimeStore,
-    envelope: HookEventEnvelope,
-) -> Result<HookDispatchResponse, String> {
+    payload: JsonValue,
+    context: JsonValue,
+    fallback: bool,
+) -> Result<PipelineHandlerResponse, String> {
+    let activation_enabled = context
+        .get("pipeline")
+        .and_then(|item| item.get("activation"))
+        .and_then(|item| item.get("enabled"))
+        .and_then(JsonValue::as_bool)
+        .unwrap_or(true);
+    if !fallback && !activation_enabled {
+        return Ok(PipelineHandlerResponse {
+            outcome: "skip".to_string(),
+            slot: Some("conversation.response".to_string()),
+            message: Some("workflow task mode is disabled".to_string()),
+            ..PipelineHandlerResponse::default()
+        });
+    }
+
     let client = HostApiClient::new(&runtime.runtime_paths)?;
-    generate_conversation_agent_reply(&client, runtime, store, &envelope.payload).await?;
-    Ok(HookDispatchResponse {
-        handled: true,
-        result: None,
-        message: None,
+    let route = if fallback {
+        ConversationRoute::DirectReply
+    } else {
+        ConversationRoute::ManagedDiscussion
+    };
+    generate_conversation_agent_reply(&client, runtime, store, &payload, route).await?;
+    Ok(PipelineHandlerResponse {
+        outcome: "claim".to_string(),
+        slot: Some("conversation.response".to_string()),
+        message: Some("workflow accepted operator message".to_string()),
+        ..PipelineHandlerResponse::default()
     })
 }
 
@@ -811,7 +834,14 @@ pub async fn recover_stale_conversation_receipts(
                 "addressed_agents": [agent_id],
                 "workflow_receipt_recovery": true,
             });
-            generate_conversation_agent_reply(&client, runtime, store, &payload).await
+            generate_conversation_agent_reply(
+                &client,
+                runtime,
+                store,
+                &payload,
+                ConversationRoute::DirectReply,
+            )
+            .await
         }
         .await;
 
@@ -842,6 +872,7 @@ async fn generate_conversation_agent_reply(
     runtime: &WorkflowRuntime,
     store: &SqliteRuntimeStore,
     payload: &JsonValue,
+    route: ConversationRoute,
 ) -> Result<(), String> {
     let role = payload_string_field(payload, &["message", "role"])
         .unwrap_or_else(|| "operator".to_string());
@@ -1084,7 +1115,7 @@ async fn generate_conversation_agent_reply(
                 return Ok(ConversationTurnProgress::Completed);
             }
 
-            let progress = match decide_conversation_route(&body, active_session.as_ref()) {
+            let progress = match route {
                 ConversationRoute::ManagedDiscussion => {
                     workflow_trace(
                         "route",
@@ -1093,7 +1124,7 @@ async fn generate_conversation_agent_reply(
                         agent_id,
                         "managed_discussion",
                     );
-                    let discussion_reply = upsert_managed_discussion(
+                    let discussion_reply = match upsert_managed_discussion(
                         client,
                         runtime,
                         store,
@@ -1109,7 +1140,20 @@ async fn generate_conversation_agent_reply(
                         active_session.as_ref(),
                     )
                     .await
-                    .map_err(|error| error.to_string())?;
+                    {
+                        Ok(reply) => reply,
+                        Err(error) => {
+                            let reply = managed_discussion_error_reply(&error);
+                            workflow_trace(
+                                "managed_discussion.fallback_reply",
+                                &conversation_id,
+                                message_id.as_deref(),
+                                agent_id,
+                                error.to_string(),
+                            );
+                            reply
+                        }
+                    };
                     append_agent_conversation_reply(
                         client,
                         &conversation_id,
@@ -1298,64 +1342,6 @@ fn is_explicit_new_topic(body: &str) -> bool {
     ["另外", "另一个", "新问题", "换个", "换一下", "重新开一个"]
         .iter()
         .any(|needle| normalized.contains(&needle.to_ascii_lowercase()))
-}
-
-fn is_explicit_plan_request(body: &str) -> bool {
-    let normalized = body.trim().to_ascii_lowercase();
-    [
-        "先计划",
-        "先出方案",
-        "任务编排",
-        "按步骤",
-        "先别执行",
-        "先讨论方案",
-    ]
-    .iter()
-    .any(|needle| normalized.contains(&needle.to_ascii_lowercase()))
-}
-
-fn looks_complex_request(body: &str) -> bool {
-    let normalized = body.trim().to_ascii_lowercase();
-    let mut score = 0;
-    for needle in [
-        "重构",
-        "架构",
-        "方案",
-        "系统级",
-        "一次性",
-        "长期",
-        "前后端",
-        "多文件",
-        "多模块",
-        "权限系统",
-        "任务编排",
-        "工作流",
-        "设计一下",
-    ] {
-        if normalized.contains(&needle.to_ascii_lowercase()) {
-            score += 1;
-        }
-    }
-    if body.lines().count() >= 4 {
-        score += 1;
-    }
-    score >= 2
-}
-
-fn decide_conversation_route(
-    body: &str,
-    active_session: Option<&ActiveWorkflowSession>,
-) -> ConversationRoute {
-    if is_explicit_plan_request(body) {
-        return ConversationRoute::ManagedDiscussion;
-    }
-    if active_session.is_some() {
-        return ConversationRoute::ManagedDiscussion;
-    }
-    if looks_complex_request(body) {
-        return ConversationRoute::ManagedDiscussion;
-    }
-    ConversationRoute::DirectReply
 }
 
 fn synthetic_direct_run_id(agent_id: &str, message_id: Option<&str>) -> String {
@@ -4864,6 +4850,19 @@ fn format_host_api_error_for_conversation(error: &HostApiError) -> String {
     format!("{heading}\n{message}")
 }
 
+fn managed_discussion_error_reply(error: &HostApiError) -> String {
+    let message = error.message().trim();
+    if message.contains("计划输出未通过校验")
+        || message.contains("没有找到可解析的 plan.json")
+        || message.contains("planner returned empty text")
+    {
+        return format!(
+            "任务模式这轮没能整理出可执行方案。\n{message}\n你可以换一种说法补充目标，我会重新从头整理方案。"
+        );
+    }
+    format_host_api_error_for_conversation(error)
+}
+
 fn operation_error_message(operation: &OperationRecord) -> String {
     operation
         .error
@@ -5397,6 +5396,17 @@ mod tests {
             conversation_receipt_terminal_status(&failed),
             Some("failed")
         );
+    }
+
+    #[test]
+    fn managed_discussion_error_is_formatted_as_visible_reply() {
+        let error = bad_request_error("计划输出未通过校验：没有找到可解析的 plan.json");
+
+        let reply = managed_discussion_error_reply(&error);
+
+        assert!(reply.contains("任务模式"));
+        assert!(reply.contains("计划输出未通过校验"));
+        assert!(!reply.contains("系统错误"));
     }
 
     #[test]

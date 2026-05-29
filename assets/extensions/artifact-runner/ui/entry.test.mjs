@@ -30,11 +30,13 @@ describe("artifact runner HTML preview", () => {
     expect(entrySource).toContain('artifact-runner-viewport');
     expect(entrySource).toContain('artifact-runner-source-scroll');
     expect(styleSource).toContain(".artifact-runner-card--html");
-    expect(styleSource).toContain("grid-template-rows: auto auto minmax(0, 1fr);");
-    expect(styleSource).toContain(".artifact-runner-viewport");
-    expect(styleSource).toContain("height: clamp(260px, 52vh, 560px);");
+    expect(styleSource).toContain(".artifact-runner-card--source");
+    expect(styleSource).toContain(".artifact-runner-card--source .artifact-runner-viewport");
+    expect(styleSource).toContain("height: auto;");
+    expect(styleSource).toContain("max-height: min(52vh, 560px);");
     expect(styleSource).toContain(".artifact-runner-source-scroll");
-    expect(styleSource).toContain("padding: 14px 14px 36px;");
+    expect(styleSource).toContain("min-height: 0;");
+    expect(styleSource).toContain("padding: 14px 14px 14px;");
     expect(styleSource).toContain("white-space: pre;");
   });
 

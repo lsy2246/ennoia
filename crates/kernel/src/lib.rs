@@ -49,12 +49,14 @@ pub use extension::{
     LocaleContribution, MemoryContribution, MessageRendererContribution, OperationApprovalLink,
     OperationEventRecord, OperationListQuery, OperationPerformRequest, OperationPerformResponse,
     OperationRecord, OperationStatus, PageContribution, PageNavContribution, PanelContribution,
-    ProcessWorkerControlMessage, ProviderContribution, ProviderGenerationOption,
-    ProviderModelDescriptor, ResolvedUiEntry, ResolvedWorkerEntry, RuntimeOperationRequest,
-    ScheduleActionContribution, ThemeContribution, HOOK_EVENT_ARTIFACT_CREATED,
-    HOOK_EVENT_CONVERSATION_CREATED, HOOK_EVENT_CONVERSATION_MESSAGE_CREATED, HOOK_EVENT_JOB_DUE,
-    HOOK_EVENT_OPERATION_UPDATED, HOOK_EVENT_PERMISSION_APPROVAL_RESOLVED,
-    HOOK_EVENT_RUN_REQUESTED, HOOK_EVENT_RUN_STAGE_CHANGED,
+    PipelineActivationScope, PipelineHandlerActivationSpec, PipelineHandlerResponse,
+    PipelineHandlerSpec, PipelineHandlerStage, ProcessWorkerControlMessage, ProviderContribution,
+    ProviderGenerationOption, ProviderModelDescriptor, ResolvedUiEntry, ResolvedWorkerEntry,
+    RuntimeOperationRequest, ScheduleActionContribution, ThemeContribution,
+    HOOK_EVENT_ARTIFACT_CREATED, HOOK_EVENT_CONVERSATION_CREATED,
+    HOOK_EVENT_CONVERSATION_MESSAGE_CREATED, HOOK_EVENT_JOB_DUE, HOOK_EVENT_OPERATION_UPDATED,
+    HOOK_EVENT_PERMISSION_APPROVAL_RESOLVED, HOOK_EVENT_RUN_REQUESTED,
+    HOOK_EVENT_RUN_STAGE_CHANGED,
 };
 pub use file_access::{AgentFileAccessProfile, AgentFileAccessRoot};
 pub use gate::{GateRecord, GateSeverity, GateVerdict};

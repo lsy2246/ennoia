@@ -16,6 +16,7 @@ import type {
   ExtensionUiModule,
   ExtensionUiRenderHelpers,
 } from "@ennoia/ui-sdk";
+import { normalizeCodeBlockText } from "../../../../web/src/views/conversations/code-block-content";
 
 const roots = new WeakMap<HTMLElement, Root>();
 const MarkdownCodeBlockContext = createContext(false);
@@ -159,7 +160,7 @@ function PlainTextContent({ body, request }: {
 }
 
 function CodeContent({ body }: { body: string }) {
-  const normalized = body.replace(/^```[\w-]*\n?/, "").replace(/\n?```$/, "");
+  const normalized = normalizeCodeBlockText(body);
   return (
     <pre className="message-pre">
       <code>{normalized}</code>
@@ -168,9 +169,7 @@ function CodeContent({ body }: { body: string }) {
 }
 
 function DiagramContent({ body }: { body: string }) {
-  const normalized = body
-    .replace(/^```(?:mermaid|diagram|flowchart)\n?/i, "")
-    .replace(/\n?```$/, "");
+  const normalized = normalizeCodeBlockText(body);
   return (
     <div className="message-diagram">
       <div className="message-diagram__header">Mermaid</div>
@@ -197,7 +196,9 @@ function MarkdownCodeNode({
   children?: ReactNode;
 }) {
   const isBlock = useContext(MarkdownCodeBlockContext);
-  const raw = extractNodeText(children).replace(/\n$/, "");
+  const raw = isBlock
+    ? normalizeCodeBlockText(extractNodeText(children))
+    : extractNodeText(children).replace(/\n$/, "");
   if (!isBlock) {
     return <code className="message-code-inline">{raw}</code>;
   }

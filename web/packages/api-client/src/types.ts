@@ -12,6 +12,7 @@ import type {
   ExtensionOperationContribution,
   ExtensionPageContribution,
   ExtensionPanelContribution,
+  PipelineHandlerContribution,
   ExtensionProviderContribution,
   ExtensionScheduleActionContribution,
   ExtensionSettingField,
@@ -67,6 +68,7 @@ export type UiRuntime = {
     views: ExtensionViewContribution[];
     operations: ExtensionOperationContribution[];
     events: ExtensionEventContribution[];
+    pipeline_handlers: PipelineHandlerContribution[];
     pages: ExtensionPageContribution[];
     panels: ExtensionPanelContribution[];
     themes: ExtensionThemeContribution[];
@@ -657,6 +659,7 @@ export type ExtensionDetail = {
   views: ExtensionView[];
   operations: ExtensionOperation[];
   events: ExtensionEvent[];
+  pipeline_handlers: PipelineHandlerContribution["handler"][];
   message_renderers: ExtensionMessageRendererContribution["renderer"][];
   settings: ExtensionSettingField[];
   diagnostics: ExtensionDiagnostic[];

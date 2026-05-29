@@ -32,7 +32,7 @@ Web
 - `Paths`：统一解析运行目录，所有运行时文件位置都通过 `RuntimePaths` 推导。
 - `Extension Host`：负责扩展扫描、attach / detach、reload / restart、诊断、Worker 解析和 Worker RPC 分发；Worker 可以是 Wasm，也可以是进程型 stdio RPC。对于进程型 Worker，宿主还负责当前 RPC 会话内的 `plugin -> host capability` 反向调用分发。
 - `Server`：负责 HTTP API、定时调度、Worker RPC 路由、日志、事件总线和系统内置组件装配。
-- `Pipeline Runtime`：负责稳定 action 的规则收集、阶段执行和结果收敛。它不拥有 conversation、memory、workflow 的主数据。
+- `Pipeline Runtime`：负责稳定 action 的规则收集、阶段执行、结果收敛和生命周期 slot 接管。它不拥有 conversation、memory、workflow 的主数据。
 - `Extension Runtime Store`：提供扩展可复用的宿主级轻量状态与记录原语，只负责通用 state/record 持久化，不承担 workflow draft、memory graph、conversation message 等业务语义。
 
 ## Agent 权限裁决
@@ -71,13 +71,14 @@ Web
 - 核心不再内置 `journal` 文件记录层。
 - 会话、记忆、运行等产品视图都通过通用 action runtime 和扩展 RPC 组合，不再保留核心包装 REST。
 - 内置 `conversation` 扩展当前声明会话、分支、检查点、线路和消息接口；内置 `memory` 扩展只负责记忆、上下文、审查和图谱侧车。
-- 动作管道是系统级中立执行层，只负责执行规则、收敛结果和发出事实事件；它不再承接 workflow、memory、provider 或 Agent tool 的产品编排。
-- 任务编排通过事件钩子进入生命周期时机。当前内置实现是 `workflow`，未来其他编排机制也可以注册同一事件，并通过 hook `priority` 与稳定排序并存。
+- 动作管道是系统级中立执行层，只负责执行规则、收敛结果、发出事实事件，并在声明过的生命周期 slot 中选择接管者；它不承载 workflow、memory、provider 或 Agent tool 的产品状态机。
+- 会话主回复使用 `conversation.operator_message.received` 事件和 `conversation.response` slot。扩展通过 `pipeline_handlers[]` 申请接管该 slot，宿主按 `priority` 降序、扩展 ID 和 handler ID 稳定排序调用；同一 slot 中第一个返回 `claim` 或 `complete` 的 handler 成为本次 owner，后续 handler 不再执行。
+- Pipeline 只决定“后续消息由哪个主职责处理”，不倒退、不重放用户消息、不解释复杂度。返工、方案不通过、回到 planning、审批恢复和执行重试都属于 workflow run 自己的状态机循环。
 - 会话展示层首屏和后续刷新统一由前端通过 action runtime 组装 detail、run 和 approval 快照；核心不再维护会话专属 SSE 聚合面。
 - `memory` 只暴露 `memory.*` 动作键，不再保留 `/api/memory/*` 核心包装入口。
 - `conversation` 不直接调用 `memory` 或 `workflow`；它只维护会话事实并发出事实事件。
 - `memory` 不直接读取 `conversation.db`，也不再镜像保存整段会话消息或 shadow session state。
-- `workflow` 不假设自己一定挂在 conversation 上；会话事实是否进入 workflow、何时回写 conversation / memory，由 workflow 扩展自己订阅 `conversation.message.created`、`operation.updated` 等事实事件后决定。
+- `workflow` 不假设自己一定挂在 conversation 上；会话主回复是否进入 workflow 由 `conversation.response` slot 的 pipeline handler 和 activation 状态决定，运行过程中的回写、记忆、审批恢复和产物记录由 workflow 的 run 状态机与事件链决定。
 - 宿主允许扩展通过通用 `extension.state` / `extension.record` 原语保存跨刷新轻量状态和会话可视记录；这些条目只表达扩展自己的运行事实，不提升为系统业务模型。
 - Conversation、Message、Memory Graph、Review 等业务数据组织属于扩展私有责任，不属于日志主数据。
 
@@ -85,6 +86,8 @@ Web
 
 - `workflow` 是一个内置扩展实现，声明 run/task/artifact 接口，并承接定时器里的 Agent 执行。
 - `workflow` 自己负责生成结构化执行计划；`plan` 是执行真相源，`task` 只是从 `plan.steps` 派生出来的展示与执行投影视图，系统核心不再硬编码猜测任务清单。
+- `workflow.task_response` 作为 `conversation.response` slot 的任务模式 handler 注册，默认关闭；用户在会话 composer 中开启该 activation 后，只影响后续消息。`workflow.default_response` 作为 fallback handler 承载普通回复。
+- 任务模式 handler 进入 workflow 的 draft / plan / confirmation / execution 循环；普通 fallback 直接执行回复，不再靠关键词或复杂度推断自动升级为任务编排。
 - `workflow` 相关读取与执行统一通过 `run.*`、`task.*`、`artifact.*` 动作键或扩展 RPC 暴露，不再保留 `/api/runs/*` 核心包装入口。
 - 系统 scheduler 只负责保存计划、计算到期、串行触发、失败重试和记录最近运行历史。
 - 定时器支持两类执行方式：
@@ -130,17 +133,27 @@ Web
 
 - Hook 保留为扩展订阅系统事件的方式，但事件先进入宿主持久化事件总线，不做同步强耦合调用。
 - 动作管道在完成会话创建、消息追加、run 请求等动作后，把 `conversation.created`、`conversation.message.created`、`run.requested` 等事件写入 `events.db`；operation 生命周期、权限审批和 scheduler 分别发布 `operation.updated`、`permission.approval.resolved`、`job.due`。
+- `conversation.message.created` 是持久事实事件，供旁路观察、日志、记录投影等扩展使用；会话主回复接管使用同步 pipeline slot，不再依赖异步 hook 竞速。
 - workflow 这类进程型 Worker 如果在扩展内部产生新的生命周期事实，可以通过宿主 `HookEventPublish` capability 写回事件总线；当前 workflow 会发布 `run.stage.changed` 和 `artifact.created`。
 - 事件总线异步把事件投递给已注册 Hook；扩展临时离线不会阻塞会话写入。
 - 同一事件下的 hook 按 manifest `events[].priority` 降序投递，同优先级按扩展 ID 和 handler 名稳定排序。
 - 系统不要求 memory / workflow 必须通过 Hook 互相耦合；跨域组合统一走事件链和宿主中立 runtime bridge（action、provider、runtime operation、permission、hook event publish）。
 
+## Pipeline Handler 边界
+
+- `pipeline_handlers[]` 声明同步生命周期入口。当前稳定执行点是 `conversation.operator_message.received` 的 `drive` 阶段和 `conversation.response` slot。
+- `stage` 表达 handler 在生命周期中的位置：`tap` 用于旁路观察，`prepare` 用于主处理前准备，`drive` 用于主职责接管，`after` 用于收尾。当前宿主已落地 `drive` 调用链，其余阶段保留为同一契约下的后续扩展点。
+- `slot` 由宿主生命周期接口定义，不由扩展互相声明互斥。声明同一 slot 的 handler 可以共存，宿主用 priority 和 outcome 选择本次 owner。
+- `activation` 让扩展把某个 handler 暴露为可切换能力。activation 状态保存在 `extension.state` 的 `pipeline.activation` namespace，按 `conversation`、`agent`、`space` 或 `global` scope 生效。
+- handler 返回 `skip` 或 `continue` 时，宿主继续尝试同 slot 的后续 handler；返回 `claim` 或 `complete` 时，本次 slot 被接管；返回 `fail` 或 RPC 失败时，宿主记录 `runtime.pipeline.handler_outcome` 并继续尝试 fallback 或后续 handler。
+
 ## 扩展契约模型
 
-- 扩展 manifest 只声明系统可见契约：`id`、`version`、`name`、`description`、`docs`、`compat`、`views`、`operations`、`events`、`settings`、`message_renderers`、`conversation`。
+- 扩展 manifest 只声明系统可见契约：`id`、`version`、`name`、`description`、`docs`、`compat`、`views`、`operations`、`events`、`pipeline_handlers`、`settings`、`message_renderers`、`conversation`。
 - `views` 表达主壳可以打开或挂载的界面契约，当前稳定类型是 `page` 与 `panel`，不再单独设计 entry、surface 或入口列表。
 - `operations` 表达系统可调用动作；`operation.name` 是唯一调用名，同时作为 action key、Worker method 和事件投递目标。
 - `events` 表达 `on -> operation` 的投递关系，并可声明 `priority`；事件先进入宿主持久化事件总线，再异步投递到目标 operation。
+- `pipeline_handlers` 表达同步生命周期入口的 handler、slot、priority、operation 和可选 activation；它只负责入口接管，不表达 workflow run 内部状态。
 - `settings` 表达扩展级配置字段；主壳按声明渲染表单，实际值保存在扩展级宿主配置文件，不上浮为系统级配置模型。
 - `workflow` 和 `memory` 都只是内置扩展实现；系统依赖接口键和动作 ID，不反向依赖具体扩展。
 - 扩展不自行开放端口；operation 执行统一走宿主 Worker RPC，Worker 通过 Wasm ABI 或进程 stdio 协议接入。

@@ -19,9 +19,10 @@
   max-height: 70vh;
 }
 
-.html-reply-frame--message {
-  min-height: 180px;
-  height: clamp(180px, 34vh, 420px);
+.html-reply-frame--auto {
+  min-height: 64px;
+  height: var(--html-reply-frame-height, 64px);
+  max-height: min(70vh, 420px);
 }
 
 .html-reply-panel {

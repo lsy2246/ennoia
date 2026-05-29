@@ -20,6 +20,7 @@ import { useUiHelpers, useUiStore } from "@/stores/ui";
 import { loadExtensionMessageRendererMount } from "@/views/extensions/registry";
 
 import type { ChatEntryFormat } from "./chat-types";
+import { normalizeCodeBlockText } from "./code-block-content";
 
 function buildSkillMap(skills: SkillConfig[]) {
   const skillMap = new Map<string, string>();
@@ -105,7 +106,7 @@ function PlainTextContent({ body, agents, skills, mentionAgentIds }: {
 }
 
 function CodeContent({ body }: { body: string }) {
-  const normalized = body.replace(/^```[\w-]*\n?/, "").replace(/\n?```$/, "");
+  const normalized = normalizeCodeBlockText(body);
   return (
     <pre className="message-pre">
       <code>{normalized}</code>
@@ -127,9 +128,7 @@ function JsonContent({ body }: { body: string }) {
 }
 
 function DiagramContent({ body }: { body: string }) {
-  const normalized = body
-    .replace(/^```(?:mermaid|diagram|flowchart)\n?/i, "")
-    .replace(/\n?```$/, "");
+  const normalized = normalizeCodeBlockText(body);
   return (
     <div className="message-diagram">
       <div className="message-diagram__header">Mermaid</div>

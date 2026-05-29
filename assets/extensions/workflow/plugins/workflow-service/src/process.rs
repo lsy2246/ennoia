@@ -7,8 +7,8 @@ use std::thread;
 
 use ennoia_contract::behavior::{BehaviorRunRequest, BehaviorSourceRef, BehaviorTrigger};
 use ennoia_kernel::{
-    DecisionSnapshot, ExtensionRpcResponse, GateSeverity, GateVerdict, OwnerRef, RunContext,
-    RunSpec, TaskSpec,
+    DecisionSnapshot, ExtensionRpcResponse, GateSeverity, GateVerdict, OwnerRef,
+    PipelineHandlerResponse, RunContext, RunSpec, TaskSpec,
 };
 use ennoia_paths::RuntimePaths;
 use ennoia_policy::PolicySet;
@@ -19,8 +19,8 @@ use sqlx::{Row, SqlitePool};
 use tokio::sync::mpsc;
 
 use crate::conversation_hooks::{
-    handle_artifact_created, handle_conversation_message_created, handle_job_due,
-    handle_operation_updated, handle_permission_approval_resolved, handle_run_requested,
+    handle_artifact_created, handle_job_due, handle_operation_updated,
+    handle_operator_message_pipeline, handle_permission_approval_resolved, handle_run_requested,
     handle_run_stage_changed, recover_stale_conversation_receipts,
 };
 use crate::host_bridge::HostBridge;
@@ -240,7 +240,7 @@ async fn handle_invocation(
     }
 
     let path = invocation.method.trim_matches('/');
-    let _context = invocation.context;
+    let context = invocation.context;
     match path {
         "workflow.default" => match parse_run_request(invocation.params) {
             Ok(payload) => match run_behavior(&state.runtime, payload).await {
@@ -308,25 +308,54 @@ async fn handle_invocation(
                 ExtensionRpcResponse::failure("workflow_workspace_failed", error.to_string())
             }
         },
-        "workflow.conversation.message.created" => {
-            match parse_json::<ennoia_kernel::HookEventEnvelope>(invocation.params) {
-                Ok(payload) => {
-                    match handle_conversation_message_created(&state.runtime, &state.store, payload)
-                        .await
-                    {
-                        Ok(response) => ExtensionRpcResponse::success(
-                            serde_json::to_value(response).unwrap_or(serde_json::json!({
-                                "handled": true,
-                            })),
-                        ),
-                        Err(error) => {
-                            ExtensionRpcResponse::failure("conversation_message_hook_failed", error)
-                        }
-                    }
-                }
-                Err(error) => error,
-            }
-        }
+        "workflow.handle_operator_message" => match handle_operator_message_pipeline(
+            &state.runtime,
+            &state.store,
+            invocation.params,
+            context,
+            false,
+        )
+        .await
+        {
+            Ok(response) => ExtensionRpcResponse::success(
+                serde_json::to_value(response).unwrap_or(serde_json::json!({
+                    "outcome": "skip",
+                })),
+            ),
+            Err(error) => ExtensionRpcResponse::success(
+                serde_json::to_value(PipelineHandlerResponse {
+                    outcome: "fail".to_string(),
+                    slot: Some("conversation.response".to_string()),
+                    message: Some(error),
+                    ..PipelineHandlerResponse::default()
+                })
+                .unwrap_or(serde_json::json!({ "outcome": "fail" })),
+            ),
+        },
+        "workflow.handle_operator_message_default" => match handle_operator_message_pipeline(
+            &state.runtime,
+            &state.store,
+            invocation.params,
+            context,
+            true,
+        )
+        .await
+        {
+            Ok(response) => ExtensionRpcResponse::success(
+                serde_json::to_value(response).unwrap_or(serde_json::json!({
+                    "outcome": "skip",
+                })),
+            ),
+            Err(error) => ExtensionRpcResponse::success(
+                serde_json::to_value(PipelineHandlerResponse {
+                    outcome: "fail".to_string(),
+                    slot: Some("conversation.response".to_string()),
+                    message: Some(error),
+                    ..PipelineHandlerResponse::default()
+                })
+                .unwrap_or(serde_json::json!({ "outcome": "fail" })),
+            ),
+        },
         "workflow.operation.updated" => {
             match parse_json::<ennoia_kernel::HookEventEnvelope>(invocation.params) {
                 Ok(payload) => {

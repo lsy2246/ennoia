@@ -28,6 +28,7 @@ Extension descriptor 包含：
 - `views`
 - `operations`
 - `events`
+- `pipeline_handlers`
 - `settings`
 - `message_renderers`
 - `conversation`
@@ -37,9 +38,9 @@ Skill 磁盘包包含：
 - `SKILL.md`：传统技能入口，YAML frontmatter 必须包含 `name` 与 `description`
 - `config.toml`：Ennoia 增强配置，包含 `version`、`mount.mode`、`actions[]`、`settings[]`、`diagnostics` 与可选 `prepare`
 
-主声明模型统一只有一层：`views`、`operations`、`events`、`settings`、`message_renderers`、`conversation`。
+主声明模型统一只有一层：`views`、`operations`、`events`、`pipeline_handlers`、`settings`、`message_renderers`、`conversation`。
 
-`views` 表达主壳可以打开或挂载的界面契约，当前稳定类型是 `page` 与 `panel`。`operations` 表达系统可调用动作；`operation.name` 是唯一调用名，同时作为 action key、Worker method 和事件投递目标。`events` 只表达 `on -> operation` 的投递关系。`message_renderers` 表达消息正文格式到扩展 UI mount 的映射，主壳只做选择、挂载和纯文本兜底。
+`views` 表达主壳可以打开或挂载的界面契约，当前稳定类型是 `page` 与 `panel`。`operations` 表达系统可调用动作；`operation.name` 是唯一调用名，同时作为 action key、Worker method 和事件投递目标。`events` 只表达 `on -> operation` 的异步投递关系。`pipeline_handlers` 表达同步生命周期入口的 handler、slot、优先级和 activation。`message_renderers` 表达消息正文格式到扩展 UI mount 的映射，主壳只做选择、挂载和纯文本兜底。
 
 UI 与 service 入口由目录约定发现，属于宿主内部解析结果，不属于 manifest 契约，也不在扩展设计界面展示。
 
@@ -76,10 +77,22 @@ description = "由 scheduler 触发 workflow run。"
 agent = true
 schedule = true
 
-[[events]]
-on = "conversation.message.created"
-operation = "workflow.conversation.message.created"
+[[pipeline_handlers]]
+id = "workflow.task_response"
+on = "conversation.operator_message.received"
+stage = "drive"
+slot = "conversation.response"
+priority = 100
+operation = "workflow.handle_operator_message"
+
+[pipeline_handlers.activation]
+scope = "conversation"
+key = "workflow.task_mode"
+default = false
+label = { key = "ext.workflow.task_mode", fallback = "任务模式" }
 ```
+
+Pipeline handler 用于同步生命周期入口。当前已落地的主入口是 `conversation.operator_message.received` 的 `drive` 阶段和 `conversation.response` slot。宿主按 priority 降序调用候选 handler；handler 返回 `claim` 或 `complete` 后，本次 slot 接管结束，返回 `skip`、`continue` 或 `fail` 时继续尝试后续 handler。
 
 扩展源码推荐目录为 `ui/`、`bin/`、`worker/`、`data/` 和 `model-endpoint-presets/`。这些目录不是必备项，也不是 manifest 契约。
 

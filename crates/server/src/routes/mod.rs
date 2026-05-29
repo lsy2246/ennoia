@@ -21,8 +21,8 @@ use ennoia_extension_host::{
     RegisteredExtensionOperationContribution, RegisteredExtensionViewContribution,
     RegisteredHookContribution, RegisteredLocaleContribution, RegisteredMemoryContribution,
     RegisteredMessageRendererContribution, RegisteredPageContribution, RegisteredPanelContribution,
-    RegisteredProviderContribution, RegisteredScheduleActionContribution,
-    RegisteredThemeContribution, ResolvedExtensionSnapshot,
+    RegisteredPipelineHandlerContribution, RegisteredProviderContribution,
+    RegisteredScheduleActionContribution, RegisteredThemeContribution, ResolvedExtensionSnapshot,
 };
 use ennoia_kernel::{
     AgentConfig, BootstrapState, ExtensionDiagnostic, ExtensionRuntimeEvent, HookEventEnvelope,
@@ -340,6 +340,7 @@ struct UiRuntimeRegistryResponse {
     behaviors: Vec<RegisteredBehaviorContribution>,
     memories: Vec<RegisteredMemoryContribution>,
     hooks: Vec<RegisteredHookContribution>,
+    pipeline_handlers: Vec<RegisteredPipelineHandlerContribution>,
     actions: Vec<RegisteredActionRuleContribution>,
     schedule_actions: Vec<RegisteredScheduleActionContribution>,
 }
@@ -540,6 +541,7 @@ async fn ui_runtime(State(state): State<AppState>) -> Json<UiRuntimeResponse> {
         + snapshot.behaviors.len()
         + snapshot.memories.len()
         + snapshot.hooks.len()
+        + snapshot.pipeline_handlers.len()
         + snapshot.actions.len()
         + snapshot.schedule_actions.len()) as u64;
     let preference_version = ui_preference_version_from_disk(&state);
@@ -559,6 +561,7 @@ async fn ui_runtime(State(state): State<AppState>) -> Json<UiRuntimeResponse> {
             behaviors: snapshot.behaviors,
             memories: snapshot.memories,
             hooks: snapshot.hooks,
+            pipeline_handlers: snapshot.pipeline_handlers,
             actions: snapshot.actions,
             schedule_actions: snapshot.schedule_actions,
         },

@@ -47,9 +47,9 @@ pub struct PlanStep {
     pub expected_outputs: Vec<String>,
     #[serde(default, deserialize_with = "deserialize_string_vec")]
     pub pass_if: Vec<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_optional_string")]
     pub next_pass: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_optional_string")]
     pub next_fail: String,
     #[serde(default)]
     pub assigned_agent_id: String,
@@ -107,7 +107,7 @@ pub fn parse_plan_from_text(text: &str, objective: &str) -> Result<PlanSpec, Str
 
 pub fn normalize_plan(mut plan: PlanSpec, objective: &str) -> PlanSpec {
     let now = Utc::now().to_rfc3339();
-    if plan.schema_version.trim().is_empty() {
+    if plan.schema_version.trim().is_empty() || plan.schema_version.trim() == "1.0" {
         plan.schema_version = default_plan_schema_version();
     }
     if plan.objective.trim().is_empty() {
@@ -289,11 +289,12 @@ pub fn build_planning_prompt(goal: &str, require_confirmation: bool) -> String {
 1. 先用简短自然语言概述执行思路。\n\
 2. 然后输出一个 ```json``` 代码块，内容必须是可执行 plan。\n\
 3. plan 必须包含：schema_version、objective、intent、steps、tool_plan、verify_contract、meta。\n\
-4. steps 每项至少包含：id、type、goal、allowed_tools、expected_outputs、pass_if、next_pass、next_fail。\n\
-5. 如果任务涉及修改代码或文件，必须包含 baseline_verify 步骤，并放在写操作之前。\n\
-6. tool_plan 必须写本次真正会使用的具体工具，不要留空，不要用占位符。\n\
-7. meta.plan_status 必须为 ready。\n\
-8. 除了自然语言说明和一个 JSON 代码块，不要输出其他杂项。\n\
+4. schema_version 必须为 3.0。\n\
+5. steps 每项至少包含：id、type、goal、allowed_tools、expected_outputs、pass_if、next_pass、next_fail；终止步骤的 next_pass/next_fail 使用空字符串，不要使用 null。\n\
+6. 如果任务涉及修改代码或文件，必须包含 baseline_verify 步骤，并放在写操作之前。\n\
+7. tool_plan 必须写本次真正会使用的具体工具，不要留空，不要用占位符。\n\
+8. meta.plan_status 必须为 ready。\n\
+9. 除了自然语言说明和一个 JSON 代码块，不要输出其他杂项。\n\
 {}\n",
         goal.trim(),
         confirm_line
@@ -341,6 +342,18 @@ where
 {
     let value = JsonValue::deserialize(deserializer)?;
     Ok(json_value_tokens(&value))
+}
+
+fn deserialize_optional_string<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = JsonValue::deserialize(deserializer)?;
+    Ok(match value {
+        JsonValue::String(text) => text,
+        JsonValue::Null => String::new(),
+        other => other.to_string(),
+    })
 }
 
 fn json_value_tokens(value: &JsonValue) -> Vec<String> {
@@ -498,6 +511,26 @@ mod tests {
         .expect("plan");
         assert_eq!(plan.objective, "测试");
         assert_eq!(plan.steps.len(), 1);
+    }
+
+    #[test]
+    fn normalizes_legacy_generated_plan_version() {
+        let plan = parse_plan_from_text(
+            "方案如下\n```json\n{\"schema_version\":\"1.0\",\"objective\":\"写博客\",\"intent\":\"write_blog\",\"steps\":[{\"id\":\"S1\",\"type\":\"draft\",\"goal\":\"写草稿\",\"allowed_tools\":[],\"expected_outputs\":[\"草稿\"],\"pass_if\":\"内容完整\",\"next_pass\":null,\"next_fail\":\"S1\"}],\"tool_plan\":[{\"tool\":\"command_exec\"}],\"verify_contract\":{\"ok\":true},\"meta\":{\"plan_status\":\"ready\"}}\n```",
+            "写博客",
+        )
+        .expect("legacy plan should parse");
+
+        assert_eq!(plan.schema_version, default_plan_schema_version());
+        assert_eq!(plan.steps[0].next_pass, "");
+        assert!(validate_plan(&plan).ready);
+    }
+
+    #[test]
+    fn planning_prompt_names_current_schema_version() {
+        let prompt = build_planning_prompt("写博客", true);
+
+        assert!(prompt.contains("schema_version 必须为 3.0"));
     }
 
     #[test]

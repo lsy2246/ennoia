@@ -13,6 +13,10 @@
 
 .artifact-runner-card--html {
   display: grid;
+  grid-template-rows: auto auto auto;
+}
+
+.artifact-runner-card--preview {
   grid-template-rows: auto auto minmax(0, 1fr);
 }
 
@@ -67,9 +71,17 @@
 
 .artifact-runner-viewport {
   min-height: 0;
-  height: clamp(260px, 52vh, 560px);
   overflow: auto;
   background: #101827;
+}
+
+.artifact-runner-card--preview .artifact-runner-viewport {
+  height: clamp(260px, 52vh, 560px);
+}
+
+.artifact-runner-card--source .artifact-runner-viewport {
+  height: auto;
+  max-height: min(52vh, 560px);
 }
 
 .artifact-runner-frame {
@@ -119,8 +131,8 @@
 
 .artifact-runner-source-scroll {
   min-width: max-content;
-  min-height: 100%;
-  padding: 14px 14px 36px;
+  min-height: 0;
+  padding: 14px 14px 14px;
   overflow: visible;
   white-space: pre;
   word-break: normal;

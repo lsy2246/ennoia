@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, type CSSProperties } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import type {
   ExtensionConversationRecord,
@@ -31,6 +31,8 @@ type HtmlReplyPayload = {
   fallback?: string;
 };
 
+const MIN_MESSAGE_FRAME_HEIGHT = 64;
+const MAX_MESSAGE_FRAME_HEIGHT = 420;
 const CONFIG_SCOPE_TYPE = "extension";
 const CONFIG_SCOPE_ID = "default";
 const CONFIG_KEY = "output";
@@ -69,15 +71,38 @@ function buildSandboxHtml(content: string) {
 function HtmlReplyCard({ record }: { record: ExtensionConversationRecord }) {
   const payload = asRecordPayload<HtmlReplyPayload>(record.payload);
   const html = textValue(payload.html);
+  const [frameHeight, setFrameHeight] = useState(MIN_MESSAGE_FRAME_HEIGHT);
+  useEffect(() => {
+    setFrameHeight(MIN_MESSAGE_FRAME_HEIGHT);
+  }, [html]);
+
   if (!html.trim()) {
     return null;
+  }
+
+  function handleFrameLoad(event: React.SyntheticEvent<HTMLIFrameElement>) {
+    const documentElement = event.currentTarget.contentDocument?.documentElement;
+    const body = event.currentTarget.contentDocument?.body;
+    const bodyHeight = Math.max(
+      body?.scrollHeight ?? 0,
+      body?.offsetHeight ?? 0,
+      body?.getBoundingClientRect().height ?? 0,
+    );
+    const contentHeight = Math.max(
+      bodyHeight,
+      documentElement?.offsetHeight ?? 0,
+      MIN_MESSAGE_FRAME_HEIGHT,
+    );
+    setFrameHeight(Math.min(contentHeight, MAX_MESSAGE_FRAME_HEIGHT));
   }
 
   return (
     <section className="html-reply-card html-reply-card--message">
       <iframe
-        className="html-reply-frame html-reply-frame--message"
-        sandbox=""
+        className="html-reply-frame html-reply-frame--message html-reply-frame--auto"
+        sandbox="allow-same-origin"
+        onLoad={handleFrameLoad}
+        style={{ "--html-reply-frame-height": `${frameHeight}px` } as CSSProperties}
         title={record.title || "HTML 排版回复"}
         srcDoc={buildSandboxHtml(html)}
       />

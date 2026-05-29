@@ -1,12 +1,14 @@
 use ennoia_contract::ApiError;
 use ennoia_kernel::{
-    ActionPhase, ActionResultMode, HOOK_EVENT_CONVERSATION_CREATED,
-    HOOK_EVENT_CONVERSATION_MESSAGE_CREATED, HOOK_EVENT_RUN_REQUESTED,
+    ActionPhase, ActionResultMode, ExtensionStateGetQuery, PipelineActivationScope,
+    PipelineHandlerActivationSpec, PipelineHandlerResponse, PipelineHandlerStage,
+    HOOK_EVENT_CONVERSATION_CREATED, HOOK_EVENT_CONVERSATION_MESSAGE_CREATED,
+    HOOK_EVENT_RUN_REQUESTED,
 };
 use ennoia_logs::RequestContext;
 use serde_json::Value as JsonValue;
 
-use crate::app::AppState;
+use crate::app::{dispatch_extension_rpc, AppState};
 use crate::logs_store::{LogEntryWrite, LOGS_COMPONENT_PROXY};
 use crate::realtime::RealtimeEvent;
 use crate::routes::{
@@ -16,6 +18,9 @@ use crate::routes::{
     },
     scoped,
 };
+
+const PIPELINE_EVENT_OPERATOR_MESSAGE_RECEIVED: &str = "conversation.operator_message.received";
+const PIPELINE_SLOT_CONVERSATION_RESPONSE: &str = "conversation.response";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PipelineStage {
@@ -166,6 +171,7 @@ async fn run_pipeline_stage(
             PipelineHandlerAction::EmitConversationMessageCreated => {
                 if let Some(payload) = result {
                     emit_conversation_message_created(state, request, payload);
+                    drive_operator_message_received(state, request, payload).await;
                 }
             }
             PipelineHandlerAction::EmitRunRequested => {
@@ -378,6 +384,247 @@ fn emit_conversation_message_created(
     state.realtime.publish(RealtimeEvent::ConversationChanged {
         conversation_id: conversation_id.to_string(),
     });
+}
+
+async fn drive_operator_message_received(
+    state: &AppState,
+    request: &RequestContext,
+    payload: &JsonValue,
+) {
+    let role = payload
+        .get("message")
+        .and_then(|item| item.get("role"))
+        .and_then(JsonValue::as_str)
+        .unwrap_or_default();
+    if !matches!(role, "operator" | "user") {
+        return;
+    }
+
+    let handlers = state.extensions.pipeline_handlers_for(
+        PIPELINE_EVENT_OPERATOR_MESSAGE_RECEIVED,
+        Some(PipelineHandlerStage::Drive),
+        Some(PIPELINE_SLOT_CONVERSATION_RESPONSE),
+    );
+    if handlers.is_empty() {
+        return;
+    }
+
+    for contribution in handlers {
+        let rpc_request = ennoia_kernel::ExtensionRpcRequest {
+            params: payload.clone(),
+            context: serde_json::json!({
+                "pipeline": {
+                    "event": PIPELINE_EVENT_OPERATOR_MESSAGE_RECEIVED,
+                    "stage": "drive",
+                    "slot": PIPELINE_SLOT_CONVERSATION_RESPONSE,
+                    "handler_id": contribution.handler.id,
+                    "activation": resolve_pipeline_activation(
+                        state,
+                        &contribution.extension_id,
+                        contribution.handler.activation.as_ref(),
+                        payload,
+                    ),
+                    "trace": {
+                        "request_id": request.request_id,
+                    }
+                }
+            }),
+        };
+        let handler_id = contribution.handler.id.clone();
+        let extension_id = contribution.extension_id.clone();
+        let operation = contribution.handler.operation.clone();
+        match dispatch_extension_rpc(state, &extension_id, &operation, rpc_request).await {
+            Ok(response) if response.ok => {
+                if let Ok(outcome) =
+                    serde_json::from_value::<PipelineHandlerResponse>(response.data)
+                {
+                    match outcome.outcome.as_str() {
+                        "claim" | "complete" => {
+                            record_pipeline_drive_outcome(
+                                state,
+                                request,
+                                &extension_id,
+                                &handler_id,
+                                &operation,
+                                &outcome,
+                                "ok",
+                            );
+                            return;
+                        }
+                        "skip" | "continue" => {
+                            record_pipeline_drive_outcome(
+                                state,
+                                request,
+                                &extension_id,
+                                &handler_id,
+                                &operation,
+                                &outcome,
+                                "skipped",
+                            );
+                        }
+                        "fail" => {
+                            record_pipeline_drive_outcome(
+                                state,
+                                request,
+                                &extension_id,
+                                &handler_id,
+                                &operation,
+                                &outcome,
+                                "error",
+                            );
+                        }
+                        other => {
+                            let outcome = PipelineHandlerResponse {
+                                outcome: other.to_string(),
+                                message: Some("unknown pipeline outcome".to_string()),
+                                ..PipelineHandlerResponse::default()
+                            };
+                            record_pipeline_drive_outcome(
+                                state,
+                                request,
+                                &extension_id,
+                                &handler_id,
+                                &operation,
+                                &outcome,
+                                "warn",
+                            );
+                        }
+                    }
+                }
+            }
+            Ok(response) => {
+                let message = response
+                    .error
+                    .map(|error| format!("{}: {}", error.code, error.message))
+                    .unwrap_or_else(|| "pipeline handler returned failure".to_string());
+                let outcome = PipelineHandlerResponse {
+                    outcome: "fail".to_string(),
+                    message: Some(message),
+                    ..PipelineHandlerResponse::default()
+                };
+                record_pipeline_drive_outcome(
+                    state,
+                    request,
+                    &extension_id,
+                    &handler_id,
+                    &operation,
+                    &outcome,
+                    "error",
+                );
+            }
+            Err(error) => {
+                let outcome = PipelineHandlerResponse {
+                    outcome: "fail".to_string(),
+                    message: Some(error.to_string()),
+                    ..PipelineHandlerResponse::default()
+                };
+                record_pipeline_drive_outcome(
+                    state,
+                    request,
+                    &extension_id,
+                    &handler_id,
+                    &operation,
+                    &outcome,
+                    "error",
+                );
+            }
+        }
+    }
+}
+
+fn resolve_pipeline_activation(
+    state: &AppState,
+    extension_id: &str,
+    activation: Option<&PipelineHandlerActivationSpec>,
+    payload: &JsonValue,
+) -> JsonValue {
+    let Some(activation) = activation else {
+        return serde_json::json!({ "enabled": true });
+    };
+    let scope_id = match activation.scope {
+        PipelineActivationScope::Conversation => payload
+            .get("conversation")
+            .and_then(|item| item.get("id"))
+            .or_else(|| {
+                payload
+                    .get("message")
+                    .and_then(|item| item.get("conversation_id"))
+            })
+            .and_then(JsonValue::as_str)
+            .unwrap_or("unknown"),
+        PipelineActivationScope::Agent => payload
+            .get("message")
+            .and_then(|item| item.get("sender"))
+            .and_then(JsonValue::as_str)
+            .unwrap_or("unknown"),
+        PipelineActivationScope::Space => payload
+            .get("conversation")
+            .and_then(|item| item.get("space_id"))
+            .and_then(JsonValue::as_str)
+            .unwrap_or("default"),
+        PipelineActivationScope::Global => "global",
+    };
+    let scope_type = match activation.scope {
+        PipelineActivationScope::Conversation => "conversation",
+        PipelineActivationScope::Agent => "agent",
+        PipelineActivationScope::Space => "space",
+        PipelineActivationScope::Global => "global",
+    };
+    let stored = state
+        .extension_runtime_store
+        .get_state(&ExtensionStateGetQuery {
+            extension_id: extension_id.to_string(),
+            namespace: "pipeline.activation".to_string(),
+            scope_type: scope_type.to_string(),
+            scope_id: scope_id.to_string(),
+            key: activation.key.clone(),
+        })
+        .ok()
+        .flatten();
+    let enabled = stored
+        .as_ref()
+        .and_then(|entry| entry.value.as_bool())
+        .unwrap_or(activation.default);
+    serde_json::json!({
+        "enabled": enabled,
+        "scope": scope_type,
+        "scope_id": scope_id,
+        "key": activation.key,
+        "default": activation.default,
+        "label": activation.label,
+    })
+}
+
+fn record_pipeline_drive_outcome(
+    state: &AppState,
+    request: &RequestContext,
+    extension_id: &str,
+    handler_id: &str,
+    operation: &str,
+    outcome: &PipelineHandlerResponse,
+    level: &str,
+) {
+    let _ = state.logs.append_log_scoped(
+        LogEntryWrite {
+            event: "runtime.pipeline.handler_outcome".to_string(),
+            level: level.to_string(),
+            component: LOGS_COMPONENT_PROXY.to_string(),
+            source_kind: "pipeline_handler".to_string(),
+            source_id: Some(handler_id.to_string()),
+            message: "pipeline handler returned outcome".to_string(),
+            attributes: serde_json::json!({
+                "extension_id": extension_id,
+                "operation": operation,
+                "outcome": outcome.outcome,
+                "slot": outcome.slot,
+                "run_id": outcome.run_id,
+                "operation_id": outcome.operation_id,
+                "message": outcome.message,
+            }),
+            created_at: None,
+        },
+        Some(&request.trace_context()),
+    );
 }
 
 fn emit_run_requested(state: &AppState, request: &RequestContext, payload: &JsonValue) {

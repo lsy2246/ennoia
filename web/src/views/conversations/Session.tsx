@@ -6,11 +6,13 @@ import {
   createConversationStream,
   deleteConversationBranch,
   getConversation,
+  getExtensionState,
   listAgents,
   listConversationPermissionApprovals,
   listConversationPermissionGrants,
   listSkills,
   parseConversationStreamPayload,
+  putExtensionState,
   revokePermissionGrant,
   resolvePermissionApproval,
   switchConversationBranch,
@@ -110,6 +112,9 @@ const EMPTY_PICKER_STATE: ComposerPickerState = {
 const OUTBOX_STORAGE_PREFIX = "ennoia.conversation.outbox.v1";
 const PENDING_REPLY_STORAGE_PREFIX = "ennoia.conversation.pending-replies.v1";
 const CHAT_VISIBILITY_STORAGE_PREFIX = "ennoia.conversation.chat-visibility.v1";
+const PIPELINE_ACTIVATION_NAMESPACE = "pipeline.activation";
+const PIPELINE_EVENT_OPERATOR_MESSAGE_RECEIVED = "conversation.operator_message.received";
+const PIPELINE_SLOT_CONVERSATION_RESPONSE = "conversation.response";
 const RECOVER_SENDING_AFTER_MS = 1500;
 
 type ChatVisibilityPreferences = {
@@ -911,7 +916,7 @@ function isConversationMissingError(error: unknown) {
 
 export function SessionView({ conversationId, panelId }: { conversationId: string; panelId?: string }) {
   const sessionId = conversationId;
-  const { formatDateTime, t } = useUiHelpers();
+  const { formatDateTime, resolveText, runtime, t } = useUiHelpers();
   const operatorProfile = useRuntimeStore((state) => state.profile);
   const openView = useWorkbenchStore((state) => state.openView);
   const closeView = useWorkbenchStore((state) => state.closeView);
@@ -931,6 +936,8 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
   const [pickerState, setPickerState] = useState<ComposerPickerState>(EMPTY_PICKER_STATE);
   const [composerSnapshot, setComposerSnapshot] = useState<ComposerSnapshot>({ body: "", addressedAgents: [], segments: [] });
   const [composerMode, setComposerMode] = useState<ComposerModeState>({ kind: "normal" });
+  const [conversationResponseActivationEnabled, setConversationResponseActivationEnabled] = useState(false);
+  const [conversationResponseActivationBusy, setConversationResponseActivationBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [streamNeedsResync, setStreamNeedsResync] = useState(false);
@@ -1058,6 +1065,23 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
     () => new Map(activeAgents.map((agent) => [agent.id, agent])),
     [activeAgents],
   );
+  const conversationResponseActivation = useMemo(() => {
+    const handlers = (runtime?.registry.pipeline_handlers ?? [])
+      .filter((contribution) =>
+        contribution.handler.on === PIPELINE_EVENT_OPERATOR_MESSAGE_RECEIVED
+        && contribution.handler.stage === "drive"
+        && contribution.handler.slot === PIPELINE_SLOT_CONVERSATION_RESPONSE
+        && !contribution.handler.fallback
+        && contribution.handler.activation?.scope === "conversation",
+      )
+      .sort((left, right) =>
+        right.handler.priority - left.handler.priority
+        || left.extension_id.localeCompare(right.extension_id)
+        || left.handler.id.localeCompare(right.handler.id),
+      );
+    return handlers[0] ?? null;
+  }, [runtime?.registry.pipeline_handlers]);
+  const conversationResponseActivationSpec = conversationResponseActivation?.handler.activation ?? null;
 
   const refreshThread = useCallback(async () => {
     try {
@@ -1083,6 +1107,35 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
     }
   }, [handleConversationMissing, sessionId]);
 
+  const refreshConversationResponseActivation = useCallback(async () => {
+    if (!conversationResponseActivation || !conversationResponseActivationSpec) {
+      setConversationResponseActivationEnabled(false);
+      return;
+    }
+    try {
+      const entry = await getExtensionState({
+        extension_id: conversationResponseActivation.extension_id,
+        namespace: PIPELINE_ACTIVATION_NAMESPACE,
+        scope_type: conversationResponseActivationSpec.scope,
+        scope_id: sessionId,
+        key: conversationResponseActivationSpec.key,
+      });
+      if (isMountedRef.current) {
+        setConversationResponseActivationEnabled(Boolean(entry.value));
+      }
+    } catch (err) {
+      if (err instanceof ApiError && (err.status === 404 || err.code === "NOT_FOUND")) {
+        if (isMountedRef.current) {
+          setConversationResponseActivationEnabled(conversationResponseActivationSpec.default);
+        }
+        return;
+      }
+      if (isMountedRef.current) {
+        setError(String(err));
+      }
+    }
+  }, [conversationResponseActivation, conversationResponseActivationSpec, sessionId]);
+
   const hydrate = useCallback(async () => {
     setError(null);
     setDetail(null);
@@ -1104,6 +1157,7 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
       setGrants(nextGrants);
       setStreamNeedsResync(false);
       conversationUpdatedAtRef.current = nextDetail.conversation.updated_at;
+      void refreshConversationResponseActivation();
     } catch (err) {
       if (handleConversationMissing(err)) {
         return;
@@ -1112,7 +1166,38 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
         setError(String(err));
       }
     }
-  }, [handleConversationMissing, sessionId]);
+  }, [handleConversationMissing, refreshConversationResponseActivation, sessionId]);
+
+  const toggleConversationResponseActivation = useCallback(async () => {
+    if (!conversationResponseActivation || !conversationResponseActivationSpec) {
+      return;
+    }
+    const next = !conversationResponseActivationEnabled;
+    setConversationResponseActivationEnabled(next);
+    setConversationResponseActivationBusy(true);
+    try {
+      await putExtensionState({
+        extension_id: conversationResponseActivation.extension_id,
+        namespace: PIPELINE_ACTIVATION_NAMESPACE,
+        scope_type: conversationResponseActivationSpec.scope,
+        scope_id: sessionId,
+        key: conversationResponseActivationSpec.key,
+        value: next,
+      });
+    } catch (err) {
+      setConversationResponseActivationEnabled(!next);
+      setError(String(err));
+    } finally {
+      if (isMountedRef.current) {
+        setConversationResponseActivationBusy(false);
+      }
+    }
+  }, [
+    conversationResponseActivation,
+    conversationResponseActivationEnabled,
+    conversationResponseActivationSpec,
+    sessionId,
+  ]);
 
   useEffect(() => {
     void hydrate();
@@ -2344,6 +2429,17 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
               </div>
               <div className="composer-actions">
                 <small>{composerHint}</small>
+                {conversationResponseActivationSpec ? (
+                  <label className="composer-pipeline-toggle">
+                    <input
+                      type="checkbox"
+                      checked={conversationResponseActivationEnabled}
+                      disabled={conversationResponseActivationBusy}
+                      onChange={() => void toggleConversationResponseActivation()}
+                    />
+                    <span>{resolveText(conversationResponseActivationSpec.label)}</span>
+                  </label>
+                ) : null}
                 <button type="submit" disabled={!composerSnapshot.body.trim()}>
                   {waitingItems.length > 0 || Boolean(sendingItem)
                     ? t("web.conversations.enqueue", "加入队列")

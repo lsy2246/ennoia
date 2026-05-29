@@ -219,8 +219,13 @@ function HtmlArtifactBlock({
   const [previewRevision, setPreviewRevision] = useState(0);
   const isPreview = mode === "preview";
   const previewDocument = buildSandboxHtml(content);
+  const cardClassName = [
+    "artifact-runner-card",
+    "artifact-runner-card--html",
+    isPreview ? "artifact-runner-card--preview" : "artifact-runner-card--source",
+  ].join(" ");
   return (
-    <section className="artifact-runner-card artifact-runner-card--html">
+    <section className={cardClassName}>
       <header className="artifact-runner-card__header">
         <strong>{title}</strong>
         <span>HTML</span>

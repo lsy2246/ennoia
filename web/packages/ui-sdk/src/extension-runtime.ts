@@ -80,6 +80,28 @@ export type ExtensionEventContribution = RegisteredContributionBase & {
   event: ExtensionEvent;
 };
 
+export type PipelineHandlerActivation = {
+  scope: "conversation" | "agent" | "space" | "global";
+  key: string;
+  default: boolean;
+  label: LocalizedText;
+};
+
+export type PipelineHandler = {
+  id: string;
+  on: string;
+  stage: "tap" | "prepare" | "drive" | "after";
+  slot?: string | null;
+  priority: number;
+  operation: string;
+  fallback: boolean;
+  activation?: PipelineHandlerActivation | null;
+};
+
+export type PipelineHandlerContribution = RegisteredContributionBase & {
+  handler: PipelineHandler;
+};
+
 export type ExtensionPageContribution = RegisteredContributionBase & {
   page: {
     id: string;

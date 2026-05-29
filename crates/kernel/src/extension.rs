@@ -134,6 +134,66 @@ pub struct ExtensionEventSpec {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PipelineHandlerStage {
+    Tap,
+    Prepare,
+    Drive,
+    After,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PipelineActivationScope {
+    Conversation,
+    Agent,
+    Space,
+    Global,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct PipelineHandlerActivationSpec {
+    pub scope: PipelineActivationScope,
+    pub key: String,
+    #[serde(default)]
+    pub default: bool,
+    pub label: LocalizedText,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct PipelineHandlerSpec {
+    pub id: String,
+    pub on: String,
+    pub stage: PipelineHandlerStage,
+    #[serde(default)]
+    pub slot: Option<String>,
+    #[serde(default)]
+    pub priority: i32,
+    pub operation: String,
+    #[serde(default)]
+    pub fallback: bool,
+    #[serde(default)]
+    pub activation: Option<PipelineHandlerActivationSpec>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct PipelineHandlerResponse {
+    pub outcome: String,
+    #[serde(default)]
+    pub slot: Option<String>,
+    #[serde(default)]
+    pub run_id: Option<String>,
+    #[serde(default)]
+    pub operation_id: Option<String>,
+    #[serde(default)]
+    pub result: Option<JsonValue>,
+    #[serde(default)]
+    pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProviderGenerationOption {
     pub id: String,
     pub label: LocalizedText,
@@ -539,6 +599,8 @@ pub struct ExtensionManifest {
     pub operations: Vec<ExtensionOperationSpec>,
     #[serde(default)]
     pub events: Vec<ExtensionEventSpec>,
+    #[serde(default)]
+    pub pipeline_handlers: Vec<PipelineHandlerSpec>,
     #[serde(default)]
     pub settings: Vec<ExtensionSettingFieldSpec>,
     #[serde(default)]

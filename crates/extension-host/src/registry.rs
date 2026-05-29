@@ -12,8 +12,9 @@ use ennoia_kernel::{
     ExtensionRpcRequest, ExtensionRpcResponse, ExtensionRuntimeEvent, ExtensionRuntimeSpec,
     ExtensionSettingFieldSpec, ExtensionSourceMode, ExtensionViewSpec, HookContribution,
     LocaleContribution, MemoryContribution, MessageRendererContribution, PageContribution,
-    PageNavContribution, PanelContribution, ProviderContribution, ResolvedUiEntry,
-    ResolvedWorkerEntry, ScheduleActionContribution, ThemeContribution,
+    PageNavContribution, PanelContribution, PipelineHandlerSpec, PipelineHandlerStage,
+    ProviderContribution, ResolvedUiEntry, ResolvedWorkerEntry, ScheduleActionContribution,
+    ThemeContribution,
 };
 use serde::Serialize;
 use serde_json::Value as JsonValue;
@@ -35,6 +36,7 @@ pub struct ResolvedExtensionSnapshot {
     pub views: Vec<ExtensionViewSpec>,
     pub operations: Vec<ExtensionOperationSpec>,
     pub events: Vec<ExtensionEventSpec>,
+    pub pipeline_handlers: Vec<PipelineHandlerSpec>,
     #[serde(skip_serializing)]
     pub ui: Option<ResolvedUiEntry>,
     #[serde(skip_serializing)]
@@ -78,6 +80,14 @@ pub struct RegisteredExtensionEventContribution {
     pub source_mode: ExtensionSourceMode,
     pub install_dir: String,
     pub event: ExtensionEventSpec,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RegisteredPipelineHandlerContribution {
+    pub extension_id: String,
+    pub source_mode: ExtensionSourceMode,
+    pub install_dir: String,
+    pub handler: PipelineHandlerSpec,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -176,6 +186,7 @@ pub struct ExtensionRuntimeSnapshot {
     pub views: Vec<RegisteredExtensionViewContribution>,
     pub operations: Vec<RegisteredExtensionOperationContribution>,
     pub events: Vec<RegisteredExtensionEventContribution>,
+    pub pipeline_handlers: Vec<RegisteredPipelineHandlerContribution>,
     pub pages: Vec<RegisteredPageContribution>,
     pub panels: Vec<RegisteredPanelContribution>,
     pub themes: Vec<RegisteredThemeContribution>,
@@ -304,6 +315,39 @@ impl ExtensionRuntime {
                 .then_with(|| left.hook.handler.cmp(&right.hook.handler))
         });
         hooks
+    }
+
+    pub fn pipeline_handlers_for(
+        &self,
+        event: &str,
+        stage: Option<PipelineHandlerStage>,
+        slot: Option<&str>,
+    ) -> Vec<RegisteredPipelineHandlerContribution> {
+        let mut handlers = self
+            .snapshot()
+            .pipeline_handlers
+            .into_iter()
+            .filter(|item| {
+                item.handler.on == event
+                    && match stage.as_ref() {
+                        Some(stage) => &item.handler.stage == stage,
+                        None => true,
+                    }
+                    && match slot {
+                        Some(slot) => item.handler.slot.as_deref() == Some(slot),
+                        None => true,
+                    }
+            })
+            .collect::<Vec<_>>();
+        handlers.sort_by(|left, right| {
+            right
+                .handler
+                .priority
+                .cmp(&left.handler.priority)
+                .then_with(|| left.extension_id.cmp(&right.extension_id))
+                .then_with(|| left.handler.id.cmp(&right.handler.id))
+        });
+        handlers
     }
 
     pub fn refresh_from_disk(&self, summary: &str) -> io::Result<Option<ExtensionRuntimeSnapshot>> {
@@ -494,6 +538,19 @@ impl ResolvedExtensionSnapshot {
             .collect()
     }
 
+    fn pipeline_handler_rows(&self) -> Vec<RegisteredPipelineHandlerContribution> {
+        self.pipeline_handlers
+            .iter()
+            .cloned()
+            .map(|handler| RegisteredPipelineHandlerContribution {
+                extension_id: self.id.clone(),
+                source_mode: self.source_mode.clone(),
+                install_dir: self.install_dir.clone(),
+                handler,
+            })
+            .collect()
+    }
+
     fn page_rows(&self) -> Vec<RegisteredPageContribution> {
         self.pages
             .iter()
@@ -658,6 +715,7 @@ fn build_snapshot(
     let mut views = Vec::new();
     let mut operations = Vec::new();
     let mut events = Vec::new();
+    let mut pipeline_handlers = Vec::new();
     let mut pages = Vec::new();
     let mut panels = Vec::new();
     let mut themes = Vec::new();
@@ -674,6 +732,7 @@ fn build_snapshot(
         views.extend(extension.view_rows());
         operations.extend(extension.operation_rows());
         events.extend(extension.event_rows());
+        pipeline_handlers.extend(extension.pipeline_handler_rows());
         pages.extend(extension.page_rows());
         panels.extend(extension.panel_rows());
         themes.extend(extension.theme_rows());
@@ -694,6 +753,7 @@ fn build_snapshot(
         views,
         operations,
         events,
+        pipeline_handlers,
         pages,
         panels,
         themes,
@@ -796,6 +856,7 @@ fn resolve_manifest(
     let views = manifest.views.clone();
     let operations = manifest.operations.clone();
     let events = manifest.events.clone();
+    let pipeline_handlers = manifest.pipeline_handlers.clone();
     let pages = derive_pages(&views);
     let panels = derive_panels(&views);
     let settings = manifest.settings.clone();
@@ -862,6 +923,7 @@ fn resolve_manifest(
         views,
         operations,
         events,
+        pipeline_handlers,
         ui,
         worker,
         runtime,
@@ -1194,6 +1256,7 @@ fn failed_extension_snapshot(
         views: Vec::new(),
         operations: Vec::new(),
         events: Vec::new(),
+        pipeline_handlers: Vec::new(),
         ui: None,
         worker: None,
         runtime: ExtensionRuntimeSpec::default(),
@@ -1269,6 +1332,7 @@ fn equivalent_snapshots(
         && current.views == next.views
         && current.operations == next.operations
         && current.events == next.events
+        && current.pipeline_handlers == next.pipeline_handlers
         && current.pages == next.pages
         && current.panels == next.panels
         && current.themes == next.themes
@@ -1303,6 +1367,7 @@ fn empty_snapshot() -> ExtensionRuntimeSnapshot {
         views: Vec::new(),
         operations: Vec::new(),
         events: Vec::new(),
+        pipeline_handlers: Vec::new(),
         pages: Vec::new(),
         panels: Vec::new(),
         themes: Vec::new(),
@@ -1400,6 +1465,7 @@ mod tests {
         assert_eq!(snapshot.views.len(), 2);
         assert_eq!(snapshot.operations.len(), 2);
         assert_eq!(snapshot.events.len(), 1);
+        assert_eq!(snapshot.pipeline_handlers.len(), 1);
         assert_eq!(snapshot.pages.len(), 1);
         assert_eq!(snapshot.panels.len(), 1);
         assert_eq!(snapshot.message_renderers.len(), 1);
@@ -1415,6 +1481,10 @@ mod tests {
         assert_eq!(snapshot.locales.len(), 0);
         assert_eq!(snapshot.providers.len(), 1);
         assert_eq!(snapshot.hooks.len(), 1);
+        assert_eq!(
+            snapshot.pipeline_handlers[0].handler.slot.as_deref(),
+            Some("sample.response")
+        );
         assert_eq!(snapshot.actions.len(), 1);
         assert_eq!(snapshot.actions[0].action.operation, "sample.run.completed");
         assert_eq!(snapshot.extensions[0].health, ExtensionHealth::Ready);
@@ -1530,6 +1600,108 @@ mod tests {
     }
 
     #[test]
+    fn pipeline_handlers_for_returns_matching_slot_by_priority_then_stable_tiebreakers() {
+        let root = unique_test_dir("runtime-pipeline-priority");
+        let alpha_dir = root.join("alpha");
+        let beta_dir = root.join("beta");
+        let gamma_dir = root.join("gamma");
+        for ext_dir in [&alpha_dir, &beta_dir, &gamma_dir] {
+            fs::create_dir_all(ext_dir.join("runtime")).expect("create runtime dir");
+            fs::write(service_entry_path(ext_dir), b"test").expect("write service entry");
+        }
+        fs::write(
+            alpha_dir.join("extension.toml"),
+            pipeline_handler_descriptor_for(
+                "alpha",
+                "conversation.operator_message.received",
+                "conversation.response",
+                "alpha.response",
+                100,
+            ),
+        )
+        .expect("write alpha descriptor");
+        fs::write(
+            beta_dir.join("extension.toml"),
+            pipeline_handler_descriptor_for(
+                "beta",
+                "conversation.operator_message.received",
+                "conversation.response",
+                "beta.response",
+                10,
+            ),
+        )
+        .expect("write beta descriptor");
+        fs::write(
+            gamma_dir.join("extension.toml"),
+            pipeline_handler_descriptor_for(
+                "gamma",
+                "conversation.operator_message.received",
+                "conversation.response",
+                "gamma.response",
+                100,
+            ),
+        )
+        .expect("write gamma descriptor");
+
+        let config = ExtensionRuntimeConfig {
+            registry_file: root.join("config/extensions.toml"),
+            logs_dir: root.join("logs"),
+            home_dir: root.clone(),
+            allow_dev_sources: true,
+            runtime_defaults: ExtensionRuntimeSpec::default(),
+        };
+        write_registry_file(
+            &config.registry_file,
+            &ExtensionRegistryFile {
+                dev_sources: vec![
+                    ExtensionDevSourceEntry {
+                        id: "beta".to_string(),
+                        path: normalize_display_path(&beta_dir),
+                        enabled: true,
+                    },
+                    ExtensionDevSourceEntry {
+                        id: "gamma".to_string(),
+                        path: normalize_display_path(&gamma_dir),
+                        enabled: true,
+                    },
+                    ExtensionDevSourceEntry {
+                        id: "alpha".to_string(),
+                        path: normalize_display_path(&alpha_dir),
+                        enabled: true,
+                    },
+                ],
+                ..ExtensionRegistryFile::default()
+            },
+        )
+        .expect("write registry");
+
+        let runtime = ExtensionRuntime::bootstrap(config).expect("bootstrap runtime");
+        let handlers = runtime.pipeline_handlers_for(
+            "conversation.operator_message.received",
+            Some(PipelineHandlerStage::Drive),
+            Some("conversation.response"),
+        );
+
+        assert_eq!(
+            handlers
+                .iter()
+                .map(|item| (
+                    item.extension_id.as_str(),
+                    item.handler.operation.as_str(),
+                    item.handler.priority
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                ("alpha", "alpha.response", 100),
+                ("gamma", "gamma.response", 100),
+                ("beta", "beta.response", 10),
+            ]
+        );
+
+        fs::remove_dir_all(&root).expect("cleanup");
+    }
+
+    #[test]
     fn builtin_workflow_manifest_registers_task_orchestration_lifecycle_events() {
         let manifest_path = workspace_root()
             .join("assets")
@@ -1544,9 +1716,20 @@ mod tests {
             .iter()
             .map(|event| event.on.as_str())
             .collect::<Vec<_>>();
+        let registered_pipeline_handlers = manifest
+            .pipeline_handlers
+            .iter()
+            .map(|handler| {
+                (
+                    handler.on.as_str(),
+                    &handler.stage,
+                    handler.slot.as_deref(),
+                    handler.operation.as_str(),
+                )
+            })
+            .collect::<Vec<_>>();
 
         for expected in [
-            "conversation.message.created",
             "operation.updated",
             "permission.approval.resolved",
             "run.requested",
@@ -1559,6 +1742,15 @@ mod tests {
                 "workflow manifest should register {expected}"
             );
         }
+        assert!(
+            registered_pipeline_handlers.contains(&(
+                "conversation.operator_message.received",
+                &PipelineHandlerStage::Drive,
+                Some("conversation.response"),
+                "workflow.handle_operator_message",
+            )),
+            "workflow manifest should register the conversation response pipeline handler"
+        );
     }
 
     #[test]
@@ -1708,6 +1900,14 @@ name = "{id}.run.completed"
 on = "run.completed"
 operation = "{id}.run.completed"
 
+[[pipeline_handlers]]
+id = "{id}.response"
+on = "sample.message.created"
+stage = "drive"
+slot = "sample.response"
+priority = 50
+operation = "{id}.run.completed"
+
 [[message_renderers]]
 id = "{id}.markdown"
 format = "markdown"
@@ -1730,6 +1930,32 @@ name = "{operation}"
 on = "{event}"
 operation = "{operation}"
 priority = {priority}
+"##
+        )
+    }
+
+    fn pipeline_handler_descriptor_for(
+        id: &str,
+        event: &str,
+        slot: &str,
+        operation: &str,
+        priority: i32,
+    ) -> String {
+        format!(
+            r##"
+id = "{id}"
+name = "{id}"
+
+[[operations]]
+name = "{operation}"
+
+[[pipeline_handlers]]
+id = "{id}.handler"
+on = "{event}"
+stage = "drive"
+slot = "{slot}"
+priority = {priority}
+operation = "{operation}"
 "##
         )
     }

@@ -2398,7 +2398,7 @@ label {
   width: min(100%, var(--chat-bubble-max-width));
   max-width: min(100%, var(--chat-bubble-max-width));
   min-width: 0;
-  flex: 0 1 min(100%, var(--chat-bubble-max-width));
+  flex: 0 0 auto;
   box-sizing: border-box;
   border: 1px solid color-mix(in srgb, var(--line) 76%, transparent);
   border-radius: 16px;
@@ -3402,6 +3402,21 @@ label {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+.composer-pipeline-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+
+.composer-pipeline-toggle input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
 }
 
 .conversation-empty-card {
