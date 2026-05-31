@@ -131,7 +131,7 @@ operation = "workflow.handle_operator_message"
 scope = "conversation"
 key = "workflow.task_mode"
 default = false
-label = { key = "ext.workflow.task_mode", fallback = "任务模式" }
+label = { key = "ext.workflow.response_strategy", fallback = "处理策略" }
 
 [[pipeline_handlers]]
 id = "workflow.default_response"
@@ -218,7 +218,7 @@ operation = "workflow.handle_operator_message"
 scope = "conversation"
 key = "workflow.task_mode"
 default = false
-label = { key = "ext.workflow.task_mode", fallback = "任务模式" }
+label = { key = "ext.workflow.response_strategy", fallback = "处理策略" }
 
 [[pipeline_handlers]]
 id = "workflow.default_response"

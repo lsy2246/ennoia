@@ -43,6 +43,14 @@ import {
   areComposerSnapshotsEqual,
 } from "./session-composer";
 import { mergeConversationAppendResponse } from "./session-detail";
+import {
+  PIPELINE_ACTIVATION_NAMESPACE,
+  RESPONSE_STRATEGY_KEY,
+  RESPONSE_STRATEGY_NAMESPACE,
+  type ConversationResponseStrategy,
+  normalizeConversationResponseStrategy,
+  responseStrategyUsesPipeline,
+} from "./response-strategy";
 import type {
   ComposerSegment,
   LocalMessageDraft,
@@ -112,7 +120,6 @@ const EMPTY_PICKER_STATE: ComposerPickerState = {
 const OUTBOX_STORAGE_PREFIX = "ennoia.conversation.outbox.v1";
 const PENDING_REPLY_STORAGE_PREFIX = "ennoia.conversation.pending-replies.v1";
 const CHAT_VISIBILITY_STORAGE_PREFIX = "ennoia.conversation.chat-visibility.v1";
-const PIPELINE_ACTIVATION_NAMESPACE = "pipeline.activation";
 const PIPELINE_EVENT_OPERATOR_MESSAGE_RECEIVED = "conversation.operator_message.received";
 const PIPELINE_SLOT_CONVERSATION_RESPONSE = "conversation.response";
 const RECOVER_SENDING_AFTER_MS = 1500;
@@ -916,7 +923,7 @@ function isConversationMissingError(error: unknown) {
 
 export function SessionView({ conversationId, panelId }: { conversationId: string; panelId?: string }) {
   const sessionId = conversationId;
-  const { formatDateTime, resolveText, runtime, t } = useUiHelpers();
+  const { formatDateTime, runtime, t } = useUiHelpers();
   const operatorProfile = useRuntimeStore((state) => state.profile);
   const openView = useWorkbenchStore((state) => state.openView);
   const closeView = useWorkbenchStore((state) => state.closeView);
@@ -936,8 +943,8 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
   const [pickerState, setPickerState] = useState<ComposerPickerState>(EMPTY_PICKER_STATE);
   const [composerSnapshot, setComposerSnapshot] = useState<ComposerSnapshot>({ body: "", addressedAgents: [], segments: [] });
   const [composerMode, setComposerMode] = useState<ComposerModeState>({ kind: "normal" });
-  const [conversationResponseActivationEnabled, setConversationResponseActivationEnabled] = useState(false);
-  const [conversationResponseActivationBusy, setConversationResponseActivationBusy] = useState(false);
+  const [conversationResponseStrategy, setConversationResponseStrategyState] = useState<ConversationResponseStrategy>("normal");
+  const [conversationResponseStrategyBusy, setConversationResponseStrategyBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [streamNeedsResync, setStreamNeedsResync] = useState(false);
@@ -1107,10 +1114,32 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
     }
   }, [handleConversationMissing, sessionId]);
 
-  const refreshConversationResponseActivation = useCallback(async () => {
+  const refreshConversationResponseStrategy = useCallback(async () => {
     if (!conversationResponseActivation || !conversationResponseActivationSpec) {
-      setConversationResponseActivationEnabled(false);
+      setConversationResponseStrategyState("normal");
       return;
+    }
+    try {
+      const strategyEntry = await getExtensionState({
+        extension_id: conversationResponseActivation.extension_id,
+        namespace: RESPONSE_STRATEGY_NAMESPACE,
+        scope_type: conversationResponseActivationSpec.scope,
+        scope_id: sessionId,
+        key: RESPONSE_STRATEGY_KEY,
+      });
+      if (isMountedRef.current) {
+        setConversationResponseStrategyState(normalizeConversationResponseStrategy(strategyEntry.value));
+      }
+    } catch (err) {
+      if (!(err instanceof ApiError && (err.status === 404 || err.code === "NOT_FOUND"))) {
+        if (isMountedRef.current) {
+          setError(String(err));
+        }
+        return;
+      }
+      if (isMountedRef.current) {
+        setConversationResponseStrategyState("normal");
+      }
     }
     try {
       const entry = await getExtensionState({
@@ -1121,12 +1150,17 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
         key: conversationResponseActivationSpec.key,
       });
       if (isMountedRef.current) {
-        setConversationResponseActivationEnabled(Boolean(entry.value));
+        setConversationResponseStrategyState((current) => {
+          if (entry.value !== true) {
+            return "normal";
+          }
+          return current === "normal" ? "clarify_first" : current;
+        });
       }
     } catch (err) {
       if (err instanceof ApiError && (err.status === 404 || err.code === "NOT_FOUND")) {
         if (isMountedRef.current) {
-          setConversationResponseActivationEnabled(conversationResponseActivationSpec.default);
+          setConversationResponseStrategyState(conversationResponseActivationSpec.default ? "clarify_first" : "normal");
         }
         return;
       }
@@ -1157,7 +1191,7 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
       setGrants(nextGrants);
       setStreamNeedsResync(false);
       conversationUpdatedAtRef.current = nextDetail.conversation.updated_at;
-      void refreshConversationResponseActivation();
+      void refreshConversationResponseStrategy();
     } catch (err) {
       if (handleConversationMissing(err)) {
         return;
@@ -1166,36 +1200,44 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
         setError(String(err));
       }
     }
-  }, [handleConversationMissing, refreshConversationResponseActivation, sessionId]);
+  }, [handleConversationMissing, refreshConversationResponseStrategy, sessionId]);
 
-  const toggleConversationResponseActivation = useCallback(async () => {
+  const updateConversationResponseStrategy = useCallback(async (next: ConversationResponseStrategy) => {
     if (!conversationResponseActivation || !conversationResponseActivationSpec) {
       return;
     }
-    const next = !conversationResponseActivationEnabled;
-    setConversationResponseActivationEnabled(next);
-    setConversationResponseActivationBusy(true);
+    const previous = conversationResponseStrategy;
+    setConversationResponseStrategyState(next);
+    setConversationResponseStrategyBusy(true);
     try {
+      await putExtensionState({
+        extension_id: conversationResponseActivation.extension_id,
+        namespace: RESPONSE_STRATEGY_NAMESPACE,
+        scope_type: conversationResponseActivationSpec.scope,
+        scope_id: sessionId,
+        key: RESPONSE_STRATEGY_KEY,
+        value: next,
+      });
       await putExtensionState({
         extension_id: conversationResponseActivation.extension_id,
         namespace: PIPELINE_ACTIVATION_NAMESPACE,
         scope_type: conversationResponseActivationSpec.scope,
         scope_id: sessionId,
         key: conversationResponseActivationSpec.key,
-        value: next,
+        value: responseStrategyUsesPipeline(next),
       });
     } catch (err) {
-      setConversationResponseActivationEnabled(!next);
+      setConversationResponseStrategyState(previous);
       setError(String(err));
     } finally {
       if (isMountedRef.current) {
-        setConversationResponseActivationBusy(false);
+        setConversationResponseStrategyBusy(false);
       }
     }
   }, [
     conversationResponseActivation,
-    conversationResponseActivationEnabled,
     conversationResponseActivationSpec,
+    conversationResponseStrategy,
     sessionId,
   ]);
 
@@ -2430,14 +2472,21 @@ export function SessionView({ conversationId, panelId }: { conversationId: strin
               <div className="composer-actions">
                 <small>{composerHint}</small>
                 {conversationResponseActivationSpec ? (
-                  <label className="composer-pipeline-toggle">
-                    <input
-                      type="checkbox"
-                      checked={conversationResponseActivationEnabled}
-                      disabled={conversationResponseActivationBusy}
-                      onChange={() => void toggleConversationResponseActivation()}
-                    />
-                    <span>{resolveText(conversationResponseActivationSpec.label)}</span>
+                  <label className="composer-response-strategy">
+                    <span>{t("web.conversations.response_strategy", "处理策略")}</span>
+                    <select
+                      value={conversationResponseStrategy}
+                      disabled={conversationResponseStrategyBusy}
+                      onChange={(event) => {
+                        void updateConversationResponseStrategy(
+                          normalizeConversationResponseStrategy(event.currentTarget.value),
+                        );
+                      }}
+                    >
+                      <option value="normal">{t("web.conversations.response_strategy_normal", "常规响应")}</option>
+                      <option value="clarify_first">{t("web.conversations.response_strategy_clarify_first", "澄清优先")}</option>
+                      <option value="acceptance_first">{t("web.conversations.response_strategy_acceptance_first", "验收先行")}</option>
+                    </select>
                   </label>
                 ) : null}
                 <button type="submit" disabled={!composerSnapshot.body.trim()}>

@@ -98,7 +98,7 @@
 
 `PUT /api/extensions/{extension_id}/settings` 接收扩展声明过的配置字段值，宿主会按 manifest 做键、类型、必填项和 `select` 值校验，然后写入 `~/.ennoia/config/extensions/{extension_id}.toml`。
 
-`GET /api/ui/runtime` 和 `GET /api/extensions/{extension_id}` 会返回 `pipeline_handlers`。主壳用它发现会话级 activation 控件，例如 `conversation.response` slot 的任务模式开关；状态值保存在扩展 state 的 `pipeline.activation` namespace。
+`GET /api/ui/runtime` 和 `GET /api/extensions/{extension_id}` 会返回 `pipeline_handlers`。主壳用它发现会话级 activation 能力，例如 `conversation.response` slot 的处理策略控件；是否接管保存在扩展 state 的 `pipeline.activation` namespace，具体策略值由扩展保存在自己的 state namespace。
 
 ## Action Runtime
 

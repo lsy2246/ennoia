@@ -169,7 +169,28 @@ struct WorkflowDraftRow {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ConversationRoute {
     DirectReply,
-    ManagedDiscussion,
+    ManagedDiscussion {
+        strategy: ConversationResponseStrategy,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ConversationResponseStrategy {
+    ClarifyFirst,
+    AcceptanceFirst,
+}
+
+impl ConversationResponseStrategy {
+    fn from_state_value(value: Option<JsonValue>) -> Self {
+        match value.and_then(|item| item.as_str().map(str::to_string)) {
+            Some(value) if value == "acceptance_first" => Self::AcceptanceFirst,
+            _ => Self::ClarifyFirst,
+        }
+    }
+
+    fn acceptance_first(self) -> bool {
+        matches!(self, Self::AcceptanceFirst)
+    }
 }
 
 #[derive(Debug)]
@@ -493,7 +514,7 @@ pub async fn handle_operator_message_pipeline(
         return Ok(PipelineHandlerResponse {
             outcome: "skip".to_string(),
             slot: Some("conversation.response".to_string()),
-            message: Some("workflow task mode is disabled".to_string()),
+            message: Some("workflow response strategy is normal".to_string()),
             ..PipelineHandlerResponse::default()
         });
     }
@@ -502,7 +523,9 @@ pub async fn handle_operator_message_pipeline(
     let route = if fallback {
         ConversationRoute::DirectReply
     } else {
-        ConversationRoute::ManagedDiscussion
+        ConversationRoute::ManagedDiscussion {
+            strategy: resolve_conversation_response_strategy(&client, &context).await?,
+        }
     };
     generate_conversation_agent_reply(&client, runtime, store, &payload, route).await?;
     Ok(PipelineHandlerResponse {
@@ -511,6 +534,37 @@ pub async fn handle_operator_message_pipeline(
         message: Some("workflow accepted operator message".to_string()),
         ..PipelineHandlerResponse::default()
     })
+}
+
+async fn resolve_conversation_response_strategy(
+    client: &HostApiClient,
+    context: &JsonValue,
+) -> Result<ConversationResponseStrategy, String> {
+    let Some(activation) = context
+        .get("pipeline")
+        .and_then(|item| item.get("activation"))
+    else {
+        return Ok(ConversationResponseStrategy::ClarifyFirst);
+    };
+    let scope = activation
+        .get("scope")
+        .and_then(JsonValue::as_str)
+        .unwrap_or("conversation");
+    let scope_id = activation
+        .get("scope_id")
+        .and_then(JsonValue::as_str)
+        .unwrap_or("unknown");
+    let value = client
+        .get_extension_state(
+            "workflow",
+            workflow_response_namespace(),
+            scope,
+            scope_id,
+            workflow_response_strategy_key(),
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(ConversationResponseStrategy::from_state_value(value))
 }
 
 pub async fn handle_operation_updated(
@@ -1116,7 +1170,7 @@ async fn generate_conversation_agent_reply(
             }
 
             let progress = match route {
-                ConversationRoute::ManagedDiscussion => {
+                ConversationRoute::ManagedDiscussion { strategy } => {
                     workflow_trace(
                         "route",
                         &conversation_id,
@@ -1138,6 +1192,7 @@ async fn generate_conversation_agent_reply(
                         agent_id,
                         &branch_scope,
                         active_session.as_ref(),
+                        strategy,
                     )
                     .await
                     {
@@ -1238,6 +1293,14 @@ fn conversation_receipt_terminal_status(
 
 fn workflow_session_namespace() -> &'static str {
     "workflow.session"
+}
+
+fn workflow_response_namespace() -> &'static str {
+    "workflow.response"
+}
+
+fn workflow_response_strategy_key() -> &'static str {
+    "strategy"
 }
 
 fn workflow_branch_scope_id(branch_id: Option<&str>, lane_id: Option<&str>) -> String {
@@ -1718,6 +1781,7 @@ async fn upsert_managed_discussion(
     agent_id: &str,
     branch_scope: &str,
     active_session: Option<&ActiveWorkflowSession>,
+    strategy: ConversationResponseStrategy,
 ) -> Result<String, HostApiError> {
     let current = if let Some(session) = active_session {
         load_workflow_draft(store, &session.draft_id)
@@ -1742,13 +1806,14 @@ async fn upsert_managed_discussion(
         &goal,
         current.as_ref().map(|draft| &draft.plan),
         agent_id,
+        strategy.acceptance_first(),
     )
     .await?;
     let revision = current
         .as_ref()
         .map(|draft| draft.latest_revision + 1)
         .unwrap_or(1);
-    let reply = build_draft_reply(&goal, &plan, revision);
+    let reply = build_draft_reply(&goal, &plan, revision, strategy.acceptance_first());
 
     let record = if let Some(record_id) = current
         .as_ref()
@@ -1837,6 +1902,7 @@ async fn generate_draft_plan(
     goal: &str,
     previous_plan: Option<&PlanSpec>,
     agent_id: &str,
+    acceptance_first: bool,
 ) -> Result<PlanSpec, HostApiError> {
     let agent = agents
         .iter()
@@ -1869,7 +1935,7 @@ async fn generate_draft_plan(
         agent_id,
         &resolve_operator_profile(&runtime.runtime_paths).display_name,
     );
-    let mut planning_prompt = build_planning_prompt(goal, true);
+    let mut planning_prompt = build_planning_prompt(goal, true, acceptance_first);
     if previous_plan.is_some() {
         planning_prompt
             .push_str("\n请基于当前已有方案继续修订，不要换掉任务目标，只修正策略、步骤和约束。\n");
@@ -1983,12 +2049,15 @@ async fn generate_draft_plan(
     )))
 }
 
-fn build_draft_reply(goal: &str, plan: &PlanSpec, revision: i64) -> String {
+fn build_draft_reply(goal: &str, plan: &PlanSpec, revision: i64, acceptance_first: bool) -> String {
     let mut lines = vec![format!(
         "我先把这件事整理成第 {revision} 版方案，目标还是：{goal}"
     )];
     for item in summarize_plan_steps(plan).into_iter().take(5) {
         lines.push(format!("- {item}"));
+    }
+    if acceptance_first {
+        lines.push("我会先按完成标准检查结果，再交付最终回复。".to_string());
     }
     lines.push("如果方向不对，你继续指出要改哪一点，我会在这版上继续修。".to_string());
     lines.push("如果方向已经对了，直接说“开始执行”或“去改吧”，我就按这版进入执行。".to_string());
@@ -4857,7 +4926,7 @@ fn managed_discussion_error_reply(error: &HostApiError) -> String {
         || message.contains("planner returned empty text")
     {
         return format!(
-            "任务模式这轮没能整理出可执行方案。\n{message}\n你可以换一种说法补充目标，我会重新从头整理方案。"
+            "处理策略这轮没能整理出可执行方案。\n{message}\n你可以换一种说法补充目标，我会重新从头整理方案。"
         );
     }
     format_host_api_error_for_conversation(error)
@@ -5404,9 +5473,27 @@ mod tests {
 
         let reply = managed_discussion_error_reply(&error);
 
-        assert!(reply.contains("任务模式"));
+        assert!(reply.contains("处理策略"));
         assert!(reply.contains("计划输出未通过校验"));
         assert!(!reply.contains("系统错误"));
+    }
+
+    #[test]
+    fn response_strategy_defaults_pipeline_claim_to_clarify_first() {
+        assert_eq!(
+            ConversationResponseStrategy::from_state_value(None),
+            ConversationResponseStrategy::ClarifyFirst
+        );
+        assert_eq!(
+            ConversationResponseStrategy::from_state_value(Some(serde_json::json!("normal"))),
+            ConversationResponseStrategy::ClarifyFirst
+        );
+        assert_eq!(
+            ConversationResponseStrategy::from_state_value(Some(serde_json::json!(
+                "acceptance_first"
+            ))),
+            ConversationResponseStrategy::AcceptanceFirst
+        );
     }
 
     #[test]

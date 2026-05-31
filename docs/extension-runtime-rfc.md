@@ -89,7 +89,7 @@ operation = "workflow.handle_operator_message"
 scope = "conversation"
 key = "workflow.task_mode"
 default = false
-label = { key = "ext.workflow.task_mode", fallback = "任务模式" }
+label = { key = "ext.workflow.response_strategy", fallback = "处理策略" }
 ```
 
 Pipeline handler 用于同步生命周期入口。当前已落地的主入口是 `conversation.operator_message.received` 的 `drive` 阶段和 `conversation.response` slot。宿主按 priority 降序调用候选 handler；handler 返回 `claim` 或 `complete` 后，本次 slot 接管结束，返回 `skip`、`continue` 或 `fail` 时继续尝试后续 handler。

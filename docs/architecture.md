@@ -86,8 +86,8 @@ Web
 
 - `workflow` 是一个内置扩展实现，声明 run/task/artifact 接口，并承接定时器里的 Agent 执行。
 - `workflow` 自己负责生成结构化执行计划；`plan` 是执行真相源，`task` 只是从 `plan.steps` 派生出来的展示与执行投影视图，系统核心不再硬编码猜测任务清单。
-- `workflow.task_response` 作为 `conversation.response` slot 的任务模式 handler 注册，默认关闭；用户在会话 composer 中开启该 activation 后，只影响后续消息。`workflow.default_response` 作为 fallback handler 承载普通回复。
-- 任务模式 handler 进入 workflow 的 draft / plan / confirmation / execution 循环；普通 fallback 直接执行回复，不再靠关键词或复杂度推断自动升级为任务编排。
+- `workflow.task_response` 作为 `conversation.response` slot 的处理策略 handler 注册，默认不接管；用户在会话 composer 中选择“澄清优先”或“验收先行”后，只影响后续消息。`workflow.default_response` 作为 fallback handler 承载“常规响应”。
+- “澄清优先”进入 workflow 的 draft / plan / confirmation / execution 循环；“验收先行”在生成计划时先明确完成标准并在结束时按标准检查；“常规响应”直接执行回复，不靠关键词或复杂度推断自动升级为编排流程。
 - `workflow` 相关读取与执行统一通过 `run.*`、`task.*`、`artifact.*` 动作键或扩展 RPC 暴露，不再保留 `/api/runs/*` 核心包装入口。
 - 系统 scheduler 只负责保存计划、计算到期、串行触发、失败重试和记录最近运行历史。
 - 定时器支持两类执行方式：

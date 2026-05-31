@@ -276,11 +276,20 @@ pub fn summarize_plan_steps(plan: &PlanSpec) -> Vec<String> {
         .collect()
 }
 
-pub fn build_planning_prompt(goal: &str, require_confirmation: bool) -> String {
+pub fn build_planning_prompt(
+    goal: &str,
+    require_confirmation: bool,
+    acceptance_first: bool,
+) -> String {
     let confirm_line = if require_confirmation {
         "本轮只输出可执行计划，不要直接开始执行，等待用户确认。"
     } else {
         "计划就绪后可以继续进入执行。"
+    };
+    let acceptance_line = if acceptance_first {
+        "验收先行：先定义完成标准，并写入 verify_contract 和每个步骤的 pass_if；执行结束后必须按完成标准检查结果。"
+    } else {
+        "根据任务风险设置 verify_contract 和 pass_if，保证计划可检查。"
     };
     format!(
         "你现在负责为当前任务生成一份可执行计划。\n\
@@ -295,8 +304,10 @@ pub fn build_planning_prompt(goal: &str, require_confirmation: bool) -> String {
 7. tool_plan 必须写本次真正会使用的具体工具，不要留空，不要用占位符。\n\
 8. meta.plan_status 必须为 ready。\n\
 9. 除了自然语言说明和一个 JSON 代码块，不要输出其他杂项。\n\
+10. {}\n\
 {}\n",
         goal.trim(),
+        acceptance_line,
         confirm_line
     )
 }
@@ -528,9 +539,17 @@ mod tests {
 
     #[test]
     fn planning_prompt_names_current_schema_version() {
-        let prompt = build_planning_prompt("写博客", true);
+        let prompt = build_planning_prompt("写博客", true, false);
 
         assert!(prompt.contains("schema_version 必须为 3.0"));
+    }
+
+    #[test]
+    fn acceptance_first_planning_prompt_requires_completion_criteria() {
+        let prompt = build_planning_prompt("写博客", true, true);
+
+        assert!(prompt.contains("先定义完成标准"));
+        assert!(prompt.contains("执行结束后必须按完成标准检查"));
     }
 
     #[test]

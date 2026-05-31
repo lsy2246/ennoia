@@ -3404,7 +3404,7 @@ label {
   gap: 12px;
 }
 
-.composer-pipeline-toggle {
+.composer-response-strategy {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -3413,10 +3413,15 @@ label {
   white-space: nowrap;
 }
 
-.composer-pipeline-toggle input {
-  width: 16px;
-  height: 16px;
-  accent-color: var(--accent);
+.composer-response-strategy select {
+  min-width: 112px;
+  height: 30px;
+  padding: 0 28px 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: var(--text);
+  font: inherit;
 }
 
 .conversation-empty-card {
