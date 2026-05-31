@@ -49,7 +49,7 @@ export type PendingReplyMarker = {
   sourceMessageId: string;
 };
 
-export type ChatEntryFormat = "plain" | "markdown" | "code" | "json" | "diagram";
+export type ChatEntryFormat = "plain" | "markdown" | "html" | "code" | "json" | "diagram";
 export type ChatEntryState = "pending" | "streaming" | "done" | "failed";
 export type ChatEntryTone = "accent" | "warn" | "danger" | "muted";
 

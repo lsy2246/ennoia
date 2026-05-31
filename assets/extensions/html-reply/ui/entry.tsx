@@ -2,6 +2,8 @@ import React, { useEffect, useState, type CSSProperties } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import type {
   ExtensionConversationRecord,
+  ExtensionMessageRenderRequest,
+  ExtensionMessageRendererMountContext,
   ExtensionUiModule,
   ExtensionUiRenderHelpers,
 } from "@ennoia/ui-sdk";
@@ -68,9 +70,7 @@ function buildSandboxHtml(content: string) {
   </head><body>${content}</body></html>`;
 }
 
-function HtmlReplyCard({ record }: { record: ExtensionConversationRecord }) {
-  const payload = asRecordPayload<HtmlReplyPayload>(record.payload);
-  const html = textValue(payload.html);
+function HtmlReplyFrame({ html, title }: { html: string; title: string }) {
   const [frameHeight, setFrameHeight] = useState(MIN_MESSAGE_FRAME_HEIGHT);
   useEffect(() => {
     setFrameHeight(MIN_MESSAGE_FRAME_HEIGHT);
@@ -103,11 +103,25 @@ function HtmlReplyCard({ record }: { record: ExtensionConversationRecord }) {
         sandbox="allow-same-origin"
         onLoad={handleFrameLoad}
         style={{ "--html-reply-frame-height": `${frameHeight}px` } as CSSProperties}
-        title={record.title || "HTML 排版回复"}
+        title={title}
         srcDoc={buildSandboxHtml(html)}
       />
     </section>
   );
+}
+
+function HtmlReplyCard({ record }: { record: ExtensionConversationRecord }) {
+  const payload = asRecordPayload<HtmlReplyPayload>(record.payload);
+  const html = textValue(payload.html);
+  return <HtmlReplyFrame html={html} title={record.title || "HTML 排版回复"} />;
+}
+
+function HtmlReplyMessage({ request }: { request: ExtensionMessageRenderRequest }) {
+  return <HtmlReplyFrame html={request.body} title="HTML 排版回复" />;
+}
+
+function renderHtmlReplyMessage(container: HTMLElement, context: ExtensionMessageRendererMountContext) {
+  return renderIntoContainer(container, <HtmlReplyMessage request={context.request} />);
 }
 
 function HtmlReplyPanel({ helpers }: { helpers: ExtensionUiRenderHelpers }) {
@@ -183,6 +197,9 @@ const extensionUi: ExtensionUiModule = {
   conversationRecords: {
     "html-reply.message": (container, context) =>
       renderIntoContainer(container, <HtmlReplyCard record={context.record} />),
+  },
+  messageRenderers: {
+    "html-reply.html": renderHtmlReplyMessage,
   },
 };
 

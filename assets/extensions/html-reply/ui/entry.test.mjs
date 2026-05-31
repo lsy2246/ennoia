@@ -16,6 +16,12 @@ describe("html reply message renderer", () => {
     expect(entrySource).not.toContain("<summary>源码</summary>");
   });
 
+  test("registers html messages as message renderer", () => {
+    expect(entrySource).toContain("messageRenderers");
+    expect(entrySource).toContain("\"html-reply.html\"");
+    expect(entrySource).toContain("request.body");
+  });
+
   test("sizes short message iframes to their content instead of reserving viewport height", () => {
     expect(entrySource).toContain("html-reply-frame--auto");
     expect(entrySource).toContain("handleFrameLoad");

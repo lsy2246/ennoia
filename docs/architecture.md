@@ -72,7 +72,7 @@ Web
 - 会话、记忆、运行等产品视图都通过通用 action runtime 和扩展 RPC 组合，不再保留核心包装 REST。
 - 内置 `conversation` 扩展当前声明会话、分支、检查点、线路和消息接口；内置 `memory` 扩展只负责记忆、上下文、审查和图谱侧车。
 - 动作管道是系统级中立执行层，只负责执行规则、收敛结果、发出事实事件，并在声明过的生命周期 slot 中选择接管者；它不承载 workflow、memory、provider 或 Agent tool 的产品状态机。
-- 会话主回复使用 `conversation.operator_message.received` 事件和 `conversation.response` slot。扩展通过 `pipeline_handlers[]` 申请接管该 slot，宿主按 `priority` 降序、扩展 ID 和 handler ID 稳定排序调用；同一 slot 中第一个返回 `claim` 或 `complete` 的 handler 成为本次 owner，后续 handler 不再执行。
+- 会话主回复使用 `conversation.operator_message.received` 事件和 `conversation.response` slot。扩展通过 `pipeline_handlers[]` 申请接管该 slot，宿主按 `priority` 降序、扩展 ID 和 handler ID 稳定排序调用；同一 slot 中第一个返回 `claim` 或 `complete` 的 handler 成为本次 owner，后续 handler 不再执行。`message.append` 只同步完成消息写入、事实事件和实时广播；会话回复 slot 在后台驱动，不能阻塞发送接口。
 - Pipeline 只决定“后续消息由哪个主职责处理”，不倒退、不重放用户消息、不解释复杂度。返工、方案不通过、回到 planning、审批恢复和执行重试都属于 workflow run 自己的状态机循环。
 - 会话展示层首屏和后续刷新统一由前端通过 action runtime 组装 detail、run 和 approval 快照；核心不再维护会话专属 SSE 聚合面。
 - `memory` 只暴露 `memory.*` 动作键，不再保留 `/api/memory/*` 核心包装入口。
@@ -133,7 +133,7 @@ Web
 
 - Hook 保留为扩展订阅系统事件的方式，但事件先进入宿主持久化事件总线，不做同步强耦合调用。
 - 动作管道在完成会话创建、消息追加、run 请求等动作后，把 `conversation.created`、`conversation.message.created`、`run.requested` 等事件写入 `events.db`；operation 生命周期、权限审批和 scheduler 分别发布 `operation.updated`、`permission.approval.resolved`、`job.due`。
-- `conversation.message.created` 是持久事实事件，供旁路观察、日志、记录投影等扩展使用；会话主回复接管使用同步 pipeline slot，不再依赖异步 hook 竞速。
+- `conversation.message.created` 是持久事实事件，供旁路观察、日志、记录投影等扩展使用；会话主回复接管使用 pipeline slot，不依赖异步 hook 竞速，也不阻塞消息写入响应。
 - workflow 这类进程型 Worker 如果在扩展内部产生新的生命周期事实，可以通过宿主 `HookEventPublish` capability 写回事件总线；当前 workflow 会发布 `run.stage.changed` 和 `artifact.created`。
 - 事件总线异步把事件投递给已注册 Hook；扩展临时离线不会阻塞会话写入。
 - 同一事件下的 hook 按 manifest `events[].priority` 降序投递，同优先级按扩展 ID 和 handler 名稳定排序。
@@ -141,11 +141,11 @@ Web
 
 ## Pipeline Handler 边界
 
-- `pipeline_handlers[]` 声明同步生命周期入口。当前稳定执行点是 `conversation.operator_message.received` 的 `drive` 阶段和 `conversation.response` slot。
+- `pipeline_handlers[]` 声明生命周期入口。当前稳定执行点是 `conversation.operator_message.received` 的 `drive` 阶段和 `conversation.response` slot；宿主在 `message.append` 成功后后台驱动该 slot，避免会话回复耗时影响消息发送。
 - `stage` 表达 handler 在生命周期中的位置：`tap` 用于旁路观察，`prepare` 用于主处理前准备，`drive` 用于主职责接管，`after` 用于收尾。当前宿主已落地 `drive` 调用链，其余阶段保留为同一契约下的后续扩展点。
 - `slot` 由宿主生命周期接口定义，不由扩展互相声明互斥。声明同一 slot 的 handler 可以共存，宿主用 priority 和 outcome 选择本次 owner。
 - `activation` 让扩展把某个 handler 暴露为可切换能力。activation 状态保存在 `extension.state` 的 `pipeline.activation` namespace，按 `conversation`、`agent`、`space` 或 `global` scope 生效。
-- handler 返回 `skip` 或 `continue` 时，宿主继续尝试同 slot 的后续 handler；返回 `claim` 或 `complete` 时，本次 slot 被接管；返回 `fail` 或 RPC 失败时，宿主记录 `runtime.pipeline.handler_outcome` 并继续尝试 fallback 或后续 handler。
+- handler 返回 `skip` 或 `continue` 时，宿主继续尝试同 slot 的后续 handler；返回 `claim` 或 `complete` 时，本次 slot 被接管；返回 `fail` 或 RPC 失败时，宿主记录 `runtime.pipeline.handler_outcome` 并继续尝试 fallback 或后续 handler。接管只代表本次主职责归属，后续 planning、provider 调用、工具执行和回写都由接管扩展自己的状态机推进。
 
 ## 扩展契约模型
 
@@ -153,7 +153,7 @@ Web
 - `views` 表达主壳可以打开或挂载的界面契约，当前稳定类型是 `page` 与 `panel`，不再单独设计 entry、surface 或入口列表。
 - `operations` 表达系统可调用动作；`operation.name` 是唯一调用名，同时作为 action key、Worker method 和事件投递目标。
 - `events` 表达 `on -> operation` 的投递关系，并可声明 `priority`；事件先进入宿主持久化事件总线，再异步投递到目标 operation。
-- `pipeline_handlers` 表达同步生命周期入口的 handler、slot、priority、operation 和可选 activation；它只负责入口接管，不表达 workflow run 内部状态。
+- `pipeline_handlers` 表达生命周期入口的 handler、slot、priority、operation 和可选 activation；它只负责入口接管，不表达 workflow run 内部状态。
 - `settings` 表达扩展级配置字段；主壳按声明渲染表单，实际值保存在扩展级宿主配置文件，不上浮为系统级配置模型。
 - `workflow` 和 `memory` 都只是内置扩展实现；系统依赖接口键和动作 ID，不反向依赖具体扩展。
 - 扩展不自行开放端口；operation 执行统一走宿主 Worker RPC，Worker 通过 Wasm ABI 或进程 stdio 协议接入。
@@ -164,7 +164,7 @@ Web
 - 扩展 UI 通过独立 ESM bundle 动态加载；主壳只导入 `/api/extensions/{extension_id}/ui/module` 暴露的模块包装器，再按 view name 调用扩展自己的 `mount/unmount`。
 - 会话时间线只提供通用 record mount 槽位；主壳不硬编码 workflow 专属卡片，扩展可以把自己的 record 以会话附件或独立块渲染出来。
 - 会话消息正文提供通用 `message_renderers` 槽位；主壳按消息 `format` 选择最高优先级渲染器并传入正文、角色、agents、skills 和 mentions。内置 `markdown-renderer` 扩展接管 Markdown/GFM 渲染；主壳只保留纯文本兜底，不内置 Markdown 解析语义。
-- `html-reply` 与 `artifact-runner` 是两个独立内置扩展。`workflow` 只识别各自的输出 envelope，把 fallback 写入普通会话消息，再把 HTML 回复写入 `html-reply.message`、把 HTML/Python 产物写入 `artifact-runner.artifact`；`html-reply` 只做静态消息排版，`artifact-runner` 负责 HTML 预览、HTML 源码展示和 Python 手动运行输出。Web 主壳继续通过通用 `conversationRecords` 与扩展 RPC 挂载记录和调用扩展 operation，核心不理解这些扩展输出语义，也不把它们提升为系统级消息结构。
+- `html-reply` 与 `artifact-runner` 是两个独立内置扩展。`workflow` 只识别各自的输出 envelope：`ennoia.html_reply` 的 `body` 写入同一条 `format = "html"` 的会话消息，并由 `html-reply` 通过 `message_renderers` 做静态消息排版；`ennoia.artifact_runner` 仍把 fallback 写入普通会话消息，再把 HTML/Python 产物写入 `artifact-runner.artifact` 记录。`artifact-runner` 负责 HTML 预览、HTML 源码展示和 Python 手动运行输出。Web 主壳通过通用 `messageRenderers` 渲染正文，通过 `conversationRecords` 挂载附件或产物记录，核心不理解这些扩展输出语义。
 - 扩展主题通过 `ennoia.theme` 与主壳对接；主壳只消费稳定语义 token 和 dockview token，不把内部 class 结构暴露给扩展。
 - 扩展默认不进入会话目录；只有显式声明 `conversation.visible = true` 时，宿主才会把该扩展作为会话可见目录项暴露给模型。进入会话时只注入扩展自身的 `description`、受限资源/operation 目录与 `docs` 入口，不自动注入 `docs` 正文。
 - Agent 权限系统由宿主按 operation 和调用上下文统一裁决；扩展 manifest 不声明底层权限边界、SQLite、文件、网络或环境变量。

@@ -541,6 +541,7 @@ export type ConversationMessage = {
   sender: string;
   role: "operator" | "agent" | "system" | "tool";
   body: string;
+  format?: string | null;
   mentions: string[];
   parent_message_id?: string | null;
   reply_to_message_id?: string | null;

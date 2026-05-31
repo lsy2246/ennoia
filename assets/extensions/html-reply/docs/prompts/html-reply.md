@@ -9,7 +9,6 @@
   "profile": "html-message",
   "placement": "message",
   "content_type": "text/html",
-  "fallback": "普通文本摘要",
   "body": "<section><h2>标题</h2><p>静态 HTML 内容。</p></section>"
 }
 ```
@@ -17,5 +16,5 @@
 要求：
 
 - 只写静态 HTML 片段，不写 `<script>`、事件属性或外链脚本。
-- 始终提供有意义的 `fallback`。
+- HTML `body` 会作为同一条 `format = "html"` 的消息正文保存，不要再输出一份 Markdown 或纯文本正文。
 - HTML 源码、完整 HTML 页面、Python 脚本或其他可预览产物不要放在这里，交给 `artifact-runner`。

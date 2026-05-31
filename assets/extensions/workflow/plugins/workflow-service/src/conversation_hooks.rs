@@ -150,6 +150,13 @@ struct ActiveWorkflowSession {
     revision: i64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AgentConversationReplyMessage {
+    body: String,
+    format: &'static str,
+    extension_output: Option<ExtensionOutputEnvelope>,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 struct WorkflowDraftRow {
     id: String,
@@ -3091,18 +3098,15 @@ async fn append_agent_conversation_reply(
     run_id: Option<&str>,
     body: &str,
 ) -> Result<(), String> {
-    let extension_output = parse_extension_output_reply(body);
-    let message_body = extension_output
-        .as_ref()
-        .map(|output| output.fallback.as_str())
-        .unwrap_or(body);
+    let reply = build_extension_reply_message(body);
     let append_response = client
         .dispatch_action(
             "message.append",
             serde_json::json!({
                 "conversation_id": conversation_id,
                 "message": {
-                    "body": message_body,
+                    "body": reply.body,
+                    "format": reply.format,
                     "lane_id": lane_id,
                     "sender": agent_id,
                     "role": "agent",
@@ -3119,7 +3123,7 @@ async fn append_agent_conversation_reply(
         )
         .await
         .map_err(|error| error.to_string())?;
-    if let Some(output) = extension_output {
+    if let Some(output) = reply.extension_output {
         let reply_message_id = append_response
             .get("message")
             .and_then(|message| message.get("id"))
@@ -3137,6 +3141,29 @@ async fn append_agent_conversation_reply(
     Ok(())
 }
 
+fn build_extension_reply_message(body: &str) -> AgentConversationReplyMessage {
+    let extension_output = parse_extension_output_reply(body);
+    if let Some(output) = extension_output {
+        if let Some(html) = output.html_reply.as_deref() {
+            return AgentConversationReplyMessage {
+                body: html.to_string(),
+                format: "html",
+                extension_output: Some(output),
+            };
+        }
+        return AgentConversationReplyMessage {
+            body: output.fallback.clone(),
+            format: "markdown",
+            extension_output: Some(output),
+        };
+    }
+    AgentConversationReplyMessage {
+        body: body.to_string(),
+        format: "markdown",
+        extension_output: None,
+    }
+}
+
 async fn append_extension_output_records(
     client: &HostApiClient,
     conversation_id: &str,
@@ -3144,28 +3171,6 @@ async fn append_extension_output_records(
     agent_id: &str,
     output: &ExtensionOutputEnvelope,
 ) -> Result<(), HostApiError> {
-    if let Some(html) = output.html_reply.as_deref() {
-        let _ = client
-            .append_extension_record(serde_json::json!({
-                "extension_id": "html-reply",
-                "namespace": format!("html-reply/conversation/{conversation_id}"),
-                "scope_type": "conversation",
-                "scope_id": conversation_id,
-                "kind": "html-reply.message",
-                "status": "ready",
-                "title": "HTML 排版回复",
-                "summary": output.fallback,
-                "payload": {
-                    "type": "html-rich",
-                    "html": html,
-                    "fallback": output.fallback,
-                    "agent_id": agent_id,
-                },
-                "related_message_id": related_message_id,
-            }))
-            .await?;
-    }
-
     if let Some(block) = &output.artifact {
         let title = block.title.as_deref().unwrap_or(match block.kind.as_str() {
             "html-preview" => "HTML 预览",
@@ -4282,7 +4287,7 @@ fn build_agent_runtime_prompt(
     }
     if html_reply_enabled(context) {
         sections.push(
-            "当前会话启用了 html-reply 扩展。需要把普通回复做成静态 HTML 排版时，最终回复可以输出 JSON 对象，不要包在 Markdown 代码块中：{\"kind\":\"ennoia.html_reply\",\"version\":1,\"profile\":\"html-message\",\"placement\":\"message\",\"content_type\":\"text/html\",\"fallback\":\"普通文本摘要\",\"body\":\"<section>安全静态 HTML 片段</section>\"}。只用于普通回复排版；用户要求 HTML 源码、源代码或代码时不要使用 html-reply；不要写 <script>、事件属性或外链脚本；始终提供 fallback。".to_string(),
+            "当前会话启用了 html-reply 扩展。需要把普通回复做成静态 HTML 排版时，最终回复可以输出 JSON 对象，不要包在 Markdown 代码块中：{\"kind\":\"ennoia.html_reply\",\"version\":1,\"profile\":\"html-message\",\"placement\":\"message\",\"content_type\":\"text/html\",\"body\":\"<section>安全静态 HTML 片段</section>\"}。系统会把 body 保存为 format=html 的同一条会话消息；只用于普通回复排版；用户要求 HTML 源码、源代码或代码时不要使用 html-reply；不要写 <script>、事件属性或外链脚本。".to_string(),
         );
     }
     if artifact_runner_enabled(context) {
@@ -5322,6 +5327,8 @@ mod tests {
         assert!(!enabled.contains(&removed_combined_extension_id));
         assert!(!enabled.contains(&removed_combined_output_kind));
         assert!(enabled.contains("\"profile\":\"html-message\""));
+        assert!(enabled.contains("format=html"));
+        assert!(!enabled.contains("\"fallback\":\"普通文本摘要\""));
         assert!(enabled.contains("\"profile\":\"html-artifact\""));
         assert!(enabled.contains("\"profile\":\"html-source\""));
         assert!(enabled.contains("用户明确要求 HTML 源码"));
@@ -5335,6 +5342,56 @@ mod tests {
         assert_eq!(extension_output_config_scope_type(), "extension");
         assert_eq!(extension_output_config_scope_id(), "default");
         assert_eq!(extension_output_config_key(), "output");
+    }
+
+    #[test]
+    fn html_extension_output_becomes_single_html_message() {
+        let source = serde_json::json!({
+            "kind": "ennoia.html_reply",
+            "version": 1,
+            "profile": "html-message",
+            "placement": "message",
+            "content_type": "text/html",
+            "body": "<section><h2>摘要</h2><p>富排版。</p></section>"
+        })
+        .to_string();
+
+        let reply = build_extension_reply_message(&source);
+
+        assert_eq!(
+            reply.body,
+            "<section><h2>摘要</h2><p>富排版。</p></section>"
+        );
+        assert_eq!(reply.format, "html");
+        let output = reply.extension_output.expect("extension output");
+        assert_eq!(
+            output.html_reply.as_deref(),
+            Some("<section><h2>摘要</h2><p>富排版。</p></section>")
+        );
+        assert_eq!(output.artifact, None);
+    }
+
+    #[test]
+    fn artifact_extension_output_keeps_fallback_message_and_artifact_record() {
+        let source = serde_json::json!({
+            "kind": "ennoia.artifact_runner",
+            "version": 1,
+            "profile": "html-artifact",
+            "placement": "artifact",
+            "content_type": "text/html",
+            "title": "页面预览",
+            "fallback": "我生成了一个 HTML 页面，可以在下方预览。",
+            "body": "<!doctype html><html><body>demo</body></html>"
+        })
+        .to_string();
+
+        let reply = build_extension_reply_message(&source);
+
+        assert_eq!(reply.body, "我生成了一个 HTML 页面，可以在下方预览。");
+        assert_eq!(reply.format, "markdown");
+        let output = reply.extension_output.expect("extension output");
+        assert_eq!(output.html_reply, None);
+        assert!(output.artifact.is_some());
     }
 
     #[test]

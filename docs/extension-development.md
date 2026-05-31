@@ -9,7 +9,7 @@ Extension 负责系统能力，Skill 负责 Agent 工具与用法。Extension ma
 - `views`：主壳可以打开或挂载的界面。
 - `operations`：系统可以调用的操作。
 - `events`：系统事件投递到 operation 的关系。
-- `pipeline_handlers`：同步生命周期入口上的 handler、slot、优先级和 activation。
+- `pipeline_handlers`：生命周期入口上的 handler、slot、优先级和 activation。
 - `settings`：宿主需要渲染和保存的扩展级配置字段。
 - `message_renderers`：会话消息正文格式到扩展 UI mount 的映射。
 - `conversation`：扩展是否进入会话上下文，以及暴露哪些资源和 operation 名称。
@@ -260,17 +260,17 @@ operation = "workflow.job.due"
 priority = 100
 ```
 
-其中 `conversation.operator_message.received` 是宿主在 `message.append` 成功后同步驱动的 pipeline 生命周期事件；`operation.updated`、`permission.approval.resolved`、`run.requested` 和 `job.due` 由宿主动作管道、权限路由或 scheduler 发布；`run.stage.changed` 和 `artifact.created` 由 workflow worker 在内部持久化对应事实后，通过宿主 `HookEventPublish` capability 写回事件总线。
+其中 `conversation.operator_message.received` 是宿主在 `message.append` 成功后后台驱动的 pipeline 生命周期事件；消息发送接口只等待写入、事实事件和实时广播完成，不等待策略选择、模型回复、工具执行或 workflow run 推进。`operation.updated`、`permission.approval.resolved`、`run.requested` 和 `job.due` 由宿主动作管道、权限路由或 scheduler 发布；`run.stage.changed` 和 `artifact.created` 由 workflow worker 在内部持久化对应事实后，通过宿主 `HookEventPublish` capability 写回事件总线。
 
 ## Pipeline Handlers
 
-`pipeline_handlers[]` 声明扩展要接入的同步生命周期入口。它适合处理“这个 slot 本次由谁负责”的问题，例如会话主回复；不适合表达一个 run 内部的 planning、review、blocked、retry 等循环，这些应该放在扩展自己的状态机里。
+`pipeline_handlers[]` 声明扩展要接入的生命周期入口。它适合处理“这个 slot 本次由谁负责”的问题，例如会话主回复；不适合表达一个 run 内部的 planning、review、blocked、retry 等循环，这些应该放在扩展自己的状态机里。
 
 字段：
 
 - `id`：handler 唯一 ID，扩展内唯一。
 - `on`：生命周期事件名。当前会话主回复入口是 `conversation.operator_message.received`。
-- `stage`：生命周期阶段，取值为 `tap`、`prepare`、`drive`、`after`。当前已落地同步执行的是 `drive`。
+- `stage`：生命周期阶段，取值为 `tap`、`prepare`、`drive`、`after`。当前已落地的是 `drive`。
 - `slot`：宿主定义的主职责槽位。当前会话主回复 slot 是 `conversation.response`。
 - `priority`：同一事件、阶段和 slot 下的优先级，默认 `0`。宿主按降序调用，同优先级按扩展 ID 和 handler ID 稳定排序。
 - `operation`：handler 被调用时执行的 operation 名称。
@@ -383,7 +383,7 @@ export default ui;
 
 页面、面板和消息渲染器导出 `mount(container, context)` / `unmount()`；扩展 UI 可以自带自己的 React runtime，不和主壳 hooks 冲突。需要渲染会话时间线记录时导出 `conversationRecords`，它使用扩展记录的 `kind` 作为 mount key。需要渲染消息正文时导出 `messageRenderers`，它使用 `message_renderers[].mount` 作为 mount key。`context.helpers` 提供 `apiBaseUrl`、`locale`、`themeId`、`t()`、`formatDateTime()` 等宿主运行时能力。
 
-内置 `html-reply` 与 `artifact-runner` 扩展使用这一机制承载两类输出体验：`workflow` 识别 `ennoia.html_reply` envelope 后只把普通 fallback 写入会话消息，把 HTML 排版内容写入 `html-reply.message`，由 `html-reply` 作为静态消息排版展示，不显示源码、不运行脚本；识别 `ennoia.artifact_runner` envelope 后把 HTML/Python 产物写入 `artifact-runner.artifact`，由 `artifact-runner` 提供 HTML 预览、HTML 源码展示与 Python 手动运行输出。Python 运行通过 `artifact-runner` 自己声明的 `artifact.run_python` operation 和 process service 完成。这些协议属于扩展内部约定，不新增系统级 manifest 字段，也不改变核心消息模型。
+内置 `html-reply` 与 `artifact-runner` 扩展使用这一机制承载两类输出体验：`workflow` 识别 `ennoia.html_reply` envelope 后把 HTML `body` 写入同一条 `format = "html"` 的会话消息，由 `html-reply` 通过 `message_renderers` 作为静态消息排版展示，不显示源码、不运行脚本；识别 `ennoia.artifact_runner` envelope 后把 fallback 写入普通会话消息，并把 HTML/Python 产物写入 `artifact-runner.artifact`，由 `artifact-runner` 提供 HTML 预览、HTML 源码展示与 Python 手动运行输出。Python 运行通过 `artifact-runner` 自己声明的 `artifact.run_python` operation 和 process service 完成。这些协议属于扩展内部约定，不新增系统级 manifest 字段。
 
 内置 `markdown-renderer` 扩展使用 `message_renderers` 承载普通 Markdown/GFM 正文渲染。它不同于 `conversationRecords`：前者是消息正文展示，后者是消息附件或产物记录展示。
 

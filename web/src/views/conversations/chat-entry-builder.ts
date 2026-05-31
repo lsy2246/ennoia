@@ -1,6 +1,7 @@
 import type { AgentProfile, ConversationMessage, OperationRecord } from "@ennoia/api-client";
 
 import type {
+  ChatEntryFormat,
   ChatEntryRecipient,
   ChatEntryViewModel,
   LocalMessageDraft,
@@ -54,6 +55,16 @@ function detectMessageFormat(body: string) {
     }
   }
   return "markdown" as const;
+}
+
+function normalizeMessageFormat(format: unknown, body: string): ChatEntryFormat {
+  if (typeof format === "string") {
+    const normalized = format.trim().toLowerCase();
+    if (["plain", "markdown", "html", "code", "json", "diagram"].includes(normalized)) {
+      return normalized as ChatEntryFormat;
+    }
+  }
+  return detectMessageFormat(body);
 }
 
 function isLikelyErrorMessage(role: ConversationMessage["role"], body: string) {
@@ -201,7 +212,7 @@ export function buildChatEntries(params: {
       body: message.body,
       createdAt: message.created_at,
       state: "done" as const,
-      format: detectMessageFormat(message.body),
+      format: normalizeMessageFormat(message.format, message.body),
     };
     if (message.role === "operator" && (!message.sender.trim() || message.sender === "operator")) {
       base.sender = operatorDisplayName;

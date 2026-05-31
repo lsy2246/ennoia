@@ -2,7 +2,7 @@
 
 `html-reply` 是独立扩展，只负责 Agent 普通回复的 HTML 富排版展示。
 
-模型可以输出 `ennoia.html_reply` JSON envelope。`workflow` 会把 `fallback` 保存为普通会话消息，并把 HTML 内容写入 `html-reply.message` 扩展记录。扩展禁用或渲染失败时，普通消息仍然可读。这个扩展只呈现排版结果，不展示源码、不运行脚本。
+模型可以输出 `ennoia.html_reply` JSON envelope。`workflow` 会把 HTML `body` 保存为同一条 `format = "html"` 的会话消息，Web 主壳再通过 `message_renderers` 挂载 `html-reply` 渲染器。扩展禁用或渲染失败时，主壳回退为纯文本展示。这个扩展只呈现排版结果，不展示源码、不运行脚本。
 
 ## Envelope
 
@@ -13,7 +13,6 @@
   "profile": "html-message",
   "placement": "message",
   "content_type": "text/html",
-  "fallback": "普通文本摘要",
   "body": "<section>安全静态 HTML 片段</section>"
 }
 ```

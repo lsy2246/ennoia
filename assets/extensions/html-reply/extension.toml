@@ -9,8 +9,14 @@ ennoia = ">=0.1.0"
 
 [conversation]
 visible = true
-resources = ["html-reply.message"]
+resources = []
 operations = []
+
+[[message_renderers]]
+id = "html-reply.html"
+format = "html"
+mount = "html-reply.html"
+priority = 100
 
 [[views]]
 name = "html-reply.panel"

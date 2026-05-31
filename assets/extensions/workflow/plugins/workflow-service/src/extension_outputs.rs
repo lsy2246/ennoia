@@ -176,14 +176,13 @@ mod tests {
             "profile": "html-message",
             "placement": "message",
             "content_type": "text/html",
-            "fallback": "普通文本摘要。",
             "body": "<section><h2>摘要</h2><p>富排版。</p></section>"
         })
         .to_string();
 
         let parsed = parse_extension_output_reply(&body).expect("parse html reply");
 
-        assert_eq!(parsed.fallback, "普通文本摘要。");
+        assert_eq!(parsed.fallback, "摘要 富排版。");
         assert_eq!(
             parsed.html_reply.as_deref(),
             Some("<section><h2>摘要</h2><p>富排版。</p></section>")

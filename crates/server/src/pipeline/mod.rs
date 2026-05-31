@@ -33,8 +33,13 @@ enum PipelineStage {
 enum PipelineHandlerAction {
     EmitConversationCreated,
     EmitConversationDeleted,
-    EmitConversationMessageCreated,
+    EmitConversationMessageCreated { response_drive: PipelineDriveMode },
     EmitRunRequested,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PipelineDriveMode {
+    Background,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -70,7 +75,9 @@ const PIPELINE_HANDLERS: &[PipelineHandler] = &[
         stage: PipelineStage::AfterSuccess,
         priority: 300,
         enabled: true,
-        action: PipelineHandlerAction::EmitConversationMessageCreated,
+        action: PipelineHandlerAction::EmitConversationMessageCreated {
+            response_drive: PipelineDriveMode::Background,
+        },
     },
     PipelineHandler {
         id: "run.requested.emit",
@@ -168,10 +175,10 @@ async fn run_pipeline_stage(
                     emit_conversation_deleted(state, request, Some(params), payload);
                 }
             }
-            PipelineHandlerAction::EmitConversationMessageCreated => {
+            PipelineHandlerAction::EmitConversationMessageCreated { response_drive } => {
                 if let Some(payload) = result {
                     emit_conversation_message_created(state, request, payload);
-                    drive_operator_message_received(state, request, payload).await;
+                    drive_conversation_response(state, request, payload, response_drive);
                 }
             }
             PipelineHandlerAction::EmitRunRequested => {
@@ -197,6 +204,24 @@ async fn run_pipeline_stage(
                 },
                 Some(&request.trace_context()),
             );
+        }
+    }
+}
+
+fn drive_conversation_response(
+    state: &AppState,
+    request: &RequestContext,
+    payload: &JsonValue,
+    mode: PipelineDriveMode,
+) {
+    match mode {
+        PipelineDriveMode::Background => {
+            let state = state.clone();
+            let request = request.clone();
+            let payload = payload.clone();
+            tokio::spawn(async move {
+                drive_operator_message_received(&state, &request, &payload).await;
+            });
         }
     }
 }
@@ -658,6 +683,21 @@ mod tests {
                 && handler.priority == 300
                 && handler.enabled
                 && matches!(handler.action, PipelineHandlerAction::EmitRunRequested)
+        }));
+    }
+
+    #[test]
+    fn message_append_drives_operator_message_response_in_background() {
+        assert!(PIPELINE_HANDLERS.iter().any(|handler| {
+            handler.id == "message.created.emit"
+                && handler.target == "message.append"
+                && handler.stage == PipelineStage::AfterSuccess
+                && matches!(
+                    handler.action,
+                    PipelineHandlerAction::EmitConversationMessageCreated {
+                        response_drive: PipelineDriveMode::Background,
+                    }
+                )
         }));
     }
 }

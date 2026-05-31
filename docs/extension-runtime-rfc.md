@@ -40,7 +40,9 @@ Skill 磁盘包包含：
 
 主声明模型统一只有一层：`views`、`operations`、`events`、`pipeline_handlers`、`settings`、`message_renderers`、`conversation`。
 
-`views` 表达主壳可以打开或挂载的界面契约，当前稳定类型是 `page` 与 `panel`。`operations` 表达系统可调用动作；`operation.name` 是唯一调用名，同时作为 action key、Worker method 和事件投递目标。`events` 只表达 `on -> operation` 的异步投递关系。`pipeline_handlers` 表达同步生命周期入口的 handler、slot、优先级和 activation。`message_renderers` 表达消息正文格式到扩展 UI mount 的映射，主壳只做选择、挂载和纯文本兜底。
+`views` 表达主壳可以打开或挂载的界面契约，当前稳定类型是 `page` 与 `panel`。`operations` 表达系统可调用动作；`operation.name` 是唯一调用名，同时作为 action key、Worker method 和事件投递目标。`events` 只表达 `on -> operation` 的异步投递关系。`pipeline_handlers` 表达生命周期入口的 handler、slot、优先级和 activation。`message_renderers` 表达消息正文格式到扩展 UI mount 的映射，主壳只做选择、挂载和纯文本兜底。
+
+消息正文是单条消息的主内容，`format` 只是它的呈现约定。扩展不应把同一条普通回复拆成“正文消息 + 额外 HTML 记录”来实现排版；正确做法是让消息先落成 `format = "html"` 或 `format = "markdown"` 等主格式，再由对应 `message_renderers` 完成展示。
 
 UI 与 service 入口由目录约定发现，属于宿主内部解析结果，不属于 manifest 契约，也不在扩展设计界面展示。
 
@@ -92,7 +94,7 @@ default = false
 label = { key = "ext.workflow.response_strategy", fallback = "处理策略" }
 ```
 
-Pipeline handler 用于同步生命周期入口。当前已落地的主入口是 `conversation.operator_message.received` 的 `drive` 阶段和 `conversation.response` slot。宿主按 priority 降序调用候选 handler；handler 返回 `claim` 或 `complete` 后，本次 slot 接管结束，返回 `skip`、`continue` 或 `fail` 时继续尝试后续 handler。
+Pipeline handler 用于生命周期入口。当前已落地的主入口是 `conversation.operator_message.received` 的 `drive` 阶段和 `conversation.response` slot。宿主在 `message.append` 成功后后台驱动该 slot；消息发送接口只等待写入、事实事件和实时广播完成，不等待策略选择、模型回复、工具执行或 workflow run 推进。候选 handler 在后台任务内按 priority 降序调用；handler 返回 `claim` 或 `complete` 后，本次 slot 接管结束，返回 `skip`、`continue` 或 `fail` 时继续尝试后续 handler。
 
 扩展源码推荐目录为 `ui/`、`bin/`、`worker/`、`data/` 和 `model-endpoint-presets/`。这些目录不是必备项，也不是 manifest 契约。
 

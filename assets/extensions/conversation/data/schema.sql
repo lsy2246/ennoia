@@ -67,6 +67,7 @@ CREATE TABLE IF NOT EXISTS messages (
   sender TEXT NOT NULL,
   role TEXT NOT NULL,
   body TEXT NOT NULL,
+  format TEXT NOT NULL DEFAULT 'markdown',
   mentions_json TEXT NOT NULL,
   parent_message_id TEXT,
   reply_to_message_id TEXT,

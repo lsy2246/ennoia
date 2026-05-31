@@ -61,16 +61,15 @@ export async function generate(request = {}) {
     payload.metadata = request.metadata;
   }
 
-  if (tools.length === 0) {
-    try {
-      const streamed = await generateByChatCompletionStream(config, model, payload);
-      if (streamed.text) {
-        return streamed;
-      }
-    } catch (error) {
-      if (!isStreamReadResetError(error)) {
-        throw error;
-      }
+  try {
+    const streamed = await generateByChatCompletionStream(config, model, payload);
+    if (hasGeneratedOutput(streamed)) {
+      return streamed;
+    }
+    throw new Error(describeEmptyStreamedChatCompletion(streamed.raw, model));
+  } catch (error) {
+    if (!isStreamReadResetError(error)) {
+      throw error;
     }
   }
 
@@ -112,22 +111,12 @@ async function generateByChatCompletionStream(config, fallbackModel, payload) {
     text: data.text,
     reasoning: data.reasoning ?? "",
   });
-  if (!content.text) {
-    return {
-      id: data.id,
-      model: data.model ?? fallbackModel,
-      text: "",
-      reasoning: content.reasoning,
-      tool_calls: [],
-      raw: data.raw,
-    };
-  }
   return {
     id: data.id,
     model: data.model ?? fallbackModel,
     text: content.text,
     reasoning: content.reasoning,
-    tool_calls: [],
+    tool_calls: data.tool_calls,
     raw: data.raw,
   };
 }
@@ -266,6 +255,7 @@ async function collectChatCompletionStream(response, fallbackModel) {
   let model = fallbackModel ?? "";
   let finishReason = "";
   const events = [];
+  const toolCalls = new Map();
 
   while (true) {
     const { done, value } = await reader.read();
@@ -297,19 +287,11 @@ async function collectChatCompletionStream(response, fallbackModel) {
       if (typeof parsed?.model === "string" && parsed.model.trim()) {
         model = parsed.model;
       }
-      for (const choice of parsed?.choices ?? []) {
-        const delta = choice?.delta;
-        collectCompletionDeltaText(delta, {
-          onText: (chunk) => {
-            text += chunk;
-          },
-          onReasoning: (chunk) => {
-            reasoning += chunk;
-          },
-        });
-        if (typeof choice?.finish_reason === "string" && choice.finish_reason.trim()) {
-          finishReason = choice.finish_reason;
-        }
+      const collected = collectStreamCompletionChunk(parsed, toolCalls);
+      text += collected.text;
+      reasoning += collected.reasoning;
+      if (collected.finishReason) {
+        finishReason = collected.finishReason;
       }
     }
   }
@@ -331,19 +313,11 @@ async function collectChatCompletionStream(response, fallbackModel) {
         if (typeof parsed?.model === "string" && parsed.model.trim()) {
           model = parsed.model;
         }
-        for (const choice of parsed?.choices ?? []) {
-          const delta = choice?.delta;
-          collectCompletionDeltaText(delta, {
-            onText: (chunk) => {
-              text += chunk;
-            },
-            onReasoning: (chunk) => {
-              reasoning += chunk;
-            },
-          });
-          if (typeof choice?.finish_reason === "string" && choice.finish_reason.trim()) {
-            finishReason = choice.finish_reason;
-          }
+        const collected = collectStreamCompletionChunk(parsed, toolCalls);
+        text += collected.text;
+        reasoning += collected.reasoning;
+        if (collected.finishReason) {
+          finishReason = collected.finishReason;
         }
       } catch {
         // ignore trailing incomplete payload
@@ -357,6 +331,7 @@ async function collectChatCompletionStream(response, fallbackModel) {
     text,
     reasoning,
     finish_reason: finishReason || "unknown",
+    tool_calls: finalizeStreamToolCalls(toolCalls),
     raw: {
       object: "chat.completion.stream",
       id: responseId || "unknown",
@@ -365,6 +340,104 @@ async function collectChatCompletionStream(response, fallbackModel) {
       events,
     },
   };
+}
+
+function collectStreamCompletionChunk(parsed, toolCalls) {
+  let text = "";
+  let reasoning = "";
+  let finishReason = "";
+  collectResponseStreamEventText(parsed, {
+    onText: (chunk) => {
+      text += chunk;
+    },
+    onReasoning: (chunk) => {
+      reasoning += chunk;
+    },
+  });
+  for (const choice of parsed?.choices ?? []) {
+    const delta = choice?.delta;
+    collectCompletionDeltaText(delta, {
+      onText: (chunk) => {
+        text += chunk;
+      },
+      onReasoning: (chunk) => {
+        reasoning += chunk;
+      },
+    });
+    collectCompletionDeltaToolCalls(delta, toolCalls);
+    if (typeof choice?.finish_reason === "string" && choice.finish_reason.trim()) {
+      finishReason = choice.finish_reason;
+    }
+  }
+  return { text, reasoning, finishReason };
+}
+
+function collectResponseStreamEventText(parsed, handlers) {
+  const type = typeof parsed?.type === "string" ? parsed.type : "";
+  if (type === "response.output_text.delta" && typeof parsed.delta === "string") {
+    handlers.onText(parsed.delta);
+    return;
+  }
+  if (
+    (type === "response.reasoning_text.delta" || type === "response.reasoning.delta")
+    && typeof parsed.delta === "string"
+  ) {
+    handlers.onReasoning(parsed.delta);
+    return;
+  }
+  if (type === "response.completed" && parsed.response && typeof parsed.response === "object") {
+    pushResponseEventText(parsed.response, handlers);
+  }
+}
+
+function pushResponseEventText(value, handlers) {
+  const texts = [];
+  const reasonings = [];
+  pushTextCandidate(texts, value?.output_text);
+  pushTextCandidate(texts, value?.output);
+  pushReasoningCandidate(reasonings, value?.reasoning);
+  for (const item of texts) {
+    handlers.onText(item);
+  }
+  for (const item of reasonings) {
+    handlers.onReasoning(item);
+  }
+}
+
+function collectCompletionDeltaToolCalls(delta, toolCalls) {
+  if (!Array.isArray(delta?.tool_calls)) {
+    return;
+  }
+  for (const item of delta.tool_calls) {
+    const key = Number.isInteger(item?.index) ? item.index : toolCalls.size;
+    const current = toolCalls.get(key) ?? {
+      id: "",
+      name: "",
+      arguments: "",
+    };
+    if (typeof item?.id === "string") {
+      current.id += item.id;
+    }
+    const fn = item?.function;
+    if (typeof fn?.name === "string") {
+      current.name += fn.name;
+    }
+    if (typeof fn?.arguments === "string") {
+      current.arguments += fn.arguments;
+    }
+    toolCalls.set(key, current);
+  }
+}
+
+function finalizeStreamToolCalls(toolCalls) {
+  return [...toolCalls.entries()]
+    .sort(([left], [right]) => left - right)
+    .map(([, item]) => ({
+      id: item.id,
+      name: item.name,
+      arguments: safeJsonParse(item.arguments, item.arguments || {}),
+    }))
+    .filter((item) => item.id || item.name);
 }
 
 function parseSseEvent(chunk) {
@@ -639,8 +712,25 @@ function isStreamReadResetError(error) {
   return (
     (code === "ECONNRESET" && syscall === "read")
     || /read ECONNRESET/i.test(message)
+    || /stream response body is missing/i.test(message)
     || (cause && isStreamReadResetError(cause))
   );
+}
+
+function hasGeneratedOutput(result) {
+  return Boolean(
+    result?.text
+    || result?.reasoning
+    || (Array.isArray(result?.tool_calls) && result.tool_calls.length > 0)
+  );
+}
+
+function describeEmptyStreamedChatCompletion(response, fallbackModel) {
+  const finishReason = response?.finish_reason ?? "unknown";
+  const model = response?.model ?? fallbackModel ?? "unknown";
+  const responseId = response?.id ?? "unknown";
+  const eventCount = Array.isArray(response?.events) ? response.events.length : 0;
+  return `OpenAI empty streamed completion: finish_reason=${finishReason}, model=${model}, response_id=${responseId}, events=${eventCount}`;
 }
 
 function splitThinkTaggedText(value) {

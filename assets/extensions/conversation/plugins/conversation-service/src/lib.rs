@@ -101,6 +101,8 @@ struct ConversationMessagePayload {
     #[serde(default)]
     body: String,
     #[serde(default)]
+    format: Option<String>,
+    #[serde(default)]
     lane_id: Option<String>,
     #[serde(default)]
     goal: Option<String>,
@@ -948,6 +950,7 @@ async fn append_message(
         .filter(|item| !item.is_empty())
         .map(ToOwned::to_owned)
         .collect::<Vec<_>>();
+    let format = normalize_message_format(payload.message.format.as_deref());
     let message = MessageSpec {
         id: format!("msg-{}", Uuid::new_v4()),
         conversation_id: conversation.id.clone(),
@@ -956,6 +959,7 @@ async fn append_message(
         sender,
         role,
         body,
+        format,
         mentions: explicit_mentions,
         parent_message_id: payload.message.parent_message_id.clone(),
         reply_to_message_id: payload.message.fork_from_message_id.clone(),
@@ -1710,6 +1714,18 @@ fn message_role_from(value: &str) -> MessageRole {
     }
 }
 
+fn normalize_message_format(value: Option<&str>) -> String {
+    match value.map(str::trim).filter(|item| !item.is_empty()) {
+        Some("plain") => "plain".to_string(),
+        Some("markdown") => "markdown".to_string(),
+        Some("html") => "html".to_string(),
+        Some("json") => "json".to_string(),
+        Some("code") => "code".to_string(),
+        Some("diagram") => "diagram".to_string(),
+        _ => "markdown".to_string(),
+    }
+}
+
 fn now_iso() -> String {
     Utc::now().to_rfc3339()
 }
@@ -1836,6 +1852,60 @@ mod tests {
                 ..Default::default()
             },
         }
+    }
+
+    fn html_agent_message_payload(
+        conversation_id: &str,
+        branch_id: &str,
+        body: &str,
+    ) -> AppendMessageParams {
+        AppendMessageParams {
+            conversation_id: conversation_id.to_string(),
+            message: ConversationMessagePayload {
+                body: body.to_string(),
+                format: Some("html".to_string()),
+                role: Some("agent".to_string()),
+                sender: Some("lsy".to_string()),
+                branch_id: Some(branch_id.to_string()),
+                lane_id: Some(branch_id.to_string()),
+                addressed_agents: vec!["operator".to_string()],
+                ..Default::default()
+            },
+        }
+    }
+
+    #[tokio::test]
+    async fn appends_html_message_format() {
+        let state = test_state().await;
+        let created = create_conversation(&state, create_payload())
+            .await
+            .expect("create conversation");
+        let conversation_id = created.conversation.id.clone();
+        let branch_id = created.default_lane.id.clone();
+
+        let appended = append_routed_message(
+            &state,
+            html_agent_message_payload(
+                &conversation_id,
+                &branch_id,
+                "<section><h2>Summary</h2></section>",
+            ),
+        )
+        .await
+        .expect("append html message");
+        let messages = list_messages(
+            &state,
+            BranchLookupPayload {
+                conversation_id,
+                branch_id: None,
+            },
+        )
+        .await
+        .expect("list messages");
+
+        assert_eq!(appended.message.format, "html");
+        assert_eq!(messages[0].format, "html");
+        assert_eq!(messages[0].body, "<section><h2>Summary</h2></section>");
     }
 
     #[tokio::test]

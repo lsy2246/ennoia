@@ -161,6 +161,7 @@ export async function appendConversationMessage(
     lane_id?: string;
     branch_id?: string;
     body: string;
+    format?: string;
     sender?: string;
     goal?: string;
     addressed_agents?: string[];

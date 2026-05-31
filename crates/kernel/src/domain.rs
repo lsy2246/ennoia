@@ -192,6 +192,7 @@ pub struct MessageSpec {
     pub sender: String,
     pub role: MessageRole,
     pub body: String,
+    pub format: String,
     pub mentions: Vec<String>,
     pub parent_message_id: Option<String>,
     pub reply_to_message_id: Option<String>,
